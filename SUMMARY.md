@@ -1,5 +1,3 @@
-+   [Effective Java 中文第三版](docs/effective-java-3e-zh/README.md)
-+   [Thinking in Java (Java 编程思想)](docs/thinking-in-java-zh/README.md)
 +   [Java 8 简明教程](docs/modern-java-zh/REAMDE.md)
 +   [Java 设计模式最佳实践](docs/design-pattern-best-prac-java/README.md)
 +   [Java 编程问题](docs/java-coding-prob/README.md)
