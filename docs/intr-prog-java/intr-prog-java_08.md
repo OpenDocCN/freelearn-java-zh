@@ -370,9 +370,10 @@ public class TrafficFactory {
 }
 ```
 
-The `random()` static method of the `Math` class generates a random decimal number between 0 and 1\. We use it to make the resulting mix of traffic look somewhat real. And we have hardcoded, for now, the values we pass into each of the vehicles' constructors.
 
-Now, we can run the following code (we discussed it already a few pages ago):
+`Math`类的`random()`静态方法生成 0 到 1 之间的随机十进制数。我们用它来使交通的结果看起来有些真实。而且，目前我们在每辆车辆的构造函数中传递的值是硬编码的。
+
+现在，我们可以运行以下代码（我们已经在前面的几页中讨论过）：
 
 ```java
 public class TrafficApp {
@@ -396,11 +397,11 @@ public class TrafficApp {
 }
 ```
 
-The result is:
+结果如下：
 
 ![](img/3ff20e22-6228-435a-9211-4fcd408691b6.png)
 
-The calculated speed is the same because the input data is hardcoded in `TrafficFactory`. But before we move on and make the input data different, let's create a speed calculation test:
+计算得到的速度是相同的，因为输入数据在`TrafficFactory`中是硬编码的。但在我们继续并使输入数据不同之前，让我们创建一个速度计算测试：
 
 ```java
 package com.packt.javapath.ch08demo.traffic.impl;
@@ -422,17 +423,17 @@ class SpeedCalculationTest {
 }
 ```
 
-We could access the `CarImpl` and `TruckImpl` classes because the test belongs to the same package, although it's located in a different directory of our project (under the `test` directory, instead of `main`). On the classpath, they are placed according to their package, even if the source comes from another source tree.
+我们可以访问`CarImpl`和`TruckImpl`类，因为该测试属于同一个包，尽管它位于项目的不同目录中（在`test`目录下，而不是`main`）。在类路径上，它们根据其包的位置放置，即使源来自另一个源树。
 
-We have tested our code and now we can concentrate on processing real data and creating the corresponding objects for the client in `TrafficFactory`. The implementation is decoupled from the interface and, until it is ready, we can keep it hardcoded, so the client can start writing and testing their code without waiting until our system is fully functional. That is another advantage of encapsulation and interface.
+我们已经测试了我们的代码，现在我们可以专注于处理真实数据并为客户在`TrafficFactory`中创建相应的对象。实现与接口解耦，直到准备好为止，我们可以保持其硬编码状态，以便客户端可以开始编写和测试他们的代码，而无需等待我们的系统完全功能可用。这是封装和接口的另一个优点。
 
-# Preferring aggregation over inheritance
+# 优先选择聚合而非继承
 
-Those who worked on real-life projects know that the requirements can change at any moment. In the case of our project, even before the second iteration was completed, new methods had to be added to the `Car` and `Truck` interfaces, while speed calculation grew in its own project. The programmers who worked on the implementation of the interfaces and those working on the speed calculation started to change the `CarImpl`, `TruckImpl`, and `VehicleImpl` files.
+在现实项目中工作过的人都知道需求随时可能变化。在我们的项目中，甚至在第二次迭代完成之前，就需要向`Car`和`Truck`接口添加新的方法，同时速度计算在自己的项目中增长。负责实现接口的程序员和负责速度计算的程序员开始修改`CarImpl`、`TruckImpl`和`VehicleImpl`文件。
 
-Not only that, but another project decided to use our speed calculation functionality, but they wanted to apply it to other objects, not cars and trucks. That is when we realized that we need to change our implementation in favor of aggregating the functionality instead of inheriting it, which is one of the recommended design strategies in general anyway, because it increases decoupling and facilitates more flexible design. Here is what it means.
+不仅如此，另一个项目决定使用我们的速度计算功能，但他们想将其应用于其他对象，而不是汽车和卡车。那时我们意识到需要改变我们的实现，以支持聚合功能而非继承功能，这也是一般情况下推荐的设计策略之一，因为它增加了解耦和促进了更灵活的设计。这是什么意思。
 
-We copy the `getSpeedMph()` method of the `VehicleImpl` class and put it in the `SpeedModelImpl` class in a new `com.packt.javapath.ch08demo.speedmodel.impl` package:
+我们将`VehicleImpl`类的`getSpeedMph()`方法复制到一个新的`com.packt.javapath.ch08demo.speedmodel.impl`包中的`SpeedModelImpl`类中。
 
 ```java
 class SpeedModelImpl implements SpeedModel {
@@ -444,7 +445,8 @@ class SpeedModelImpl implements SpeedModel {
 }
 ```
 
-We add `SpeedModelFactory` to the same package:
+我们将`SpeedModelFactory`添加到同一个包中：
+
 
 ```java
 public class SpeedModelFactory {
