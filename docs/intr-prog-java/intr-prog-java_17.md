@@ -1,0 +1,361 @@
+# Lambda Expressions and Functional Programming
+
+This chapter explains the concept of functional programming. It provides an overview of the functional interfaces that come with JDK, explains how to use them in lambda expressions, and how to write lambda expressions in the most concise style.
+
+In this chapter, we will cover the following topics:
+
+*   Functional programming
+*   Functional interfaces
+*   Lambda expressions
+*   Method references
+*   Exercise – Using method references for creating a new object
+
+# Functional programming
+
+Functional programming allows us to treat a block of code (a function) like an object, passing it as a parameter or as a return value of a method. This feature is present in many programming languages. It does not require us to manage the object state. The function is stateless. Its result depends only on the input data, no matter how many times it was called. This style makes the outcome more predictable, which is the most attractive aspect of functional programming.
+
+Without functional programming, the only way to pass a functionality as a parameter in Java would be through writing a class that implements an interface, creating its object, and then passing it as a parameter. But even the least involved style—using the anonymous class—requires writing too much of the boilerplate code. Using functional interfaces and lambda expressions makes the code shorter, clearer, and more expressive.
+
+Adding it to Java increases parallel programming capabilities by shifting the responsibility for parallelism from the client code to the library. Before that, in order to process elements of Java collections, the client code had to iterate over the collection and organize processing. In Java 8, new (default) methods were added that accept a function (the implementation of a functional interface) as a parameter and then apply it to each element of the collection in parallel or not, depending on the internal processing algorithm. So, it is the library's responsibility to organize parallel processing.
+
+Throughout this chapter, we will define and explain these Java features—functional interfaces and lambda expressions—and demonstrate their applicability in code examples. They make functions the first-class citizens of the language on the same level of importance as objects.
+
+# What is a functional interface?
+
+In fact, you have already seen elements of functional programming in our demonstration code. One example is the `forEach(Consumer consumer)` method, available for every `Iterable`, where `Consumer` is a functional interface. Another example is the `removeIf(Predicate predicate)` method, available for every `Collection` object. The passed-in `Predicate` object is a function – an implementation of a functional interface. Similarly, the `sort(Comparator comparator)` and `replaceAll(UnaryOperator uo)` methods in the `List` interface and several `compute()` methods in `Map` are examples of functional programming.
+
+A functional interface is an interface that has only one abstract method, including those that were inherited from the parent interface.
+
+To help avoid runtime errors, an `@FunctionalInterface` annotation was introduced in Java 8 that tells the compiler about the intent, so the compiler can check to see whether there is truly only one abstract method in the annotated interface. Let's review the following interfaces of the same line of inheritance:
+
+[PRE0]
+
+Interface `A` is a functional interface because it has only one abstract method: `method1()`. Interface `B` is also a functional interface because it has only one abstract method too – the same `method1()` inherited from interface `A`. Interface `C` is a functional interface because it has only one abstract method, `method1()`, which overrides the abstract `method1()` method of the parent interface `A`. Interface `D` cannot be a functional interface because it has two abstract methods – `method1()`, from the parent interface `A`, and `method5()`.
+
+When the `@FunctionalInterface` annotation is used, it tells the compiler to check on the presence of only one abstract method, and it warns the programmer, who reads the code, that this interface has only one abstract method intentionally. Otherwise, the programmer may waste time enhancing the interface only to discover later that it cannot be done.
+
+For the same reason, the `Runnable` and `Callable` interfaces that existed in Java since its early versions were annotated in Java 8 as `@FunctionalInterface`. It makes this distinction explicit and serves as a reminder to its users and to those who might attempt to add another abstract method:
+
+[PRE1]
+
+As you can see, creating a functional interface is easy. But before doing that, consider using one of the 43 functional interfaces provided in the `java.util.function` package.
+
+# Ready-to-use standard functional interfaces
+
+Most of the interfaces provided in the `java.util.function` package are specializations of the following four interfaces: `Function`, `Consumer`, `Supplier`, and `Predicate`. Let's review them and then have a short overview of the rest of the 39 standard functional interfaces.
+
+# Function<T, R>
+
+The notation of this and other functional `<indexentry content="standard functional interfaces:function">` interfaces includes listing of the types of the input data (`T`) and the returned data (`R`). So, `Function<T, R>` means that the only abstract method of this interface accepts an argument of type `T` and produces a result of type `R`. You can find the name of that abstract method by reading the online documentation. In the case of the `Function<T, R>` interface, its method is `R apply(T)`.
+
+After learning all that, we can create an implementation of this interface using an anonymous class:
+
+[PRE2]
+
+It is up to the programmer to decide which actual type will be `T` (the input parameter) and which type will be `R` (the returned value). In our example, we have decided that the input parameters will be of the `Integer` type and the result will be of the `Double` type. As you have probably realized by now, the types can be reference types only, and the boxing and unboxing of primitive types is performed automatically.
+
+We can now use our new `Function<Integer, Double> multiplyByTen` function any way we need. We can just use it directly, as follows:
+
+[PRE3]
+
+Or we can create a method that accepts this function as a parameter:
+
+[PRE4]
+
+We can then pass our function into this method and let the method use it:
+
+[PRE5]
+
+We can also create a method that will generate a function whenever we need one:
+
+[PRE6]
+
+Using the preceding method, we can write the following code:
+
+[PRE7]
+
+In the next section, we will introduce lambda expressions and will show how they can be used to express the functional interface implementation with much less code.
+
+# Consumer<T>
+
+By looking at the `Consumer<T>` interface definition, you can already guess that this interface has an abstract method that accepts a parameter of the `T` type <indexentry content="standard functional interfaces:Consumer">and does not return anything. From the documentation of the `Consumer<T>` interface, we learn that its abstract method is `void accept(T)`, which means that, for example, we can implement it as follows:
+
+[PRE8]
+
+Or we can create a method that will generate the function:
+
+[PRE9]
+
+Now we can use it as follows:
+
+[PRE10]
+
+We can also create a new method that not only accepts a processing function as a parameter but also a printing function too:
+
+[PRE11]
+
+We can then write the following code:
+
+[PRE12]
+
+As we have mentioned before, in the next section, we will introduce lambda expressions and will show how they can be used to express the functional interface implementation with much less code.
+
+# Supplier<T>
+
+Here is a trick question: guess the input and the output types of the abstract method of the `Supplier<T>` interface. The answer is: it accepts no parameters and returns the `T` type. As you understand now, the difference is in the name of the interface itself. It should give you a hint: the consumer just consumes and returns nothing, while the supplier just supplies without any input. The abstract method of the `Supplier<T>` interface is `T get()`.
+
+Similar to the previous functions, we can write the supplier generating method:
+
+[PRE13]
+
+We can now write a method that accepts only functions:
+
+[PRE14]
+
+Notice how the output type of the `input` function is the same as the input of the `process` function, which returns the same type as consumed by the `consume` function. It makes the following code possible:
+
+[PRE15]
+
+At this point, we hope, you start to appreciate the value functional programming brings to the table. It allows us to pass around chunks of functionality that can be plugged into the middle of an algorithm without needing to create an object. Static methods do not require creating an object either, but they are shared by all application threads because they are unique in the JVM. Meanwhile, each function is an object and can be either unique in the JVM (if assigned to a static variable) or created for each processing thread (which typically is the case). It has very little coding overhead and can have even less plumbing when used in a lambda expression – the topic of our next section.
+
+So far, we have demonstrated how a function can be plugged into the existing control-flow expression. And now we will describe the last missing piece – a function that represents the decision-making construct that can be passed around as an object too.
+
+# Predicate<T>
+
+This is an interface that represents a Boolean-valued function that has a single method: `boolean test(T)`. Here is an example of a method that creates a `Predicate<Integer>` function:
+
+[PRE16]
+
+We can use it to add some logic to the processing method:
+
+[PRE17]
+
+And the following code demonstrates its usage:
+
+[PRE18]
+
+Let's set the input to 3, for example:
+
+[PRE19]
+
+The preceding code would result in the following output:
+
+[PRE20]
+
+# Other standard functional interfaces
+
+The other 39 functional interfaces in the `java.util.function` package are variations of the four interfaces we have just reviewed. These variations are created in order to achieve one or any combination of the following:
+
+*   Better performance by avoiding autoboxing and unboxing via the explicit usage of the integer, double, or long primitives
+*   Allowing two input parameters
+*   A shorter notation
+
+Here are just a few of examples:
+
+*   `IntFunction<R>` with the `R apply(int)` method provides shorter notation (without generics for the input parameter type) and avoids autoboxing by requiring the `int` primitive as the parameter
+*   `BiFunction<T,U,R>` with the `R apply(T,U)` method allows two input parameters
+*   `BinaryOperator<T>` with the `T apply(T,T)` method allows two input parameters of the `T` type and returns a value of the same `T` type
+*   `IntBinaryOperator` with the `int applAsInt(int,int)` method accepts two parameters of the `int` type and returns the value of the `int` type
+
+If you are going to use functional interfaces, we encourage you to study the API of the interfaces of the `java.util.functional` package.
+
+# Chaining standard functions
+
+Most of the functional interfaces in the `java.util.function` package have default methods that allow us to build a chain (also called a pipe or pipeline) of functions that pass the result of one as the input parameter to another, thus composing a new complex function. For example:
+
+[PRE21]
+
+As you can see from the preceding code, we have created a new `f3` function by combining the `f1` and `f2` functions using the `andThen()` method. That's the idea behind the methods we are going to explore in this section. First, we express the functions as anonymous classes and, in the following section, we introduce the lambda expressions that we used in the preceding example.
+
+# Chain two Function<T,R>
+
+We can use the `andThen(Function after)` default method of the `Function` interface. We have already created the `Function<Integer, Double> createMultiplyBy()` method:
+
+[PRE22]
+
+We can also write another method that creates a subtracting function with the `Double` input type, so we can chain it to the multiplying function:
+
+[PRE23]
+
+Now we can write the following code:
+
+[PRE24]
+
+As you can see, the `multiplyByFive.andThen(subtract7)` chain acts effectively as `Function<Integer, Long> multiplyByFiveAndSubtractSeven`.
+
+The `Function` interface has another default method, `Function<V,R> compose(Function<V,T> before)`, that also allows us to chain two functions. The function that has to be executed first can be passed as the `before` parameter into the `compose()` method of the second function:
+
+[PRE25]
+
+# Chain two Consumer<T>
+
+The `Consumer` interface has the `andThen(Consumer after)` method too. We have already written the method that creates the printing function:
+
+[PRE26]
+
+And now we can create and chain two printing functions, as follows:
+
+[PRE27]
+
+As you can see in the `Consumer` chain, both functions consume the same value in the sequence defined by the chain.
+
+# Chain two Predicate<T>
+
+The `Supplier` interface does not have default methods, while the `Predicate` interface has one static method, `isEqual(Object targetRef)`, and three default methods: `and(Predicate other)`, `negate()`, and `or(Predicate other)`. To demonstrate usage of the `and(Predicate other)` and `or(Predicate other)` methods, for example, let's write the methods that create two `Predicate<Double>` functions. One function checks whether the value is smaller than the input:
+
+[PRE28]
+
+Another function checks whether the value is bigger than the input:
+
+[PRE29]
+
+Now we can create two `Predicate<Double>` functions and chain them:
+
+[PRE30]
+
+As you can see, the `and()` method required execution of each of the functions, while the `or()` method did not execute the second function as soon as the first one in the chain returned `true`.
+
+# identity() and other default methods
+
+Functional interfaces of the `java.util.function` package have other helpful default methods. The one that stands out is the `identity()` method, which returns a function that always returns its input argument:
+
+[PRE31]
+
+The `identity()` method is very helpful when some procedure requires providing a certain function, but you do not want the provided function to change anything. In such cases, you create an identity function with the necessary output type. For example, in one of our previous code snippets, we may decide that the `multiplyByFive` function should not change anything in the `multiplyByFive.andThen(subtract7)` chain:
+
+[PRE32]
+
+As you can see, the  `multiplyByFive` function did not do anything with the input parameter `2`, so the result (after `7` was subtracted) is `-5`.
+
+Other default methods are mostly related to conversion and boxing and unboxing, but also extracting minimum and maximum values of two parameters. If you are interested, you can look through the API of interfaces of the `java.util.function` package and get a feeling for the possibilities.
+
+# Lambda expressions
+
+The examples in the previous section (that used anonymous classes for the implementation of functional interfaces) looked bulky and felt excessively verbose. For one, there was no need to repeat the interface name, because we had declared it already as the type for the object reference. And, second, in the case of a functional interface that had only one abstract method, there is no need to specify the method name that has to be implemented. The compiler and Java runtime can figure it out. All we need is to provide the new functionality. Lambda expressions were introduced for exactly this purpose.
+
+# What is a lambda expression?
+
+The term lambda comes from lambda calculus—a universal model of computation that can be used to simulate any Turing machine. It was introduced by mathematician, Alonzo Church, in the 1930s. A lambda expression is a function, implemented in Java as an anonymous method, that also allows us to omit modifiers, return types, and parameter types. That makes for a very compact notation.
+
+The syntax of a lambda expression includes the list of parameters, an arrow token `->`, and a body. The list of parameters can be empty `()`, without brackets (if there is only one parameter), or a comma-separated list of parameters surrounded by brackets. The body can be a single expression or a statement block. 
+
+Let us look at a few examples:
+
+*   `() -> 42;` always returns `42`
+*   `x -> x + 1;` increments the `x` variable by `1`
+*   `(x, y) -> x * y;` multiplies `x` by `y` and returns the result
+*   `(char x) -> x == '$';` compares the value of the `x` variable and the `$` symbol, and returns a Boolean value
+*   `x -> {  System.out.println("x=" + x); };` prints the `x` value with the `x=` prefix
+
+# Re-implementing functions
+
+We can rewrite our functions, created in the previous section, using lambda expressions, as follows:
+
+[PRE33]
+
+We don't repeat the name of the implemented interface because it is specified as the return type in the method signature. And we do not specify the name of the abstract method either because it is the only method of the interface that has to be implemented. Writing such a compact and efficient code became possible because of the combination of the lambda expression and functional interface.
+
+Looking at the preceding examples, you probably realize that there is no need to have methods that create a function anymore. Let's change the code that calls the `supplyDecideProcessAndConsume()` method:
+
+[PRE34]
+
+Let's revisit the following lines: 
+
+[PRE35]
+
+We can change the preceding code to the following without changing the functionality:
+
+[PRE36]
+
+We can even inline the preceding functions and write the preceding code in one line like this:
+
+[PRE37]
+
+Notice how much more transparent the definition of the printing function has become. That is the power and the beauty of lambda expressions in combination with functional interfaces. In [Chapter 18](be052e15-ac84-4e19-9bd9-24548aa3f904.xhtml), *Streams and Pipelines*, you will see that lambda expressions are, in fact, the only way to process streamed data. 
+
+# Lambda limitations
+
+There are two aspects of a lambda expression that we would like to point out and clarify, which are:
+
+*   If a lambda expression uses a local variable created outside it, this local variable has to be final or effectively final (not re-assigned in the same context)
+*   The `this` keyword in a lambda expression refers to the enclosing context, and not the lambda expression itself
+
+# Effectively final local variable
+
+As in the anonymous class, the variable, created outside and used inside the lambda expression, becomes effectively final and cannot be modified. You can write the following:
+
+[PRE38]
+
+But, as you can see, we cannot change the value of the local variable used in the lambda expression. The reason for this restriction is that a function can be passed around and executed in different contexts (different threads, for example), and the attempt to synchronize these contexts would defeat the original idea of the stateless function and independent distributed evaluation of the expression. That is why all the local variables used in the lambda expression are effectively final, meaning that they can either be declared final explicitly or become final by virtue of their usage in a lambda expression. 
+
+There is one possible workaround for this limitation. If the local variable is of a reference type (but not `String` or a primitive wrapping type), it is possible to change its state even if this local variable is used in the lambda expression:
+
+[PRE39]
+
+But this workaround should be used only when really needed and has to be done with care because of the danger of unexpected side effects.
+
+# The this keyword interpretation
+
+One principal difference between the anonymous class and lambda expressions is the interpretation of the `this` keyword. Inside an anonymous class, it refers to the instance of the anonymous class. Inside a lambda expression, `this` refers to the instance of the class that surrounds the expression, also called an *enclosing instance*, *enclosing context*, or *enclosing scope*.
+
+Let's write a `ThisDemo` class that illustrates the difference:
+
+[PRE40]
+
+As you can see, `this` inside the anonymous class refers to the anonymous class instance, while `this` in the lambda expression refers to the enclosing class instance. Lambda expressions just do not have and cannot have a field. If we execute the preceding methods, the output confirms our assumptions:
+
+[PRE41]
+
+The lambda expression is not a class instance and cannot be referred to by `this`. According to Java Specification, such an approach *allows more flexibility for implementations* by *treating [this] the same as in the surrounding context.*
+
+# Method references
+
+Let's look at our last implementation of the call to the `supplyDecidePprocessAndConsume()` method:
+
+[PRE42]
+
+The functions we have used are pretty trivial. In real-life code, each of them may require a multiple-line implementation. In such a case, to put a code block inline would make the code almost unreadable. In such cases, referring to the methods with the necessary implementation helps. Let's assume we have the following `Helper` class:
+
+[PRE43]
+
+The lambda expressions in the `Lambdas` class may refer to the methods of the `Helper` and `Lambdas` classes, as follows:
+
+[PRE44]
+
+The preceding code reads better already, and the functions may be inlined again:
+
+[PRE45]
+
+But in such cases, the notation can be made even more compact. When a one-line lambda expression consists of a reference to an existing method, it is possible to further simplify the notation by using a method reference without listing the parameters. 
+
+The syntax of the method reference is `Location::methodName`, where `Location` indicates where (in which object or class) the `methodName` method can be found, and the two colons (`::`) serve as a separator between the location and the method name. If there are several methods with the same name at the specified location (because of the method overload), the reference method is identified by the signature of the abstract method of the functional interface implemented by the lambda expression.
+
+Using the method reference, the preceding code under `methodReference()` method in the `Lambdas` class can be rewritten as follows:
+
+[PRE46]
+
+To inline such functions makes even more sense:
+
+[PRE47]
+
+You have probably noticed that we have intentionally used different locations and two instance methods and two static methods in order to demonstrate the variety of possibilities.
+
+If it feels like too much to remember, the good news is that a modern IDE (IntelliJ IDEA is one example) can do it for you and convert the code you are writing into the most compact form.
+
+# Exercise – Using the method reference to create a new object
+
+Use the method reference to express creating a new object. Let's assume that we have `class A{}`. Replace the following `Supplier` function declaration with another one that uses the method reference:
+
+[PRE48]
+
+# Answer
+
+The answer is:
+
+[PRE49]
+
+# Summary
+
+This chapter introduced the concept of functional programming. It provided an overview of the functional interfaces that come with JDK and demonstrated how to use them. It also discussed and demonstrated lambda expressions and how effectively they can improve code readability.
+
+The next chapter will make the reader familiar with the powerful concept of datastreams processing. It explains what streams are, how to create them and process their elements, and how to build processing pipelines. It also shows how easily you can organize stream processing in parallel.
