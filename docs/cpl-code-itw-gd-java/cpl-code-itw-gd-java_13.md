@@ -1,4 +1,4 @@
-# 第十二章：数组和字符串
+# 第十章：数组和字符串
 
 这一章涵盖了涉及字符串和数组的一系列问题。由于 Java 字符串和数组是开发人员常见的话题，我将通过几个你必须记住的标题来简要介绍它们。然而，如果你需要深入研究这个主题，那么请考虑官方的 Java 文档（[`docs.oracle.com/javase/tutorial/java/`](https://docs.oracle.com/javase/tutorial/java/)）。
 
