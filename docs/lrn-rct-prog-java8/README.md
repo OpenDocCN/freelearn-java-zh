@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Java8 反应式编程学习指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/A4E30A017482EBE61466A691985993DC`](https://zh.annas-archive.org/md5/A4E30A017482EBE61466A691985993DC)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

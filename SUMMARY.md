@@ -18,7 +18,7 @@
 +   [Java Lambda 学习指南](docs/lrn-java-lmd/README.md)
 +   [Java 12 编程学习手册](docs/lrn-java12-prog/README.md)
 +   [Java8 反应式编程学习指南](docs/lrn-net-prog-java/README.md)
-+   [Go 编程蓝图](docs/lrn-rct-prog-java8/README.md)
++   [Java8 反应式编程学习指南](docs/lrn-rct-prog-java8/README.md)
 +   [精通 Java8 并发编程](docs/ms-cncr-prog-java8/README.md)
 +   [精通 Java 11](docs/ms-java11/README.md)
 +   [精通 JUnit5 软件测试](docs/ms-sw-test-junit5/README.md)

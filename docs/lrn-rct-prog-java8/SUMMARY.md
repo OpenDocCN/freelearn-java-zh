@@ -1,4 +1,4 @@
-+   [Go 编程蓝图](README.md)
++   [Java8 反应式编程学习指南](README.md)
 +   [前言](lrn-rct-prog-java8_0.md)
 +   [第一章：响应式编程简介](lrn-rct-prog-java8_1.md)
 +   [第二章：使用 Java 8 的函数式构造](lrn-rct-prog-java8_2.md)
