@@ -310,7 +310,7 @@ consume.accept(processFunc.apply(input.get()));
 
 ```
 
-注意`input`函数的输出类型与`process`函数的输入类型相同，它返回的类型与`consume`函数消耗的类型相同。这使得下面的代码成为可能：```
+注意`input`函数的输出类型与`process`函数的输入类型相同，它返回的类型与`consume`函数消耗的类型相同。这使得下面的代码成为可能：
 
 ```java
 

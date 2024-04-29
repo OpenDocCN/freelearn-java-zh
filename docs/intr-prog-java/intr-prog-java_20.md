@@ -59,9 +59,7 @@
 ```java
 
 interface MeasuringSystem {
-
-double get(String id);
-
+    double get(String id);
 }
 
 ```
@@ -71,17 +69,11 @@ double get(String id);
 ```java
 
 void pauseMs(int ms) {
-
-try{
-
-TimeUnit.MILLISECONDS.sleep(ms);
-
-} catch(InterruptedException ex){
-
-ex.printStackTrace();
-
-}
-
+    try{
+        TimeUnit.MILLISECONDS.sleep(ms);
+    } catch(InterruptedException ex){
+        ex.printStackTrace();
+    }
 }
 
 ```
@@ -91,15 +83,10 @@ ex.printStackTrace();
 ```java
 
 class MeasuringSystemImpl implements MeasuringSystem {
-
-public double get(String id){
-
-demo.pauseMs(100);
-
-return 10\. * Math.random();
-
-}
-
+    public double get(String id){
+        demo.pauseMs(100);
+        return 10. * Math.random();
+    }
 }
 
 ```
@@ -109,11 +96,8 @@ return 10\. * Math.random();
 ```java
 
 Function<String, Double> mSys = id -> {
-
-demo.pauseMs(100);
-
-return 10\. + Math.random();
-
+    demo.pauseMs(100);
+    return 10. + Math.random();
 };
 
 ```
@@ -125,8 +109,7 @@ return 10\. + Math.random();
 ```java
 
 List<String> ids = IntStream.range(1, 11)
-
-.mapToObj(i -> "id" + i).collect(Collectors.toList());
+    .mapToObj(i -> "id" + i).collect(Collectors.toList());
 
 ```
 
@@ -137,11 +120,8 @@ List<String> ids = IntStream.range(1, 11)
 ```java
 
 Stream<Double> collectData(Stream<String> stream,
-
-Function<String, Double> mSys){
-
-return  stream.map(id -> mSys.apply(id));
-
+    Function<String, Double> mSys){
+    return  stream.map(id -> mSys.apply(id));
 }
 
 ```
@@ -980,7 +960,7 @@ public class PeriodicService1 extends AbstractVerticle {
 
 public void start() throws Exception {
 
-LocalTime start = LocalTime.now();```
+LocalTime start = LocalTime.now();
 
 vertx.setPeriodic(1000, v-> {
 
@@ -1246,7 +1226,7 @@ public class MsgConsumer extends AbstractVerticle {
 
 private String address, name;
 
-public MsgConsumer(String id, String address) {```
+public MsgConsumer(String id, String address) {
 
 this.address = address;
 

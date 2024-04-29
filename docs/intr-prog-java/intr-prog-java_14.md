@@ -1046,7 +1046,7 @@ list.add（“ab”）;
 
 //     Comparator.naturalOrder()
 
-//     Comparator.reverseOrder()```
+//     Comparator.reverseOrder()
 
 list.add（“a”）;
 
@@ -1142,7 +1142,7 @@ public Person(int age, String name, String address) {
 
 this.age = age;
 
-this.name = name == null？""：name;```
+this.name = name == null?""：name;
 
 this.address = address;
 
@@ -1880,7 +1880,7 @@ set1.add("s1");
 
 set1.add("s2");
 
-List<String> list = new ArrayList<>();```
+List<String> list = new ArrayList<>();
 
 list.add("s2");
 
