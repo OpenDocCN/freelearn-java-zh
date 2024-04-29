@@ -1,361 +1,781 @@
-# Lambda Expressions and Functional Programming
+# 第十七章：Lambda 表达式和函数式编程
 
-This chapter explains the concept of functional programming. It provides an overview of the functional interfaces that come with JDK, explains how to use them in lambda expressions, and how to write lambda expressions in the most concise style.
+本章解释了函数式编程的概念。它提供了 JDK 附带的功能接口的概述，解释了如何在 Lambda 表达式中使用它们，以及如何以最简洁的方式编写 Lambda 表达式。
 
-In this chapter, we will cover the following topics:
+在本章中，我们将介绍以下主题：
 
-*   Functional programming
-*   Functional interfaces
-*   Lambda expressions
-*   Method references
-*   Exercise – Using method references for creating a new object
++   函数式编程
 
-# Functional programming
++   函数式接口
 
-Functional programming allows us to treat a block of code (a function) like an object, passing it as a parameter or as a return value of a method. This feature is present in many programming languages. It does not require us to manage the object state. The function is stateless. Its result depends only on the input data, no matter how many times it was called. This style makes the outcome more predictable, which is the most attractive aspect of functional programming.
++   Lambda 表达式
 
-Without functional programming, the only way to pass a functionality as a parameter in Java would be through writing a class that implements an interface, creating its object, and then passing it as a parameter. But even the least involved style—using the anonymous class—requires writing too much of the boilerplate code. Using functional interfaces and lambda expressions makes the code shorter, clearer, and more expressive.
++   方法引用
 
-Adding it to Java increases parallel programming capabilities by shifting the responsibility for parallelism from the client code to the library. Before that, in order to process elements of Java collections, the client code had to iterate over the collection and organize processing. In Java 8, new (default) methods were added that accept a function (the implementation of a functional interface) as a parameter and then apply it to each element of the collection in parallel or not, depending on the internal processing algorithm. So, it is the library's responsibility to organize parallel processing.
++   练习——使用方法引用创建一个新对象
 
-Throughout this chapter, we will define and explain these Java features—functional interfaces and lambda expressions—and demonstrate their applicability in code examples. They make functions the first-class citizens of the language on the same level of importance as objects.
+# 函数式编程
 
-# What is a functional interface?
+函数式编程允许我们像处理对象一样处理一段代码（一个函数），将其作为参数传递或作为方法的返回值。这个特性存在于许多编程语言中。它不需要我们管理对象状态。这个函数是无状态的。它的结果只取决于输入数据，不管它被调用多少次。这种风格使结果更可预测，这是函数式编程最具吸引力的方面。
 
-In fact, you have already seen elements of functional programming in our demonstration code. One example is the `forEach(Consumer consumer)` method, available for every `Iterable`, where `Consumer` is a functional interface. Another example is the `removeIf(Predicate predicate)` method, available for every `Collection` object. The passed-in `Predicate` object is a function – an implementation of a functional interface. Similarly, the `sort(Comparator comparator)` and `replaceAll(UnaryOperator uo)` methods in the `List` interface and several `compute()` methods in `Map` are examples of functional programming.
+没有函数式编程，Java 中将功能作为参数传递的唯一方式是通过编写一个实现接口的类，创建其对象，然后将其作为参数传递。但即使是最简单的样式——使用匿名类——也需要编写太多的样板代码。使用函数式接口和 Lambda 表达式使代码更短、更清晰、更具表现力。
 
-A functional interface is an interface that has only one abstract method, including those that were inherited from the parent interface.
+将其添加到 Java 中增加了并行编程的能力，将并行性的责任从客户端代码转移到库中。在此之前，为了处理 Java 集合的元素，客户端代码必须遍历集合并组织处理。在 Java 8 中，添加了新的（默认）方法，接受一个函数（函数式接口的实现）作为参数，然后根据内部处理算法并行或顺序地将其应用于集合的每个元素。因此，组织并行处理是库的责任。
 
-To help avoid runtime errors, an `@FunctionalInterface` annotation was introduced in Java 8 that tells the compiler about the intent, so the compiler can check to see whether there is truly only one abstract method in the annotated interface. Let's review the following interfaces of the same line of inheritance:
+在本章中，我们将定义和解释这些 Java 特性——函数式接口和 Lambda 表达式，并演示它们在代码示例中的适用性。它们将函数作为语言中与对象同等重要的一等公民。
 
-[PRE0]
+# 什么是函数式接口？
 
-Interface `A` is a functional interface because it has only one abstract method: `method1()`. Interface `B` is also a functional interface because it has only one abstract method too – the same `method1()` inherited from interface `A`. Interface `C` is a functional interface because it has only one abstract method, `method1()`, which overrides the abstract `method1()` method of the parent interface `A`. Interface `D` cannot be a functional interface because it has two abstract methods – `method1()`, from the parent interface `A`, and `method5()`.
+实际上，您在我们的演示代码中已经看到了函数式编程的元素。一个例子是`forEach(Consumer consumer)`方法，适用于每个`Iterable`，其中`Consumer`是一个函数式接口。另一个例子是`removeIf(Predicate predicate)`方法，适用于每个`Collection`对象。传入的`Predicate`对象是一个函数——函数式接口的实现。类似地，`List`接口中的`sort(Comparator comparator)`和`replaceAll(UnaryOperator uo)`方法以及`Map`中的几个`compute()`方法都是函数式编程的例子。
 
-When the `@FunctionalInterface` annotation is used, it tells the compiler to check on the presence of only one abstract method, and it warns the programmer, who reads the code, that this interface has only one abstract method intentionally. Otherwise, the programmer may waste time enhancing the interface only to discover later that it cannot be done.
+一个函数接口是一个只有一个抽象方法的接口，包括那些从父接口继承的方法。
 
-For the same reason, the `Runnable` and `Callable` interfaces that existed in Java since its early versions were annotated in Java 8 as `@FunctionalInterface`. It makes this distinction explicit and serves as a reminder to its users and to those who might attempt to add another abstract method:
+为了帮助避免运行时错误，在 Java 8 中引入了`@FunctionalInterface`注解，告诉编译器关于意图，因此编译器可以检查被注解接口中是否真正只有一个抽象方法。让我们一起审查下面的与同一继承线的接口：
 
-[PRE1]
+```java
+@FunctionalInterface
+interface A {
+  void method1();
+  default void method2(){}
+  static void method3(){}
+}
 
-As you can see, creating a functional interface is easy. But before doing that, consider using one of the 43 functional interfaces provided in the `java.util.function` package.
+@FunctionalInterface
+interface B extends A {
+  default void method4(){}
+}
 
-# Ready-to-use standard functional interfaces
+@FunctionalInterface
+interface C extends B {
+  void method1();
+}
 
-Most of the interfaces provided in the `java.util.function` package are specializations of the following four interfaces: `Function`, `Consumer`, `Supplier`, and `Predicate`. Let's review them and then have a short overview of the rest of the 39 standard functional interfaces.
+//@FunctionalInterface  //compilation error
+interface D extends C {
+  void method5();
+}
+```
+
+接口`A`是一个函数接口，因为它只有一个抽象方法：`method1()`。接口`B`也是一个函数接口，因为它也只有一个抽象方法 - 从接口`A`继承的同一个`method1()`。接口`C`是一个函数接口，因为它只有一个抽象方法，`method1()`，它覆盖了父接口`A`的抽象`method1()`方法。接口`D`不能是一个函数接口，因为它有两个抽象方法 - 从父接口`A`继承的`method1()`和`method5()`。
+
+当使用`@FunctionalInterface`注解时，它告诉编译器只检查存在一个抽象方法，并警告程序员读取代码时，这个接口只有一个抽象方法是有意的。否则，程序员可能会浪费时间完善接口，最后发现无法完成。
+
+出于同样的原因，自 Java 早期版本以来存在的`Runnable`和`Callable`接口在 Java 8 中被注释为`@FunctionalInterface`。这明确表明了这种区别，并提醒其用户以及可能尝试添加另一个抽象方法的人：
+
+```java
+@FunctionalInterface
+interface Runnable { 
+  void run(); 
+} 
+@FunctionalInterface
+interface Callable<V> { 
+  V call() throws Exception; 
+}
+```
+
+可以看到，创建一个函数接口很容易。但在这之前，考虑使用`java.util.function`包中提供的 43 个函数接口之一。
+
+# 准备好使用的标准函数接口
+
+`java.util.function`包中提供的大多数接口都是以下四个接口的专业化：`Function`，`Consumer`，`Supplier`和`Predicate`。让我们对它们进行审查，然后简要概述其余 39 个标准函数接口。
 
 # Function<T, R>
 
-The notation of this and other functional `<indexentry content="standard functional interfaces:function">` interfaces includes listing of the types of the input data (`T`) and the returned data (`R`). So, `Function<T, R>` means that the only abstract method of this interface accepts an argument of type `T` and produces a result of type `R`. You can find the name of that abstract method by reading the online documentation. In the case of the `Function<T, R>` interface, its method is `R apply(T)`.
+这个和其他函数接口的标记包括输入数据类型(`T`)和返回数据类型(`R`)的列举。因此，`Function<T, R>`表示该接口的唯一抽象方法接受类型为`T`的参数并产生类型为`R`的结果。您可以通过阅读在线文档找到该抽象方法的名称。在`Function<T, R>`接口的情况下，它的方法是`R apply(T)`。
 
-After learning all that, we can create an implementation of this interface using an anonymous class:
+在学习所有内容后，我们可以使用匿名类创建该接口的实现：
 
-[PRE2]
+```java
+Function<Integer, Double> multiplyByTen = new Function<Integer, Double>(){
+  public Double apply(Integer i){
+    return i * 10.0;
+  }
+};
+```
 
-It is up to the programmer to decide which actual type will be `T` (the input parameter) and which type will be `R` (the returned value). In our example, we have decided that the input parameters will be of the `Integer` type and the result will be of the `Double` type. As you have probably realized by now, the types can be reference types only, and the boxing and unboxing of primitive types is performed automatically.
+由程序员决定`T`（输入参数）将是哪种实际类型，以及`R`（返回值）将是哪种类型。在我们的示例中，我们已经决定输入参数将是`Integer`类型，结果将是`Double`类型。正如你现在可能已经意识到的那样，类型只能是引用类型，并且原始类型的装箱和拆箱会自动执行。
 
-We can now use our new `Function<Integer, Double> multiplyByTen` function any way we need. We can just use it directly, as follows:
+现在我们可以按照需要使用我们新的`Function<Integer, Double> multiplyByTen`函数。我们可以直接使用它，如下所示：
 
-[PRE3]
+```java
+System.out.println(multiplyByTen.apply(1)); //prints: 10.0
+```
 
-Or we can create a method that accepts this function as a parameter:
+或者我们可以创建一个接受这个函数作为参数的方法：
 
-[PRE4]
+```java
+void useFunc(Function<Integer, Double> processingFunc, int input){
+  System.out.println(processingFunc.apply(input));
+}
+```
 
-We can then pass our function into this method and let the method use it:
+然后我们可以将我们的函数传递给这个方法，并让方法使用它：
 
-[PRE5]
+```java
+useFunc(multiplyByTen, 10);     //prints: 100.00
 
-We can also create a method that will generate a function whenever we need one:
+```
 
-[PRE6]
+我们还可以创建一个方法，每当我们需要一个函数时就会生成一个函数：
 
-Using the preceding method, we can write the following code:
+```java
+Function<Integer, Double> createMultiplyBy(double num){
+  Function<Integer, Double> func = new Function<Integer, Double>(){
+    public Double apply(Integer i){
+      return i * num;
+    }
+  };
+  return func;
+}
+```
 
-[PRE7]
+使用前述方法，我们可以编写以下代码：
 
-In the next section, we will introduce lambda expressions and will show how they can be used to express the functional interface implementation with much less code.
+```java
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+System.out.println(multiplyByFive.apply(1)); //prints: 5.0
+useFunc(multiplyByFive, 10);                 //prints: 50.0
 
-# Consumer<T>
+```
 
-By looking at the `Consumer<T>` interface definition, you can already guess that this interface has an abstract method that accepts a parameter of the `T` type <indexentry content="standard functional interfaces:Consumer">and does not return anything. From the documentation of the `Consumer<T>` interface, we learn that its abstract method is `void accept(T)`, which means that, for example, we can implement it as follows:
+在下一节中，我们将介绍 lambda 表达式，并展示如何使用它们以更少的代码来表示函数接口实现。
 
-[PRE8]
+# `Consumer<T>`
 
-Or we can create a method that will generate the function:
+通过查看`Consumer<T>`接口的定义，你可以猜到这个接口有一个接受`T`类型参数的抽象方法，而且不返回任何东西。从`Consumer<T>`接口的文档中，我们了解到它的抽象方法是`void accept(T)`，这意味着，例如，我们可以这样实现它：
 
-[PRE9]
+```java
+Consumer<Double> printResult = new Consumer<Double>() {
+  public void accept(Double d) {
+    System.out.println("Result=" + d);
+  }
+};
+printResult.accept(10.0);         //prints: Result=10.0
 
-Now we can use it as follows:
+```
 
-[PRE10]
+或者我们可以创建一个生成函数的方法：
 
-We can also create a new method that not only accepts a processing function as a parameter but also a printing function too:
+```java
+Consumer<Double> createPrintingFunc(String prefix, String postfix){
+  Consumer<Double> func = new Consumer<Double>() {
+    public void accept(Double d) {
+      System.out.println(prefix + d + postfix);
+    }
+  };
+  return func;
+}
+```
 
-[PRE11]
+现在我们可以像下面这样使用它：
 
-We can then write the following code:
+```java
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+printResult.accept(10.0);    //prints: Result=10.0 Great!
 
-[PRE12]
+```
 
-As we have mentioned before, in the next section, we will introduce lambda expressions and will show how they can be used to express the functional interface implementation with much less code.
+我们还可以创建一个新方法，不仅接受一个处理函数作为参数，还接受一个打印函数：
 
-# Supplier<T>
+```java
+void processAndConsume(int input, 
+                       Function<Integer, Double> processingFunc, 
+                                          Consumer<Double> consumer){
+  consumer.accept(processingFunc.apply(input));
+}
+```
 
-Here is a trick question: guess the input and the output types of the abstract method of the `Supplier<T>` interface. The answer is: it accepts no parameters and returns the `T` type. As you understand now, the difference is in the name of the interface itself. It should give you a hint: the consumer just consumes and returns nothing, while the supplier just supplies without any input. The abstract method of the `Supplier<T>` interface is `T get()`.
+然后我们可以编写以下代码：
 
-Similar to the previous functions, we can write the supplier generating method:
+```java
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+processAndConsume(10, multiplyByFive, printResult); //Result=50.0 Great! 
+```
 
-[PRE13]
+正如我们之前提到的，在下一节中，我们将介绍 lambda 表达式，并展示如何使用它们以更少的代码来表示函数接口实现。
 
-We can now write a method that accepts only functions:
+# `Supplier<T>`
 
-[PRE14]
+这是一个诡计问题：猜猜`Supplier<T>`接口的抽象方法的输入和输出类型。答案是：它不接受参数，返回`T`类型。正如你现在理解的那样，区别在于接口本身的名称。它应该给你一个提示：消费者只消耗而不返回任何东西，而供应者只提供而不需要任何输入。`Supplier<T>`接口的抽象方法是`T get()`。
 
-Notice how the output type of the `input` function is the same as the input of the `process` function, which returns the same type as consumed by the `consume` function. It makes the following code possible:
+与前面的函数类似，我们可以编写生成供应者的方法：
 
-[PRE15]
+```java
+Supplier<Integer> createSuppplier(int num){
+  Supplier<Integer> func = new Supplier<Integer>() {
+    public Integer get() { return num; }
+  };
+  return func;
+}
+```
 
-At this point, we hope, you start to appreciate the value functional programming brings to the table. It allows us to pass around chunks of functionality that can be plugged into the middle of an algorithm without needing to create an object. Static methods do not require creating an object either, but they are shared by all application threads because they are unique in the JVM. Meanwhile, each function is an object and can be either unique in the JVM (if assigned to a static variable) or created for each processing thread (which typically is the case). It has very little coding overhead and can have even less plumbing when used in a lambda expression – the topic of our next section.
+现在我们可以编写一个只接受函数的方法：
 
-So far, we have demonstrated how a function can be plugged into the existing control-flow expression. And now we will describe the last missing piece – a function that represents the decision-making construct that can be passed around as an object too.
+```java
+void supplyProcessAndConsume(Supplier<Integer> input, 
+                             Function<Integer, Double> process, 
+                                      Consumer<Double> consume){
+  consume.accept(processFunc.apply(input.get()));
+}
+```
+
+注意`input`函数的输出类型与`process`函数的输入类型相同，返回类型与`consume`函数消耗的类型相同。这使得以下代码成为可能：
+
+```java
+Supplier<Integer> supply7 = createSuppplier(7);
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+supplyProcessAndConsume(supply7, multiplyByFive, printResult); 
+                                            //prints: Result=35.0 Great!
+
+```
+
+到此为止，我们希望你开始欣赏函数式编程带来的价值。它允许我们传递功能块，可以插入到算法的中间而不需要创建对象。静态方法也不需要创建对象，但它们由于在 JVM 中是唯一的，所以会被所有应用线程共享。与此同时，每个函数都是一个对象，可以在 JVM 中是唯一的（如果赋值给静态变量），或者为每个处理线程创建一个（这通常是情况）。它几乎没有编码开销，并且在 lambda 表达式中使用时可以更少地使用管道 - 这是我们下一节的主题。
+
+到目前为止，我们已经演示了如何将函数插入现有的控制流表达式中。现在我们将描述最后一个缺失的部分 - 一个表示决策构造的函数，也可以作为对象传递。
 
 # Predicate<T>
 
-This is an interface that represents a Boolean-valued function that has a single method: `boolean test(T)`. Here is an example of a method that creates a `Predicate<Integer>` function:
+这是一个表示具有单个方法`boolean test(T)`的布尔值函数的接口。这里是一个创建`Predicate<Integer>`函数的方法示例：
 
-[PRE16]
+```java
+Predicate<Integer> createTestSmallerThan(int num){
+  Predicate<Integer> func = new Predicate<Integer>() {
+    public boolean test(Integer d) {
+      return d < num;
+    }
+  };
+  return func;
+}
+```
 
-We can use it to add some logic to the processing method:
+我们可以使用它来为处理方法添加一些逻辑：
 
-[PRE17]
+```java
+void supplyDecideProcessAndConsume(Supplier<Integer> input, 
+                                  Predicate<Integer> test, 
+                                   Function<Integer, Double> process, 
+                                            Consumer<Double> consume){
+  int in = input.get();
+  if(test.test(in)){
+    consume.accept(process.apply(in));
+  } else {
+    System.out.println("Input " + in + 
+                     " does not pass the test and not processed.");
+  }
+}
+```
 
-And the following code demonstrates its usage:
+下面的代码演示了它的使用方法：
 
-[PRE18]
+```java
+Supplier<Integer> input = createSuppplier(7);
+Predicate<Integer> test = createTestSmallerThan(5);
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
+             //prints: Input 7 does not pass the test and not processed.
+```
 
-Let's set the input to 3, for example:
+例如，让我们将输入设置为 3：
 
-[PRE19]
+```java
+Supplier<Integer> input = createSuppplier(3)
+```
 
-The preceding code would result in the following output:
+前面的代码将导致以下输出：
 
-[PRE20]
+```java
+Result=15.0 Great!
+```
 
-# Other standard functional interfaces
+# 其他标准的函数式接口
 
-The other 39 functional interfaces in the `java.util.function` package are variations of the four interfaces we have just reviewed. These variations are created in order to achieve one or any combination of the following:
+`java.util.function`包中的其他 39 个函数接口是我们刚刚审查的四个接口的变体。这些变体是为了实现以下目的之一或任意组合：
 
-*   Better performance by avoiding autoboxing and unboxing via the explicit usage of the integer, double, or long primitives
-*   Allowing two input parameters
-*   A shorter notation
++   通过明确使用整数、双精度或长整型原始类型来避免自动装箱和拆箱，从而获得更好的性能
 
-Here are just a few of examples:
++   允许两个输入参数
 
-*   `IntFunction<R>` with the `R apply(int)` method provides shorter notation (without generics for the input parameter type) and avoids autoboxing by requiring the `int` primitive as the parameter
-*   `BiFunction<T,U,R>` with the `R apply(T,U)` method allows two input parameters
-*   `BinaryOperator<T>` with the `T apply(T,T)` method allows two input parameters of the `T` type and returns a value of the same `T` type
-*   `IntBinaryOperator` with the `int applAsInt(int,int)` method accepts two parameters of the `int` type and returns the value of the `int` type
++   更简短的记法
 
-If you are going to use functional interfaces, we encourage you to study the API of the interfaces of the `java.util.functional` package.
+这里只是一些例子：
 
-# Chaining standard functions
++   `IntFunction<R>`提供了更简短的记法（不需要输入参数类型的泛型）并且避免了自动装箱，因为它要求参数为`int`原始类型。
 
-Most of the functional interfaces in the `java.util.function` package have default methods that allow us to build a chain (also called a pipe or pipeline) of functions that pass the result of one as the input parameter to another, thus composing a new complex function. For example:
++   `BiFunction<T,U,R>`的`R apply(T,U)`方法允许两个输入参数
 
-[PRE21]
++   `BinaryOperator<T>`的`T apply(T,T)`方法允许两个`T`类型的输入参数，并返回相同的`T`类型的值
 
-As you can see from the preceding code, we have created a new `f3` function by combining the `f1` and `f2` functions using the `andThen()` method. That's the idea behind the methods we are going to explore in this section. First, we express the functions as anonymous classes and, in the following section, we introduce the lambda expressions that we used in the preceding example.
++   `IntBinaryOperator`的`int applAsInt(int,int)`方法接受两个`int`类型的参数，并返回`int`类型的值
 
-# Chain two Function<T,R>
+如果你打算使用函数接口，我们鼓励你学习`java.util.functional`包中接口的 API。
 
-We can use the `andThen(Function after)` default method of the `Function` interface. We have already created the `Function<Integer, Double> createMultiplyBy()` method:
+# 链接标准函数
 
-[PRE22]
+`java.util.function`包中的大多数函数接口都有默认方法，允许我们构建一个函数链（也称为管道），将一个函数的结果作为另一个函数的输入参数传递，从而组合成一个新的复杂函数。例如：
 
-We can also write another method that creates a subtracting function with the `Double` input type, so we can chain it to the multiplying function:
+```java
+Function<Double, Long> f1 = d -> Double.valueOf(d / 2.).longValue();
+Function<Long, String> f2 = l -> "Result: " + (l + 1);
+Function<Double, String> f3 = f1.andThen(f2);
+System.out.println(f3.apply(4.));            //prints: 3
 
-[PRE23]
+```
 
-Now we can write the following code:
+如您从前面的代码中所见，我们通过使用 `andThen()` 方法将 `f1` 和 `f2` 函数组合成了一个新的 `f3` 函数。这就是我们将要在本节中探讨的方法的思想。首先，我们将函数表示为匿名类，然后在以下部分中，我们介绍了前面示例中使用的 lambda 表达式。
 
-[PRE24]
+# 链两个 Function<T,R>
 
-As you can see, the `multiplyByFive.andThen(subtract7)` chain acts effectively as `Function<Integer, Long> multiplyByFiveAndSubtractSeven`.
+我们可以使用 `Function` 接口的 `andThen(Function after)` 默认方法。我们已经创建了 `Function<Integer, Double> createMultiplyBy()` 方法：
 
-The `Function` interface has another default method, `Function<V,R> compose(Function<V,T> before)`, that also allows us to chain two functions. The function that has to be executed first can be passed as the `before` parameter into the `compose()` method of the second function:
+```java
+Function<Integer, Double> createMultiplyBy(double num){
+  Function<Integer, Double> func = new Function<Integer, Double>(){
+    public Double apply(Integer i){
+      return i * num;
+    }
+  };
+  return func; 
+```
 
-[PRE25]
+我们还可以编写另一个方法，该方法创建具有 `Double` 输入类型的减法函数，以便我们可以将其链接到乘法函数：
 
-# Chain two Consumer<T>
+```java
+private static Function<Double, Long> createSubtractInt(int num){
+  Function<Double, Long> func = new Function<Double, Long>(){
+    public Long apply(Double dbl){
+      return Math.round(dbl - num);
+    }
+  };
+  return func;
+}
+
+```
+
+现在我们可以编写以下代码：
+
+```java
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+System.out.println(multiplyByFive.apply(2));  //prints: 10.0
+
+Function<Double, Long> subtract7 = createSubtractInt(7);
+System.out.println(subtract7.apply(11.0));   //prints: 4
+
+long r = multiplyByFive.andThen(subtract7).apply(2);
+System.out.println(r);                          //prints: 3
 
-The `Consumer` interface has the `andThen(Consumer after)` method too. We have already written the method that creates the printing function:
+```
 
-[PRE26]
+如您所见，`multiplyByFive.andThen(subtract7)` 链有效地作为 `Function<Integer, Long> multiplyByFiveAndSubtractSeven`。
 
-And now we can create and chain two printing functions, as follows:
+`Function` 接口还有另一个默认方法 `Function<V,R> compose(Function<V,T> before)`，它也允许我们链两个函数。必须先执行的函数可以作为 `before` 参数传递到第二个函数的 `compose()` 方法中：
 
-[PRE27]
+```java
+boolean r = subtract7.compose(multiplyByFive).apply(2);
+System.out.println(r);                          //prints: 3         
 
-As you can see in the `Consumer` chain, both functions consume the same value in the sequence defined by the chain.
+```
 
-# Chain two Predicate<T>
+# 链两个 Consumer<T>
 
-The `Supplier` interface does not have default methods, while the `Predicate` interface has one static method, `isEqual(Object targetRef)`, and three default methods: `and(Predicate other)`, `negate()`, and `or(Predicate other)`. To demonstrate usage of the `and(Predicate other)` and `or(Predicate other)` methods, for example, let's write the methods that create two `Predicate<Double>` functions. One function checks whether the value is smaller than the input:
+`Consumer` 接口也有 `andThen(Consumer after)` 方法。我们已经编写了创建打印函数的方法：
 
-[PRE28]
+```java
+Consumer<Double> createPrintingFunc(String prefix, String postfix){
+  Consumer<Double> func = new Consumer<Double>() {
+    public void accept(Double d) {
+      System.out.println(prefix + d + postfix);
+    }
+  };
+  return func;
+}
+```
 
-Another function checks whether the value is bigger than the input:
+现在我们可以创建和链两个打印函数，如下所示：
 
-[PRE29]
+```java
+Consumer<Double> print21By = createPrintingFunc("21 by ", "");
+Consumer<Double> equalsBy21 = createPrintingFunc("equals ", " by 21");
+print21By.andThen(equalsBy21).accept(2d);  
+//prints: 21 by 2.0 
+//        equals 2.0 by 21
 
-Now we can create two `Predicate<Double>` functions and chain them:
+```
 
-[PRE30]
+如您在 `Consumer` 链中所见，两个函数按链定义的顺序消耗相同的值。
 
-As you can see, the `and()` method required execution of each of the functions, while the `or()` method did not execute the second function as soon as the first one in the chain returned `true`.
+# 链两个 Predicate<T>
 
-# identity() and other default methods
+`Supplier` 接口没有默认方法，而 `Predicate` 接口有一个静态方法 `isEqual(Object targetRef)` 和三个默认方法：`and(Predicate other)`、`negate()` 和 `or(Predicate other)`。为了演示 `and(Predicate other)` 和 `or(Predicate other)` 方法的用法，例如，让我们编写创建两个 `Predicate<Double>` 函数的方法。一个函数检查值是否小于输入：
 
-Functional interfaces of the `java.util.function` package have other helpful default methods. The one that stands out is the `identity()` method, which returns a function that always returns its input argument:
+```java
+Predicate<Double> testSmallerThan(double limit){
+  Predicate<Double> func = new Predicate<Double>() {
+    public boolean test(Double num) {
+      System.out.println("Test if " + num + " is smaller than " + limit);
+      return num < limit;
+    }
+  };
+  return func;
+}
+```
 
-[PRE31]
+另一个函数检查值是否大于输入：
 
-The `identity()` method is very helpful when some procedure requires providing a certain function, but you do not want the provided function to change anything. In such cases, you create an identity function with the necessary output type. For example, in one of our previous code snippets, we may decide that the `multiplyByFive` function should not change anything in the `multiplyByFive.andThen(subtract7)` chain:
+```java
+Predicate<Double> testBiggerThan(double limit){
+  Predicate<Double> func = new Predicate<Double>() {
+    public boolean test(Double num) {
+      System.out.println("Test if " + num + " is bigger than " + limit);
+      return num > limit;
+    }
+  };
+  return func;
+}
+```
 
-[PRE32]
+现在我们可以创建两个 `Predicate<Double>` 函数并将它们链在一起：
 
-As you can see, the  `multiplyByFive` function did not do anything with the input parameter `2`, so the result (after `7` was subtracted) is `-5`.
+```java
+Predicate<Double> isSmallerThan20 = testSmallerThan(20d);
+System.out.println(isSmallerThan20.test(10d));
+     //prints: Test if 10.0 is smaller than 20.0
+     //        true
 
-Other default methods are mostly related to conversion and boxing and unboxing, but also extracting minimum and maximum values of two parameters. If you are interested, you can look through the API of interfaces of the `java.util.function` package and get a feeling for the possibilities.
+Predicate<Double> isBiggerThan18 = testBiggerThan(18d);
+System.out.println(isBiggerThan18.test(10d));
+    //prints: Test if 10.0 is bigger than 18.0
+    //        false
 
-# Lambda expressions
+boolean b = isSmallerThan20.and(isBiggerThan18).test(10.);
+System.out.println(b);
+    //prints: Test if 10.0 is smaller than 20.0
+    //        Test if 10.0 is bigger than 18.0
+    //        false
 
-The examples in the previous section (that used anonymous classes for the implementation of functional interfaces) looked bulky and felt excessively verbose. For one, there was no need to repeat the interface name, because we had declared it already as the type for the object reference. And, second, in the case of a functional interface that had only one abstract method, there is no need to specify the method name that has to be implemented. The compiler and Java runtime can figure it out. All we need is to provide the new functionality. Lambda expressions were introduced for exactly this purpose.
+b = isSmallerThan20.or(isBiggerThan18).test(10.);
+System.out.println(b);
+    //prints: Test if 10.0 is smaller than 20.0
+    //        true
 
-# What is a lambda expression?
+```
 
-The term lambda comes from lambda calculus—a universal model of computation that can be used to simulate any Turing machine. It was introduced by mathematician, Alonzo Church, in the 1930s. A lambda expression is a function, implemented in Java as an anonymous method, that also allows us to omit modifiers, return types, and parameter types. That makes for a very compact notation.
+如您所见，`and()` 方法需要执行每个函数，而 `or()` 方法在链中的第一个函数返回 `true` 后就不执行第二个函数。
 
-The syntax of a lambda expression includes the list of parameters, an arrow token `->`, and a body. The list of parameters can be empty `()`, without brackets (if there is only one parameter), or a comma-separated list of parameters surrounded by brackets. The body can be a single expression or a statement block. 
+# identity() 和其他默认方法
 
-Let us look at a few examples:
+`java.util.function` 包的功能接口有其他有用的默认方法。其中一个显著的是 `identity()` 方法，它返回一个始终返回其输入参数的函数：
 
-*   `() -> 42;` always returns `42`
-*   `x -> x + 1;` increments the `x` variable by `1`
-*   `(x, y) -> x * y;` multiplies `x` by `y` and returns the result
-*   `(char x) -> x == '$';` compares the value of the `x` variable and the `$` symbol, and returns a Boolean value
-*   `x -> {  System.out.println("x=" + x); };` prints the `x` value with the `x=` prefix
+```java
+Function<Integer, Integer> id = Function.identity();
+System.out.println(id.apply(4));          //prints: 4
 
-# Re-implementing functions
+```
 
-We can rewrite our functions, created in the previous section, using lambda expressions, as follows:
+`identity()`方法在某些过程需要提供特定函数，但你不希望提供的函数改变任何东西时非常有用。在这种情况下，你可以创建一个具有必要输出类型的身份函数。例如，在我们之前的代码片段中，我们可能决定`multiplyByFive`函数在`multiplyByFive.andThen(subtract7)`链中不改变任何东西：
 
-[PRE33]
+```java
+Function<Double, Double> multiplyByFive = Function.identity();
+System.out.println(multiplyByFive.apply(2.));  //prints: 2.0
 
-We don't repeat the name of the implemented interface because it is specified as the return type in the method signature. And we do not specify the name of the abstract method either because it is the only method of the interface that has to be implemented. Writing such a compact and efficient code became possible because of the combination of the lambda expression and functional interface.
+Function<Double, Long> subtract7 = createSubtractInt(7);
+System.out.println(subtract7.apply(11.0));    //prints: 4
 
-Looking at the preceding examples, you probably realize that there is no need to have methods that create a function anymore. Let's change the code that calls the `supplyDecideProcessAndConsume()` method:
+long r = multiplyByFive.andThen(subtract7).apply(2.);
+System.out.println(r);                       //prints: -5
 
-[PRE34]
+```
 
-Let's revisit the following lines: 
+正如你所看到的，`multiplyByFive`函数未对输入参数`2`做任何操作，因此结果（减去`7`后）是`-5`。
 
-[PRE35]
+其他默认方法大多涉及转换和装箱和拆箱，但也提取两个参数的最小值和最大值。如果你感兴趣，可以查看`java.util.function`包接口的 API，并了解可能性。
 
-We can change the preceding code to the following without changing the functionality:
+# Lambda 表达式
 
-[PRE36]
+前一节中的例子（使用匿名类实现函数接口）看起来庞大，并且显得冗长。首先，无需重复接口名称，因为我们已经将其声明为对象引用的类型。其次，在只有一个抽象方法的功能接口的情况下，不需要指定需要实现的方法名称。编译器和 Java 运行时可以自行处理。我们所需做的就是提供新的功能。Lambda 表达式就是为了这个目的而引入的。
 
-We can even inline the preceding functions and write the preceding code in one line like this:
+# 什么是 Lambda 表达式？
 
-[PRE37]
+术语 lambda 来自于 lambda 演算——一种通用的计算模型，可用于模拟任何图灵机。它是数学家阿隆佐·丘奇在 20 世纪 30 年代引入的。Lambda 表达式是一个函数，在 Java 中实现为匿名方法，还允许我们省略修饰符、返回类型和参数类型。这使得它具有非常简洁的表示。
 
-Notice how much more transparent the definition of the printing function has become. That is the power and the beauty of lambda expressions in combination with functional interfaces. In [Chapter 18](be052e15-ac84-4e19-9bd9-24548aa3f904.xhtml), *Streams and Pipelines*, you will see that lambda expressions are, in fact, the only way to process streamed data. 
+Lambda 表达式的语法包括参数列表、箭头符号`->`和主体部分。参数列表可以是空的`()`，没有括号（如果只有一个参数），或者用括号括起来的逗号分隔的参数列表。主体部分可以是单个表达式或语句块。
 
-# Lambda limitations
+让我们看几个例子：
 
-There are two aspects of a lambda expression that we would like to point out and clarify, which are:
++   `() -> 42;` 总是返回`42`
 
-*   If a lambda expression uses a local variable created outside it, this local variable has to be final or effectively final (not re-assigned in the same context)
-*   The `this` keyword in a lambda expression refers to the enclosing context, and not the lambda expression itself
++   `x -> x + 1;` 将变量`x`增加`1`
 
-# Effectively final local variable
++   `(x, y) -> x * y;` 将`x`乘以`y`并返回结果
 
-As in the anonymous class, the variable, created outside and used inside the lambda expression, becomes effectively final and cannot be modified. You can write the following:
++   `(char x) -> x == '$';` 比较变量`x`和符号`$`的值，并返回布尔值
 
-[PRE38]
++   `x -> {  System.out.println("x=" + x); };` 打印带有`x=`前缀的`x`值
 
-But, as you can see, we cannot change the value of the local variable used in the lambda expression. The reason for this restriction is that a function can be passed around and executed in different contexts (different threads, for example), and the attempt to synchronize these contexts would defeat the original idea of the stateless function and independent distributed evaluation of the expression. That is why all the local variables used in the lambda expression are effectively final, meaning that they can either be declared final explicitly or become final by virtue of their usage in a lambda expression. 
+# 重新实现函数
 
-There is one possible workaround for this limitation. If the local variable is of a reference type (but not `String` or a primitive wrapping type), it is possible to change its state even if this local variable is used in the lambda expression:
+我们可以使用 lambda 表达式重新编写前一节中创建的函数，如下所示：
 
-[PRE39]
+```java
+Function<Integer, Double> createMultiplyBy(double num){
+  Function<Integer, Double> func = i -> i * num;
+  return func;
+}
+Consumer<Double> createPrintingFunc(String prefix, String postfix){
+  Consumer<Double> func = d -> System.out.println(prefix + d + postfix);
+  return func;
+}
+Supplier<Integer> createSuppplier(int num){
+  Supplier<Integer> func = () -> num;
+  return func;
+}
+Predicate<Integer> createTestSmallerThan(int num){
+  Predicate<Integer> func = d -> d < num;
+  return func;
+}
+```
 
-But this workaround should be used only when really needed and has to be done with care because of the danger of unexpected side effects.
+我们不重复实现接口的名称，因为它在方法签名中指定为返回类型。我们也不指定抽象方法的名称，因为它是唯一必须实现的接口方法。编写这样简洁高效的代码变得可能是因为 lambda 表达式和函数接口的组合。
 
-# The this keyword interpretation
+通过前面的例子，你可能意识到不再需要创建函数的方法了。让我们修改调用`supplyDecideProcessAndConsume()`方法的代码：
 
-One principal difference between the anonymous class and lambda expressions is the interpretation of the `this` keyword. Inside an anonymous class, it refers to the instance of the anonymous class. Inside a lambda expression, `this` refers to the instance of the class that surrounds the expression, also called an *enclosing instance*, *enclosing context*, or *enclosing scope*.
+```java
+void supplyDecideProcessAndConsume(Supplier<Integer> input, 
+                                   Predicate<Integer> test, 
+                                   Function<Integer, Double> process, 
+                                            Consumer<Double> consume){
+  int in = input.get();
+  if(test.test(in)){
+    consume.accept(process.apply(in));
+  } else {
+    System.out.println("Input " + in + 
+                 " does not pass the test and not processed.");
+  }
+}
+```
 
-Let's write a `ThisDemo` class that illustrates the difference:
+让我们重新审视以下内容：
 
-[PRE40]
+```java
+Supplier<Integer> input = createSuppplier(7);
+Predicate<Integer> test = createTestSmallerThan(5);
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
+```
 
-As you can see, `this` inside the anonymous class refers to the anonymous class instance, while `this` in the lambda expression refers to the enclosing class instance. Lambda expressions just do not have and cannot have a field. If we execute the preceding methods, the output confirms our assumptions:
+我们可以将前面的代码更改为以下内容而不改变功能：
 
-[PRE41]
+```java
+Supplier<Integer> input = () -> 7;
+Predicate<Integer> test = d -> d < 5.;
+Function<Integer, Double> multiplyByFive = i -> i * 5.;;
+Consumer<Double> printResult = 
+                     d -> System.out.println("Result=" + d + " Great!");
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult); 
 
-The lambda expression is not a class instance and cannot be referred to by `this`. According to Java Specification, such an approach *allows more flexibility for implementations* by *treating [this] the same as in the surrounding context.*
+```
 
-# Method references
+我们甚至可以内联前面的函数，并像这样一行写出前面的代码：
 
-Let's look at our last implementation of the call to the `supplyDecidePprocessAndConsume()` method:
+```java
+supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5., 
+                    d -> System.out.println("Result=" + d + " Great!")); 
 
-[PRE42]
+```
 
-The functions we have used are pretty trivial. In real-life code, each of them may require a multiple-line implementation. In such a case, to put a code block inline would make the code almost unreadable. In such cases, referring to the methods with the necessary implementation helps. Let's assume we have the following `Helper` class:
+注意定义打印函数的透明度提高了多少。这就是 lambda 表达式与函数接口结合的力量和美丽所在。在第十八章，*流和管道*，你将看到 lambda 表达式实际上是处理流数据的唯一方法。
 
-[PRE43]
+# Lambda 的限制
 
-The lambda expressions in the `Lambdas` class may refer to the methods of the `Helper` and `Lambdas` classes, as follows:
+有两个我们想指出和澄清的 lambda 表达式方面，它们是：
 
-[PRE44]
++   如果 lambda 表达式使用在其外部创建的局部变量，则此局部变量必须是 final 或有效 final（在同一上下文中不可重新赋值）
 
-The preceding code reads better already, and the functions may be inlined again:
++   lambda 表达式中的 `this` 关键字引用的是封闭上下文，而不是 lambda 表达式本身
 
-[PRE45]
+# 有效 final 局部变量
 
-But in such cases, the notation can be made even more compact. When a one-line lambda expression consists of a reference to an existing method, it is possible to further simplify the notation by using a method reference without listing the parameters. 
+与匿名类一样，创建在 lambda 表达式外部并在内部使用的变量将变为有效 final，并且不能被修改。你可以编写以下内容：
 
-The syntax of the method reference is `Location::methodName`, where `Location` indicates where (in which object or class) the `methodName` method can be found, and the two colons (`::`) serve as a separator between the location and the method name. If there are several methods with the same name at the specified location (because of the method overload), the reference method is identified by the signature of the abstract method of the functional interface implemented by the lambda expression.
+```java
+int x = 7;
+//x = 3;       //compilation error
+int y = 5;
+double z = 5.;
+supplyDecideProcessAndConsume(() -> x, d -> d < y, i -> i * z,
+            d -> { //x = 3;      //compilation error
+                   System.out.println("Result=" + d + " Great!"); } );
 
-Using the method reference, the preceding code under `methodReference()` method in the `Lambdas` class can be rewritten as follows:
+```
 
-[PRE46]
+但是，正如你所看到的，我们不能改变 lambda 表达式中使用的局部变量的值。这种限制的原因在于函数可以被传递并在不同的上下文中执行（例如，不同的线程），尝试同步这些上下文会破坏状态无关函数和表达式的独立分布式评估的原始想法。这就是为什么 lambda 表达式中使用的所有局部变量都是有效 final 的原因，这意味着它们可以明确声明为 final，也可以通过它们在 lambda 表达式中的使用变为 final。
 
-To inline such functions makes even more sense:
+这个限制有一个可能的解决方法。如果局部变量是引用类型（但不是 `String` 或原始包装类型），即使该局部变量用于 lambda 表达式中，也可以更改其状态：
 
-[PRE47]
+```java
+class A {
+  private int x;
+  public int getX(){ return this.x; }
+  public void setX(int x){ this.x = x; }
+}
+void localVariable2(){
+  A a = new A();
+  a.setX(7);
+  a.setX(3);
+  int y = 5;
+  double z = 5.;
+  supplyDecideProcessAndConsume(() -> a.getX(), d -> d < y, i -> i * z,
+               d -> { a.setX(5);
+    System.out.println("Result=" + d + " Great!"); } );
+}
+```
 
-You have probably noticed that we have intentionally used different locations and two instance methods and two static methods in order to demonstrate the variety of possibilities.
+但是，只有在真正需要的情况下才应该使用这种解决方法，并且必须谨慎进行，因为存在意外副作用的危险。
 
-If it feels like too much to remember, the good news is that a modern IDE (IntelliJ IDEA is one example) can do it for you and convert the code you are writing into the most compact form.
+# 关于 this 关键字的解释
 
-# Exercise – Using the method reference to create a new object
+匿名类和 lambda 表达式之间的一个主要区别是对`this`关键字的解释。在匿名类内部，它引用匿名类的实例。在 lambda 表达式内部，`this`引用包围表达式的类实例，也称为*包围实例*、*包围上下文*或*包围范围*。
 
-Use the method reference to express creating a new object. Let's assume that we have `class A{}`. Replace the following `Supplier` function declaration with another one that uses the method reference:
+让我们编写一个演示区别的`ThisDemo`类：
 
-[PRE48]
+```java
+class ThisDemo {
+  private String field = "ThisDemo.field";
+  public void useAnonymousClass() {
+    Consumer<String> consumer = new Consumer<>() {
+      private String field = "AnonymousClassConsumer.field";
+      public void accept(String s) {
+        System.out.println(this.field);
+      }
+    };
+    consumer.accept(this.field);
+  }
+  public void useLambdaExpression() {
+    Consumer<String> consumer = consumer = s -> {
+      System.out.println(this.field);
+    };
+    consumer.accept(this.field);
+  }
 
-# Answer
+}
+```
 
-The answer is:
+正如您所看到的，匿名类中的`this`指的是匿名类实例，而 lambda 表达式中的`this`指的是包围表达式的类实例。Lambda 表达式确实没有字段，也不能有字段。 如果执行前面的方法，输出将确认我们的假设：
 
-[PRE49]
+```java
+ThisDemo d = new ThisDemo();
+d.useAnonymousClass();   //prints: AnonymousClassConsumer.field
+d.useLambdaExpression(); //prints: ThisDemo.field
 
-# Summary
+```
 
-This chapter introduced the concept of functional programming. It provided an overview of the functional interfaces that come with JDK and demonstrated how to use them. It also discussed and demonstrated lambda expressions and how effectively they can improve code readability.
+Lambda 表达式不是类的实例，不能通过`this`引用。根据 Java 规范，这种方法*通过将[this]与所在上下文中的相同方式来处理，* *允许更多实现的灵活性*。
 
-The next chapter will make the reader familiar with the powerful concept of datastreams processing. It explains what streams are, how to create them and process their elements, and how to build processing pipelines. It also shows how easily you can organize stream processing in parallel.
+# 方法引用
+
+让我们再看一下我们对`supplyDecidePprocessAndConsume()`方法的最后一个实现：
+
+```java
+supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5., 
+                    d -> System.out.println("Result=" + d + " Great!")); 
+```
+
+我们使用的功能相当琐碎。在现实代码中，每个都可能需要多行实现。在这种情况下，将代码块内联会使代码几乎不可读。在这种情况下，引用具有必要实现的方法是有帮助的。让我们假设我们有以下的`Helper`类：
+
+```java
+public class Helper {
+  public double calculateResult(int i){
+    // Maybe many lines of code here
+    return i* 5;
+  }
+  public static void printResult(double d){
+    // Maybe many lines of code here
+    System.out.println("Result=" + d + " Great!");
+  }
+}
+```
+
+`Lambdas`类中的 lambda 表达式可以引用`Helper`和`Lambdas`类的方法，如下所示：
+
+```java
+public class Lambdas {
+  public void methodReference() {
+    Supplier<Integer> input = () -> generateInput();
+    Predicate<Integer> test = d -> checkValue(d);
+    Function<Integer, Double> multiplyByFive = 
+                                  i -> new Helper().calculateResult(i);
+    Consumer<Double> printResult = d -> Helper.printResult(d);
+    supplyDecideProcessAndConsume(input, test, 
+                                           multiplyByFive, printResult);
+  }
+  private int generateInput(){
+    // Maybe many lines of code here
+    return 7;
+  }
+  private static boolean checkValue(double d){
+    // Maybe many lines of code here
+    return d < 5;
+  }
+}
+```
+
+前面的代码已经更易读了，函数还可以再次内联：
+
+```java
+supplyDecideProcessAndConsume(() -> generateInput(), d -> checkValue(d), 
+            i -> new Helper().calculateResult(i), Helper.printResult(d));
+```
+
+但在这种情况下，表示法可以做得更紧凑。当一个单行 lambda 表达式由对现有方法的引用组成时，可以通过使用不列出参数的方法引用进一步简化表示法。
+
+方法引用的语法为`Location::methodName`，其中`Location`表示`methodName`方法所在的位置（对象或类），两个冒号(`::`)用作位置和方法名之间的分隔符。如果在指定位置有多个同名方法（因为方法重载的原因），则通过 lambda 表达式实现的函数接口抽象方法的签名来标识引用方法。
+
+使用方法引用，`Lambdas`类中`methodReference()`方法下的前面代码可以重写为：
+
+```java
+Supplier<Integer> input = this::generateInput;
+Predicate<Integer> test = Lambdas::checkValue;
+Function<Integer, Double> multiplyByFive = new Helper()::calculateResult;;
+Consumer<Double> printResult = Helper::printResult;
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
+
+```
+
+内联这样的函数更有意义：
+
+```java
+supplyDecideProcessAndConsume(this::generateInput, Lambdas::checkValue, 
+                    new Helper()::calculateResult, Helper::printResult);
+
+```
+
+您可能已经注意到，我们有意地使用了不同的位置和两个实例方法以及两个静态方法，以展示各种可能性。
+
+如果觉得记忆负担过重，好消息是现代 IDE（例如 IntelliJ IDEA）可以为您执行此操作，并将您正在编写的代码转换为最紧凑的形式。
+
+# 练习 - 使用方法引用创建一个新对象
+
+使用方法引用来表示创建一个新对象。假设我们有`class A{}`。用方法引用替换以下的`Supplier`函数声明，以另一个使用方法引用的声明替代：
+
+```java
+Supplier<A> supplier = () -> new A();
+
+```
+
+# 答案
+
+答案如下：
+
+```java
+Supplier<A> supplier = A::new;
+
+```
+
+# 摘要
+
+本章介绍了函数式编程的概念。它提供了 JDK 提供的函数式接口的概述，并演示了如何使用它们。它还讨论并演示了 lambda 表达式，以及它们如何有效地提高代码可读性。
+
+下一章将使读者熟悉强大的数据流处理概念。它解释了什么是流，如何创建它们和处理它们的元素，以及如何构建处理流水线。它还展示了如何轻松地将流处理组织成并行处理。
