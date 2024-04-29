@@ -1,4 +1,4 @@
-# 第二章。提高生产力和加快应用程序的工具
+# 第二章：提高生产力和加快应用程序的工具
 
 ```java
 /list), and /-<n> allow re-running of the snippets that have been run previously.

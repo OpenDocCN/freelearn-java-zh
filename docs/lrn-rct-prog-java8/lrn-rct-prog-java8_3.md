@@ -1,4 +1,4 @@
-# 第三章。创建和连接 Observables、Observers 和 Subjects
+# 第三章：创建和连接 Observables、Observers 和 Subjects
 
 RxJava 的 `Observable` 实例是响应式应用程序的构建模块，这是 RxJava 的优势。如果我们有一个源 `Observable` 实例，我们可以将逻辑链接到它并订阅结果。我们只需要这个初始的 `Observable` 实例。
 
