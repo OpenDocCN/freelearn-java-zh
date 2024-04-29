@@ -125,43 +125,20 @@
 正如我们在第六章中所演示的，*接口、类和对象构造*，使对象的状态私有化也解决了涉及继承时实例字段和实例方法之间可访问性的差异。子类不能覆盖父类的非私有字段，只能隐藏它们。只有方法可以被覆盖。为了演示这种差异，让我们创建以下三个类：
 
 ```java
-
 public class Grandad {
-
-public String name = "爷爷";
-
-public String getName() { return this.name; }
-
+  public String name = "Grandad";
+  public String getName() { return this.name; }
 }
 
 public class Parent extends Grandad {
-
-public String name = "父亲";
-
-public String getName() { return this.name; }
-
+  public String name = "Parent";
+  public String getName() { return this.name; }
 }
 
 public class Child extends Parent {
-
-public String name = "孩子";
-
-public String getName() { return this.name; }
-
+  public String name = "Child";
+  public String getName() { return this.name; }
 }
-
-这种差异经常会引起混淆，并且可能导致难以调试的错误。为了避免这些错误，我们建议永远不直接允许访问对象状态（字段），只能通过方法（至少是 getter 和 setter）访问。这也是始终保持状态封装的另一个原因。
-
-OOP 是一个成功的解决方案。它确保对数据（对象状态）的受控访问，并且在不改变接口的情况下灵活地（根据需要）更改实现。此外，它有助于组织软件的设计和开发。在定义了接口之后，每个人都可以独立地进行实现。如果接口不发生变化，就不需要花时间开会和讨论。
-
-我们现在将创建一个小型软件建模系统，演示我们正在讨论的设计步骤的应用。假设我们的任务是创建一个交通模型，允许根据特定城市中汽车和卡车的典型混合来计算每辆车的速度。该模型将首先在该城市进行测试。模型返回的值应该是车辆在一定秒数后达到的速度（每小时英里）。结果将用于评估交通灯变绿后几秒钟内多车道道路上的交通密度。它将成为引入与汽车最低乘客数量（对于汽车）和有效载荷最大重量（对于卡车）相关的新交通法规时的决策的一部分。
-
-Grandad grandad = new Child();
-
-System.out.println(grandad.name);
-
-System.out.println(grandad.getName());
-
 ```
 
 车辆数量
@@ -170,13 +147,12 @@ System.out.println(grandad.getName());
 
 每个都有一个具有相同名称的公共字段和相同签名的方法。现在，在不往下看的情况下，尝试猜测以下代码的输出：
 
-```
+```java
+Grandad grandad = new Child();
+System.out.println(grandad.name);
+System.out.println(grandad.getName());
 
-我们肯定简化了可能的现实需求，以使代码更易于阅读。在真实系统中，这样的计算将需要更多的输入数据和基于机器学习建模的更复杂的算法。但是，即使我们开发的简单系统也将具有真实系统具有的所有设计方面。
-
-在讨论需求后，高级设计已经确定了 API。它必须接受三个参数：
-
-+   ```java
+```java
 
 +   所有车辆开始移动后的秒数
 
@@ -191,31 +167,18 @@ System.out.println(grandad.getName());
 以下是位于`com.packt.javapath.ch08demo.traffic`包中的建模系统 API 的详细设计：
 
 ```java
-
 public interface Vehicle {
-
-double getSpeedMph(double timeSec);
-
-static List<Vehicle> getTraffic(int vehiclesCount){
-
-return TrafficFactory.get(vehiclesCount);
-
+  double getSpeedMph(double timeSec);
+  static List<Vehicle> getTraffic(int vehiclesCount){
+    return TrafficFactory.get(vehiclesCount);
+  }
 }
-
-}
-
 public interface Car extends Vehicle {
-
-void setPassengersCount(int passengersCount);
-
+  void setPassengersCount(int passengersCount);
 }
-
 public interface Truck extends Vehicle {
-
-void setPayloadPounds(int payloadPounds);
-
+  void setPayloadPounds(int payloadPounds);
 }
-
 ```
 
 正如您所看到的，我们只向客户端公开接口并隐藏实现（关于这一点我们将在下一节详细讨论）。只要满足合同，它允许我们以我们认为最好的方式实现接口。如果以后更改了实现，客户端不需要更改他们的代码。这是封装和解耦接口与实现的一个例子。正如我们在上一章中讨论的那样，它还有助于代码的可维护性、可测试性和可重用性。更多关于后者的内容请参见*更喜欢聚合而不是继承*部分，尽管我们应该指出，继承也有助于代码重用，我们将在下一节中看到它的证明。
@@ -233,33 +196,19 @@ void setPayloadPounds(int payloadPounds);
 这里是交通接口的实现：
 
 ```java
-
 class VehicleImpl implements Vehicle {
-
-public double getSpeedMph(double timeSec){
-
-return 42;
-
+  public double getSpeedMph(double timeSec){
+    return 42;
+  }
 }
-
-}
-
 class TruckImpl implements Truck {
-
-public void setPayloadPounds(int payloadPounds){
-
+  public void setPayloadPounds(int payloadPounds){
+  }
 }
-
+class CarImpl implements Car {
+  public void setPassengersCount(int passengersCount){
+  }
 }
-
-车辆实现类实现了车辆接口：
-
-public void setPassengersCount(int passengersCount){
-
-}
-
-}
-
 ```
 
 我们在`com.packt.javapath.ch08demo.traffic.impl`包中创建了这些类，并使用了一些虚拟数据，只是为了使它们编译通过。但是`CarImpl`和`TruckImpl`类仍然会生成编译错误，因为`Vehicle`接口中列出了`getSpeedMph()`方法，而这两个类中没有实现。`Car`和`Truck`接口扩展了`Vehicle`接口，因此继承了它的抽象`getSpeedMph()`方法。
@@ -267,33 +216,19 @@ public void setPassengersCount(int passengersCount){
 因此，现在我们需要在这两个类中实现`getSpeedMph()`方法，或者将它们都作为`VehicleImpl`类的子类，而这个方法已经被实现了。我们决定汽车和卡车的速度可能会以相同的方式计算，所以扩展`VehicleImpl`类是正确的方法。如果以后我们发现`CarImpl`或`TruckImpl`类需要不同的实现，我们可以覆盖父类中的实现。以下是相同两个类的新版本：
 
 ```java
-
 abstract class VehicleImpl implements Vehicle {
-
-public double getSpeedMph(double timeSec){
-
-返回 42；
-
+  public double getSpeedMph(double timeSec){
+    return 42;
+  }
 }
-
-}
-
 class TruckImpl extends VehicleImpl implements Truck {
-
-public void setPayloadPounds(int payloadPounds){
-
+  public void setPayloadPounds(int payloadPounds){
+  }
 }
-
-}
-
 class CarImpl extends VehicleImpl implements Car {
-
-public void setPassengersCount(int passengersCount){
-
+  public void setPassengersCount(int passengersCount){
+  }
 }
-
-}
-
 ```
 
 请注意，我们还将`VehicleImpl`类设为抽象类，这使得不可能创建`VehicleImpl`类的对象。只能创建它的子类的对象。我们这样做是因为我们将其用作包含一些通用功能的基类，但我们永远不会需要通用的`Vehicle`对象，只需要特定的对象——`Car`或`Truck`。
@@ -303,27 +238,18 @@ public void setPassengersCount(int passengersCount){
 所以，回到`CarImpl`和`TruckImpl`交通接口的实现。它们无法从包外访问，但这并不是问题，因为我们定义的 API 不需要它。如果`TrafficFactory`类可以访问它们，那就足够了。这就是为什么我们在`com.packt.javapath.ch08demo.traffic.impl`包中创建`TrafficFactor`类，它可以作为同一包的成员访问这两个实现：
 
 ```java
-
 package com.packt.javapath.ch08demo.traffic.impl;
 
 import com.packt.javapath.ch08demo.traffic.Vehicle;
-
 import java.util.ArrayList;
-
 import java.util.List;
 
 public class TrafficFactory {
-
-public static List<Vehicle> get(int vehiclesCount) {
-
-List<Vehicle> list = new ArrayList();
-
-return list;
-
+  public static List<Vehicle> get(int vehiclesCount) {
+    List<Vehicle> list = new ArrayList();
+    return list;
+  }
 }
-
-}
-
 ```
 
 它并没有做太多事情，但在设计阶段足够好，以确保所有类都就位并具有适当的访问权限，然后我们开始编码。我们将在第十三章中更多地讨论`List<Vehicle>`构造。现在，假设它代表实现`Vehicle`接口的对象列表就足够了。
@@ -331,33 +257,19 @@ return list;
 现在，我们可以编写以下客户端代码：
 
 ```java
-
 double timeSec = 5;
-
 int vehiclesCount = 4;
-
 List<Vehicle> traffic = Vehicle.getTraffic(vehiclesCount);
-
 for(Vehicle vehicle: traffic){
-
-System.out.println("已装载：" + vehicle.getSpeedMph(timeSec));
-
-if(vehicle instanceof Car){
-
-((Car) vehicle).setPassengersCount(0);
-
-System.out.println("汽车（无载荷）：" + vehicle.getSpeedMph(timeSec));
-
-} else {
-
-((Truck) vehicle).setPayloadPounds(0);
-
-System.out.println("卡车（无载荷）：" + vehicle.getSpeedMph(timeSec));
-
+  System.out.println("Loaded: " + vehicle.getSpeedMph(timeSec));
+  if(vehicle instanceof Car){
+    ((Car) vehicle).setPassengersCount(0); 
+    System.out.println("Car(no load): " + vehicle.getSpeedMph(timeSec));
+  } else {
+    ((Truck) vehicle).setPayloadPounds(0);
+    System.out.println("Truck(no load): " + vehicle.getSpeedMph(timeSec));
+  }
 }
-
-}
-
 ```
 
 前面的代码从`TrafficFactory`中检索任意数量的车辆（在本例中为 4 辆）。工厂隐藏（封装）了交通建模实现的细节。然后，代码在 for 循环中对列表进行迭代（参见第十章，*控制流语句*），并打印出每辆车在车辆开始移动后 5 秒的速度。
@@ -373,71 +285,40 @@ System.out.println("卡车（无载荷）：" + vehicle.getSpeedMph(timeSec));
 我们选择了继承来实现代码在不同实现之间的共享。结果如下。这是`VehicleImpl`类：
 
 ```java
-
 abstract class VehicleImpl implements Vehicle {
-
-private int weightPounds, horsePower;
-
-public VehicleImpl(int weightPounds, int horsePower) {
-
-this.weightPounds = weightPounds;
-
-this.horsePower = horsePower;
-
+  private int weightPounds, horsePower;
+  public VehicleImpl(int weightPounds, int horsePower) {
+    this.weightPounds = weightPounds;
+    this.horsePower = horsePower;
+  }
+  protected int getWeightPounds(){ return this.weightPounds; }
+  protected double getSpeedMph(double timeSec, int weightPounds){
+    double v = 2.0 * this.horsePower * 746 * timeSec * 
+                                          32.174 / weightPounds;
+    return Math.round(Math.sqrt(v) * 0.68);
+  }
 }
-
-protected int getWeightPounds(){ return this.weightPounds; }
-
-protected double getSpeedMph(double timeSec, int weightPounds){
-
-double v = 2.0 * this.horsePower * 746 * timeSec *
-
-32.174 / weightPounds;
-
-return Math.round(Math.sqrt(v) * 0.68);
-
-}
-
-}
-
 ```
 
 请注意，一些方法具有`protected`访问权限，这意味着只有相同包和类子类的成员才能访问它们。这也是为了更好地封装。我们的代码客户端不需要访问这些方法，只有子类需要。以下是其中一个：
 
 ```java
-
 class CarImpl extends VehicleImpl implements Car {
-
-private int passengersCount;
-
-public CarImpl(int passengersCount, int weightPounds, int horsePower){
-
-super(weightPounds , horsePower);
-
-this.passengersCount = passengersCount;
-
+  private int passengersCount;
+  public CarImpl(int passengersCount, int weightPounds, int horsePower){
+    super(weightPounds , horsePower);
+    this.passengersCount = passengersCount;
+  }
+  public void setPassengersCount(int passengersCount) {
+    this.passengersCount = passengersCount;
+  }
+  protected int getWeightPounds(){ 
+    return this.passengersCount * 200 + super.getWeightPounds(); 
+  }
+  public double getSpeedMph(double timeSec){
+    return getSpeedMph(timeSec, this.getWeightPounds());
+  }
 }
-
-public void setPassengersCount(int passengersCount) {
-
-this.passengersCount = passengersCount;
-
-}
-
-protected int getWeightPounds(){
-
-return this.passengersCount * 200 + super.getWeightPounds();
-
-}
-
-public double getSpeedMph(double timeSec){
-
-return getSpeedMph(timeSec, this.getWeightPounds());
-
-}
-
-}
-
 ```
 
 在前面的代码中，`this`和`super`关键字允许我们区分应该调用哪个方法-当前子对象中的方法还是父对象中的方法。
@@ -451,75 +332,42 @@ return getSpeedMph(timeSec, this.getWeightPounds());
 `TruckImpl`类看起来类似于以下代码片段：
 
 ```java
-
 class TruckImpl extends VehicleImpl implements Truck {
-
-private int payloadPounds;
-
-TruckImpl(int payloadPounds, int weightPounds, int horsePower) {
-
-super(weightPounds, horsePower);
-
-this.payloadPounds = payloadPounds;
-
+  private int payloadPounds;
+  TruckImpl(int payloadPounds, int weightPounds, int horsePower) {
+    super(weightPounds, horsePower);
+    this.payloadPounds = payloadPounds;
+  }
+  public void setPayloadPounds(int payloadPounds) {
+    this.payloadPounds = payloadPounds;
+  }
+  protected int getWeightPounds(){ 
+    return this.payloadPounds + super.getWeightPounds(); 
+  }
+  public double getSpeedMph(double timeSec){
+    return getSpeedMph(timeSec, this.getWeightPounds());
+  }
 }
-
-public void setPayloadPounds(int payloadPounds) {
-
-this.payloadPounds = payloadPounds;
-
-}
-
-protected int getWeightPounds(){
-
-return this.payloadPounds + super.getWeightPounds();
-
-}
-
-public double getSpeedMph(double timeSec){
-
-return getSpeedMph(timeSec, this.getWeightPounds());
-
-}
-
-}
-
 ```
 
 `TrafficFactory`类可以访问这些类和它们的构造函数来根据需要创建对象：
 
 ```java
-
 public class TrafficFactory {
-
-public static List<Vehicle> get(int vehiclesCount) {
-
-List<Vehicle> list = new ArrayList();
-
-for (int i = 0; i < vehiclesCount; i++){
-
-Vehicle vehicle;
-
-if (Math.random() <= 0.5) {
-
-vehicle = new CarImpl(2, 2000, 150);
-
-} else {
-
-vehicle = new TruckImpl(500, 3000, 300);
-
+  public static List<Vehicle> get(int vehiclesCount) {
+    List<Vehicle> list = new ArrayList();
+    for (int i = 0; i < vehiclesCount; i++){
+      Vehicle vehicle;
+      if (Math.random() <= 0.5) {
+        vehicle = new CarImpl(2, 2000, 150);
+      } else {
+        vehicle = new TruckImpl(500, 3000, 300);
+      }
+      list.add(vehicle);
+    }
+    return list;
+  }
 }
-
-list.add(vehicle);
-
-}
-
-return list;
-
-}
-
-}
-
 ```
 
 The `random()` static method of the `Math` class generates a random decimal number between 0 and 1\. We use it to make the resulting mix of traffic look somewhat real. And we have hardcoded, for now, the values we pass into each of the vehicles' constructors.
@@ -527,45 +375,25 @@ The `random()` static method of the `Math` class generates a random decimal
 Now, we can run the following code (we discussed it already a few pages ago):
 
 ```java
-
 public class TrafficApp {
-
-public static void main(String... args){
-
-double timeSec = 5;
-
-int vehiclesCount = 4;
-
-List<Vehicle> traffic = Vehicle.getTraffic(vehiclesCount);
-
-for(Vehicle vehicle: traffic){
-
-System.out.println("Loaded: " + vehicle.getSpeedMph(timeSec));
-
-if(vehicle instanceof Car){
-
-((Car) vehicle).setPassengersCount(0);
-
-System.out.println("Car(no load): " +
-
-vehicle.getSpeedMph(timeSec));
-
-} else {
-
-((Truck) vehicle).setPayloadPounds(0);
-
-System.out.println("Truck(no load): " +
-
-vehicle.getSpeedMph(timeSec));
-
+  public static void main(String... args){
+    double timeSec = 5;
+    int vehiclesCount = 4;
+    List<Vehicle> traffic = Vehicle.getTraffic(vehiclesCount);
+    for(Vehicle vehicle: traffic){
+      System.out.println("Loaded: " + vehicle.getSpeedMph(timeSec));
+      if(vehicle instanceof Car){
+        ((Car) vehicle).setPassengersCount(0);
+        System.out.println("Car(no load): " + 
+                           vehicle.getSpeedMph(timeSec));
+      } else {
+        ((Truck) vehicle).setPayloadPounds(0);
+        System.out.println("Truck(no load): " + 
+                           vehicle.getSpeedMph(timeSec));
+      }
+    }
+  }
 }
-
-}
-
-}
-
-}
-
 ```
 
 The result is:
@@ -575,37 +403,23 @@ The result is:
 The calculated speed is the same because the input data is hardcoded in `TrafficFactory`. But before we move on and make the input data different, let's create a speed calculation test:
 
 ```java
-
 package com.packt.javapath.ch08demo.traffic.impl;
 
 class SpeedCalculationTest {
+  @Test
+  void speedCalculation() {
+    double timeSec = 5;
+    Vehicle vehicle = new CarImpl(2, 2000, 150);
+    assertEquals(83.0, vehicle.getSpeedMph(timeSec));
+    ((Car) vehicle).setPassengersCount(0);
+    assertEquals(91.0, vehicle.getSpeedMph(timeSec));
 
-@Test
-
-void speedCalculation() {
-
-double timeSec = 5;
-
-Vehicle vehicle = new CarImpl(2, 2000, 150);
-
-assertEquals(83.0, vehicle.getSpeedMph(timeSec));
-
-((Car) vehicle).setPassengersCount(0);
-
-assertEquals(91.0, vehicle.getSpeedMph(timeSec));
-
-vehicle = new TruckImpl(500, 3000, 300);
-
-assertEquals(98.0, vehicle.getSpeedMph(timeSec));
-
-((Truck) vehicle).setPayloadPounds(0);
-
-assertEquals(105.0, vehicle.getSpeedMph(timeSec));
-
+    vehicle = new TruckImpl(500, 3000, 300);
+    assertEquals(98.0, vehicle.getSpeedMph(timeSec));
+    ((Truck) vehicle).setPayloadPounds(0);
+    assertEquals(105.0, vehicle.getSpeedMph(timeSec));
+   }
 }
-
-}
-
 ```
 
 We could access the `CarImpl` and `TruckImpl` classes because the test belongs to the same package, although it's located in a different directory of our project (under the `test` directory, instead of `main`). On the classpath, they are placed according to their package, even if the source comes from another source tree.
@@ -621,99 +435,58 @@ Not only that, but another project decided to use our speed calculation function
 We copy the `getSpeedMph()` method of the `VehicleImpl` class and put it in the `SpeedModelImpl` class in a new `com.packt.javapath.ch08demo.speedmodel.impl` package:
 
 ```java
-
 class SpeedModelImpl implements SpeedModel {
-
-public double getSpeedMph(double timeSec, int weightPounds,
-
-int horsePower){
-
-double v = 2.0 * horsePower * 746 * timeSec * 32.174 / weightPounds;
-
-return Math.round(Math.sqrt(v) * 0.68);
-
+  public double getSpeedMph(double timeSec, int weightPounds,
+                            int horsePower){
+    double v = 2.0 * horsePower * 746 * timeSec * 32.174 / weightPounds;
+    return Math.round(Math.sqrt(v) * 0.68);
+  }
 }
-
-}
-
 ```
 
 We add `SpeedModelFactory` to the same package:
 
 ```java
-
 public class SpeedModelFactory {
-
-public static SpeedModel speedModel(){
-
-return new SpeedModelImpl();
-
+  public static SpeedModel speedModel(){
+    return new SpeedModelImpl();
+  }
 }
-
-}
-
 ```
 
 然后我们在`com.packt.javapath.ch08demo.speedmodel`包中创建了一个`SpeedModel`接口：
 
 ```java
-
 public interface SpeedModel {
-
-double getSpeedMph（double timeSec，int weightPounds，int horsePower）;
-
-静态 SpeedModel getInstance（月份，dayOfMonth，小时）{
-
-返回 SpeedModelFactory.speedModel（月份，dayOfMonth，小时）;
-
+  double getSpeedMph(double timeSec, int weightPounds, int horsePower);
+  static SpeedModel getInstance(Month month, int dayOfMonth, int hour){
+    return SpeedModelFactory.speedModel(month, dayOfMonth, hour);
+  }
 }
-
-}
-
 ```
 
 现在，我们通过为`SpeedModel`对象添加一个 setter 并在速度计算中使用此对象来更改`VehicleImpl`类：
 
 ```java
-
-抽象类 VehicleImpl 实现 Vehicle {
-
-私人 int weightPounds，horsePower;
-
-私人 SpeedModel speedModel;
-
-public VehicleImpl（int weightPounds，int horsePower）{
-
-this.weightPounds = weightPounds;
-
-this.horsePower = horsePower;
-
+abstract class VehicleImpl implements Vehicle {
+  private int weightPounds, horsePower;
+  private SpeedModel speedModel;
+  public VehicleImpl(int weightPounds, int horsePower) {
+    this.weightPounds = weightPounds;
+    this.horsePower = horsePower;
+  }
+  protected int getWeightPounds(){ return this.weightPounds; }
+  protected double getSpeedMph(double timeSec, int weightPounds){
+    if(this.speedModel == null){
+      throw new RuntimeException("Speed model is required");
+    } else {
+      return speedModel.getSpeedMph(timeSec, weightPounds, horsePower);
+    }
+  }
+  public void setSpeedModel(SpeedModel speedModel) {
+    this.speedModel = speedModel;
+  }
 }
-
-protected int getWeightPounds（）{返回 this.weightPounds; }
-
-protected double getSpeedMph（double timeSec，int weightPounds）{
-
-如果（this.speedModel == null）{
-
-抛出新的 RuntimeException（“需要速度模型”）;
-
-}否则{
-
-返回 speedModel.getSpeedMph（timeSec，weightPounds，horsePower）;
-
-}
-
-}
-
-public void setSpeedModel（SpeedModel speedModel）{
-
-this.speedModel = speedModel;
-
-}
-
-}
-
 ```
 
 正如您所看到的，如果在设置 SpeedModel 对象之前调用`getSpeedMph（）`方法，它现在会抛出异常（并停止工作）。
@@ -721,41 +494,23 @@ this.speedModel = speedModel;
 我们还更改了`TrafficFactory`并让它在交通对象上设置`SpeedModel`：
 
 ```java
-
 public class TrafficFactory {
-
-public static List<Vehicle> get（int vehiclesCount）{
-
-SpeedModel speedModel = SpeedModelFactory.speedModel（）;
-
-列表<Vehicle>列表=新的 ArrayList（）;
-
-对于（int i = 0; i <vehiclesCount; i ++）{
-
-车辆车辆;
-
-如果（Math.random（）<= 0.5）{
-
-车辆= new CarImpl（2，2000，150）;
-
-}否则{
-
-车辆= new TruckImpl（500，3000，300）;
-
+  public static List<Vehicle> get(int vehiclesCount) {
+    SpeedModel speedModel = SpeedModelFactory.speedModel();
+    List<Vehicle> list = new ArrayList();
+    for (int i = 0; i < vehiclesCount; i++) {
+      Vehicle vehicle;
+      if (Math.random() <= 0.5) {
+        vehicle = new CarImpl(2, 2000, 150);
+      } else {
+        vehicle = new TruckImpl(500, 3000, 300);
+      }
+      ((VehicleImpl)vehicle).setSpeedModel(speedModel);
+      list.add(vehicle);
+    }
+    return list;
+  }
 }
-
-（（VehicleImpl）vehicle）.setSpeedModel（speedModel）;
-
-列表.add（车辆）;
-
-}
-
-返回列表;
-
-}
-
-}
-
 ```
 
 现在，速度模型继续独立于交通模型进行开发，我们完成了所有这些而不改变客户端的代码（这种不影响接口的内部代码更改称为**重构**）。这是封装和接口解耦的好处。`Vehicle`对象的行为现在是聚合的，这使我们能够在不修改其代码的情况下更改其行为。

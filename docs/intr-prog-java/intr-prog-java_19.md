@@ -57,17 +57,14 @@
 为了演示顺序和并行处理之间的差异，让我们想象一个从 10 个物理设备（传感器）收集数据并计算平均值的系统。这样一个系统的接口可能如下所示：
 
 ```java
-
 interface MeasuringSystem {
     double get(String id);
 }
-
 ```
 
 它只有一个方法，`get()`，它接收传感器的 ID 并返回测量结果。使用这个接口，我们可以实现许多不同的系统，这些系统能够调用不同的设备。为了演示目的，我们不打算写很多代码。我们只需要延迟 100 毫秒（模拟从传感器收集测量数据所需的时间）并返回一些数字。我们可以这样实现延迟：
 
 ```java
-
 void pauseMs(int ms) {
     try{
         TimeUnit.MILLISECONDS.sleep(ms);
@@ -75,29 +72,25 @@ void pauseMs(int ms) {
         ex.printStackTrace();
     }
 }
-
 ```
 
 至于结果数字，我们将使用`Math.random()`来模拟从不同传感器接收到的测量值的差异（这就是为什么我们需要找到一个平均值——以抵消个别设备的误差和其他特性）。因此，我们的演示实现可能如下所示：
 
 ```java
-
 class MeasuringSystemImpl implements MeasuringSystem {
     public double get(String id){
-        demo.pauseMs(100);
-        return 10. * Math.random();
+         demo.pauseMs(100);
+         return 10\. * Math.random();
     }
 }
-
 ```
 
 现在，我们意识到我们的`MeasuringInterface`是一个函数接口，因为它只有一个方法。这意味着我们可以使用`java.util.function`包中的标准函数接口之一；即`Function<String, Double>`：
 
 ```java
-
 Function<String, Double> mSys = id -> {
     demo.pauseMs(100);
-    return 10. + Math.random();
+    return 10\. + Math.random();
 };
 
 ```
@@ -107,10 +100,8 @@ Function<String, Double> mSys = id -> {
 现在，让我们创建一个传感器 ID 列表：
 
 ```java
-
 List<String> ids = IntStream.range(1, 11)
-    .mapToObj(i -> "id" + i).collect(Collectors.toList());
-
+        .mapToObj(i -> "id" + i).collect(Collectors.toList());
 ```
 
 同样，在现实生活中，我们需要收集真实设备的 ID，但是为了演示目的，我们只是生成它们。
@@ -118,12 +109,10 @@ List<String> ids = IntStream.range(1, 11)
 最后，我们将创建`collectData()`方法，它调用所有传感器并计算接收到的所有数据的平均值：
 
 ```java
-
-Stream<Double> collectData(Stream<String> stream,
-    Function<String, Double> mSys){
+Stream<Double> collectData(Stream<String> stream, 
+                         Function<String, Double> mSys){
     return  stream.map(id -> mSys.apply(id));
 }
-
 ```
 
 正如你所看到的，这个方法接收一个提供 ID 的流和一个使用每个 ID 从传感器获取测量值的函数。
@@ -131,34 +120,21 @@ Stream<Double> collectData(Stream<String> stream,
 这是我们将如何从`averageDemo()`方法中调用这个方法，使用`getAverage()`方法：
 
 ```java
-
 void averageDemo() {
-
-Function<String, Double> mSys = id -> {
-
-pauseMs(100);
-
-返回 10\. + Math.random();
-
-};
-
-getAverage(() -> collectData(ids.stream(), mSys));
-
+    Function<String, Double> mSys = id -> {
+         pauseMs(100);
+         return 10\. + Math.random();
+    };
+    getAverage(() -> collectData(ids.stream(), mSys)); 
 }
 
 void getAverage(Supplier<Stream<Double>> collectData) {
-
-LocalTime start = LocalTime.now();
-
-double a = collectData.get()
-
-.mapToDouble(Double::valueOf).average().orElse(0);
-
-System.out.println((Math.round(a * 100.) / 100.) + " in " +
-
-Duration.between(start, LocalTime.now()).toMillis() + " ms");
-
-}
+    LocalTime start = LocalTime.now();
+    double a = collectData.get()
+                    .mapToDouble(Double::valueOf).average().orElse(0);
+    System.out.println((Math.round(a * 100.) / 100.) + " in " + 
+         Duration.between(start, LocalTime.now()).toMillis() + " ms");
+}   
 
 ```
 
@@ -167,26 +143,16 @@ Duration.between(start, LocalTime.now()).toMillis() + " ms");
 现在，我们可以将顺序流处理的性能与并行流处理进行比较：
 
 ```java
-
 List<String> ids = IntStream.range(1, 11)
-
-.mapToObj(i -> "id" + i).collect(Collectors.toList());
-
+              .mapToObj(i -> "id" + i).collect(Collectors.toList());
 Function<String, Double> mSys = id -> {
-
-pauseMs(100);
-
-返回 10\. + Math.random();
-
+        pauseMs(100);
+        return 10\. + Math.random();
 };
-
-getAverage(() -> collectData(ids.stream(), mSys));
-
-//打印：10.46 在 1031 毫秒内
-
-getAverage(() -> collectData(ids.parallelStream(), mSys));
-
-//打印：10.49 在 212 毫秒内
+getAverage(() -> collectData(ids.stream(), mSys));    
+                                             //prints: 10.46 in 1031 ms
+getAverage(() -> collectData(ids.parallelStream(), mSys));  
+                                             //prints: 10.49 in 212 ms
 
 ```
 
@@ -203,12 +169,9 @@ getAverage(() -> collectData(ids.parallelStream(), mSys));
 使用`CompletableFuture`对象，我们可以将向测量系统发送数据请求（并创建`CompletableFuture`对象）与从`CompletableFuture`对象获取结果分开。这正是我们在解释异步处理时描述的场景。让我们在代码中演示它。类似于我们提交请求到测量系统的方式，我们可以使用`CompletableFuture.supplyAsync()`静态方法来完成：
 
 ```java
-
 List<CompletableFuture<Double>> list = ids.stream()
-
-.map(id -> CompletableFuture.supplyAsync(() -> mSys.apply(id)))
-
-.collect(Collectors.toList());
+        .map(id -> CompletableFuture.supplyAsync(() -> mSys.apply(id)))
+        .collect(Collectors.toList());
 
 ```
 
@@ -217,45 +180,25 @@ List<CompletableFuture<Double>> list = ids.stream()
 创建的`CompletableFuture`对象列表可以存储在任何地方。我们选择将其存储在一个`Map`中。事实上，我们创建了一个`sendRequests()`方法，可以向任意数量的测量系统发送任意数量的请求：
 
 ```java
-
-Map<Integer, List<CompletableFuture<Double>>>
-
-sendRequests(List<List<String>> idLists,
-
-List<Function<String, Double>> mSystems){
-
-LocalTime start = LocalTime.now();
-
-Map<Integer, List<CompletableFuture<Double>>> requests
-
-= new HashMap<>();
-
-for(int i = 0; i < idLists.size(); i++){
-
-for(Function<String, Double> mSys: mSystems){
-
-List<String> ids = idLists.get(i);
-
-List<CompletableFuture<Double>> list = ids.stream()
-
-.map(id -> CompletableFuture.supplyAsync(() -> mSys.apply(id)))
-
-.collect(Collectors.toList());
-
-requests.put(i, list);
-
+Map<Integer, List<CompletableFuture<Double>>> 
+                  sendRequests(List<List<String>> idLists, 
+                               List<Function<String, Double>> mSystems){
+   LocalTime start = LocalTime.now();
+   Map<Integer, List<CompletableFuture<Double>>> requests 
+                                                       = new HashMap<>();
+   for(int i = 0; i < idLists.size(); i++){
+      for(Function<String, Double> mSys: mSystems){
+         List<String> ids = idLists.get(i);
+         List<CompletableFuture<Double>> list = ids.stream()
+          .map(id -> CompletableFuture.supplyAsync(() -> mSys.apply(id)))
+          .collect(Collectors.toList());
+         requests.put(i, list);
+      }
+   }
+   long dur = Duration.between(start, LocalTime.now()).toMillis();
+   System.out.println("Submitted in " + dur + " ms");
+   return requests;
 }
-
-}
-
-long dur = Duration.between(start, LocalTime.now()).toMillis();
-
-System.out.println("提交时间为" + dur + "毫秒");
-
-返回请求;
-
-}
-
 ```
 
 正如您所看到的，前面的方法接受了两个参数：
@@ -267,17 +210,11 @@ System.out.println("提交时间为" + dur + "毫秒");
 然后，我们创建了一个`Map<Integer, List<CompletableFuture<Double>>>`对象来存储`CompletableFuture`对象的列表。我们在`for`循环中生成它们，然后将它们存储在一个带有顺序号的`Map`中。`Map`被返回给客户端，可以存储在任何地方，任意时间段（好吧，有一些可以修改的限制，但我们不打算在这里讨论它们）。稍后，当客户端决定获取请求的结果时，可以使用`getAverage()`方法来检索它们：
 
 ```java
-
 void getAverage(Map<Integer, List<CompletableFuture<Double>>> requests){
-
-for(List<CompletableFuture<Double>> list: requests.values()){
-
-getAverage(() -> list.stream().map(CompletableFuture::join));
-
+    for(List<CompletableFuture<Double>> list: requests.values()){
+        getAverage(() -> list.stream().map(CompletableFuture::join));
+    }
 }
-
-}
-
 ```
 
 前面的方法接受了`sendRequests()`方法创建的`Map`对象，并迭代存储在`Map`中的所有值（`CompletableFuture`对象的列表）。对于每个列表，它创建一个流，将每个元素（`CompletableFuture`对象）映射到调用该元素的`join()`方法的结果。此方法检索从相应调用测量系统返回的值。如果值不可用，该方法会等待一段时间（可配置的值），然后要么退出（并返回`null`），要么最终接收来自测量系统的值（如果可用）。同样，我们不打算讨论围绕故障的所有保护措施，以便专注于主要功能。
@@ -285,21 +222,13 @@ getAverage(() -> list.stream().map(CompletableFuture::join));
 `()-> list.stream().map(CompletableFuture::join)`函数实际上被传递到`getAverage()`方法中（这对您来说应该是熟悉的），我们在前面的示例中处理流时使用过：
 
 ```java
-
 void getAverage(Supplier<Stream<Double>> collectData) {
-
-LocalTime start = LocalTime.now();
-
-double a = collectData.get()
-
-.mapToDouble(Double::valueOf).average().orElse(0);
-
-System.out.println((Math.round(a * 100.) / 100.) + " in " +
-
-Duration.between(start, LocalTime.now()).toMillis() + " ms");
-
+    LocalTime start = LocalTime.now();
+    double a = collectData.get()
+                    .mapToDouble(Double::valueOf).average().orElse(0);
+    System.out.println((Math.round(a * 100.) / 100.) + " in " + 
+         Duration.between(start, LocalTime.now()).toMillis() + " ms");
 }
-
 ```
 
 这个方法计算传入流发出的所有值的平均值，打印出来，并且还捕获了处理流（和计算平均值）所花费的时间。
@@ -307,32 +236,21 @@ Duration.between(start, LocalTime.now()).toMillis() + " ms");
 现在，让我们使用新的方法，看看性能如何提高：
 
 ```java
-
 Function<String, Double> mSys = id -> {
+     pauseMs(100);
+     return 10\. + Math.random();
+ };
+ List<Function<String, Double>> mSystems = List.of(mSys, mSys, mSys);
+ List<List<String>> idLists = List.of(ids, ids, ids);
 
-pauseMs(100);
+ Map<Integer, List<CompletableFuture<Double>>> requestLists = 
+        sendRequests(idLists, mSystems);  //prints: Submitted in 13 ms
 
-return 10\. + Math.random();
-
-};
-
-List<Function<String, Double>> mSystems = List.of(mSys, mSys, mSys);
-
-List<List<String>> idLists = List.of(ids, ids, ids);
-
-Map<Integer, List<CompletableFuture<Double>>> requestLists =
-
-sendRequests(idLists, mSystems);  //prints: Submitted in 13 ms
-
-pauseMs(2000);  //主线程可以继续做其他事情
-
-//for any period of time
-
-getAverage(requestLists);               //prints: 10.49 in 5 ms
-
-//        10.61 in 0 ms
-
-//        10.51 in 0 ms
+ pauseMs(2000);  //The main thread can continue doing something else
+                 //for any period of time
+ getAverage(requestLists);               //prints: 10.49 in 5 ms
+                                         //        10.61 in 0 ms
+                                         //        10.51 in 0 ms
 
 ```
 
@@ -341,51 +259,28 @@ getAverage(requestLists);               //prints: 10.49 in 5 ms
 `CompletableFuture`类有许多方法，并且得到了几个其他类和接口的支持。例如，使用线程池可以减少收集所有数据的两秒暂停时间：
 
 ```java
-
-Map<Integer, List<CompletableFuture<Double>>>
-
-sendRequests(List<List<String>> idLists,
-
-List<Function<String, Double>> mSystems){
-
-ExecutorService pool = Executors.newCachedThreadPool();
-
-LocalTime start = LocalTime.now();
-
-Map<Integer, List<CompletableFuture<Double>>> requests
-
-= new HashMap<>();
-
-for(int i = 0; i < idLists.size(); i++){
-
-for(Function<String, Double> mSys: mSystems){
-
-List<String> ids = idLists.get(i);
-
-List<CompletableFuture<Double>> list = ids.stream()
-
-.map(id -> CompletableFuture.supplyAsync(() -> mSys.apply(id),
-
-pool))
-
-.collect(Collectors.toList());
-
-requests.put(i, list);
-
+Map<Integer, List<CompletableFuture<Double>>> 
+                  sendRequests(List<List<String>> idLists, 
+                               List<Function<String, Double>> mSystems){
+   ExecutorService pool = Executors.newCachedThreadPool();
+   LocalTime start = LocalTime.now();
+   Map<Integer, List<CompletableFuture<Double>>> requests 
+                                                       = new HashMap<>();
+   for(int i = 0; i < idLists.size(); i++){
+      for(Function<String, Double> mSys: mSystems){
+         List<String> ids = idLists.get(i);
+         List<CompletableFuture<Double>> list = ids.stream()
+          .map(id -> CompletableFuture.supplyAsync(() -> mSys.apply(id), 
+ pool))
+          .collect(Collectors.toList());
+         requests.put(i, list);
+      }
+   }
+   pool.shutdown();
+   long dur = Duration.between(start, LocalTime.now()).toMillis();
+   System.out.println("Submitted in " + dur + " ms");
+   return requests;
 }
-
-}
-
-pool.shutdown();
-
-long dur = Duration.between(start, LocalTime.now()).toMillis();
-
-System.out.println("Submitted in " + dur + " ms");
-
-return requests;
-
-}
-
 ```
 
 有各种各样的这样的池，用于不同的目的和不同的性能。但所有这些都不会改变整体系统设计，因此我们将忽略这些细节。
@@ -491,17 +386,11 @@ Reactive Streams 的范围是找到一组最小的接口、方法和协议，描
 让我们首先比较使用`java.util.stream`包和 RxJava 2.1.13 的`io.reactivex`包实现相同功能的两种方式，可以通过以下依赖项添加到项目中：
 
 ```java
-
 <dependency>
-
-<groupId>io.reactivex.rxjava2</groupId>
-
-<artifactId>rxjava</artifactId>
-
-<version>2.1.13</version>
-
-</dependency>
-
+    <groupId>io.reactivex.rxjava2</groupId>
+    <artifactId>rxjava</artifactId>
+    <version>2.1.13</version>
+</dependency> 
 ```
 
 示例程序将非常简单：
@@ -517,17 +406,11 @@ Reactive Streams 的范围是找到一组最小的接口、方法和协议，描
 以下是使用`java.util.stream`包实现的方式：
 
 ```java
-
 double a = IntStream.rangeClosed(1, 5)
-
-.filter(i -> i % 2 == 0)
-
-.mapToDouble(Double::valueOf)
-
-.map(Math::sqrt)
-
-.sum();
-
+        .filter(i -> i % 2 == 0)
+        .mapToDouble(Double::valueOf)
+        .map(Math::sqrt)
+        .sum();
 System.out.println(a); //prints: 3.414213562373095
 
 ```
@@ -535,76 +418,45 @@ System.out.println(a); //prints: 3.414213562373095
 使用 RxJava 实现相同功能的方式如下：
 
 ```java
-
 Observable.range(1, 5)
-
-.filter(i -> i % 2 == 0)
-
-.map(Math::sqrt)
-
-.reduce((r, d) -> r + d)
-
-.subscribe(System.out::println); //prints: 3.414213562373095
-
-RxJava 基于 Observable 对象（扮演发布者的角色）和 Observer 订阅 Observable 并等待数据被发出。
-
+        .filter(i -> i % 2 == 0)
+        .map(Math::sqrt)
+        .reduce((r, d) -> r + d)
+        .subscribe(System.out::println); //prints: 3.414213562373095
+RxJava is based on the Observable object (which plays the role of Publisher) and Observer that subscribes to the Observable and waits for data to be emitted. 
 ```
 
 除了`Stream`功能外，`Observable`具有显著不同的功能。例如，流一旦关闭，就无法重新打开，而`Observable`对象可以再次使用。这是一个例子：
 
 ```java
-
 Observable<Double> observable = Observable.range(1, 5)
-
-.filter(i -> i % 2 == 0)
-
-.doOnNext(System.out::println)    //打印 2 和 4 两次
-
-.map(Math::sqrt);
-
+        .filter(i -> i % 2 == 0)
+        .doOnNext(System.out::println)    //prints 2 and 4 twice
+        .map(Math::sqrt);
 observable
-
-.reduce((r, d) -> r + d)
-
-.subscribe(System.out::println);  //prints: 3.414213562373095
-
+        .reduce((r, d) -> r + d)
+        .subscribe(System.out::println);  //prints: 3.414213562373095
 observable
-
-.reduce((r, d) -> r + d)a
-
-.map(r -> r / 2)
-
-.subscribe(System.out::println);  //prints: 1.7071067811865475
-
+        .reduce((r, d) -> r + d)a
+        .map(r -> r / 2)
+        .subscribe(System.out::println);  //prints: 1.7071067811865475
 ```
 
 在前面的示例中，从注释中可以看出，`doOnNext()`操作被调用了两次，这意味着`observable`对象发出了两次值。但是，如果我们不希望`Observable`运行两次，我们可以通过添加`cache()`操作来缓存其数据：
 
 ```java
-
 Observable<Double> observable = Observable.range(1,5)
-
-.filter(i -> i % 2 == 0)
-
-.doOnNext(System.out::println)  //只打印 2 和 4 一次
-
-.map(Math::sqrt)
-
-.cache();
-
+        .filter(i -> i % 2 == 0)
+        .doOnNext(System.out::println)  //prints 2 and 4 only once
+        .map(Math::sqrt)
+        .cache();
 observable
-
-.reduce((r, d) -> r + d)
-
-.subscribe(System.out::println); //prints: 3.414213562373095
-
+        .reduce((r, d) -> r + d)
+        .subscribe(System.out::println); //prints: 3.414213562373095
 observable
-
-.reduce((r, d) -> r + d)
-
-.map(r -> r / 2)
-
-.subscribe(System.out::println);  //打印：1.7071067811865475
+        .reduce((r, d) -> r + d)
+        .map(r -> r / 2)
+        .subscribe(System.out::println);  //prints: 1.7071067811865475
 
 ```
 
@@ -685,21 +537,13 @@ observable
 在 Vert.x 世界中的构建块是实现`io.vertx.core.Verticle`接口的类：
 
 ```java
-
 package io.vertx.core;
-
 public interface Verticle {
-
-Vertx getVertx();
-
-void init(Vertx vertx, Context context);
-
-void start(Future<Void> future) throws Exception;
-
-void stop(Future<Void> future) throws Exception;
-
+  Vertx getVertx();
+  void init(Vertx vertx, Context context);
+  void start(Future<Void> future) throws Exception;
+  void stop(Future<Void> future) throws Exception;
 }
-
 ```
 
 上述接口的实现称为垂直线。上述接口的大多数方法名称都是不言自明的。`getVertex()`方法提供对`Vertx`对象的访问——这是进入 Vert.x Core API 的入口点，该 API 具有允许我们构建微服务构建所需的以下功能的方法：
@@ -723,87 +567,48 @@ void stop(Future<Void> future) throws Exception;
 可以通过扩展`io.vertx.rxjava.core.AbstractVerticle`类轻松创建`Verticle`接口实现：
 
 ```java
-
 package io.vertx.rxjava.core;
-
 import io.vertx.core.Vertx;
-
 import io.vertx.core.Context;
-
 import io.vertx.core.AbstractVerticle
-
 public class AbstractVerticle extends AbstractVerticle {
-
-protected io.vertx.rxjava.core.Vertx vertx;
-
-public void init(Vertx vertx, Context context) {
-
-super.init(vertx, context);
-
-this.vertx = new io.vertx.rxjava.core.Vertx(vertx);
-
+   protected io.vertx.rxjava.core.Vertx vertx;
+   public void init(Vertx vertx, Context context) {
+      super.init(vertx, context);
+      this.vertx = new io.vertx.rxjava.core.Vertx(vertx);
+   } 
 }
-
-}
-
 ```
 
 如您所见，上述类扩展了`io.vertx.core.AbstractVerticle`类：
 
 ```java
-
 package io.vertx.core;
-
 import java.util.List;
-
 import io.vertx.core.Verticle;
-
 import io.vertx.core.json.JsonObject;
-
 public abstract class AbstractVerticle implements Verticle {
-
-protected Vertx vertx;
-
-protected Context context;
-
-public void init(Vertx vertx, Context context) {
-
-this.vertx = vertx;
-
-this.context = context;
-
+   protected Vertx vertx;
+   protected Context context;
+   public void init(Vertx vertx, Context context) {
+      this.vertx = vertx;
+      this.context = context;
+   }
+   public Vertx getVertx() { return vertx; }
+   public JsonObject config() { return context.config(); }
+   public String deploymentID() { return context.deploymentID(); }
+   public List<String> processArgs() { return context.processArgs(); }
+   public void start(Future<Void> startFuture) throws Exception {
+      start();
+      startFuture.complete();
+   }
+   public void stop(Future<Void> stopFuture) throws Exception {
+      stop();
+      stopFuture.complete();
+   }
+   public void start() throws Exception {}
+   public void stop() throws Exception {}
 }
-
-public Vertx getVertx() { return vertx; }
-
-public JsonObject config() { return context.config(); }
-
-public String deploymentID() { return context.deploymentID(); }
-
-public List<String> processArgs() { return context.processArgs(); }
-
-public void start(Future<Void> startFuture) throws Exception {
-
-start();
-
-startFuture.complete();
-
-}
-
-public void stop(Future<Void> stopFuture) throws Exception {
-
-stop();
-
-stopFuture.complete();
-
-}
-
-public void start() throws Exception {}
-
-public void stop() throws Exception {}
-
-}
-
 ```
 
 如您所见，您只需要扩展`io.vertx.rxjava.core.AbstractVerticle`类并实现`start()`方法。新的垂直线将是可部署的，即使没有实现`start()`方法，但它将不会执行任何有用的操作。`start()`方法中的代码是应用功能的入口点。
@@ -811,25 +616,15 @@ public void stop() throws Exception {}
 要使用 Vert.x 并执行示例，必须将以下依赖项添加到项目中：
 
 ```java
-
 <dependency>
-
-<groupId>io.vertx</groupId>
-
-<artifactId>vertx-web</artifactId>
-
-<version>${vertx.version}</version>
-
+    <groupId>io.vertx</groupId>
+    <artifactId>vertx-web</artifactId>
+    <version>${vertx.version}</version>
 </dependency>
-
 <dependency>
-
-<groupId>io.vertx</groupId>
-
-<artifactId>vertx-rx-java</artifactId>
-
-<version>${vertx.version}</version>
-
+    <groupId>io.vertx</groupId>
+    <artifactId>vertx-rx-java</artifactId>
+    <version>${vertx.version}</version>
 </dependency>
 
 ```
@@ -837,11 +632,8 @@ public void stop() throws Exception {}
 `vertx.version`属性可以在`pom.xml`文件的`properties`部分中设置：
 
 ```java
-
 <properties>
-
-<vertx.version>3.5.1</vertx.version>
-
+    <vertx.version>3.5.1</vertx.version>
 </properties>
 
 ```
@@ -855,63 +647,38 @@ public void stop() throws Exception {}
 例如，这是一个充当 HTTP 服务器的垂直：
 
 ```java
-
 package com.packt.javapath.ch18demo.microservices;
-
 import io.vertx.rxjava.core.AbstractVerticle;
-
 import io.vertx.rxjava.core.http.HttpServer;
-
 public class HttpServer1 extends AbstractVerticle{
-
-private int port;
-
-public HttpServer1(int port) {
-
-this.port = port;
-
+   private int port;
+   public HttpServer1(int port) {
+       this.port = port;
+   }
+   public void start() throws Exception {
+      HttpServer server = vertx.createHttpServer();
+      server.requestStream().toObservable()
+         .subscribe(request -> request.response()
+             .end("Hello from " + Thread.currentThread().getName() + 
+                                         " on port " + port + "!\n\n"));
+      server.rxListen(port).subscribe();
+      System.out.println(Thread.currentThread().getName() + 
+                                 " is waiting on port " + port + "...");
+   }
 }
-
-public void start() throws Exception {
-
-HttpServer server = vertx.createHttpServer();
-
-server.requestStream().toObservable()
-
-.subscribe(request -> request.response()
-
-.end("Hello from " + Thread.currentThread().getName() +
-
-" on port " + port + "!\n\n"));
-
-server.rxListen(port).subscribe();
-
-System.out.println(Thread.currentThread().getName() +
-
-"正在等待端口" + port + "...");
-
-}
-
-}
-
 ```
 
 在上述代码中，创建了服务器，并将可能请求的数据流包装成`Observable`。由`Observable`发出的数据传递给处理请求并生成必要响应的函数（请求处理程序）。我们还告诉服务器要监听的端口，并且现在可以部署此垂直的多个实例，以侦听不同的端口：
 
 ```java
-
 vertx().getDelegate().deployVerticle(new HttpServer1(8082));
-
 vertx().getDelegate().deployVerticle(new HttpServer1(8083));
-
 ```
 
 还有一个`io.vertx.rxjava.core.RxHelper`助手类，可用于部署。它处理了一些对当前讨论不重要的细节：
 
 ```java
-
 RxHelper.deployVerticle(vertx(), new HttpServer1(8082));
-
 RxHelper.deployVerticle(vertx(), new HttpServer1(8083));
 
 ```
@@ -919,27 +686,20 @@ RxHelper.deployVerticle(vertx(), new HttpServer1(8083));
 无论使用哪种方法，您都将看到以下消息：
 
 ```java
-
-vert.x-eventloop-thread-0 正在等待端口 8082...
-
-vert.x-eventloop-thread-0 正在等待端口 8083...
-
+vert.x-eventloop-thread-0 is waiting on port 8082...
+vert.x-eventloop-thread-0 is waiting on port 8083...
 ```
 
 这些消息确认了我们的预期：同一事件循环线程正在两个端口上监听。现在，我们可以使用标准的`curl`命令向任何正在运行的服务器发送请求：
 
 ```java
-
 curl localhost:8082
-
 ```
 
 响应将是我们硬编码的响应：
 
 ```java
-
-从端口 8082 上的 vert.x-eventloop-thread-0 问好！
-
+Hello from vert.x-eventloop-thread-0 on port 8082!
 ```
 
 # 周期性服务作为微服务
@@ -947,63 +707,36 @@ curl localhost:8082
 Vert.x 还允许我们创建一个定期服务，该服务会定期执行某些操作。这是一个例子：
 
 ```java
-
 package com.packt.javapath.ch18demo.microservices;
-
 import io.vertx.rxjava.core.AbstractVerticle;
-
 import java.time.LocalTime;
-
 import java.time.temporal.ChronoUnit;
-
 public class PeriodicService1 extends AbstractVerticle {
-
-public void start() throws Exception {
-
-LocalTime start = LocalTime.now();
-
-vertx.setPeriodic(1000, v-> {
-
-System.out.println("Beep!");
-
-if(ChronoUnit.SECONDS.between(start, LocalTime.now()) > 3 ){
-
-vertx.undeploy(deploymentID());
-
+  public void start() throws Exception {
+     LocalTime start = LocalTime.now();
+     vertx.setPeriodic(1000, v-> {
+         System.out.println("Beep!");
+         if(ChronoUnit.SECONDS.between(start, LocalTime.now()) > 3 ){
+             vertx.undeploy(deploymentID());
+         }
+     });
+     System.out.println("Vertical PeriodicService1 is deployed");
+  }
+  public void stop() throws Exception {
+     System.out.println("Vertical PeriodicService1 is un-deployed");
+  }
 }
-
-});
-
-System.out.println("Vertical PeriodicService1 is deployed");
-
-}
-
-public void stop() throws Exception {
-
-System.out.println("Vertical PeriodicService1 is un-deployed");
-
-}
-
-}
-
 ```
 
 如您所见，此垂直一旦部署，就会每秒打印一次“Beep！”消息，并且在三秒后会自动取消部署。如果我们部署此垂直，我们将看到：
 
 ```java
-
-垂直 PeriodicService1 被部署
-
-嘟嘟声！
-
-嘟嘟声！
-
-嘟嘟声！
-
-嘟嘟声！
-
-垂直 PeriodicService1 被卸载
-
+Vertical PeriodicService1 is deployed
+Beep!
+Beep!
+Beep!
+Beep!
+Vertical PeriodicService1 is un-deployed
 ```
 
 当垂直开始时，第一个“嘟嘟声！”响起，然后每秒钟会有三条消息，然后垂直被卸载，正如预期的那样。
@@ -1013,15 +746,10 @@ System.out.println("Vertical PeriodicService1 is un-deployed");
 我们可以使用周期性服务垂直向服务器垂直发送消息，使用 HTTP 协议。为了做到这一点，我们需要一个新的依赖项，所以我们可以使用`WebClient`类：
 
 ```java
-
 <dependency>
-
-<groupId>io.vertx</groupId>
-
-<artifactId>vertx-web-client</artifactId>
-
-<version>${vertx.version}</version>
-
+    <groupId>io.vertx</groupId>
+    <artifactId>vertx-web-client</artifactId>
+    <version>${vertx.version}</version>
 </dependency>
 
 ```
@@ -1029,69 +757,37 @@ System.out.println("Vertical PeriodicService1 is un-deployed");
 有了这个，向 HTTP 服务器垂直发送消息的周期性服务看起来是这样的：
 
 ```java
-
 package com.packt.javapath.ch18demo.microservices;
-
 import io.vertx.rxjava.core.AbstractVerticle;
-
 import io.vertx.rxjava.core.buffer.Buffer;
-
 import io.vertx.rxjava.ext.web.client.HttpResponse;
-
 import io.vertx.rxjava.ext.web.client.WebClient;
-
 import rx.Single;
-
 import java.time.LocalTime;
-
 import java.time.temporal.ChronoUnit;
-
 public class PeriodicService2 extends AbstractVerticle {
-
-private int port;
-
-public PeriodicService2(int port) {
-
-this.port = port;
-
+    private int port;
+    public PeriodicService2(int port) {
+        this.port = port;
+    }
+    public void start() throws Exception {
+        WebClient client = WebClient.create(vertx);
+        Single<HttpResponse<Buffer>> single = client
+                .get(port, "localhost", "?name=Nick")
+                .rxSend();
+        LocalTime start = LocalTime.now();
+        vertx.setPeriodic(1000, v-> {
+           single.subscribe(r-> System.out.println(r.bodyAsString()),
+                             Throwable::printStackTrace);
+           if(ChronoUnit.SECONDS.between(start, LocalTime.now()) >= 3 ){
+              client.close(); 
+              vertx.undeploy(deploymentID());
+              System.out.println("Vertical PeriodicService2 undeployed");
+           }
+        });
+        System.out.println("Vertical PeriodicService2 deployed");
+    }
 }
-
-public void start() throws Exception {
-
-WebClient client = WebClient.create(vertx);
-
-Single<HttpResponse<Buffer>> single = client
-
-.get(port, "localhost", "?name=Nick")
-
-.rxSend();
-
-LocalTime start = LocalTime.now();
-
-vertx.setPeriodic(1000, v-> {
-
-single.subscribe(r-> System.out.println(r.bodyAsString()),
-
-Throwable::printStackTrace);
-
-if(ChronoUnit.SECONDS.between(start, LocalTime.now()) >= 3 ){
-
-client.close();
-
-vertx.undeploy(deploymentID());
-
-System.out.println("垂直 PeriodicService2 被卸载");
-
-}
-
-});
-
-System.out.println("垂直 PeriodicService2 被部署");
-
-}
-
-}
-
 ```
 
 正如您所看到的，这个周期性服务接受端口号作为其构造函数的参数，然后每秒向本地主机的此端口发送一条消息，并在三秒后卸载自己。消息是`name`参数的值。默认情况下，它是 GET 请求。
@@ -1099,35 +795,22 @@ System.out.println("垂直 PeriodicService2 被部署");
 我们还将修改我们的服务器垂直以读取`name`参数的值：
 
 ```java
-
 public void start() throws Exception {
-
-HttpServer server = vertx.createHttpServer();
-
-server.requestStream().toObservable()
-
-.subscribe(request -> request.response()
-
-.end("嗨，" + request.getParam("name") + "！来自" +
-
-Thread.currentThread().getName() + " on port " + port + "!"));
-
-server.rxListen(port).subscribe();
-
-System.out.println(Thread.currentThread().getName()
-
-+ "正在等待端口" + port + "...");
-
+    HttpServer server = vertx.createHttpServer();
+    server.requestStream().toObservable()
+          .subscribe(request -> request.response()
+             .end("Hi, " + request.getParam("name") + "! Hello from " + 
+          Thread.currentThread().getName() + " on port " + port + "!"));
+    server.rxListen(port).subscribe();
+    System.out.println(Thread.currentThread().getName()
+                               + " is waiting on port " + port + "...");
 }
-
 ```
 
 我们可以部署两个垂直：
 
 ```java
-
 RxHelper.deployVerticle(vertx(), new HttpServer2(8082));
-
 RxHelper.deployVerticle(vertx(), new PeriodicService2(8082));
 
 ```
@@ -1135,19 +818,12 @@ RxHelper.deployVerticle(vertx(), new PeriodicService2(8082));
 输出将如下所示：
 
 ```java
-
-垂直 PeriodicService2 被部署
-
-vert.x-eventloop-thread-0 正在等待端口 8082...
-
-嗨，Nick！来自 vert.x-eventloop-thread-0 在端口 8082 上的问候！
-
-嗨，Nick！来自 vert.x-eventloop-thread-0 在端口 8082 上的问候！
-
-垂直 PeriodicService2 被卸载
-
-嗨，Nick！来自 vert.x-eventloop-thread-0 在端口 8082 上的问候！
-
+Vertical PeriodicService2 deployed
+vert.x-eventloop-thread-0 is waiting on port 8082...
+Hi, Nick! Hello from vert.x-eventloop-thread-0 on port 8082!
+Hi, Nick! Hello from vert.x-eventloop-thread-0 on port 8082!
+Vertical PeriodicService2 undeployed
+Hi, Nick! Hello from vert.x-eventloop-thread-0 on port 8082!
 ```
 
 # 其他微服务
@@ -1169,45 +845,34 @@ vert.x-eventloop-thread-0 正在等待端口 8082...
 Vert.x 具有直接支持消息驱动架构和 EDA 的功能。它被称为事件总线。任何 verticle 都可以访问事件总线，并且可以使用`io.vertx.core.eventbus.EventBus`类或其类似物`io.vertx.rxjava.core.eventbus.EventBus`向任何地址（只是一个字符串）发送任何消息。我们只会使用后者，但是`io.vertx.core.eventbus.EventBus`中也提供了类似（非 rx-fied）的功能。一个或多个 verticle 可以注册自己作为某个地址的消息消费者。如果有多个 verticle 是相同地址的消费者，那么`EventBus`的`rxSend()`方法使用循环算法仅将消息传递给这些消费者中的一个，以选择下一条消息的接收者。或者，`publish()`方法会将消息传递给具有相同地址的所有消费者。以下是将消息发送到指定地址的代码：
 
 ```java
-
-vertx.eventBus().rxSend(address, msg).subscribe(reply ->
-
-System.out.println("Got reply: " + reply.body()),
-
-Throwable::printStackTrace );
+vertx.eventBus().rxSend(address, msg).subscribe(reply -> 
+    System.out.println("Got reply: " + reply.body()), 
+    Throwable::printStackTrace );
 
 ```
 
 `rxSend()`方法返回表示可以接收的消息的`Single<Message>`对象，并且`subscribe()`方法...嗯...订阅它。`Single<Message>`类实现了单个值响应的反应式模式。`subscribe()`方法接受两个`Consumer`函数：第一个处理回复，第二个处理错误。在前面的代码中，第一个函数只是打印回复：
 
 ```java
-
 reply -> System.out.println("Got reply: " + reply.body())
-
 ```
 
 第二个操作打印异常的堆栈跟踪，如果发生异常：
 
 ```java
-
 Throwable::printStackTrace
-
 ```
 
 如您所知，前面的结构称为方法引用。作为 lambda 表达式的相同函数将如下所示：
 
 ```java
-
 e -> e.printStackTrace()
-
 ```
 
 对`publish()`方法的调用看起来很相似：
 
 ```java
-
 vertx.eventBus().publish(address, msg)
-
 ```
 
 它将消息发布给许多消费者，因此该方法不会返回`Single`对象或任何其他可用于获取回复的对象。相反，它只返回一个`EventBus`对象；如果需要，可以调用更多的事件总线方法。
@@ -1217,59 +882,32 @@ vertx.eventBus().publish(address, msg)
 在 Vert.x 中的消息消费者是一个 verticle，它在事件总线上注册为指定地址发送或发布的消息的潜在接收者：
 
 ```java
-
 package com.packt.javapath.ch18demo.reactivesystem;
-
 import io.vertx.rxjava.core.AbstractVerticle;
-
 public class MsgConsumer extends AbstractVerticle {
-
-private String address, name;
-
-public MsgConsumer(String id, String address) {
-
-this.address = address;
-
-this.name = this.getClass().getSimpleName() +
-
-"(" + id + "," + address + ")";
-
+    private String address, name;
+    public MsgConsumer(String id, String address) {
+        this.address = address;
+        this.name = this.getClass().getSimpleName() + 
+                                    "(" + id + "," + address + ")";
+    }
+    public void start() throws Exception {
+        System.out.println(name + " starts...");
+        vertx.eventBus().consumer(address).toObservable()
+         .subscribe(msg -> {
+            String reply = name + " got message: " + msg.body();
+            System.out.println(reply);
+            if ("undeploy".equals(msg.body())) {
+                vertx.undeploy(deploymentID());
+                reply = name + " undeployed.";
+                System.out.println(reply);
+            }
+            msg.reply(reply);
+        }, Throwable::printStackTrace );
+        System.out.println(Thread.currentThread().getName()
+                + " is waiting on address " + address + "...");
+    }
 }
-
-public void start() throws Exception {
-
-System.out.println(name + " starts...");
-
-vertx.eventBus().consumer(address).toObservable()
-
-.subscribe(msg -> {
-
-String reply = name + " got message: " + msg.body();
-
-System.out.println(reply);
-
-if ("undeploy".equals(msg.body())) {
-
-vertx.undeploy(deploymentID());
-
-reply = name + " undeployed.";
-
-System.out.println(reply);
-
-}
-
-msg.reply(reply);
-
-}, Throwable::printStackTrace );
-
-System.out.println(Thread.currentThread().getName()
-
-+ " is waiting on address " + address + "...");
-
-}
-
-}
-
 ```
 
 `consumer(address)`方法返回一个`io.vertx.rxjava.core.eventbus.MessageConsumer<T>`对象，表示提供的地址的消息流。这意味着可以将流转换为`Observable`并订阅它以接收发送到此地址的所有消息。`Observable`对象的`subscribe()`方法接受两个`Consumer`函数：第一个处理接收到的消息，第二个在发生错误时执行。在第一个函数中，我们包含了`msg.reply(reply)`方法，它将消息发送回消息的来源。您可能还记得，如果原始消息是通过`rxSend()`方法发送的，发送方可以获得此回复。如果使用了`publish()`方法，那么由`msg.reply(reply)`方法发送的回复将无处可去。
@@ -1285,100 +923,55 @@ System.out.println(Thread.currentThread().getName()
 我们将演示的消息发送者基于我们在*微服务*部分演示的 HTTP 服务器实现。不一定非要这样做。在实际代码中，垂直通常会自动发送消息，要么获取它需要的数据，要么提供其他垂直需要的数据，要么通知另一个垂直，要么将数据存储在数据库中，或者出于任何其他原因。但是出于演示目的，我们决定发送方将侦听某个端口以接收消息，并且我们将手动（使用`curl`命令）或自动（通过*微服务*部分描述的某个周期性服务）发送消息给它。这就是为什么消息发送者看起来比消息消费者复杂一些：
 
 ```java
-
 package com.packt.javapath.ch18demo.reactivesystem;
-
 import io.vertx.rxjava.core.AbstractVerticle;
-
 import io.vertx.rxjava.core.http.HttpServer;
-
 public class EventBusSend extends AbstractVerticle {
-
-private int port;
-
-private String address，name;
-
-public EventBusSend（int port，String address）{
-
-this.port = port;
-
-this.address = address;
-
-this.name = this.getClass（）。getSimpleName（）+
-
-"（端口" + port + "，发送到" + address + "）";
-
+    private int port;
+    private String address, name;
+    public EventBusSend(int port, String address) {
+       this.port = port;
+       this.address = address;
+       this.name = this.getClass().getSimpleName() + 
+                      "(port " + port + ", send to " + address + ")";
+    }
+    public void start() throws Exception {
+       System.out.println(name + " starts...");
+       HttpServer server = vertx.createHttpServer();
+       server.requestStream().toObservable().subscribe(request -> {
+         String msg = request.getParam("msg");
+         request.response().setStatusCode(200).end();
+ vertx.eventBus().rxSend(address, msg).subscribe(reply -> {
+            System.out.println(name + " got reply:\n  " + reply.body());
+         },
+         e -> {
+            if(StringUtils.contains(e.toString(), "NO_HANDLERS")){
+                vertx.undeploy(deploymentID());
+                System.out.println(name + " undeployed.");
+            } else {
+                e.printStackTrace();
+            }
+         }); });
+       server.rxListen(port).subscribe();
+       System.out.println(Thread.currentThread().getName()
+                               + " is waiting on port " + port + "...");
+    }
 }
-
-public void start（）throws Exception {
-
-System.out.println（name + "开始..."）;
-
-HttpServer server = vertx.createHttpServer（）;
-
-server.requestStream（）。toObservable（）。subscribe（request - > {
-
-String msg = request.getParam（"msg"）;
-
-request.response（）。setStatusCode（200）。end（）;
-
-vertx.eventBus（）。rxSend（address，msg）。subscribe（reply - > {
-
-System.out.println（name + "收到回复：\n "+ reply.body（））;
-
-}，
-
-e - > {
-
-if（StringUtils.contains（e.toString（），"NO_HANDLERS"））{
-
-vertx.undeploy（deploymentID（））;
-
-System.out.println（name + "取消部署。"）;
-
-} else {
-
-e.printStackTrace（）;
-
-}
-
-}）;
-
-server.rxListen（port）。subscribe（）;
-
-System.out.println（Thread.currentThread（）。getName（））
-
-+ "正在等待端口" + port + "...");
-
-}
-
-}
-
 ```
 
 大部分前面的代码与 HTTP 服务器功能相关。发送消息（由 HTTP 服务器接收）的几行是这些：
 
 ```java
-
-vertx.eventBus（）。rxSend（address，msg）。subscribe（reply - > {
-
-System.out.println（name + "收到回复：\n "+ reply.body（））;
-
-}，e - > {
-
-if（StringUtils.contains（e.toString（），"NO_HANDLERS"））{
-
-vertx.undeploy（deploymentID（））;
-
-System.out.println（name + "取消部署。"）;
-
-} else {
-
-e.printStackTrace（）;
-
-}
-
-}）;
+        vertx.eventBus().rxSend(address, msg).subscribe(reply -> {
+            System.out.println(name + " got reply:\n  " + reply.body());
+        }, e -> {
+            if(StringUtils.contains(e.toString(), "NO_HANDLERS")){
+                vertx.undeploy(deploymentID());
+                System.out.println(name + " undeployed.");
+            } else {
+                e.printStackTrace();
+            }
+        });
 
 ```
 
@@ -1389,35 +982,23 @@ e.printStackTrace（）;
 现在，让我们部署两个消息消费者，并通过我们的消息发送者向它们发送消息：
 
 ```java
-
 String address = "One";
-
-Vertx vertx = vertx（）;
-
-RxHelper.deployVerticle（vertx，new MsgConsumer（"1"，address））;
-
-RxHelper.deployVerticle（vertx，new MsgConsumer（"2"，address））;
-
-RxHelper.deployVerticle（vertx，new EventBusSend（8082，address））;
+Vertx vertx = vertx();
+RxHelper.deployVerticle(vertx, new MsgConsumer("1",address));
+RxHelper.deployVerticle(vertx, new MsgConsumer("2",address));
+RxHelper.deployVerticle(vertx, new EventBusSend(8082, address));
 
 ```
 
 运行前面的代码后，终端显示以下消息：
 
 ```java
-
-MsgConsumer（1，One）开始...
-
-MsgConsumer（2，One）开始...
-
-EventBusSend（端口 8082，发送到 One）开始...
-
-vert.x-eventloop-thread-1 正在等待地址 One...
-
-vert.x-eventloop-thread-0 正在等待地址 One...
-
-vert.x-eventloop-thread-2 正在等待端口 8082...
-
+MsgConsumer(1,One) starts...
+MsgConsumer(2,One) starts...
+EventBusSend(port 8082, send to One) starts...
+vert.x-eventloop-thread-1 is waiting on address One...
+vert.x-eventloop-thread-0 is waiting on address One...
+vert.x-eventloop-thread-2 is waiting on port 8082...
 ```
 
 注意运行以支持每个 verticle 的不同事件循环。
@@ -1425,91 +1006,56 @@ vert.x-eventloop-thread-2 正在等待端口 8082...
 现在，让我们使用终端窗口中的以下命令发送几条消息：
 
 ```java
-
-curl localhost：8082？msg =你好！
-
-curl localhost：8082？msg = Hi！
-
-curl localhost：8082？msg = How + are + you？
-
-curl localhost：8082？msg = Just + saying...
-
+curl localhost:8082?msg=Hello!
+curl localhost:8082?msg=Hi!
+curl localhost:8082?msg=How+are+you?
+curl localhost:8082?msg=Just+saying...
 ```
 
 加号（`+`）是必需的，因为 URL 不能包含空格，必须*编码*，这意味着，除其他外，用加号`+`或`%20`替换空格。作为对前述命令的响应，我们将看到以下消息：
 
 ```java
-
-MsgConsumer（2，One）收到消息：你好！
-
-EventBusSend（端口 8082，发送到 One）收到回复：
-
-MsgConsumer（2，One）收到消息：你好！
-
-MsgConsumer（1，One）收到消息：你好！
-
-EventBusSend（端口 8082，发送到 One）收到回复：
-
-MsgConsumer（1，One）收到消息：嗨！
-
-MsgConsumer（2，One）收到消息：你好吗？
-
-EventBusSend（端口 8082，发送到 One）收到回复：
-
-MsgConsumer（2，One）收到消息：你好吗？
-
-MsgConsumer（1，One）收到消息：只是说...
-
-EventBusSend（端口 8082，发送到 One）收到回复：
-
-MsgConsumer（1，One）收到消息：只是说...
-
+MsgConsumer(2,One) got message: Hello!
+EventBusSend(port 8082, send to One) got reply:
+ MsgConsumer(2,One) got message: Hello!
+MsgConsumer(1,One) got message: Hi!
+EventBusSend(port 8082, send to One) got reply:
+ MsgConsumer(1,One) got message: Hi!
+MsgConsumer(2,One) got message: How are you?
+EventBusSend(port 8082, send to One) got reply:
+ MsgConsumer(2,One) got message: How are you?
+MsgConsumer(1,One) got message: Just saying...
+EventBusSend(port 8082, send to One) got reply:
+ MsgConsumer(1,One) got message: Just saying...
 ```
 
 正如预期的那样，消费者根据循环算法轮流接收消息。现在，让我们部署所有的垂直线：
 
 ```java
-
-curl localhost：8082？msg=undeploy
-
-curl localhost：8082？msg=undeploy
-
-curl localhost：8082？msg=undeploy
-
+curl localhost:8082?msg=undeploy
+curl localhost:8082?msg=undeploy
+curl localhost:8082?msg=undeploy
 ```
 
 以下是对前述命令的响应中显示的消息：
 
 ```java
-
-MsgConsumer（1，One）收到消息：取消部署
-
-MsgConsumer（1，One）未部署。
-
-EventBusSend（端口 8082，发送到 One）收到回复：
-
-MsgConsumer（1，One）未部署。
-
-MsgConsumer（2，One）收到消息：取消部署
-
-MsgConsumer（2，One）未部署。
-
-EventBusSend（端口 8082，发送到 One）收到回复：
-
-MsgConsumer（2，One）未部署。
-
-EventBusSend（端口 8082，发送到 One）未部署。
-
+MsgConsumer(1,One) got message: undeploy
+MsgConsumer(1,One) undeployed.
+EventBusSend(port 8082, send to One) got reply:
+ MsgConsumer(1,One) undeployed.
+MsgConsumer(2,One) got message: undeploy
+MsgConsumer(2,One) undeployed.
+EventBusSend(port 8082, send to One) got reply:
+ MsgConsumer(2,One) undeployed.
+EventBusSend(port 8082, send to One) undeployed.
 ```
 
 根据前面的消息，我们所有的垂直线都未部署。如果我们再次提交`undeploy`消息，我们将看到：
 
 ```java
-
-curl localhost：8082？msg=undeploy
-
-curl：（7）无法连接到本地主机端口 8082：连接被拒绝
-
+curl localhost:8082?msg=undeploy
+curl: (7) Failed to connect to localhost port 8082: Connection refused
 ```
 
 这是因为发送者已被取消部署，并且本地主机的端口`8082`没有监听的 HTTP 服务器。
@@ -1519,165 +1065,104 @@ curl：（7）无法连接到本地主机端口 8082：连接被拒绝
 我们实现了消息发布者与消息发送者非常相似：
 
 ```java
-
-包 com.packt.javapath.ch18demo.reactivesystem;
+package com.packt.javapath.ch18demo.reactivesystem;
 
 import io.vertx.rxjava.core.AbstractVerticle;
-
 import io.vertx.rxjava.core.http.HttpServer;
 
 public class EventBusPublish extends AbstractVerticle {
-
-private int port;
-
-private String address，name;
-
-public EventBusPublish（int port，String address）{
-
-this.port = port;
-
-this.address = address;
-
-this.name = this.getClass().getSimpleName（）+
-
-“（端口”+端口+“，发布到”+地址+“）”;
-
+    private int port;
+    private String address, name;
+    public EventBusPublish(int port, String address) {
+        this.port = port;
+        this.address = address;
+        this.name = this.getClass().getSimpleName() + 
+                    "(port " + port + ", publish to " + address + ")";
+    }
+    public void start() throws Exception {
+        System.out.println(name + " starts...");
+        HttpServer server = vertx.createHttpServer();
+        server.requestStream().toObservable()
+                .subscribe(request -> {
+                    String msg = request.getParam("msg");
+                    request.response().setStatusCode(200).end();
+ vertx.eventBus().publish(address, msg);
+                    if ("undeploy".equals(msg)) {
+ vertx.undeploy(deploymentID());
+                        System.out.println(name + " undeployed.");
+                    }
+                });
+        server.rxListen(port).subscribe();
+        System.out.println(Thread.currentThread().getName()
+                + " is waiting on port " + port + "...");
+    }
 }
-
-public void start（）throws Exception {
-
-System.out.println（name +“开始...”）;
-
-HttpServer server = vertx.createHttpServer（）;
-
-server.requestStream().toObservable()
-
-.subscribe（request - > {
-
-String msg = request.getParam（“msg”）;
-
-request.response().setStatusCode(200).end();
-
-vertx.eventBus（）。publish（address，msg）;
-
-if（“undeploy”。equals（msg））{
-
-vertx.undeploy（deploymentID（））;
-
-System.out.println（name +“未部署”）;
-
-}
-
-}）;
-
-server.rxListen（port）.subscribe（）;
-
-System.out.println（Thread.currentThread().getName（）
-
-+“正在等待端口”+端口+“...”）;
-
-}
-
-}
-
 ```
 
 发布者与发送者的区别仅在于此部分：
 
 ```java
-
-vertx.eventBus（）。publish（address，msg）;
-
-if（“undeploy”。equals（msg））{
-
-vertx.undeploy（deploymentID（））;
-
-System.out.println（name +“未部署”）;
-
-}
-
+            vertx.eventBus().publish(address, msg);
+            if ("undeploy".equals(msg)) {
+                vertx.undeploy(deploymentID());
+                System.out.println(name + " undeployed.");
+            }
 ```
 
 由于在发布时无法获得回复，因此前面的代码比发送消息的代码简单得多。此外，由于所有消费者同时收到`undeploy`消息，我们可以假设它们都将被取消部署，并且发布者可以取消部署自己。让我们通过运行以下程序来测试它：
 
 ```java
-
-String address =“One”;
-
-Vertx vertx = vertx（）;
-
-RxHelper.deployVerticle（vertx，new MsgConsumer（“1”，address））;
-
-RxHelper.deployVerticle（vertx，new MsgConsumer（“2”，address））;
-
-RxHelper.deployVerticle（vertx，new EventBusPublish（8082，address））;
+String address = "One";
+Vertx vertx = vertx();
+RxHelper.deployVerticle(vertx, new MsgConsumer("1",address));
+RxHelper.deployVerticle(vertx, new MsgConsumer("2",address));
+RxHelper.deployVerticle(vertx, new EventBusPublish(8082, address));
 
 ```
 
 作为对前面的代码执行的响应，我们得到以下消息：
 
 ```java
-
-消息消费者（1，One）开始...
-
-MsgConsumer（2，One）开始...
-
-EventBusPublish（端口 8082，发布到 One）开始...
-
-vert.x-eventloop-thread-2 正在等待端口 8082...
-
+MsgConsumer(1,One) starts...
+MsgConsumer(2,One) starts...
+EventBusPublish(port 8082, publish to One) starts...
+vert.x-eventloop-thread-2 is waiting on port 8082...
 ```
 
 现在，我们在另一个终端窗口中发出以下命令：
 
 ```java
-
-curl localhost：8082？msg=你好！
-
+curl localhost:8082?msg=Hello!
 ```
 
 在运行垂直线的终端窗口中的消息如下：
 
 ```java
-
-MsgConsumer（1，One）收到消息：你好！
-
-MsgConsumer（2，One）收到消息：你好！
-
+MsgConsumer(1,One) got message: Hello!
+MsgConsumer(2,One) got message: Hello!
 ```
 
 如预期的那样，具有相同地址的两个消费者都会收到相同的消息。现在，让我们将它们取消部署：
 
 ```java
-
-curl localhost：8082？msg=undeploy
-
+curl localhost:8082?msg=undeploy
 ```
 
 垂直线对这些消息做出响应：
 
 ```java
-
-MsgConsumer(1,One)收到消息：undeploy
-
-MsgConsumer(2,One)收到消息：undeploy
-
-EventBusPublish（端口 8082，发布到 One）已卸载。
-
-MsgConsumer(1,One)已卸载。
-
-MsgConsumer(2,One)已卸载。
-
+MsgConsumer(1,One) got message: undeploy
+MsgConsumer(2,One) got message: undeploy
+EventBusPublish(port 8082, publish to One) undeployed.
+MsgConsumer(1,One) undeployed.
+MsgConsumer(2,One) undeployed.
 ```
 
 如果我们再次提交`undeploy`消息，我们将看到：
 
 ```java
-
 curl localhost:8082?msg=undeploy
-
-curl: (7)无法连接到本地主机端口 8082：连接被拒绝
-
+curl: (7) Failed to connect to localhost port 8082: Connection refused
 ```
 
 通过这样，我们已经完成了一个由微服务组成的反应式系统的演示。添加能够执行有用操作的方法和类将使其更接近实际系统。但我们将把这留给读者作为练习。
@@ -1715,71 +1200,38 @@ curl: (7)无法连接到本地主机端口 8082：连接被拒绝
 以下是允许您创建`io.reactivex.Observable`的六种方法：
 
 ```java
-
 //1
-
-Observable.just("Hi!").subscribe(System.out::println); //打印：Hi！
-
+Observable.just("Hi!").subscribe(System.out::println); //prints: Hi!
 //2
-
 Observable.fromIterable(List.of("1","2","3"))
-
-.subscribe(System.out::print); //打印：123
-
+          .subscribe(System.out::print); //prints: 123
 System.out.println();
-
 //3
-
 String[] arr = {"1","2","3"};
-
-Observable.fromArray(arr).subscribe(System.out::print); //打印：123
-
+Observable.fromArray(arr).subscribe(System.out::print); //prints: 123
 System.out.println();
-
 //4
-
 Observable.fromCallable(()->123)
-
-.subscribe(System.out::println); //打印：123
-
+          .subscribe(System.out::println); //prints: 123
 //5
-
 ExecutorService pool = Executors.newSingleThreadExecutor();
-
 Future<String> future = pool
-
-.submit(() -> {
-
-Thread.sleep(100);
-
-return "Hi!";
-
-});
-
+        .submit(() -> {
+            Thread.sleep(100);
+            return "Hi!";
+        });
 Observable.fromFuture(future)
-
-.subscribe(System.out::println); //打印：Hi！
-
+          .subscribe(System.out::println); //prints: Hi!
 pool.shutdown();
-
 //6
-
 Observable.interval(100, TimeUnit.MILLISECONDS)
-
-.subscribe(v->System.out.println("100 ms is over"));
-
-//两次打印“100 毫秒已经过”
-
-尝试 { //这个暂停给上面的方法一个打印消息的机会
-
-TimeUnit.MILLISECONDS.sleep(200);
-
+          .subscribe(v->System.out.println("100 ms is over")); 
+                                     //prints twice "100 ms is over"
+try { //this pause gives the above method a chance to print the message
+    TimeUnit.MILLISECONDS.sleep(200);
 } catch (InterruptedException e) {
-
-e.printStackTrace();
-
+    e.printStackTrace();
 }
-
 ```
 
 # 摘要

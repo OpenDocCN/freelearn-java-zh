@@ -417,12 +417,9 @@ Apache Commons 项目有三个部分：
 `String`类的`indexOf()`方法不处理`null`。这是一些演示代码：
 
 ```java
-
 String s = null;
-
-int i = StringUtils.indexOf(s, "abc");     //返回-1
-
-s.indexOf("abc");                          //抛出 NullPointerException
+int i = StringUtils.indexOf(s, "abc");     //return -1
+s.indexOf("abc");                          //throws NullPointerException
 
 ```
 

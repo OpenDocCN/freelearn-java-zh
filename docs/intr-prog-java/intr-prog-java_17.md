@@ -33,43 +33,27 @@
 为了避免运行时错误，Java 8 引入了`@FunctionalInterface`注解，告诉编译器意图，因此编译器可以检查注解接口中是否真的只有一个抽象方法。让我们回顾一下相同继承线的以下接口：
 
 ```java
-
 @FunctionalInterface
-
-接口 A {
-
-void method1();
-
-default void method2(){}
-
-static void method3(){}
-
+interface A {
+  void method1();
+  default void method2(){}
+  static void method3(){}
 }
 
 @FunctionalInterface
-
-接口 B 扩展自 A {
-
-default void method4(){}
-
+interface B extends A {
+  default void method4(){}
 }
 
 @FunctionalInterface
-
-接口 C 扩展自 B {
-
-void method1();
-
+interface C extends B {
+  void method1();
 }
 
-//@FunctionalInterface  //编译错误
-
-接口 D 扩展自 C {
-
-void method5();
-
+//@FunctionalInterface  //compilation error
+interface D extends C {
+  void method5();
 }
-
 ```
 
 接口`A`是一个功能接口，因为它只有一个抽象方法：`method1()`。接口`B`也是一个功能接口，因为它也只有一个抽象方法-与从接口`A`继承的相同的`method1()`。接口`C`是一个功能接口，因为它只有一个抽象方法，`method1()`，它覆盖了父接口`A`的抽象`method1()`方法。接口`D`不能是一个功能接口，因为它有两个抽象方法-从父接口`A`继承的`method1()`和`method5()`。
@@ -79,23 +63,14 @@ void method5();
 出于同样的原因，自 Java 早期版本以来就存在的`Runnable`和`Callable`接口在 Java 8 中被注释为`@FunctionalInterface`。它使这种区别变得明确，并提醒其用户和那些可能尝试添加另一个抽象方法的人：
 
 ```java
-
 @FunctionalInterface
-
-接口 Runnable {
-
-void run();
-
-}
-
+interface Runnable { 
+  void run(); 
+} 
 @FunctionalInterface
-
-接口 Callable<V> {
-
-V call() throws Exception;
-
+interface Callable<V> { 
+  V call() throws Exception; 
 }
-
 ```
 
 如您所见，创建功能接口很容易。但在这之前，考虑使用`java.util.function`包中提供的 43 个功能接口之一。
@@ -111,17 +86,11 @@ V call() throws Exception;
 学习了所有这些之后，我们可以使用匿名类创建此接口的实现：
 
 ```java
-
 Function<Integer, Double> multiplyByTen = new Function<Integer, Double>(){
-
-public Double apply(Integer i){
-
-return i * 10.0;
-
-}
-
+  public Double apply(Integer i){
+    return i * 10.0;
+  }
 };
-
 ```
 
 由程序员决定`T`（输入参数）将是哪种实际类型，`R`（返回值）将是哪种类型。在我们的例子中，我们已经决定输入参数将是`Integer`类型，结果将是`Double`类型。正如您现在可能已经意识到的那样，类型只能是引用类型，并且原始类型的装箱和拆箱是自动执行的。
@@ -129,27 +98,20 @@ return i * 10.0;
 现在我们可以根据需要使用我们的新`Function<Integer, Double> multiplyByTen`函数。我们可以直接使用它，如下所示：
 
 ```java
-
 System.out.println(multiplyByTen.apply(1)); //prints: 10.0
-
 ```
 
 或者我们可以创建一个接受此函数作为参数的方法：
 
 ```java
-
 void useFunc(Function<Integer, Double> processingFunc, int input){
-
-System.out.println(processingFunc.apply(input));
-
+  System.out.println(processingFunc.apply(input));
 }
-
 ```
 
 然后我们可以将我们的函数传递到这个方法中，并让方法使用它：
 
 ```java
-
 useFunc(multiplyByTen, 10);     //prints: 100.00
 
 ```
@@ -157,33 +119,21 @@ useFunc(multiplyByTen, 10);     //prints: 100.00
 我们还可以创建一个方法，每当需要时就会生成一个函数：
 
 ```java
-
 Function<Integer, Double> createMultiplyBy(double num){
-
-Function<Integer, Double> func = new Function<Integer, Double>(){
-
-public Double apply(Integer i){
-
-return i * num;
-
+  Function<Integer, Double> func = new Function<Integer, Double>(){
+    public Double apply(Integer i){
+      return i * num;
+    }
+  };
+  return func;
 }
-
-};
-
-return func;
-
-}
-
 ```
 
 使用上述方法，我们可以编写以下代码：
 
 ```java
-
 Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
-
 System.out.println(multiplyByFive.apply(1)); //prints: 5.0
-
 useFunc(multiplyByFive, 10);                 //prints: 50.0
 
 ```
@@ -195,17 +145,11 @@ useFunc(multiplyByFive, 10);                 //prints: 50.0
 通过查看`Consumer<T>`接口的定义，你已经猜到这个接口有一个接受`T`类型参数的抽象方法，并且不返回任何东西。从`Consumer<T>`接口的文档中，我们了解到它的抽象方法是`void accept(T)`，这意味着，例如，我们可以这样实现它：
 
 ```java
-
 Consumer<Double> printResult = new Consumer<Double>() {
-
-public void accept(Double d) {
-
-System.out.println("Result=" + d);
-
-}
-
+  public void accept(Double d) {
+    System.out.println("Result=" + d);
+  }
 };
-
 printResult.accept(10.0);         //prints: Result=10.0
 
 ```
@@ -213,31 +157,20 @@ printResult.accept(10.0);         //prints: Result=10.0
 或者我们可以创建一个生成函数的方法：
 
 ```java
-
-消费者<Double> createPrintingFunc(String prefix, String postfix){
-
-Consumer<Double> func = new Consumer<Double>() {
-
-public void accept(Double d) {
-
-System.out.println(prefix + d + postfix);
-
+Consumer<Double> createPrintingFunc(String prefix, String postfix){
+  Consumer<Double> func = new Consumer<Double>() {
+    public void accept(Double d) {
+      System.out.println(prefix + d + postfix);
+    }
+  };
+  return func;
 }
-
-};
-
-return func;
-
-}
-
 ```
 
 现在我们可以这样使用它：
 
 ```java
-
-消费者<Double> printResult = createPrintingFunc("Result=", " Great!");
-
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
 printResult.accept(10.0);    //prints: Result=10.0 Great!
 
 ```
@@ -245,29 +178,19 @@ printResult.accept(10.0);    //prints: Result=10.0 Great!
 我们还可以创建一个新的方法，不仅接受处理函数作为参数，还接受打印函数：
 
 ```java
-
-void processAndConsume(int input,
-
-功能<Integer, Double> processingFunc,
-
-Consumer<Double> consumer){
-
-consumer.accept(processingFunc.apply(input));
-
+void processAndConsume(int input, 
+                       Function<Integer, Double> processingFunc, 
+                                          Consumer<Double> consumer){
+  consumer.accept(processingFunc.apply(input));
 }
-
 ```
 
 然后我们可以写下面的代码：
 
 ```java
-
-功能<Integer, Double> multiplyByFive = createMultiplyBy(5);
-
-消费者<Double> printResult = createPrintingFunc("Result=", " Great!");
-
-processAndConsume(10, multiplyByFive, printResult); //Result=50.0 Great!
-
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+processAndConsume(10, multiplyByFive, printResult); //Result=50.0 Great! 
 ```
 
 正如我们之前提到的，在下一节中，我们将介绍 lambda 表达式，并展示它们如何用更少的代码来表达函数接口的实现。
@@ -279,50 +202,32 @@ processAndConsume(10, multiplyByFive, printResult); //Result=50.0 Great!
 与之前的函数类似，我们可以编写生成供应商的方法：
 
 ```java
-
-供应商<Integer> createSuppplier(int num){
-
-供应商<Integer> func = new 供应商<Integer>() {
-
-public Integer get() { return num; }
-
-};
-
-return func;
-
+Supplier<Integer> createSuppplier(int num){
+  Supplier<Integer> func = new Supplier<Integer>() {
+    public Integer get() { return num; }
+  };
+  return func;
 }
-
 ```
 
 现在我们可以编写一个只接受函数的方法：
 
 ```java
-
-void supplyProcessAndConsume(供应商<Integer> input,
-
-功能<Integer, Double> process,
-
-Consumer<Double> consume){
-
-consume.accept(processFunc.apply(input.get()));
-
+void supplyProcessAndConsume(Supplier<Integer> input, 
+                             Function<Integer, Double> process, 
+                                      Consumer<Double> consume){
+  consume.accept(processFunc.apply(input.get()));
 }
-
 ```
 
 注意`input`函数的输出类型与`process`函数的输入类型相同，它返回的类型与`consume`函数消耗的类型相同。这使得下面的代码成为可能：
 
 ```java
-
-供应商<Integer> supply7 = createSuppplier(7);
-
-功能<Integer, Double> multiplyByFive = createMultiplyBy(5);
-
-消费者<Double> printResult = createPrintingFunc("Result=", " Great!");
-
-supplyProcessAndConsume(supply7, multiplyByFive, printResult);
-
-//prints: Result=35.0 Great!
+Supplier<Integer> supply7 = createSuppplier(7);
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+supplyProcessAndConsume(supply7, multiplyByFive, printResult); 
+                                            //prints: Result=35.0 Great!
 
 ```
 
@@ -335,87 +240,54 @@ supplyProcessAndConsume(supply7, multiplyByFive, printResult);
 这是一个表示布尔值函数的接口，它有一个方法：`boolean test(T)`。以下是一个创建`Predicate<Integer>`函数的方法示例：
 
 ```java
-
 Predicate<Integer> createTestSmallerThan(int num){
-
-Predicate<Integer> func = new Predicate<Integer>() {
-
-public boolean test(Integer d) {
-
-return d < num;
-
+  Predicate<Integer> func = new Predicate<Integer>() {
+    public boolean test(Integer d) {
+      return d < num;
+    }
+  };
+  return func;
 }
-
-};
-
-return func;
-
-}
-
 ```
 
 我们可以使用它来向处理方法添加一些逻辑：
 
 ```java
-
-void supplyDecideProcessAndConsume(Supplier<Integer> input,
-
-Predicate<Integer> test,
-
-Function<Integer, Double> process,
-
-Consumer<Double> consume){
-
-int in = input.get();
-
-if(test.test(in)){
-
-consume.accept(process.apply(in));
-
-} else {
-
-System.out.println("Input " + in +
-
-" does not pass the test and not processed.");
-
+void supplyDecideProcessAndConsume(Supplier<Integer> input, 
+                                  Predicate<Integer> test, 
+                                   Function<Integer, Double> process, 
+                                            Consumer<Double> consume){
+  int in = input.get();
+  if(test.test(in)){
+    consume.accept(process.apply(in));
+  } else {
+    System.out.println("Input " + in + 
+                     " does not pass the test and not processed.");
+  }
 }
-
-}
-
 ```
 
 以下代码演示了它的用法：
 
 ```java
-
 Supplier<Integer> input = createSuppplier(7);
-
 Predicate<Integer> test = createTestSmallerThan(5);
-
 Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
-
 Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
-
 supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
-
-//打印：Input 7 does not pass the test and not processed.
-
+             //prints: Input 7 does not pass the test and not processed.
 ```
 
 让我们以 3 为例设置输入：
 
 ```java
-
 Supplier<Integer> input = createSuppplier(3)
-
 ```
 
 前面的代码将产生以下输出：
 
 ```java
-
 Result=15.0 Great!
-
 ```
 
 # 其他标准函数接口
@@ -445,14 +317,10 @@ Result=15.0 Great!
 `java.util.function`包中的大多数函数接口都有默认方法，允许我们构建一个函数链（也称为管道），将一个函数的结果作为输入参数传递给另一个函数，从而组成一个新的复杂函数。例如：
 
 ```java
-
 Function<Double, Long> f1 = d -> Double.valueOf(d / 2.).longValue();
-
 Function<Long, String> f2 = l -> "Result: " + (l + 1);
-
 Function<Double, String> f3 = f1.andThen(f2);
-
-System.out.println(f3.apply(4.));            //打印：3
+System.out.println(f3.apply(4.));            //prints: 3
 
 ```
 
@@ -463,41 +331,25 @@ System.out.println(f3.apply(4.));            //打印：3
 我们可以使用`Function`接口的`andThen(Function after)`默认方法。我们已经创建了`Function<Integer, Double> createMultiplyBy()`方法：
 
 ```java
-
 Function<Integer, Double> createMultiplyBy(double num){
-
-Function<Integer, Double> func = new Function<Integer, Double>(){
-
-public Double apply(Integer i){
-
-返回 i * num;
-
-}
-
-};
-
-return func;
-
+  Function<Integer, Double> func = new Function<Integer, Double>(){
+    public Double apply(Integer i){
+      return i * num;
+    }
+  };
+  return func; 
 ```
 
 我们还可以编写另一个方法，创建一个带有`Double`输入类型的减法函数，这样我们就可以将其链接到乘法函数：
 
 ```java
-
 private static Function<Double, Long> createSubtractInt(int num){
-
-Function<Double, Long> func = new Function<Double, Long>(){
-
-public Long apply(Double dbl){
-
-返回 Math.round(dbl - num);
-
-}
-
-};
-
-返回 func;
-
+  Function<Double, Long> func = new Function<Double, Long>(){
+    public Long apply(Double dbl){
+      return Math.round(dbl - num);
+    }
+  };
+  return func;
 }
 
 ```
@@ -505,18 +357,14 @@ public Long apply(Double dbl){
 现在我们可以编写以下代码：
 
 ```java
-
 Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
-
-System.out.println(multiplyByFive.apply(2));  //打印：10.0
+System.out.println(multiplyByFive.apply(2));  //prints: 10.0
 
 Function<Double, Long> subtract7 = createSubtractInt(7);
-
-System.out.println(subtract7.apply(11.0));   //打印：4
+System.out.println(subtract7.apply(11.0));   //prints: 4
 
 long r = multiplyByFive.andThen(subtract7).apply(2);
-
-System.out.println(r);                          //打印：3
+System.out.println(r);                          //prints: 3
 
 ```
 
@@ -525,10 +373,8 @@ System.out.println(r);                          //打印：3
 `Function`接口还有另一个默认方法，`Function<V,R> compose(Function<V,T> before)`，它也允许我们链接两个函数。必须首先执行的函数可以作为`before`参数传递到第二个函数的`compose()`方法中：
 
 ```java
-
 boolean r = subtract7.compose(multiplyByFive).apply(2);
-
-System.out.println(r);                          //打印：3
+System.out.println(r);                          //prints: 3         
 
 ```
 
@@ -537,38 +383,24 @@ System.out.println(r);                          //打印：3
 `Consumer`接口也有`andThen(Consumer after)`方法。我们已经编写了创建打印函数的方法：
 
 ```java
-
 Consumer<Double> createPrintingFunc(String prefix, String postfix){
-
-Consumer<Double> func = new Consumer<Double>() {
-
-public void accept(Double d) {
-
-System.out.println(prefix + d + postfix);
-
+  Consumer<Double> func = new Consumer<Double>() {
+    public void accept(Double d) {
+      System.out.println(prefix + d + postfix);
+    }
+  };
+  return func;
 }
-
-};
-
-return func;
-
-}
-
 ```
 
 现在我们可以创建并链接两个打印函数，如下所示：
 
 ```java
-
 Consumer<Double> print21By = createPrintingFunc("21 by ", "");
-
 Consumer<Double> equalsBy21 = createPrintingFunc("equals ", " by 21");
-
-print21By.andThen(equalsBy21).accept(2d);
-
-//打印：21 by 2.0
-
-// 由 21 等于 2.0
+print21By.andThen(equalsBy21).accept(2d);  
+//prints: 21 by 2.0 
+//        equals 2.0 by 21
 
 ```
 
@@ -579,88 +411,54 @@ print21By.andThen(equalsBy21).accept(2d);
 `Supplier`接口没有默认方法，而`Predicate`接口有一个静态方法`isEqual(Object targetRef)`和三个默认方法：`and(Predicate other)`、`negate()`和`or(Predicate other)`。为了演示`and(Predicate other)`和`or(Predicate other)`方法的使用，例如，让我们编写创建两个`Predicate<Double>`函数的方法。一个函数检查值是否小于输入：
 
 ```java
-
 Predicate<Double> testSmallerThan(double limit){
-
-Predicate<Double> func = new Predicate<Double>() {
-
-public boolean test(Double num) {
-
-System.out.println("Test if " + num + " is smaller than " + limit);
-
-返回 num < limit;
-
+  Predicate<Double> func = new Predicate<Double>() {
+    public boolean test(Double num) {
+      System.out.println("Test if " + num + " is smaller than " + limit);
+      return num < limit;
+    }
+  };
+  return func;
 }
-
-};
-
-返回 func;
-
-}
-
 ```
 
 另一个函数检查值是否大于输入：
 
 ```java
-
 Predicate<Double> testBiggerThan(double limit){
-
-Predicate<Double> func = new Predicate<Double>() {
-
-public boolean test(Double num) {
-
-System.out.println("Test if " + num + " is bigger than " + limit);
-
-返回 num > limit;
-
+  Predicate<Double> func = new Predicate<Double>() {
+    public boolean test(Double num) {
+      System.out.println("Test if " + num + " is bigger than " + limit);
+      return num > limit;
+    }
+  };
+  return func;
 }
-
-};
-
-return func;
-
-}
-
 ```
 
 现在我们可以创建两个 `Predicate<Double>` 函数并将它们链接起来：
 
 ```java
-
 Predicate<Double> isSmallerThan20 = testSmallerThan(20d);
-
 System.out.println(isSmallerThan20.test(10d));
-
-//打印：测试 10.0 是否小于 20.0
-
-//        true
+     //prints: Test if 10.0 is smaller than 20.0
+     //        true
 
 Predicate<Double> isBiggerThan18 = testBiggerThan(18d);
-
 System.out.println(isBiggerThan18.test(10d));
-
-//打印：测试 10.0 是否大于 18.0
-
-//        false
+    //prints: Test if 10.0 is bigger than 18.0
+    //        false
 
 boolean b = isSmallerThan20.and(isBiggerThan18).test(10.);
-
 System.out.println(b);
-
-//打印：测试 10.0 是否小于 20.0
-
-//        测试 10.0 是否大于 18.0
-
-//        false
+    //prints: Test if 10.0 is smaller than 20.0
+    //        Test if 10.0 is bigger than 18.0
+    //        false
 
 b = isSmallerThan20.or(isBiggerThan18).test(10.);
-
 System.out.println(b);
-
-//打印：测试 10.0 是否小于 20.0
-
-//        true
+    //prints: Test if 10.0 is smaller than 20.0
+    //        true
 
 ```
 
@@ -671,28 +469,22 @@ System.out.println(b);
 `java.util.function` 包的函数接口还有其他有用的默认方法。其中最突出的是 `identity()` 方法，它返回一个始终返回其输入参数的函数：
 
 ```java
-
 Function<Integer, Integer> id = Function.identity();
-
-System.out.println(id.apply(4));          //打印：4
+System.out.println(id.apply(4));          //prints: 4
 
 ```
 
 `identity()` 方法在某些程序需要提供某个函数，但你不希望提供的函数改变任何东西时非常有用。在这种情况下，你可以创建一个具有必要输出类型的恒等函数。例如，在我们之前的代码片段中，我们可能决定 `multiplyByFive` 函数不应该在 `multiplyByFive.andThen(subtract7)` 链中改变任何东西：
 
 ```java
-
 Function<Double, Double> multiplyByFive = Function.identity();
-
-System.out.println(multiplyByFive.apply(2.));  //打印：2.0
+System.out.println(multiplyByFive.apply(2.));  //prints: 2.0
 
 Function<Double, Long> subtract7 = createSubtractInt(7);
-
-System.out.println(subtract7.apply(11.0));    //打印：4
+System.out.println(subtract7.apply(11.0));    //prints: 4
 
 long r = multiplyByFive.andThen(subtract7).apply(2.);
-
-System.out.println(r);                       //打印：-5
+System.out.println(r);                       //prints: -5
 
 ```
 
@@ -727,39 +519,22 @@ lambda 表达式的语法包括参数列表、箭头标记 `->` 和主体。参�
 We can rewrite our functions, created in the previous section, using lambda expressions, as follows:
 
 ```java
-
 Function<Integer, Double> createMultiplyBy(double num){
-
-Function<Integer, Double> func = i -> i * num;
-
-return func;
-
+  Function<Integer, Double> func = i -> i * num;
+  return func;
 }
-
 Consumer<Double> createPrintingFunc(String prefix, String postfix){
-
-Consumer<Double> func = d -> System.out.println(prefix + d + postfix);
-
-return func;
-
+  Consumer<Double> func = d -> System.out.println(prefix + d + postfix);
+  return func;
 }
-
 Supplier<Integer> createSuppplier(int num){
-
-Supplier<Integer> func = () -> num;
-
-return func;
-
+  Supplier<Integer> func = () -> num;
+  return func;
 }
-
 Predicate<Integer> createTestSmallerThan(int num){
-
-Predicate<Integer> func = d -> d < num;
-
-return func;
-
+  Predicate<Integer> func = d -> d < num;
+  return func;
 }
-
 ```
 
 We don't repeat the name of the implemented interface because it is specified as the return type in the method signature. And we do not specify the name of the abstract method either because it is the only method of the interface that has to be implemented. Writing such a compact and efficient code became possible because of the combination of the lambda expression and functional interface.
@@ -767,74 +542,47 @@ We don't repeat the name of the implemented interface because it is specified as
 Looking at the preceding examples, you probably realize that there is no need to have methods that create a function anymore. Let's change the code that calls the `supplyDecideProcessAndConsume()` method:
 
 ```java
-
-void supplyDecideProcessAndConsume(Supplier<Integer> input,
-
-Predicate<Integer> test,
-
-Function<Integer, Double> process,
-
-Consumer<Double> consume){
-
-int in = input.get();
-
-if(test.test(in)){
-
-consume.accept(process.apply(in));
-
-} else {
-
-System.out.println("Input " + in +
-
-" does not pass the test and not processed.");
-
+void supplyDecideProcessAndConsume(Supplier<Integer> input, 
+                                   Predicate<Integer> test, 
+                                   Function<Integer, Double> process, 
+                                            Consumer<Double> consume){
+  int in = input.get();
+  if(test.test(in)){
+    consume.accept(process.apply(in));
+  } else {
+    System.out.println("Input " + in + 
+                 " does not pass the test and not processed.");
+  }
 }
-
-}
-
 ```
 
 Let's revisit the following lines:
 
 ```java
-
 Supplier<Integer> input = createSuppplier(7);
-
 Predicate<Integer> test = createTestSmallerThan(5);
-
 Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
-
 Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
-
 supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
-
 ```
 
 We can change the preceding code to the following without changing the functionality:
 
 ```java
-
 Supplier<Integer> input = () -> 7;
-
 Predicate<Integer> test = d -> d < 5.;
-
 Function<Integer, Double> multiplyByFive = i -> i * 5.;;
-
-Consumer<Double> printResult =
-
-d -> System.out.println("Result=" + d + " Great!");
-
-supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
+Consumer<Double> printResult = 
+                     d -> System.out.println("Result=" + d + " Great!");
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult); 
 
 ```
 
 We can even inline the preceding functions and write the preceding code in one line like this:
 
 ```java
-
-supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5.,
-
-d -> System.out.println("Result=" + d + " Great!"));
+supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5., 
+                    d -> System.out.println("Result=" + d + " Great!")); 
 
 ```
 
@@ -853,20 +601,13 @@ There are two aspects of a lambda expression that we would like to point out an
 As in the anonymous class, the variable, created outside and used inside the lambda expression, becomes effectively final and cannot be modified. You can write the following:
 
 ```java
-
 int x = 7;
-
 //x = 3;       //compilation error
-
 int y = 5;
-
 double z = 5.;
-
 supplyDecideProcessAndConsume(() -> x, d -> d < y, i -> i * z,
-
-d -> { //x = 3;      //compilation error
-
-System.out.println("Result=" + d + " Great!"); } );
+            d -> { //x = 3;      //compilation error
+                   System.out.println("Result=" + d + " Great!"); } );
 
 ```
 
@@ -875,37 +616,21 @@ System.out.println("Result=" + d + " Great!"); } );
 这种限制有一个可能的变通方法。如果局部变量是引用类型（但不是`String`或原始包装类型），即使该局部变量在 lambda 表达式中使用，也可以改变其状态：
 
 ```java
-
 class A {
-
-private int x;
-
-public int getX(){ return this.x; }
-
-public void setX(int x){ this.x = x; }
-
+  private int x;
+  public int getX(){ return this.x; }
+  public void setX(int x){ this.x = x; }
 }
-
 void localVariable2(){
-
-A a = new A();
-
-a.setX(7);
-
-a.setX(3);
-
-int y = 5;
-
-double z = 5.;
-
-supplyDecideProcessAndConsume(() -> a.getX(), d -> d < y, i -> i * z,
-
-d -> { a.setX(5);
-
-System.out.println("Result=" + d + " Great!"); } );
-
+  A a = new A();
+  a.setX(7);
+  a.setX(3);
+  int y = 5;
+  double z = 5.;
+  supplyDecideProcessAndConsume(() -> a.getX(), d -> d < y, i -> i * z,
+               d -> { a.setX(5);
+    System.out.println("Result=" + d + " Great!"); } );
 }
-
 ```
 
 但是这种变通方法只有在真正需要时才应该使用，并且必须小心操作，因为存在意外副作用的危险。
@@ -917,54 +642,33 @@ System.out.println("Result=" + d + " Great!"); } );
 让我们编写一个`ThisDemo`类来说明这种差异：
 
 ```java
-
 class ThisDemo {
-
-private String field = "ThisDemo.field";
-
-public void useAnonymousClass() {
-
-Consumer<String> consumer = new Consumer<>() {
-
-private String field = "AnonymousClassConsumer.field";
-
-public void accept(String s) {
-
-System.out.println(this.field);
-
-}
-
-};
-
-consumer.accept(this.field);
+  private String field = "ThisDemo.field";
+  public void useAnonymousClass() {
+    Consumer<String> consumer = new Consumer<>() {
+      private String field = "AnonymousClassConsumer.field";
+      public void accept(String s) {
+        System.out.println(this.field);
+      }
+    };
+    consumer.accept(this.field);
+  }
+  public void useLambdaExpression() {
+    Consumer<String> consumer = consumer = s -> {
+      System.out.println(this.field);
+    };
+    consumer.accept(this.field);
+  }
 
 }
-
-public void useLambdaExpression() {
-
-Consumer<String> consumer = consumer = s -> {
-
-System.out.println(this.field);
-
-};
-
-consumer.accept(this.field);
-
-}
-
-}
-
 ```
 
 正如你所看到的，匿名类中的`this`指的是匿名类实例，而 lambda 表达式中的`this`指的是包围表达式的类实例。Lambda 表达式根本没有字段，也不能有字段。如果我们执行前面的方法，输出将确认我们的假设：
 
 ```java
-
 ThisDemo d = new ThisDemo();
-
-d.useAnonymousClass();   //输出：AnonymousClassConsumer.field
-
-d.useLambdaExpression(); //输出：ThisDemo.field
+d.useAnonymousClass();   //prints: AnonymousClassConsumer.field
+d.useLambdaExpression(); //prints: ThisDemo.field
 
 ```
 
@@ -975,81 +679,47 @@ lambda 表达式不是类实例，也不能被`this`引用。根据 Java 规范�
 让我们来看看我们对`supplyDecidePprocessAndConsume()`方法的最后一个实现：
 
 ```java
-
-supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5.,
-
-d -> System.out.println("Result=" + d + " Great!"));
-
+supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5., 
+                    d -> System.out.println("Result=" + d + " Great!")); 
 ```
 
 我们使用的函数都相当简单。在实际代码中，每个函数可能需要多行实现。在这种情况下，将代码块内联会使代码几乎无法阅读。在这种情况下，引用具有必要实现的方法是有帮助的。假设我们有以下`Helper`类：
 
 ```java
-
 public class Helper {
-
-public double calculateResult(int i){
-
-// 这里可能有很多行代码
-
-return i* 5;
-
+  public double calculateResult(int i){
+    // Maybe many lines of code here
+    return i* 5;
+  }
+  public static void printResult(double d){
+    // Maybe many lines of code here
+    System.out.println("Result=" + d + " Great!");
+  }
 }
-
-public static void printResult(double d){
-
-// 这里可能有很多行代码
-
-System.out.println("Result=" + d + " Great!");
-
-}
-
-}
-
 ```
 
 `Lambdas`类中的 lambda 表达式可以引用`Helper`和`Lambdas`类的方法，如下所示：
 
 ```java
-
 public class Lambdas {
-
-public void methodReference() {
-
-Supplier<Integer> input = () -> generateInput();
-
-Predicate<Integer> test = d -> checkValue(d);
-
-Function<Integer, Double> multiplyByFive =
-
-下一章将使读者熟悉数据流处理的强大概念。它解释了流是什么，如何创建它们并处理它们的元素，以及如何构建处理管道。它还展示了如何轻松地将流处理组织成并行处理。
-
-Consumer<Double> printResult = d -> Helper.printResult(d);
-
-使用方法引用来表示创建一个新对象。假设我们有`class A{}`。用另一个使用方法引用的`Supplier`函数声明替换以下内容：
-
-supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
-
+  public void methodReference() {
+    Supplier<Integer> input = () -> generateInput();
+    Predicate<Integer> test = d -> checkValue(d);
+    Function<Integer, Double> multiplyByFive = 
+                                  i -> new Helper().calculateResult(i);
+    Consumer<Double> printResult = d -> Helper.printResult(d);
+    supplyDecideProcessAndConsume(input, test, 
+                                           multiplyByFive, printResult);
+  }
+  private int generateInput(){
+    // Maybe many lines of code here
+    return 7;
+  }
+  private static boolean checkValue(double d){
+    // Maybe many lines of code here
+    return d < 5;
+  }
 }
-
-private int generateInput(){
-
-// 这里可能有很多行代码
-
-return 7;
-
-}
-
-private static boolean checkValue(double d){
-
-答案
-
-return d < 5;
-
-Supplier<A> supplier = A::new;
-
-// 这里可能有很多行代码
-
 ```
 
 前述代码已经读起来更好了，函数可以再次内联：
@@ -1069,20 +739,18 @@ supplyDecideProcessAndConsume(input, test,
 使用方法引用，`Lambdas`类中`methodReference()`方法下的前述代码可以重写如下：
 
 ```java
-
-Function<Integer, Double> multiplyByFive = new Helper()::calculateResult;;
-
+supplyDecideProcessAndConsume(() -> generateInput(), d -> checkValue(d), 
+            i -> new Helper().calculateResult(i), Helper.printResult(d));
 ```java
 
 将上述文本按行翻译成中文，不要输出原文：
 
-```
-
-}
-
-multiplyByFive, printResult);
-
-要内联这样的函数更有意义：
+```java
+Supplier<Integer> input = this::generateInput;
+Predicate<Integer> test = Lambdas::checkValue;
+Function<Integer, Double> multiplyByFive = new Helper()::calculateResult;;
+Consumer<Double> printResult = Helper::printResult;
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
 
 ```java
 
@@ -1101,22 +769,15 @@ Consumer<Double> printResult = Helper::printResult;
 Predicate<Integer> test = Lambdas::checkValue;
 
 ```java
-
-Supplier<A> supplier = () -> new A();
-
-本章介绍了函数式编程的概念。它概述了 JDK 提供的函数式接口，并演示了如何使用它们。它还讨论并演示了 lambda 表达式以及它们如何有效地提高代码的可读性。
-
-# i -> new Helper().calculateResult(i);
-
-答案是：
+supplyDecideProcessAndConsume(this::generateInput, Lambdas::checkValue, 
+                    new Helper()::calculateResult, Helper::printResult);
 
 ```java
 
 Supplier<Integer> input = this::generateInput;
 
-```
-
-# 总结
+```java
+Supplier<A> supplier = () -> new A();
 
 ```
 

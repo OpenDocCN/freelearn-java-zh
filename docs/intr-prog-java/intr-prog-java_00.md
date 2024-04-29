@@ -100,45 +100,15 @@
 
 代码块设置如下：
 
-```java
-
-html, body, #map {
-
-height: 100%;
-
-margin: 0;
-
-padding: 0
-
-}
-
-```
+[PRE0]
 
 当我们希望引起您对代码块的特别关注时，相关行或项目将以粗体显示：
 
-```java
-
-[default]
-
-exten => s,1,Dial(Zap/1|30)
-
-exten => s,2,Voicemail(u100)
-
-exten => s,102,Voicemail(b100)
-
-exten => i,1,Voicemail(s0)
-
-```
+[PRE1]
 
 任何命令行输入或输出都将按照以下格式编写：
 
-```java
-
-$ mkdir css
-
-$ cd css
-
-```
+[PRE2]
 
 **粗体**：表示新术语、重要单词或屏幕上看到的单词。例如，菜单或对话框中的单词会以这种方式出现在文本中。例如："从管理面板中选择系统信息"。
 

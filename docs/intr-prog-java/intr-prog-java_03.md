@@ -71,11 +71,9 @@ IDE 功能中最有帮助的一个方面是它能够维护类路径或管理依�
 我们将首先描述如何使用`-classpath`选项。它在`javac`和`java`命令中具有相同的格式：
 
 ```java
+-classpath dir1;dir2\*;dir3\alibrary.jar  (for Windows)
 
--classpath dir1;dir2\*;dir3\alibrary.jar  (适用于 Windows)
-
-javac -classpath dir1:dir2/*:dir3/alibrary.jar   (适用于 Lunix)
-
+javac -classpath dir1:dir2/*:dir3/alibrary.jar   (for Lunix)
 ```
 
 在前面的例子中，`dir1`、`dir2`和`dir3`是包含应用程序文件和应用程序依赖的第三方`.jar`文件的文件夹。每个文件夹也可以包括对目录的路径。路径可以是绝对路径，也可以是相对于运行此命令的当前位置的路径。
@@ -95,11 +93,9 @@ javac -classpath dir1:dir2/*:dir3/alibrary.jar   (适用于 Lunix)
 可以使用`-classpath`选项包括`CLASSPATH`值：
 
 ```java
+-classpath %CLASSPATH%;dir1;dir2\*;dir3\alibrary.jar (for Windows)
 
--classpath %CLASSPATH%;dir1;dir2\*;dir3\alibrary.jar（适用于 Windows）
-
--classpath $CLASSPATH:dir1:dir2/*:dir3/alibrary.jar（适用于 Lunix）
-
+-classpath $CLASSPATH:dir1:dir2/*:dir3/alibrary.jar (for Lunix)
 ```
 
 请注意，`javac`和`java`工具是 JDK 的一部分，因此它们知道在 JDK 中附带的 Java 标准库的位置，并且无需在类路径上指定标准库的`.jar`文件。

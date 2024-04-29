@@ -49,10 +49,8 @@ Apache Commons 项目包含了（在`org.apache.commons.collections`包中）多
 +   集合的元素不能是原始类型的值，而只能是引用类型，包括包装类，如`Integer`或`Double`。好消息是您可以添加原始值：
 
 ```java
-
-List list = new ArrayList();
-
-list.add(42);
+       List list = new ArrayList();
+       list.add(42);
 
 ```
 
@@ -81,17 +79,13 @@ list.add(42);
 在创建`ArrayList`对象时，将其引用分配给`List`类型的变量是一个很好的做法：
 
 ```java
-
 List listOfNames = new ArrayList();
-
 ```
 
 很可能，在您的程序中使用`ArrayList`类型的变量不会改变任何内容，无论是今天还是将来：
 
 ```java
-
 ArrayList listOfNames = new ArrayList();
-
 ```
 
 前面的引用仍然可以传递给接受`List`类型参数的任何方法。但是，通常编码为接口（当我们将变量设置为接口类型时）是一个很好的习惯，因为您永远不知道代码的要求何时可能会更改，您可能需要使用另一个`List`的实现，例如`LinkedList`类。如果变量类型是`List`，切换实现很容易。但是，如果变量类型是`ArrayList`，将其更改为`List`或`LinkedList`需要跟踪变量使用的所有位置并运行各种测试，以确保没有在任何地方调用`ArrayList`方法。如果代码很复杂，人们永远无法确定是否已检查了所有可能的执行路径，并且代码不会在生产中中断。这就是为什么我们更喜欢使用接口类型来保存对对象的引用的变量，除非您确实需要它成为类类型。我们在第八章中广泛讨论了这一点，“面向对象设计（OOD）原则”。
@@ -101,93 +95,54 @@ ArrayList listOfNames = new ArrayList();
 `ArrayList`类之所以被命名为 ArrayList，是因为它的实现是基于数组的。它实际上在幕后使用数组。如果在 IDE 中右键单击`ArrayList`并查看源代码，您将看到以下内容：
 
 ```java
-
-私有静态最终对象[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
-
+private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
 public ArrayList() {
-
-this.elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA;
-
+  this.elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA;
 }
-
 ```
 
 它只是数组`Object[]`的包装器。例如，这是方法`add(E)`的实现方式：
 
 ```java
-
 public boolean add(E e) {
-
-modCount++;
-
-add(e, elementData, size);
-
-返回 true;
-
+  modCount++;
+  add(e, elementData, size);
+  return true;
 }
-
 private void add(E e, Object[] elementData, int s) {
-
-if (s == elementData.length)
-
-elementData = grow();
-
-elementData[s] = e;
-
-size = s + 1;
-
+  if (s == elementData.length)
+    elementData = grow();
+  elementData[s] = e;
+  size = s + 1;
 }
-
 ```
 
 And if you study the source code more and look inside the method `grow()`, you will see how it increases the size of the array when new elements are added to the list:
 
 ```java
-
 private Object[] grow() {  return grow(size + 1); }
 
 private Object[] grow(int minCapacity) {
-
-return elementData = Arrays.copyOf(elementData,
-
-newCapacity(minCapacity));
-
+  return elementData = Arrays.copyOf(elementData,
+                                    newCapacity(minCapacity));
 }
-
 private static final int DEFAULT_CAPACITY = 10;
-
 private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
-
 private int newCapacity(int minCapacity) {
-
-// overflow-conscious code
-
-int oldCapacity = elementData.length;
-
-int newCapacity = oldCapacity + (oldCapacity >> 1);
-
-if (newCapacity - minCapacity <= 0) {
-
-if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
-
-return Math.max(DEFAULT_CAPACITY, minCapacity);
-
-if (minCapacity < 0) // overflow
-
-throw new OutOfMemoryError();
-
-return minCapacity;
-
+  // overflow-conscious code
+  int oldCapacity = elementData.length;
+  int newCapacity = oldCapacity + (oldCapacity >> 1);
+  if (newCapacity - minCapacity <= 0) {
+    if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
+      return Math.max(DEFAULT_CAPACITY, minCapacity);
+    if (minCapacity < 0) // overflow
+      throw new OutOfMemoryError();
+    return minCapacity;
+  }
+  return (newCapacity - MAX_ARRAY_SIZE <= 0)
+            ? newCapacity
+            : hugeCapacity(minCapacity);
 }
-
-return (newCapacity - MAX_ARRAY_SIZE <= 0)
-
-? newCapacity
-
-: hugeCapacity(minCapacity);
-
-}
-
 ```
 
 As you can see, when the allocated array size is not enough for storing another element, the new array is created with a minimum capacity of 10\. All the already existing elements are copied to the new array using the `Arrays.copyOf()` method (we will talk about the `Arrays` class later in this chapter).
@@ -211,23 +166,14 @@ The `add(E)` method also returns a Boolean value (`true`/`false`) that indicat
 Now, let's look at the examples of the `add()` method of the `List` interface's usage:
 
 ```java
-
 List list = new ArrayList();
-
 list.add(null);
-
 list.add(1);
-
 list.add("ss");
-
 list.add(new A());
-
 list.add(new B());
-
 System.out.println(list);  //prints: [null, 1, ss, A, B]
-
 list.add(2, 42);
-
 System.out.println(list);  //prints: [null, 1, 42, ss, A, B]
 
 ```
@@ -235,23 +181,14 @@ System.out.println(list);  //prints: [null, 1, 42, ss, A, B]
 In the preceding list, we have mixed up in the same list values of different types. The classes `A` and `B`, used in the preceding code, have parent-child relations:
 
 ```java
-
 class A {
-
-@Override
-
-public String toString() { return "A"; }
-
+  @Override
+  public String toString() { return "A"; }
 }
-
 class B extends A {
-
-@Override
-
-public String toString() { return "B"; }
-
+  @Override
+  public String toString() { return "B"; }
 }
-
 ```
 
 如您所见，我们已经为它们的每个添加了`toString()`方法，这样我们就可以看到它们的对象以预期的格式打印出来。
@@ -271,25 +208,15 @@ public String toString() { return "B"; }
 实现`Collection`接口（它扩展了`Iterable`接口）的每个集合都可以使用第十章中讨论的增强`for`语句进行迭代。以下是一个示例：
 
 ```java
-
 List list = new ArrayList();
-
 list.add(null);
-
 list.add(1);
-
 list.add("ss");
-
 list.add(new A());
-
 list.add(new B());
-
 for(Object o: list){
-
-//对每个元素执行某些操作的代码
-
-}
-
+  //code that does something with each element   
+} 
 ```
 
 `Iterable`接口还向`List`接口添加了以下三种方法：
@@ -303,7 +230,6 @@ for(Object o: list){
 在第十七章中，*Lambda 表达式和函数式编程*，我们将解释如何将函数作为参数传递，所以现在我们只展示`forEach()`方法的用法示例（如果我们重用前面示例中创建的列表）：
 
 ```java
-
 list.forEach(System.out::println);
 
 ```
@@ -329,17 +255,11 @@ list.forEach(System.out::println);
 假设我们想要从以下列表中删除所有类型为`String`的对象：
 
 ```java
-
 List list = new ArrayList();
-
 list.add(null);
-
 list.add(1);
-
 list.add("ss");
-
 list.add(new A());
-
 list.add(new B());
 
 ```
@@ -347,19 +267,12 @@ list.add(new B());
 以下是尝试执行此操作的代码，但存在缺陷：
 
 ```java
-
 for(Object o: list){
-
-System.out.println(o);
-
-if(o instanceof String){
-
-list.remove(o);
-
+  System.out.println(o);
+  if(o instanceof String){
+    list.remove(o);
+  }
 }
-
-}
-
 ```
 
 如果我们运行上述代码，结果将如下所示：
@@ -369,23 +282,14 @@ list.remove(o);
 `ConcurrentModificationException`是因为我们在迭代集合时尝试修改它。`Iterator`类有助于避免这个问题。以下代码可以正常工作：
 
 ```java
-
 System.out.println(list);  //prints: [null, 1, ss, A, B]
-
 Iterator iter = list.iterator();
-
 while(iter.hasNext()){
-
-Object o = iter.next();
-
-if(o instanceof String){
-
-iter.remove();
-
+  Object o = iter.next();
+  if(o instanceof String){
+    iter.remove();
+  }
 }
-
-}
-
 System.out.println(list);  //prints: [null, 1, A, B]
 
 ```
@@ -409,23 +313,14 @@ System.out.println(list);  //prints: [null, 1, A, B]
 为了避免这样的问题，可以使用允许定义集合元素期望类型的泛型，这样编译器可以检查并在添加不同类型时失败。这里是一个例子：
 
 ```java
-
 List<Integer> list1 = new ArrayList<>();
-
 list1.add(null);
-
 list1.add(1);
-
 //list1.add("ss");          //compilation error
-
 //list1.add(new A());       //compilation error
-
 //list1.add(new B());       //compilation error
-
 System.out.println(list1);  //prints: [null, 1]
-
 list1.add(2, 42);
-
 System.out.println(list1);  //prints: [null, 1, 42]
 
 ```
@@ -435,23 +330,14 @@ System.out.println(list1);  //prints: [null, 1, 42]
 由于子类具有任何其父类的类型，泛型`<Object>`并不能帮助避免先前描述的问题，因为每个 Java 对象都将`Object`类作为其父类：
 
 ```java
-
 List<Object> list2= new ArrayList<>();
-
 list2.add(null);
-
 list2.add(1);
-
 list2.add("ss");
-
 list2.add(new A());
-
 list2.add(new B());
-
 System.out.println(list2);    //prints: [null, 1, ss, A, B]
-
 list2.add(2, 42);
-
 System.out.println(list2);    //prints: [null, 1, 42, ss, A, B]
 
 ```
@@ -459,58 +345,36 @@ System.out.println(list2);    //prints: [null, 1, 42, ss, A, B]
 但是，以下泛型更加严格：
 
 ```java
-
 List<A> list3= new ArrayList<>();
-
 list3.add(null);
-
 //list3.add(1);            //compilation error
-
 //list3.add("ss");         //compilation error
-
 list3.add(new A());
-
 list3.add(new B());
-
 System.out.println(list3); //prints: [null, A, B]
-
 list3.add(2, new A());
-
 System.out.println(list3); //prints: [null, A, A, B]
 
 List<B> list4= new ArrayList<>();
-
 list4.add(null);
-
 //list4.add(1);            //compilation error
-
-//list4.add("ss");         //编译错误
-
-//list4.add(new A());      //编译错误
-
+//list4.add("ss");         //compilation error
+//list4.add(new A());      //compilation error
 list4.add(new B());
-
-System.out.println(list4); //打印：[null, B]
-
+System.out.println(list4); //prints: [null, B]
 list4.add(2, new B());
-
-System.out.println(list4); //打印：[null, B, B]
+System.out.println(list4); //prints: [null, B, B]
 
 ```
 
 唯一的情况是当您可能使用泛型`<Object>`的情况是，当您希望允许添加不同类型的值到列表中，但不希望允许列表本身的引用引用具有其他泛型的列表时：
 
 ```java
-
 List list = new ArrayList();
-
 List<Integer> list1 = new ArrayList<>();
-
 List<Object> list2= new ArrayList<>();
-
 list = list1;
-
-//list2 = list1;   //编译错误
+//list2 = list1;   //compilation error
 
 ```
 
@@ -519,59 +383,37 @@ list = list1;
 Java 集合还允许通配符泛型`<?>`，它只允许将`null`分配给集合：
 
 ```java
-
 List<?> list5= new ArrayList<>();
-
 list5.add(null);
-
-//list5.add(1);            //编译错误
-
-//list5.add("ss");         //编译错误
-
-//list5.add(new A());      //编译错误
-
-//list5.add(new B());      //编译错误
-
-System.out.println(list5); //打印：[null]
-
-//list5.add(1, 42);        //编译错误
+//list5.add(1);            //compilation error
+//list5.add("ss");         //compilation error
+//list5.add(new A());      //compilation error
+//list5.add(new B());      //compilation error
+System.out.println(list5); //prints: [null]
+//list5.add(1, 42);        //compilation error
 
 ```
 
 可以演示通配符泛型的用法示例。假设我们编写一个具有`List`（或任何集合）作为参数的方法，但我们希望确保此列表在方法内部不会被修改，而这会更改原始列表。这是一个例子：
 
 ```java
-
 void doSomething(List<B> list){
-
-//some othe code goes here
-
-list.add(null);
-
-list.add(new B());
-
-list.add(0, new B());
-
-//some other code goes here
-
+  //some othe code goes here
+  list.add(null);
+  list.add(new B());
+  list.add(0, new B());
+  //some other code goes here
 }
-
 ```
 
 如果使用前面的方法，我们会得到一个不良的副作用：
 
 ```java
-
 List<B> list= new ArrayList<>();
-
-System.out.println(list); //打印：[B]
-
+System.out.println(list); //prints: [B]
 list.add(0, null);
-
-System.out.println(list); //打印：[null, B]
-
+System.out.println(list); //prints: [null, B]
 doSomething(list);
-
 System.out.println(list); //[B, null, B, null, B]
 
 ```
@@ -579,23 +421,14 @@ System.out.println(list); //[B, null, B, null, B]
 为了避免副作用，可以编写：
 
 ```java
-
 void doSomething(List<?> list){
-
-list.add(null);
-
-//list.add(1);            //编译错误
-
-//list.add("ss");         //编译错误
-
-//list.add(new A());      //编译错误
-
-//list.add(new B());      //编译错误
-
-//list.add(0, 42);        //编译错误
-
+  list.add(null);
+  //list.add(1);            //compilation error
+  //list.add("ss");         //compilation error
+  //list.add(new A());      //compilation error
+  //list.add(new B());      //compilation error
+  //list.add(0, 42);        //compilation error
 }
-
 ```
 
 正如您所看到的，这种方式列表无法修改，除了添加`null`。好吧，这是以删除泛型`<B>`的代价。现在，可能传入的列表包含不同类型的对象，类型转换`(B)`将抛出`ClassCastException`。没有免费的东西，但可能性是可用的。
@@ -623,23 +456,14 @@ list.add(null);
 如果您在几页前阅读了泛型的描述，您可以猜到符号`Collection<? extends E>`的含义。泛型`<? extends E>`表示的是`E`或`E`的子类类型，其中`E`是用作集合泛型的类型。与我们之前的例子相关，观察以下类`A`和`B`：
 
 ```java
-
 class A {
-
-@Override
-
-public String toString() { return "A"; }
-
+  @Override
+  public String toString() { return "A"; }
 }
-
 class B extends A {
-
-@Override
-
-public String toString() { return "B"; }
-
+  @Override
+  public String toString() { return "B"; }
 }
-
 ```
 
 我们可以向`List<A>`对象添加`A`类和`B`类的对象。
@@ -649,19 +473,12 @@ public String toString() { return "B"; }
 例如，我们可以这样做：
 
 ```java
-
 List<A> list = new ArrayList<>();
-
 list.add(new A());
-
 List<B> list1 = new ArrayList<>();
-
 list1.add(new B());
-
 list.addAll(list1);
-
-System.out.println(list);    //输出：[A, B]
-
+System.out.println(list);    //prints: [A, B]
 ```
 
 `addAll(int index, Collection<? extends E> collection)`方法的作用非常相似，但是只从指定的索引开始。当然，提供的索引值应该等于 0 或小于列表的长度。
@@ -687,49 +504,27 @@ System.out.println(list);    //输出：[A, B]
 `hashCode()`方法未被`List`实现使用，因此我们将在接下来的代码中更详细地讨论它与接口`Set`和`Map`的实现相关。但是，由于我们正在讨论这个话题，我们想提到最佳的 Java 编程实践建议在实现`equals()`方法时每次都实现`hashCode()`方法。在这样做时，使用`equals()`方法使用的相同字段。例如，我们在第九章中实现的`Person`类，应该如下所示：
 
 ```java
-
-类人{
-
-private int age;
-
-private String name, currentAddress;
-
-public Person(int age, String name, String currAddr) {
-
-this.age = age;
-
-this.name = name;
-
-this.currentAddress = currAddr;
-
-}
-
-@Override
-
-public boolean equals(Object o) {
-
-if (this == o) return true;
-
-if (o == null) return false;
-
-如果(!(o instanceof Person)) return false;
-
-Person person = (Person)o;
-
-return age == person.getAge() &&
-
-Objects.equals(name, person.getName());
-
-}
-
-@Override
-
-public int hashCode(){
-
-return Objects.hash(age, name);
-
-}
-
+class Person{
+  private int age;
+  private String name, currentAddress;
+  public Person(int age, String name, String currAddr) {
+    this.age = age;
+    this.name = name;
+    this.currentAddress = currAddr;
+  }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null) return false;
+    if(!(o instanceof Person)) return false;
+      Person person = (Person)o;
+      return age == person.getAge() &&
+                Objects.equals(name, person.getName());
+  }
+  @Override
+  public int hashCode(){
+    return Objects.hash(age, name);
+  }
 }
 
 ```
@@ -753,20 +548,14 @@ return Objects.hash(age, name);
 以下是显示如何使用这些方法的代码：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
 list.add("s1");
-
 list.add("s2");
-
 list.add("s1");
 
-System.out.println(list.contains("s1")); //打印：true
-
-System.out.println(list.indexOf("s1")); //打印：0
-
-System.out.println(list.lastIndexOf("s1")); //打印：2
+System.out.println(list.contains("s1"));    //prints: true
+System.out.println(list.indexOf("s1"));     //prints: 0
+System.out.println(list.lastIndexOf("s1")); //prints: 2
 
 ```
 
@@ -787,17 +576,12 @@ System.out.println(list.lastIndexOf("s1")); //打印：2
 以下代码演示了如何使用这些方法：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
 list.add("s1");
-
 list.add("s2");
-
 list.add("s3");
 
 System.out.println(list.get(1));       //prints: s2
-
 System.out.println(list.subList(0,2)); //prints: [s1, s2]
 
 ```
@@ -823,29 +607,18 @@ System.out.println(list.subList(0,2)); //prints: [s1, s2]
 现在让我们看看代码示例：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
 list.add("s1");
-
 list.add("s2");
-
 list.add("s3");
-
 list.add("s1");
 
 System.out.println(list.remove(1));    //prints: s2
-
 System.out.println(list);              //prints: [s1, s3, s1]
-
 //System.out.println(list.remove(5));  //throws IndexOutOfBoundsException
-
 System.out.println(list.remove("s1")); //prints: true
-
 System.out.println(list);              //prints: [s3, s1]
-
 System.out.println(list.remove("s5")); //prints: false
-
 System.out.println(list);              //prints: [s3, s1]
 
 ```
@@ -853,23 +626,15 @@ System.out.println(list);              //prints: [s3, s1]
 在前面的代码中，值得注意的是列表有两个元素`s1`，但是只有左边的第一个被语句`list.remove("s1")`移除：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
 list.add("s1");
-
 list.add("s2");
-
 list.add("s3");
-
 list.add("s1");
 
 System.out.println(list.removeAll(List.of("s1", "s2", "s5")));   //true
-
 System.out.println(list);                                        //[s3]
-
 System.out.println(list.removeAll(List.of("s5")));               //false
-
 System.out.println(list);                                        //[s3]
 
 ```
@@ -877,27 +642,17 @@ System.out.println(list);                                        //[s3]
 为了节省空间，我们使用`of()`方法创建一个列表，我们将在第十四章中讨论，*管理集合和数组*。与前面的例子相比，在前面的代码中语句`list.removeAll("s1","s2","s5")`移除了列表中的两个元素`s1`：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
 list.add("s1");
-
 list.add("s2");
-
 list.add("s3");
-
 list.add("s1");
 
 System.out.println(list.retainAll(List.of("s1","s2","s5"))); //true
-
 System.out.println(list);                                    //[s1, s2, s1]
-
 System.out.println(list.retainAll(List.of("s1","s2","s5"))); //false
-
 System.out.println(list);                                    //[s1, s2, s1]
-
 System.out.println(list.retainAll(List.of("s5")));           //true
-
 System.out.println(list);                                    //[]
 
 ```
@@ -915,16 +670,12 @@ System.out.println(list);                                    //[]
 以下是使用`set（）`方法的示例：
 
 ```java
-
 List<String> list = new ArrayList<>();
+list.add("s1");
+list.add("s2");
 
-list.add（“s1”）;
-
-list.add（“s2”）;
-
-list.set（1，null）;
-
-System.out.println（list）;    //打印：[s1，null]
+list.set(1, null);
+System.out.println(list);    //prints: [s1, null]
 
 ```
 
@@ -933,52 +684,34 @@ System.out.println（list）;    //打印：[s1，null]
 第二种方法`replaceAll（）`基于函数`UnaryOperator <E>`-Java 8 中引入的 Java 功能接口之一。我们将在第十七章中讨论它，*Lambda 表达式和函数式编程*。现在，我们只是想展示代码示例。它们似乎相当简单，所以您应该能够理解它是如何工作的。假设我们从以下列表开始：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
-list.add（“s1”）;
-
-list.add（“s2”）;
-
-list.add（“s3”）;
-
-list.add（“s1”）;
-
+list.add("s1");
+list.add("s2");
+list.add("s3");
+list.add("s1");
 ```
 
 以下是一些可能的元素修改（只需记住`replaceAll（）`方法用提供的函数返回的结果替换每个元素）：
 
 ```java
+list.replaceAll(s -> s.toUpperCase()); //cannot process null
+System.out.println(list);    //prints: [S1, S2, S3, S1]
 
-list.replaceAll（s->s.toUpperCase（））; //无法处理 null
+list.replaceAll(s -> ("S1".equals(s) ? "S5" : null));
+System.out.println(list);    //prints: [S5, null, null, S5]
 
-System.out.println(list);    //打印：[S1，S2，S3，S1]
+list.replaceAll(s -> "a");
+System.out.println(list);    //prints: [a, a, a, a]
 
-list.replaceAll（s->（“S1”。equals（s）？“S5”：null））;
-
-System.out.println（list）;    //打印：[S5，null，null，S5]
-
-list.replaceAll（s->“a”）;
-
-System.out.println（list）;    //打印：[a，a，a，a]
-
-list.replaceAll（s->{
-
-String result;
-
-//在这里写任何你需要获取值的代码
-
-//基于 s 的值返回变量结果
-
-System.out.println（s）;   //打印四次“a”
-
-结果=“42”;
-
-返回结果;
-
-}）;
-
-System.out.println（list）;    //打印：[42，42，42，42]
+list.replaceAll(s -> {
+  String result;
+  //write here any code you need to get the value
+  // for the variable result based in the value of s
+  System.out.println(s);   //prints "a" four times
+  result = "42";
+  return result;
+});
+System.out.println(list);    //prints: [42, 42, 42, 42]
 
 ```
 
@@ -989,36 +722,24 @@ System.out.println（list）;    //打印：[42，42，42，42]
 可以将上述函数的示例重写如下：
 
 ```java
-
-UnaryOperator<String> function = s->s.toUpperCase（）;
-
+UnaryOperator<String> function = s -> s.toUpperCase();
 list.replaceAll(function);
 
-function = s ->（“S1”。equals（s）？“S5”：null）;
-
-list.replaceAll（function）;
+function = s -> ("S1".equals(s) ? "S5" : null);
+list.replaceAll(function);
 
 function = s -> "a";
+list.replaceAll(function);
 
-list.replaceAll（function）;
-
-function = s->{
-
-String result;
-
-//在这里写任何你需要获取值的代码
-
-//基于 s 的值返回变量结果
-
-System.out.println（s）;   //打印四次“a”
-
-结果=“42”;
-
-返回结果;
-
+function = s -> {
+  String result;
+  //write here any code you need to get the value
+  // for the variable result based in the value of s
+  System.out.println(s);   //prints "a" four times
+  result = "42";
+  return result;
 };
-
-list.replaceAll（function）;
+list.replaceAll(function);
 
 ```
 
@@ -1031,47 +752,31 @@ list.replaceAll（function）;
 现在，我们将向您展示一些示例，并指出标准比较器的位置。我们从以下列表开始：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
-list.add（“s3”）;
-
-list.add（“s2”）;
-
-list.add（“ab”）;
-
-//list.add（null）; //对于排序会抛出 NullPointerException
-
-//     String.CASE_INSENSITIVE_ORDER
-
-//     Comparator.naturalOrder()
-
-//     Comparator.reverseOrder()
-
-list.add（“a”）;
-
-list.add（“Ab”）;
-
-System.out.println（list）;                //[s3，s2，ab，a，Ab]
+list.add("s3");
+list.add("s2");
+list.add("ab");
+//list.add(null); //throws NullPointerException for sorting
+                  //     String.CASE_INSENSITIVE_ORDER
+                  //     Comparator.naturalOrder()
+                  //     Comparator.reverseOrder()
+list.add("a");
+list.add("Ab");
+System.out.println(list);                //[s3, s2, ab, a, Ab]
 
 ```
 
 以下是一些排序的示例：
 
 ```java
-
 list.sort(String.CASE_INSENSITIVE_ORDER);
-
-System.out.println(list); //[a, ab, Ab, s2, s3]
+System.out.println(list);                //[a, ab, Ab, s2, s3]
 
 list.sort(Comparator.naturalOrder());
-
-System.out.println(list); //[Ab, a, ab, s2, s3]
+System.out.println(list);               //[Ab, a, ab, s2, s3]
 
 list.sort(Comparator.reverseOrder());
-
-System.out.println(list); //[Ab, a, ab, s2, s3]
-
+System.out.println(list);               //[Ab, a, ab, s2, s3]
 ```
 
 前述的排序不是空安全的，正如前述的注释所指出的。您可以通过阅读有关前述比较器的 API 文档或仅通过尝试来了解这一点。即使在阅读文档后，人们通常也会尝试各种边缘情况，以更好地理解所描述的功能，并查看自己是否正确理解了描述。
@@ -1079,35 +784,25 @@ System.out.println(list); //[Ab, a, ab, s2, s3]
 还有处理`null`值的比较器：
 
 ```java
-
 list.add(null);
 
 list.sort(Comparator.nullsFirst(Comparator.naturalOrder()));
-
-System.out.println(list); //[null, Ab, a, ab, s2, s3]
+System.out.println(list);              //[null, Ab, a, ab, s2, s3]
 
 list.sort(Comparator.nullsLast(Comparator.naturalOrder()));
-
-System.out.println(list); //[Ab, a, ab, s2, s3, null]
+System.out.println(list);              //[Ab, a, ab, s2, s3, null]
 
 ```
 
 正如您所看到的，许多流行的比较器都可以在`java.util.Comparator`类的静态方法中找到。但是，如果您找不到所需的现成比较器，也可以编写自己的比较器。例如，假设我们需要对空值进行排序，使其像`String`值“null”一样。对于这种情况，我们可以编写一个自定义比较器：
 
 ```java
-
-Comparator<String> comparator =（s1，s2） - > {
-
-字符串 s =（s1 == null？"null"：s1）;
-
-return s.compareTo(s2);
-
+Comparator<String> comparator = (s1, s2) ->{
+  String s = (s1 == null ? "null" : s1);
+  return s.compareTo(s2);
 };
-
 list.sort(comparator);
-
-System.out.println(list); //[Ab, a, ab, null, s2, s3]
-
+System.out.println(list);              //[Ab, a, ab, null, s2, s3]
 ```
 
 `Comparator`类中还有各种数字类型的比较器：
@@ -1131,63 +826,34 @@ System.out.println(list); //[Ab, a, ab, null, s2, s3]
 让我们看看每个前述选项的代码示例，并讨论每种方法的利弊。首先，增强`Person`，`PersonWithHair`和`PersonWithHairDressed`类，并实现`Comparable`接口：
 
 ```java
-
 class Person implements Comparable<Person> {
-
-private int age;
-
-private String name, address;
-
-public Person(int age, String name, String address) {
-
-this.age = age;
-
-this.name = name == null?""：name;
-
-this.address = address;
-
+  private int age;
+  private String name, address;
+  public Person(int age, String name, String address) {
+    this.age = age;
+    this.name = name == null ? "" : name;
+    this.address = address;
+  }
+  @Override
+  public int compareTo(Person p){
+    return name.compareTo(p.getName());
+  }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null) return false;
+    if(!(o instanceof Person)) return false;
+      Person person = (Person)o;
+      return age == person.getAge() &&
+                Objects.equals(name, person.getName());
+  }
+  @Override
+  public int hashCode(){ return Objects.hash(age, name); }
+  @Override
+  public String toString() { return "Person{age=" + age +
+                                   ", name=" + name + "}";
+  }
 }
-
-@Override
-
-public int compareTo(Person p){
-
-return name.compareTo(p.getName());
-
-}
-
-@Override
-
-public boolean equals(Object o) {
-
-if（this == o）返回 true;
-
-if（o == null）返回 false;
-
-if（！（o instanceof Person））返回 false;
-
-Person person =（Person）o;
-
-return age == person.getAge() &&
-
-Objects.equals(name, person.getName());
-
-}
-
-@Override
-
-public int hashCode(){ return Objects.hash(age, name); }
-
-@Override
-
-public String toString() { return "Person{age=" + age +
-
-", name=" + name + "}";
-
-}
-
-}
-
 ```
 
 As you can see, we have added another instance field, `address`, but do not use it in either the  `equals()`, `hashCode()`, or `compareTo()` methods. We did it just to show that it is completely up to you how to define the identity of the object of class `Person` and its children.  We also implemented the `toString()` method (which prints only the fields included in the identity), so we can identify each object when they are displayed. And we have implemented the method of the `Comparable` interface, `compareTo()`, which is going to be used for sorting. Right now it takes into account only the name, so when sorted, the objects will be ordered by name.
@@ -1195,62 +861,37 @@ As you can see, we have added another instance field, `address`, but do not use
 The children of class `Person` did not change:
 
 ```java
-
 class PersonWithHair extends Person {
-
-private String hairstyle;
-
-public PersonWithHair(int age, String name,
-
-String address, String hairstyle) {
-
-super(age, name, address);
-
-this.hairstyle = hairstyle;
-
-}
-
+  private String hairstyle;
+  public PersonWithHair(int age, String name, 
+                        String address, String hairstyle) {
+    super(age, name, address);
+    this.hairstyle = hairstyle;
+  }
 }
 
 class PersonWithHairDressed extends PersonWithHair{
-
-private String dress;
-
-public PersonWithHairDressed(int age, String name,
-
-String address, String hairstyle, String dress) {
-
-super(age, name, address, hairstyle);
-
-this.dress = dress;
-
+  private String dress;
+  public PersonWithHairDressed(int age, String name, 
+           String address, String hairstyle, String dress) {
+    super(age, name, address, hairstyle);
+    this.dress = dress;
+  }
 }
-
-}
-
 ```
 
 Now we can create the list that we are going to sort:
 
 ```java
-
 List<Person> list = new ArrayList<>();
-
-list.add(new PersonWithHair(45, "Bill", "27 Main Street",
-
-"Pompadour"));
-
-list.add(new PersonWithHair(42, "Kelly","15 Middle Street",
-
-"Ponytail"));
-
-list.add(new PersonWithHairDressed(34, "Kelly", "10 Central Square",
-
-"Pompadour", "Suit"));
-
-list.add(new PersonWithHairDressed(25, "Courtney", "27 Main Street",
-
-"Ponytail", "Tuxedo"));
+list.add(new PersonWithHair(45, "Bill", "27 Main Street", 
+                                                       "Pompadour"));
+list.add(new PersonWithHair(42, "Kelly","15 Middle Street",  
+                                                        "Ponytail"));
+list.add(new PersonWithHairDressed(34, "Kelly", "10 Central Square",  
+                                               "Pompadour", "Suit"));
+list.add(new PersonWithHairDressed(25, "Courtney", "27 Main Street",  
+                                              "Ponytail", "Tuxedo"));
 
 list.forEach(System.out::println);
 
@@ -1259,23 +900,16 @@ list.forEach(System.out::println);
 Execution of the preceding code produces the following output:
 
 ```java
-
 Person{age=45, name=Bill}
-
 Person{age=42, name=Kelly}
-
 Person{age=34, name=Kelly}
-
 Person{age=25, name=Courtney}
-
 ```
 
 The persons are printed in the order they were added to the list. Now, let's sort them:
 
 ```java
-
 list.sort(Comparator.naturalOrder());
-
 list.forEach(System.out::println);
 
 ```
@@ -1283,15 +917,10 @@ list.forEach(System.out::println);
 The new order looks as follows:
 
 ```java
-
 Person{age=45, name=Bill}
-
 Person{age=25, name=Courtney}
-
 Person{age=42, name=Kelly}
-
 Person{age=34, name=Kelly}
-
 ```
 
 The objects are ordered alphabetically by name – that is how we have implemented the `compareTo()` method.
@@ -1299,9 +928,7 @@ The objects are ordered alphabetically by name – that is how we have implement
 If we use the `reverseOrder()` comparator, the order shown be reversed:
 
 ```java
-
 list.sort(Comparator.reverseOrder());
-
 list.forEach(System.out::println);
 
 ```
@@ -1309,15 +936,10 @@ list.forEach(System.out::println);
 This is what we see if we run the preceding code:
 
 ```java
-
 Person{age=42, name=Kelly}
-
 Person{age=34, name=Kelly}
-
 Person{age=25, name=Courtney}
-
 Person{age=45, name=Bill}
-
 ```
 
 The order was reversed.
@@ -1325,51 +947,32 @@ The order was reversed.
 We can change our implementation of the `compareTo()` method and order the objects by age:
 
 ```java
-
 @Override
-
 public int compareTo(Person p){
-
-return age - p.getAge();
-
+  return age - p.getAge();
 }
-
 ```
 
 Or we can implement it so that the `Person` objects will be sorted by both fields – first by name, then by age:
 
 ```java
-
 @Override
-
 public int compareTo(Person p){
-
-int result = this.name.compareTo(p.getName());
-
-if (result != 0) {
-
-return result;
-
+  int result = this.name.compareTo(p.getName());
+  if (result != 0) {
+    return result;
+  }
+  return this.age - p.getAge();
 }
-
-return this.age - p.getAge();
-
-}
-
 ```
 
 If we sort the list in natural order now, the result will be:
 
 ```java
-
 Person{age=45, name=Bill}
-
 Person{age=25, name=Courtney}
-
 Person{age=34, name=Kelly}
-
 Person{age=42, name=Kelly}
-
 ```
 
 You can see that the objects are ordered by name, but two persons with the same name Kelly are ordered by age too.
@@ -1381,9 +984,7 @@ In such cases, the second option—using the `Comparator.comparing()` method�
 `Comparator.comparing()`方法接受一个函数作为参数。我们将在第十七章中更详细地讨论函数式编程，*Lambda 表达式和函数式编程*。现在，我们只会说`Comparator.comparing()`方法基于传递的字段（要排序的类的字段）生成一个比较器。让我们看一个例子：
 
 ```java
-
 list.sort(Comparator.comparing(Person::getName));
-
 list.forEach(System.out::println);
 
 ```
@@ -1391,9 +992,7 @@ list.forEach(System.out::println);
 上面的代码按名称对`Person`对象进行排序。我们唯一需要做的修改是向`Person`类添加`getName()`方法。同样，如果我们添加`getAge()`方法，我们可以按年龄对`Person`对象进行排序：
 
 ```java
-
 list.sort(Comparator.comparing(Person::getAge));
-
 list.forEach(System.out::println);
 
 ```
@@ -1401,9 +1000,7 @@ list.forEach(System.out::println);
 或者我们可以按照两个字段对它们进行排序 - 正如我们在实现`Comparable`接口时所做的那样：
 
 ```java
-
 list.sort(Comparator.comparing(Person::getName).thenComparing(Person::getAge));
-
 list.forEach(System.out::println);
 
 ```
@@ -1423,25 +1020,17 @@ list.forEach(System.out::println);
 以下是说明它的代码：
 
 ```java
-
 List<String> list1 = new ArrayList<>();
-
 list1.add("s1");
-
 list1.add("s2");
 
 List<String> list2 = new ArrayList<>();
-
 list2.add("s1");
-
 list2.add("s2");
 
 System.out.println(list1.equals(list2)); //prints: true
-
 list2.sort(Comparator.reverseOrder());
-
 System.out.println(list2);               //prints: [s2, s1]
-
 System.out.println(list1.equals(list2)); //prints: false
 
 ```
@@ -1453,27 +1042,17 @@ System.out.println(list1.equals(list2)); //prints: false
 如果没有，我们可以使用前面在本节中描述的`retainAll(Collection)`和`removeAll(Collection)`方法找到差异。假设我们有两个如下的列表：
 
 ```java
-
 List<String> list1 = new ArrayList<>();
-
 list1.add("s1");
-
 list1.add("s1");
-
 list1.add("s2");
-
 list1.add("s3");
-
 list1.add("s4");
 
 List<String> list2 = new ArrayList<>();
-
 list2.add("s1");
-
 list2.add("s2");
-
 list2.add("s2");
-
 list2.add("s5");
 
 ```
@@ -1481,17 +1060,12 @@ list2.add("s5");
 我们可以找出一个列表中哪些元素不在另一个列表中：
 
 ```java
-
 List<String> list = new ArrayList<>(list1);
-
 list.removeAll(list2);
-
 System.out.println(list);    //prints: [s3, s4]
 
 list = new ArrayList<>(list2);
-
 list.removeAll(list1);
-
 System.out.println(list);    //prints: [s5]
 
 ```
@@ -1501,18 +1075,13 @@ System.out.println(list);    //prints: [s5]
 但是这个差异并不能告诉我们每个列表中可能存在的重复元素。为了找到它，我们可以使用`retainAll(Collection)`方法：
 
 ```java
-
 List<String> list = new ArrayList<>(list1);
-
 list.retainAll(list2);
-
-System.out.println(list);    //输出：[s1, s1, s2]
+System.out.println(list);    //prints: [s1, s1, s2]
 
 list = new ArrayList<>(list2);
-
 list.retainAll(list1);
-
-System.out.println(list);    //输出：[s1, s2, s2]
+System.out.println(list);    //prints: [s1, s2, s2]
 
 ```
 
@@ -1533,51 +1102,33 @@ System.out.println(list);    //输出：[s1, s2, s2]
 这两种方法都保留了元素的顺序。这是演示代码，显示了如何做到这一点：
 
 ```java
-
 List<String> list = new ArrayList<>();
-
 list.add("s1");
-
 list.add("s2");
 
 Object[] arr1 = list.toArray();
-
 for(Object o: arr1){
-
-System.out.print(o);       //输出：s1s2
-
+  System.out.print(o);       //prints: s1s2
 }
 
 String[] arr2 = list.toArray(new String[list.size()]);
-
 for(String s: arr2){
-
-System.out.print(s);      //输出：s1s2
-
+  System.out.print(s);      //prints: s1s2
 }
-
 ```
 
 然而，还有另一种将列表或任何集合转换为数组的方法 - 使用流和函数式编程：
 
 ```java
-
 Object[] arr3 = list.stream().toArray();
-
 for (Object o : arr3) {
-
-System.out.print(o);       //输出：s1s2
-
+  System.out.print(o);       //prints: s1s2
 }
 
-arr4 = list.stream().toArray(String[]::new);
-
+String[] arr4 = list.stream().toArray(String[]::new);
 for (String s : arr4) {
-
-System.out.print(s);       //输出：s1s2
-
+  System.out.print(s);       //prints: s1s2
 }
-
 ```
 
 流和函数式编程使许多传统的编码解决方案过时了。我们将在第十七章 *Lambda 表达式和函数式编程*和第十八章 *流和管道*中讨论这一点。
@@ -1629,18 +1180,12 @@ System.out.print(s);       //输出：s1s2
 `add(E)`方法也返回一个布尔值（`true`/`false`），表示操作的成功。这个方法覆盖了`Collection`接口中的方法，因此所有扩展或实现`Collection`接口的 Java 集合都有这个方法。让我们看一个例子：
 
 ```java
-
 Set<String> set = new HashSet<>();
-
-System.out.println(set.add("s1"));  //输出：true
-
-System.out.println(set.add("s1"));  //输出：false
-
-System.out.println(set.add("s2"));  //输出：true
-
-System.out.println(set.add("s3"));  //输出：true
-
-System.out.println(set);            //输出：[s3, s1, s2]
+System.out.println(set.add("s1"));  //prints: true
+System.out.println(set.add("s1"));  //prints: false
+System.out.println(set.add("s2"));  //prints: true
+System.out.println(set.add("s3"));  //prints: true
+System.out.println(set);            //prints: [s3, s1, s2]  
 
 ```
 
@@ -1667,27 +1212,16 @@ System.out.println(set);            //输出：[s3, s1, s2]
 这个`Set`功能与之前描述的`List`没有区别，因为实现`Collection`接口的每个集合也实现了`Iterable`接口（因为`Collection`扩展了`Iterable`）。可以使用传统的增强`for`语句或其自己的方法`forEach()`来迭代`Set`：
 
 ```java
-
 Set set = new HashSet();
-
 set.add(null);
-
 set.add(1);
-
 set.add("ss");
-
 set.add(new A());
-
 set.add(new B());
-
-对于 set 中的每个对象：
-
-System.out.println(o);
-
+for(Object o: set){
+  System.out.println(o);
 }
-
 set.forEach(System.out::println);
-
 ```
 
 在第十七章中，*Lambda 表达式和函数式编程*，我们将解释如何将函数作为`forEach()`方法的参数传递。两种迭代样式的结果是相同的：
@@ -1727,29 +1261,20 @@ set.forEach(System.out::println);
 例如，我们可以这样做：
 
 ```java
-
 Set<String> set1 = new HashSet<>();
-
 set1.add("s1");
-
 set1.add("s2");
-
 set1.add("s3");
 
 List<String> list = new ArrayList<>();
-
 list.add("s1");
 
 System.out.println(set1.addAll(list)); //prints: false
-
 System.out.println(set1);              //prints: [s3, s1, s2]
 
 list.add("s4");
-
 System.out.println(set1.addAll(list)); //prints: true
-
-System.out.println(set1);              //prints: [s3, s4, s1, s2]
-
+System.out.println(set1);              //prints: [s3, s4, s1, s2] 
 ```
 
 # 实现 equals()和 hashCode()
@@ -1785,31 +1310,20 @@ System.out.println(set1);              //prints: [s3, s4, s1, s2]
 我们将在第十七章中更多地讨论函数，*Lambda 表达式和函数式编程*。与此同时，以下示例显示了如何使用`removeIf()`方法：
 
 ```java
-
 Set<String> set = new HashSet();
-
 set.add(null);
-
 set.add("s1");
-
 set.add("s1");
-
 set.add("s2");
-
 set.add("s3");
-
 set.add("s4");
-
 System.out.println(set);    //[null, s3, s4, s1, s2]
 
 set.removeIf(e -> "s1".equals(e));
-
 System.out.println(set);   //[null, s3, s4, s2]
 
 set.removeIf(e -> e == null);
-
-System.out.println(set);    //[s3, s4, s2]
-
+System.out.println(set);    //[s3, s4, s2] 
 ```
 
 请注意，当尝试查找等于`s1`的元素`e`时，我们将`s1`放在第一位。这与我们在英语中表达的方式不一样，但它有助于避免`NullPointerException`，以防其中一个元素是`null`（就像我们的情况一样）。
@@ -1819,37 +1333,22 @@ System.out.println(set);    //[s3, s4, s2]
 与`List`相反，不可能直接替换`Set`中的元素，因为您不能使用索引或其他方式指向对象。但是可以像之前描述的那样遍历集合，或者使用`Stream`对象（我们将在第十八章中讨论这一点，*流和管道)*，检查每个元素并查看这是否是您要替换的元素。那些不符合条件的元素，您可以添加到一个新的集合。而那些您想要替换的元素，则跳过并将另一个对象（将替换您跳过的对象）添加到新集合中：
 
 ```java
-
 Set<String> set = new HashSet();
-
 set.add(null);
-
 set.add("s2");
-
 set.add("s3");
-
 System.out.println(set);    //[null, s3, s2]
 
-//我们想用 s5 替换 s2
-
+//We want to replace s2 with s5
 Set<String> newSet = new HashSet<>();
-
 set.forEach(s -> {
-
-if("s2".equals(s)){
-
-newSet.add("s5");
-
-} else {
-
-newSet.add(s);
-
-}
-
+  if("s2".equals(s)){
+    newSet.add("s5");
+  } else {
+     newSet.add(s);
+  }
 });
-
 set = newSet;
-
 System.out.println(set);    //[null, s3, s5]
 
 ```
@@ -1873,41 +1372,29 @@ System.out.println(set);    //[null, s3, s5]
 以下代码说明了定义：
 
 ```java
-
 Set<String> set1 = new HashSet<>();
-
 set1.add("s1");
-
 set1.add("s2");
 
 List<String> list = new ArrayList<>();
-
 list.add("s2");
-
 list.add("s1");
 
-System.out.println(set1.equals(list)); //prints: false
-
+System.out.println(set1.equals(list)); //prints: false 
 ```
 
 前面的集合不相等，因为它们的类型不同。现在，让我们比较两个集合：
 
 ```java
-
 Set<String> set2 = new HashSet<>();
-
 set2.add("s3");
-
 set2.add("s1");
 
 System.out.println(set1.equals(set2)); //prints: false
 
 set2.remove("s3");
-
 set2.add("s2");
-
 System.out.println(set1.equals(set2)); //prints: true
-
 ```
 
 前面的集合根据其元素的组成而不同，即使集合的大小相同。
@@ -1919,47 +1406,31 @@ System.out.println(set1.equals(set2)); //prints: true
 如果不是，我们可以使用`retainAll(Collection)`和`removeAll(Collection)`方法来查找差异，这些方法在本节前面已经描述过。假设我们有两个列表如下：
 
 ```java
-
 Set<String> set1 = new HashSet<>();
-
 set1.add("s1");
-
 set1.add("s1");
-
 set1.add("s2");
-
 set1.add("s3");
-
 set1.add("s4");
 
 Set<String> set2 = new HashSet<>();
-
 set2.add("s1");
-
 set2.add("s2");
-
 set2.add("s2");
-
-set2.add("s5");
+set2.add("s5"); 
 
 ```
 
 我们可以找到一个集合中不在另一个集合中的元素：
 
 ```java
-
 Set<String> set = new HashSet<>(set1);
-
 set.removeAll(set2);
-
 System.out.println(set);    //prints: [s3, s4]
 
 set = new HashSet<>(set2);
-
 set.removeAll(set1);
-
-System.out.println(set);    //prints: [s5]
-
+System.out.println(set);    //prints: [s5] 
 ```
 
 请注意，我们创建了一个临时集合以避免破坏原始集合。
@@ -1967,19 +1438,13 @@ System.out.println(set);    //prints: [s5]
 由于`Set`不允许重复元素，因此无需使用`retainAll(Collection)`方法来查找集合之间的更多差异，就像我们为`List`所做的那样。相反，`retainAll(Collection)`方法可用于查找两个集合中的公共元素：
 
 ```java
-
 Set<String> set = new HashSet<>(set1);
-
 set.retainAll(set2);
-
 System.out.println(set);    //prints: [s1, s2]
 
 set = new HashSet<>(set2);
-
 set.retainAll(set1);
-
 System.out.println(set);    //prints: [s1, s2]
-
 ```
 
 正如您从前面的代码中可以看到的，要找到两个集合之间的公共元素，只需要使用`retainAll()`方法一次就足够了，无论哪个集合是主集合，哪个是参数集合。
@@ -1997,51 +1462,34 @@ System.out.println(set);    //prints: [s1, s2]
 这两种方法只有在集合保持顺序的情况下才能保留元素的顺序，例如`SortedSet`或`NavigableSet`。以下是演示代码，显示了如何执行此操作：
 
 ```java
-
 Set<String> set = new HashSet<>();
-
 set.add("s1");
-
 set.add("s2");
 
 Object[] arr1 = set.toArray();
-
 for(Object o: arr1){
-
-System.out.print(o);       //打印：s1s2
-
+  System.out.print(o);       //prints: s1s2
 }
 
 String[] arr2 = set.toArray(new String[set.size()]);
 
 for(String s: arr2){
-
-System.out.print(s);     //打印：s1s2
-
+  System.out.print(s);     //prints: s1s2
 }
-
 ```
 
 然而，还有另一种将集合或任何集合转换为数组的方法——使用流和函数式编程：
 
 ```java
-
 Object[] arr3 = set.stream().toArray();
-
 for (Object o : arr3) {
-
-System.out.print(o);       //打印：s1s2
-
+  System.out.print(o);       //prints: s1s2
 }
 
 String[] arr4 = set.stream().toArray(String[]::new);
-
 for (String s : arr4) {
-
-System.out.print(s);       //打印：s1s2
-
+  System.out.print(s);       //prints: s1s2
 }
-
 ```
 
 流和函数式编程使许多传统的编码解决方案过时。我们将在第十七章 *Lambda 表达式和函数式编程*和第十八章 *流和管道*中讨论它们。
@@ -2069,19 +1517,14 @@ System.out.print(s);       //打印：s1s2
 每个值都存储在一个具有唯一键的映射中，当添加到映射中时，该键与值一起传递。在`Map<Integer, String> map`的情况下：
 
 ```java
-
-map.put(42, "whatever");        //42 是值"whatever"的键
-
+map.put(42, "whatever");        //42 is the key for the value "whatever"
 ```
 
 然后，稍后可以通过其键检索值：
 
 ```java
-
 String v = map.get(42);
-
-System.out.println(v);     //打印：whatever
-
+System.out.println(v);     //prints: whatever
 ```
 
 这些是传达`Map`接口目的的基本映射操作——提供键值对的存储，其中键和值都是对象，并且用作键的类实现了`equals()`和`hashCode()`方法，这些方法覆盖了`Object`类中的默认实现。
@@ -2109,36 +1552,25 @@ System.out.println(v);     //打印：whatever
 以下代码演示了所描述的功能：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
+System.out.println(map.put(1, null));  //prints: null
+System.out.println(map.put(1, "s1"));  //prints: null
+System.out.println(map.put(2, "s1"));  //prints: null
+System.out.println(map.put(2, "s2"));  //prints: s1
+System.out.println(map.put(3, "s3"));  //prints: null
+System.out.println(map);               //prints: {1=s1, 2=s2, 3=s3}
 
-System.out.println(map.put(1, null));  //输出：null
+System.out.println(map.putIfAbsent(1, "s4"));  //prints: s1
+System.out.println(map);               //prints: {1=s1, 2=s2, 3=s3}
 
-System.out.println(map.put(1, "s1"));  //输出：null
+System.out.println(map.put(1, null));  //prints: s1
+System.out.println(map);               //prints: {1=null, 2=s2, 3=s3}
 
-System.out.println(map.put(2, "s1"));  //输出：null
+System.out.println(map.putIfAbsent(1, "s4"));  //prints: null
+System.out.println(map);               //prints: {1=s4, 2=s2, 3=s3}
 
-System.out.println(map.put(2, "s2"));  //输出：s1
-
-System.out.println(map.put(3, "s3"));  //输出：null
-
-System.out.println(map);               //输出：{1=s1, 2=s2, 3=s3}
-
-System.out.println(map.putIfAbsent(1, "s4"));  //输出：s1
-
-System.out.println(map);               //输出：{1=s1, 2=s2, 3=s3}
-
-System.out.println(map.put(1, null));  //输出：s1
-
-System.out.println(map);               //输出：{1=null, 2=s2, 3=s3}
-
-System.out.println(map.putIfAbsent(1, "s4"));  //输出：null
-
-System.out.println(map);               //输出：{1=s4, 2=s2, 3=s3}
-
-System.out.println(map.putIfAbsent(4, "s4"));  //输出：null
-
-System.out.println(map);               //输出：{1=s4, 2=s2, 3=s3, 4=s4}
+System.out.println(map.putIfAbsent(4, "s4"));  //prints: null
+System.out.println(map);               //prints: {1=s4, 2=s2, 3=s3, 4=s4}
 
 ```
 
@@ -2175,44 +1607,27 @@ System.out.println(map);               //输出：{1=s4, 2=s2, 3=s3, 4=s4}
 为了演示前面的方法，我们将使用以下地图：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(1, null);
-
 map.put(2, "s2");
-
 map.put(3, "s3");
-
 ```
 
 以下是如何迭代此地图的方法：
 
 ```java
-
 for(Integer key: map.keySet()){
-
-System.out.println("key=" + key + ", value=" + map.get(key));
-
+  System.out.println("key=" + key + ", value=" + map.get(key));
 }
-
 map.keySet().stream()
-
-.forEach(k->System.out.println("key=" + k + ", value=" + map.get(k)));
-
+   .forEach(k->System.out.println("key=" + k + ", value=" + map.get(k)));
 for(String value: map.values()){
-
-System.out.println("value=" + value);
-
+  System.out.println("value=" + value);
 }
-
 map.values().stream().forEach(System.out::println);
-
 map.forEach((k,v) -> System.out.println("key=" + k + ", value=" + v));
-
-map.entrySet().forEach(e -> System.out.println("key=" + e.getKey() +
-
-", value=" + e.getValue()));
+map.entrySet().forEach(e -> System.out.println("key=" + e.getKey() + 
+                                          ", value=" + e.getValue()));
 
 ```
 
@@ -2227,26 +1642,18 @@ map.entrySet().forEach(e -> System.out.println("key=" + e.getKey() +
 `putAll(Map<? extends K, ? extends V> map)`方法从提供的地图中添加每个键值对，就像`put(K, V)`方法对一个键值对一样：
 
 ```java
-
 Map<Integer, String> map1 = new HashMap<>();
-
 map1.put(1, null);
-
 map1.put(2, "s2");
-
 map1.put(3, "s3");
 
 Map<Integer, String> map2 = new HashMap<>();
-
 map2.put(1, "s1");
-
 map2.put(2, null);
-
 map2.put(4, "s4");
 
 map1.putAll(map2);
-
-System.out.println(map1); //打印：{1=s1, 2=null, 3=s3, 4=s4}
+System.out.println(map1); //prints: {1=s1, 2=null, 3=s3, 4=s4}
 
 ```
 
@@ -2283,30 +1690,21 @@ System.out.println(map1); //打印：{1=s1, 2=null, 3=s3, 4=s4}
 以下代码演示了这些方法：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(1, null);
-
 map.put(2, "s2");
-
 map.put(3, "s3");
 
-System.out.println(map.get(2)); //打印：s2
-
-System.out.println(map.getOrDefault(2, "s4")); //打印：s2
-
-System.out.println(map.getOrDefault(4, "s4")); //打印：s4
+System.out.println(map.get(2));                 //prints: s2
+System.out.println(map.getOrDefault(2, "s4"));  //prints: s2
+System.out.println(map.getOrDefault(4, "s4"));  //prints: s4
 
 Map.Entry<Integer, String> entry = Map.entry(42, "s42");
+System.out.println(entry);      //prints: 42=s42
 
-System.out.println(entry); //打印：42=s42
-
-Map<Integer, String> entries =
-
-Map.ofEntries(entry, Map.entry(43, "s43"));
-
-System.out.println(entries); //打印：{42=s42, 43=s43}
+Map<Integer, String> entries = 
+                Map.ofEntries(entry, Map.entry(43, "s43"));   
+System.out.println(entries);   //prints: {42=s42, 43=s43}
 
 ```
 
@@ -2323,54 +1721,36 @@ System.out.println(entries); //打印：{42=s42, 43=s43}
 以下是说明所述行为的代码：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(1, null);
-
 map.put(2, "s2");
-
 map.put(3, "s3");
-
-System.out.println(map.remove(2)); //打印：s2
-
-System.out.println(map); //打印：{1=null, 3=s3}
-
-System.out.println(map.remove(4)); //打印：null
-
-System.out.println(map); //打印：{1=null, 3=s3}
-
-System.out.println(map.remove(3, "s4")); //打印：false
-
-System.out.println(map); //打印：{1=null, 3=s3}
-
-System.out.println(map.remove(3, "s3")); //打印：true
-
-System.out.println(map); //打印：{1=null}
+System.out.println(map.remove(2));        //prints: s2
+System.out.println(map);                  //prints: {1=null, 3=s3}
+System.out.println(map.remove(4));        //prints: null
+System.out.println(map);                  //prints: {1=null, 3=s3}
+System.out.println(map.remove(3, "s4"));  //prints: false
+System.out.println(map);                  //prints: {1=null, 3=s3}
+System.out.println(map.remove(3, "s3"));  //prints: true
+System.out.println(map);                  //prints: {1=null}
 
 ```
 
 还有另一种通过键删除`Map`元素的方法。如果从地图中删除了键，则相应的值也将被删除。以下是演示它的代码：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(1, null);
-
 map.put(2, "s2");
-
 map.put(3, "s3");
 
 Set<Integer> keys = map.keySet();
 
-System.out.println(keys.remove(2)); //打印：true
+System.out.println(keys.remove(2));      //prints: true
+System.out.println(map);                 //prints: {1=null, 3=s3}
 
-System.out.println(map); //打印：{1=null, 3=s3}
-
-System.out.println(keys.remove(4)); //打印：false
-
-System.out.println(map); //打印：{1=null, 3=s3}
+System.out.println(keys.remove(4));      //prints: false
+System.out.println(map);                 //prints: {1=null, 3=s3}
 
 ```
 
@@ -2391,13 +1771,9 @@ System.out.println(map); //打印：{1=null, 3=s3}
 让我们假设我们要更改的地图如下：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(1, null);
-
 map.put(2, "s2");
-
 map.put(3, "s3");
 
 ```
@@ -2405,58 +1781,43 @@ map.put(3, "s3");
 然后，说明前两种方法的代码如下：
 
 ```java
+System.out.println(map.replace(1, "s1"));   //prints: null
+System.out.println(map);                    //prints: {1=s1, 2=s2, 3=s3}
 
-System.out.println(map.replace(1, "s1")); //打印：null
+System.out.println(map.replace(4, "s1"));   //prints: null
+System.out.println(map);                    //prints: {1=s1, 2=s2, 3=s3}
 
-System.out.println(map); //打印：{1=s1, 2=s2, 3=s3}
+System.out.println(map.replace(1, "s2", "s1"));   //prints: false
+System.out.println(map);                    //prints: {1=s1, 2=s2, 3=s3}
 
-System.out.println(map.replace(4, "s1")); //打印：null
-
-System.out.println(map); //打印：{1=s1, 2=s2, 3=s3}
-
-System.out.println(map.replace(1, "s2", "s1")); //打印：false
-
-System.out.println(map); //打印：{1=s1, 2=s2, 3=s3}
-
-System.out.println(map.replace(1, "s1", "s2")); //打印：true
-
-System.out.println(map); //打印：{1=s2, 2=s2, 3=s3}
-
+System.out.println(map.replace(1, "s1", "s2"));   //prints: true
+System.out.println(map);                    //prints: {1=s2, 2=s2, 3=s3}
 ```
 
 这是帮助理解列出的最后一个替换方法的代码：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(1, null);
-
 map.put(2, null);
-
 map.put(3, "s3");
 
 map.replaceAll((k,v) -> v == null? "s" + k : v);
-
-System.out.println(map); //打印：{1=s1, 2=s2, 3=s3}
+System.out.println(map);                 //prints: {1=s1, 2=s2, 3=s3}
 
 map.replaceAll((k,v) -> k == 2? "n2" : v);
-
-System.out.println(map); //打印：{1=s1, 2=n2, 3=s3}
+System.out.println(map);                 //prints: {1=s1, 2=n2, 3=s3}
 
 map.replaceAll((k,v) -> v.startsWith("s") ? "s" + (k + 10) : v);
-
-System.out.println(map); //打印：{1=s11, 2=n2, 3=s13}
+System.out.println(map);                 //prints: {1=s11, 2=n2, 3=s13}
 
 ```
 
 请注意，我们只能在用其他东西替换所有`null`值之后才能使用`v.startsWith()`方法。否则，这行可能会抛出`NullPointerException`，我们需要将其更改为以下行：
 
 ```java
-
-map.replaceAll((k,v) -> (v != null && v.startsWith("s")) ?
-
-"s" + (k + 10) : v);
+map.replaceAll((k,v) -> (v != null && v.startsWith("s")) ? 
+                                          "s" + (k + 10) : v);
 
 ```
 
@@ -2475,28 +1836,20 @@ map.replaceAll((k,v) -> (v != null && v.startsWith("s")) ?
 这是说明定义的代码：
 
 ```java
-
 Map<Integer, String> map1 = new HashMap<>();
-
 map1.put(1, null);
-
 map1.put(2, "s2");
-
 map1.put(3, "s3");
 
 Map<Integer, String> map2 = new HashMap<>();
-
 map2.put(1, null);
-
 map2.put(2, "s2");
-
 map2.put(3, "s3");
 
-System.out.println(map2.equals(map1)); //打印：true
+System.out.println(map2.equals(map1)); //prints: true
 
 map2.put(1, "s1");
-
-System.out.println(map2.equals(map1)); //打印：false
+System.out.println(map2.equals(map1)); //prints: false
 
 ```
 
@@ -2507,25 +1860,17 @@ System.out.println(map2.equals(map1)); //打印：false
 如果两个地图不相等，并且需要找出确切的差异，有多种方法可以做到这一点：
 
 ```java
-
 map1.entrySet().containsAll(map2.entrySet());
-
 map1.entrySet().retainAll(map2.entrySet());
-
 map1.entrySet().removeAll(map2.entrySet());
 
 map1.keySet().containsAll(map2.keySet());
-
 map1.keySet().retainAll(map2.keySet());
-
 map1.keySet().removeAll(map2.keySet());
 
 map1.values().containsAll(map2.values());
-
 map1.values().retainAll(map2.values());
-
 map1.values().removeAll(map2.values());
-
 ```
 
 使用这些方法的任意组合，可以全面了解两个地图之间的差异。
@@ -2559,30 +1904,23 @@ map1.values().removeAll(map2.values());
 假设`enum`类看起来像下面这样：
 
 ```java
-
-枚举运输{AIRPLANE，BUS，CAR，TRAIN，TRUCK}
-
+enum Transport { AIRPLANE, BUS, CAR, TRAIN, TRUCK }
 ```
 
 然后，演示`EnumSet`的四种方法的代码可能如下所示：
 
 ```java
-
 EnumSet<Transport> set1 = EnumSet.allOf(Transport.class);
-
-System.out.println(set1); //打印：[AIRPLANE，BUS，CAR，TRAIN，TRUCK]
+System.out.println(set1);   //prints: [AIRPLANE, BUS, CAR, TRAIN, TRUCK]
 
 EnumSet<Transport> set2 = EnumSet.range(Transport.BUS, Transport.TRAIN);
-
-System.out.println(set2); //打印：[BUS，CAR，TRAIN]
+System.out.println(set2);   //prints: [BUS, CAR, TRAIN]
 
 EnumSet<Transport> set3 = EnumSet.of(Transport.BUS, Transport.TRUCK);
-
-System.out.println(set3); //打印：[BUS，TRUCK]
+System.out.println(set3);   //prints: [BUS, TRUCK]
 
 EnumSet<Transport> set4 = EnumSet.complementOf(set3);
-
-System.out.println(set4); //打印：[AIRPLANE，CAR，TRAIN]
+System.out.println(set4);   //prints: [AIRPLANE, CAR, TRAIN]
 
 ```
 

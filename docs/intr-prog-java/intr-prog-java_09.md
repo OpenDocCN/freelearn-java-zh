@@ -68,56 +68,37 @@
 理解运算符的最佳方法是看它们的实际应用。以下是我们的演示应用程序代码（其中包含在注释中捕获的结果），解释了一元运算符`+`和`-`：
 
 ```java
-
 public class Ch09DemoApp {
-
-public static void main(String[] args) {
-
-int i = 2;   //默认情况下假定为一元“+”
-
-int x = -i;  //一元“-”使正数变为负数
-
-System.out.println(x);   //输出：-2
-
-int y = -x;  //一元“-”使负数变为正数
-
-System.out.println(y);   //输出：2
-
+  public static void main(String[] args) {
+    int i = 2;   //unary "+" is assumed by default
+    int x = -i;  //unary "-" makes positive become negative
+    System.out.println(x);   //prints: -2
+    int y = -x;  //unary "-" makes negative become positive
+    System.out.println(y);   //prints: 2
+  }
 }
-
-}
-
 ```
 
 以下代码演示了二进制运算符`+`、`-`、`*`、`/`和`%`：
 
 ```java
+int z = x + y;              //binary "+" means "add"
+System.out.println(z);      //prints: 0
 
-int z = x + y;              //二进制“+”表示“相加”
-
-System.out.println(z);      //输出：0
-
-z = x - y;                  //二进制“-”表示“减去”
-
-System.out.println(z);      //输出：-4
-
-System.out.println(y - x);  //输出：4
+z = x - y;                  //binary "-" means "subtract"
+System.out.println(z);      //prints: -4
+System.out.println(y - x);  //prints: 4
 
 z = x * y;
-
-System.out.println(z);      //输出：-4
+System.out.println(z);      //prints: -4
 
 z = x / y;
-
-System.out.println(z);      //输出：-1
+System.out.println(z);      //prints: -1
 
 z = x * y;
-
-System.out.println(z % 3);  //输出：-1
-
-System.out.println(z % 2);  //输出：0
-
-System.out.println(z % 4);  //输出：0
+System.out.println(z % 3);  //prints: -1
+System.out.println(z % 2);  //prints: 0
+System.out.println(z % 4);  //prints: 0
 
 ```
 
@@ -126,15 +107,10 @@ System.out.println(z % 4);  //输出：0
 一切看起来都很合乎逻辑和预期。但是，当我们尝试用余数除以另一个整数时，却没有得到预期的结果：
 
 ```java
-
 int i1 = 11;
-
 int i2 = 3;
-
-System.out.println(i1 / i2); //输出：3 而不是 3.66...
-
-System.out.println(i1 % i2); //输出余数：2
-
+System.out.println(i1 / i2); //prints: 3 instead of 3.66...
+System.out.println(i1 % i2); //prints remainder: 2
 ```
 
 结果`i1/i2`应该大于`3`。它必须是`3.66...`或类似的值。问题是由于操作中涉及的所有数字都是整数引起的。在这种情况下，Java 假设结果也应该表示为整数，并丢弃（不四舍五入）小数部分。
@@ -142,27 +118,19 @@ System.out.println(i1 % i2); //输出余数：2
 现在，让我们将操作数之一声明为`double`类型，值为 11，并再次尝试除法：
 
 ```java
-
 double d1 = 11;
-
-System.out.println(d1/i2);    //输出：3.6666666666666665
+System.out.println(d1/i2);    //prints: 3.6666666666666665
 
 ```
 
 这一次，我们得到了预期的结果，还有其他方法可以实现相同的结果：
 
 ```java
-
-System.out.println((float)i1 / i2);  //输出：3.6666667
-
-System.out.println(i1 / (double)i2); //输出：3.6666666666666665
-
-System.out.println(i1 * 1.0 / i2);   //输出：3.6666666666666665
-
-System.out.println(i1 * 1f / i2);    //输出：3.6666667
-
-System.out.println(i1 * 1d / i2);    //输出：3.6666666666666665
-
+System.out.println((float)i1 / i2);  //prints: 3.6666667
+System.out.println(i1 / (double)i2); //prints: 3.6666666666666665
+System.out.println(i1 * 1.0 / i2);   //prints: 3.6666666666666665
+System.out.println(i1 * 1f / i2);    //prints: 3.6666667
+System.out.println(i1 * 1d / i2);    //prints: 3.6666666666666665
 ```
 
 正如你所看到的，你可以将任何操作数转换为`float`或`double`类型（取决于你需要的精度），或者你可以包含`float`或`double`类型的数字。你可能还记得第五章中所述，带有小数部分的值默认为`double`。或者，你可以明确选择要添加的值的类型，就像我们在前面代码的最后两行中所做的那样。
@@ -170,23 +138,14 @@ System.out.println(i1 * 1d / i2);    //输出：3.6666666666666665
 无论你做什么，只要小心两个整数相除。如果你不希望小数部分被丢弃，至少将一个操作数转换为`float`或`double`（稍后在*Cast operator: ( target type )*部分详细了解转换运算符）。然后，如果需要，你可以将结果四舍五入到任何你喜欢的精度，或者将其转换回`int`：
 
 ```java
-
 int i1 = 11;
-
 int i2 = 3;
-
 float r = (float)i1 / i2;
-
-System.out.println(r);                 //输出：3.6666667
-
+System.out.println(r);                 //prints: 3.6666667
 float f = Math.round(r * 100f) / 100f;
-
-System.out.println(f);                 //输出：3.67
-
+System.out.println(f);                 //prints: 3.67
 int i3 = (int)f;
-
-System.out.println(i3);                //输出：3
-
+System.out.println(i3);                //prints: 3
 ```
 
 Java 整数除法：如果不确定，将其中一个操作数设为`double`或`float`，或者简单地给其中一个添加`1.0`的乘数。
@@ -194,15 +153,10 @@ Java 整数除法：如果不确定，将其中一个操作数设为`double`或`
 在`String`的情况下，二进制运算符`+`表示连接，这个运算符通常被称为连接运算符：
 
 ```java
-
 String s1 = "Nick";
-
 String s2 = "Samoylov";
-
 System.out.println(s1 + " " + s2);  //prints: Nick Samoylov
-
 String s3 = s1 + " " + s2;
-
 System.out.println(s3);             //prints: Nick Samoylov
 
 ```
@@ -210,15 +164,11 @@ System.out.println(s3);             //prints: Nick Samoylov
 并且只是作为提醒，在第五章中，*Java 语言元素和类型*，我们演示了应用于原始类型`char`的算术运算使用字符的代码点-字符的数值：
 
 ```java
-
 char c1 = 'a';
-
 char c2 = '$';
 
 System.out.println(c1 + c2);       //prints: 133
-
-System.out.println(c1/c2);         //prints: 2
-
+System.out.println(c1/c2);         //prints: 2 
 System.out.println((float)c1/c2);  //prints: 2.6944444
 
 ```
@@ -236,23 +186,15 @@ System.out.println((float)c1/c2);  //prints: 2.6944444
 以下代码显示了`++`和`--`运算符的工作原理，取决于它们的位置，变量之前（前缀）还是变量之后（后缀）：
 
 ```java
-
 int i = 2;
-
 System.out.println(++i);        //prints: 3
-
 System.out.println("i=" + i);   //prints: i=3
-
 System.out.println(--i);        //prints: 2
-
 System.out.println("i=" + i);   //prints: i=2
 
 System.out.println(i++);        //prints: 2
-
 System.out.println("i=" + i);   //prints: i=3
-
 System.out.println(i--);        //prints: 3
-
 System.out.println("i=" + i);   //prints: i=2
 
 ```
@@ -264,17 +206,11 @@ System.out.println("i=" + i);   //prints: i=2
 习惯这需要时间。但一旦你习惯了，写`++x;`或`x++`会感觉很容易，而不是`x = x + 1;`。在这种情况下使用前缀或后缀递增没有区别，因为它们都最终会增加`x`：
 
 ```java
-
 int x = 0;
-
 ++x;
-
 System.out.println(x);   //prints: 1
-
 x = 0;
-
 x++;
-
 System.out.println(x);   //prints: 1
 
 ```
@@ -282,15 +218,10 @@ System.out.println(x);   //prints: 1
 前缀和后缀之间的区别只有在使用返回值而不是后缀返回后变量的值时才会出现。例如，这是演示代码：
 
 ```java
-
 int x = 0;
-
 int y = x++ + x++;
-
 System.out.println(y);   //prints: 1
-
 System.out.println(x);   //prints: 2
-
 ```
 
 `y`的值由第一个`x++`返回 0 形成，然后将`x`增加 1。第二个`x++`得到 1 作为当前的`x`值并返回它，所以`y`的值变为 1。同时，第二个`x++`再次增加`x`的值 1，所以`x`的值变为 2。
@@ -298,13 +229,9 @@ System.out.println(x);   //prints: 2
 这种功能在表达式中更有意义：
 
 ```java
-
 int n = 0;
-
 int m = 5*n++;
-
 System.out.println(m);   //prints: 0
-
 System.out.println(n);   //prints: 1
 
 ```
@@ -312,59 +239,36 @@ System.out.println(n);   //prints: 1
 它允许我们首先使用变量的当前值，然后将其增加 1。因此，后缀递增（递减）运算符具有增加（递减）变量值的副作用。正如我们已经提到的，这对于数组元素访问特别有益：
 
 ```java
-
 int k = 0;
-
 int[] arr = {88, 5, 42};
-
 System.out.println(arr[k++]);  //prints: 88
-
 System.out.println(k);         //prints: 1
-
 System.out.println(arr[k++]);  //prints: 5
-
 System.out.println(k);         //prints: 2
-
 System.out.println(arr[k++]);  //prints: 42
-
 System.out.println(k);         //prints: 3
-
 ```
 
 通过将`k`设置为`-1`并将`++`移到前面也可以实现相同的结果：
 
 ```java
-
 int k = -1;
-
 int[] arr = {88, 5, 42};
-
 System.out.println(arr[k++]);  //prints: 88
-
 System.out.println(k);         //prints: 1
-
 System.out.println(arr[++k]);  //prints: 5
-
 System.out.println(k);         //prints: 2
-
 System.out.println(arr[++k]);  //prints: 42
-
 System.out.println(k);         //prints: 3
-
 ```
 
 但是，使用`k=0`和`k++`读起来更好，因此成为访问数组组件的典型方式。但是，只有在需要按索引访问数组元素时才有用。例如，如果需要从索引`2`开始访问数组，则需要使用索引：
 
 ```java
-
 int[] arr = {1,2,3,4};
-
 int j = 2;
-
 System.out.println(arr[j++]);  //prints: 3
-
 System.out.println(arr[j++]);  //prints: 4
-
 ```
 
 但是，如果您要按顺序访问数组，从索引 0 开始，那么有更经济的方法。请参见第十章，*控制流语句*。
@@ -374,47 +278,29 @@ System.out.println(arr[j++]);  //prints: 4
 等号运算符`==`（表示相等）和`!=`（表示不相等）比较相同类型的值，并返回`Boolean`值`true`，如果操作数的值相等，则返回`false`。整数和布尔原始类型的相等性很简单：
 
 ```java
-
 char a = 'a';
-
 char b = 'b';
-
 char c = 'a';
-
 System.out.println(a == b);  //prints: false
-
 System.out.println(a != b);  //prints: true
-
 System.out.println(a == c);  //prints: true
-
 System.out.println(a != c);  //prints: false
 
 int i1 = 1;
-
 int i2 = 2;
-
 int i3 = 1;
-
 System.out.println(i1 == i2);  //prints: false
-
 System.out.println(i1 != i2);  //prints: true
-
 System.out.println(i1 == i3);  //prints: true
 
 System.out.println(i1 != i3);  //prints: false
 
 boolean b1 = true;
-
 boolean b2 = false;
-
 boolean b3 = true;
-
 System.out.println(b1 == b2);  //prints: false
-
 System.out.println(b1 != b2);  //prints: true
-
 System.out.println(b1 == b3);  //prints: true
-
 System.out.println(b1 != b3);  //prints: false
 
 ```
@@ -422,7 +308,6 @@ System.out.println(b1 != b3);  //prints: false
 在这段代码中，`char`类型与算术运算一样，被视为等于其代码点的数值。否则，很难理解以下行的结果：
 
 ```java
-
 System.out.println((a + 1) == b); //prints: true
 
 ```
@@ -430,11 +315,8 @@ System.out.println((a + 1) == b); //prints: true
 但是，从以下结果可以明显看出这行的解释：
 
 ```java
-
 System.out.println(b - a);        //prints: 1
-
 System.out.println((int)a);       //prints: 97
-
 System.out.println((int)b);       //prints: 98
 
 ```
@@ -444,19 +326,12 @@ System.out.println((int)b);       //prints: 98
 对于基本类型`float`和`double`，等号运算符似乎以相同的方式工作。以下是`double`类型相等的示例：
 
 ```java
-
 double d1 = 0.42;
-
 double d2 = 0.43;
-
 double d3 = 0.42;
-
 System.out.println(d1 == d2);  //prints: false
-
 System.out.println(d1 != d2);  //prints: true
-
 System.out.println(d1 == d3);  //prints: true
-
 System.out.println(d1 != d3);  //prints: false
 
 ```
@@ -464,8 +339,7 @@ System.out.println(d1 != d3);  //prints: false
 但是，这是因为我们比较的是作为文字创建的数字，带有固定小数部分。如果我们比较以下计算的结果，很有可能得到的值永远不会等于预期的结果，因为有些数字（例如`1/3`）无法准确表示。那么`1/3`的情况是什么？以小数表示，它有一个永无止境的小数部分：
 
 ```java
-
-System.out.println((double)1/3);    //prints: 0.3333333333333333
+System.out.println((double)1/3);    //prints: 0.3333333333333333 
 
 ```
 
@@ -474,21 +348,13 @@ System.out.println((double)1/3);    //prints: 0.3333333333333333
 在对象引用的情况下，等号运算符比较的是引用本身，而不是对象及其值：
 
 ```java
-
 SomeClass c1 = new SomeClass();
-
 SomeClass c2 = new SomeClass();
-
 SomeClass c3 = c1;
-
 System.out.println(c1 == c2);     //prints: false
-
 System.out.println(c1 != c2);     //prints: true
-
 System.out.println(c1 == c3);     //prints: true
-
 System.out.println(c1 != c3);     //prints: false
-
 System.out.println(new SomeClass() == new SomeClass());  //prints: false
 
 ```
@@ -500,39 +366,24 @@ Object equality based on the values they contain has to be performed using the 
 Relational operators can only be used with primitive types:
 
 ```java
-
 int i1 = 1;
-
 int i2 = 2;
-
 int i3 = 1;
-
 System.out.println(i1 > i2);    //prints: false
-
 System.out.println(i1 >= i2);   //prints: false
-
 System.out.println(i1 >= i3);   //prints: true
-
 System.out.println(i1 < i2);    //prints: true
-
 System.out.println(i1 <= i2);   //prints: true
-
 System.out.println(i1 <= i3);   //prints: true
 
 System.out.println('a' >= 'b');  //prints: false
-
 System.out.println('a' <= 'b');  //prints: true
 
 double d1 = 1/3;
-
 double d2 = 0.34;
-
 double d3 = 0.33;
-
 System.out.println(d1 < d2);  //prints: true
-
-System.out.println(d1 >= d3); //prints: false
-
+System.out.println(d1 >= d3); //prints: false     
 ```
 
 In the preceding code, we see that `int` type values compare to each other as expected, and `char` type values compare to each other based on their numeric code point values.
@@ -542,23 +393,14 @@ In the preceding code, we see that `int` type values compare to each other as ex
 到目前为止，除了最后一行之外，没有什么意外。我们已经确定，作为小数表示的`1/3`应该是`0.3333333333333333`，这比`0.33`大。为什么`d1 >= d3`返回`false`？如果你说这是因为整数除法，那么你是正确的。即使赋值给`double`类型的变量，结果也是 0.0，因为整数除法`1/3`先发生，然后才将结果赋给`d1`。以下是演示它的代码：
 
 ```java
-
 double d1 = 1/3;
-
 double d2 = 0.34;
-
 double d3 = 0.33;
-
 System.out.println(d1 < d2);   //prints: true
-
 System.out.println(d1 >= d3);  //prints: false
-
 System.out.println(d1);        //prints: 0.0
-
 double d4 = 1/3d;
-
 System.out.println(d4);        //prints: 0.3333333333333333
-
 System.out.println(d4 >= d3);  //prints: true
 
 ```
@@ -582,23 +424,14 @@ System.out.println(d4 >= d3);  //prints: true
 以下是演示代码：
 
 ```java
-
 boolean x = false;
-
 System.out.println(!x);  //prints: true
-
 System.out.println(!!x); //prints: false
-
 boolean y = !x;
-
 System.out.println(y & x); //prints: false
-
 System.out.println(y | x); //prints: true
-
 boolean z = true;
-
 System.out.println(y & z); //prints: true
-
 System.out.println(y | z); //prints: true
 
 ```
@@ -610,19 +443,12 @@ System.out.println(y | z); //prints: true
 我们可以重用先前的代码示例，但使用`&&`和`||`运算符，而不是`&`和`|`运算符：
 
 ```java
-
 boolean x = false;
-
 boolean y = !x;
-
 System.out.println(y && x); //prints: false
-
 System.out.println(y || x); //prints: true
-
 boolean z = true;
-
 System.out.println(y && z); //prints: true
-
 System.out.println(y || z); //prints: true
 
 ```
@@ -630,15 +456,10 @@ System.out.println(y || z); //prints: true
 结果并没有不同，但执行上有区别。运算符`&`和`|`总是检查两个操作数的值。与此同时，在`&&`的情况下，如果左操作数返回`false`，`&&`运算符会在不评估右操作数的情况下返回`false`。而在`||`的情况下，如果左操作数返回`true`，`||`运算符会在不评估右操作数的情况下返回`true`。以下是演示这种差异的代码：
 
 ```java
-
 int i = 1, j = 3, k = 10;
-
 System.out.println(i > j & i++ < k);  //prints: false
-
 System.out.println("i=" + i);         //prints: i=2
-
 System.out.println(i > j && i++ < k); //prints: false
-
 System.out.println("i=" + i);         //prints: i=2
 
 ```
@@ -652,15 +473,10 @@ System.out.println("i=" + i);         //prints: i=2
 第三个条件运算符称为三元运算符。它的工作原理如下：
 
 ```java
-
 int n = 1, m = 2;
-
 System.out.println(n > m ? "n > m" : "n <= m"); //prints: n <= m
-
 System.out.println(n > m ? true : false);       //prints: false
-
-int max = n > m ? n : m;
-
+int max = n > m ? n : m;      
 System.out.println(max);                        //prints: 2
 
 ```
@@ -668,19 +484,12 @@ System.out.println(max);                        //prints: 2
 它评估条件，如果条件为真，则返回第一个条目（问号后面的内容，`?`）；否则，返回第二个条目（冒号后面的内容，`:`）。这是一种非常方便和紧凑的方式，可以选择两个选项，而不是使用完整的`if-else`语句结构：
 
 ```java
-
 String result;
-
 if(n > m){
-
-result = "n > m";
-
+  result = "n > m";
 } else {
-
-result = "n <= m";
-
-}
-
+  result = "n <= m";
+} 
 ```
 
 我们将在第十章中讨论这样的语句（称为条件语句），*控制流语句*。
@@ -706,56 +515,36 @@ result = "n <= m";
 操作`x = x + x % 2;`是基于运算符优先级规则的，我们将在稍后的*运算符优先级和操作数的评估顺序*部分讨论这些规则。根据这些规则，`%`运算符（取模）首先执行，然后是`+`运算符（加法），然后将结果分配给左操作数变量`x`。这是演示代码：
 
 ```java
-
 int x = 1;
-
 x += 2;
-
-System.out.println(x);    //打印：3
-
+System.out.println(x);    //prints: 3
 x -= 1;
-
-System.out.println(x);    //打印：2
-
+System.out.println(x);    //prints: 2
 x *= 2;
-
-System.out.println(x);    //打印：4
-
+System.out.println(x);    //prints: 4
 x /= 2;
-
-System.out.println(x);    //打印：2
-
+System.out.println(x);    //prints: 2
 x %= 2;
-
-System.out.println(x);    //打印：0
+System.out.println(x);    //prints: 0
 
 ```
 
 再次，每当遇到整数除法时，最好将其转换为`float`或`double`除法，然后根据需要四舍五入或将其转换为整数。在我们的例子中，我们没有任何小数部分的损失。但是，如果我们不知道`x`的值，代码可能如下所示：
 
 ```java
-
 x = 11;
-
 double y = x;
+y /= 3;          //That's the operation we wanted to do on x
 
-y /= 3;          //这是我们想要在 x 上执行的操作
-
-System.out.println(y);        //打印：3.6666666666666665
-
+System.out.println(y);        //prints: 3.6666666666666665
 x = (int)y;
+System.out.println(x);        //prints: 3
 
-System.out.println(x);        //打印：3
-
-//或者，如果我们需要四舍五入结果：
-
-double d = Math.round(y);     //打印：4.0
-
+//or, if we need to round up the result:
+double d = Math.round(y);     //prints: 4.0
 System.out.println(d);
-
 x = (int) d;
-
-System.out.println(x);        //打印：4
+System.out.println(x);        //prints: 4
 
 ```
 
@@ -768,9 +557,7 @@ System.out.println(x);        //打印：4
 到目前为止，我们已经看到`new`运算符被使用了很多次。它通过为新对象分配内存并返回对该内存的引用来实例化（创建）一个类。然后，这个引用通常被分配给与用于创建对象的类相同类型的变量，或者它的父类型，尽管我们也看到过一个情况，即引用从未被分配。在第六章中，*接口、类和对象构造*，例如，我们使用这段代码来演示构造函数是如何被调用的：
 
 ```java
-
 new Child();
-
 new Child("The Blows");
 
 ```
@@ -778,11 +565,8 @@ new Child("The Blows");
 但这种情况非常罕见，大多数时候我们需要一个对新创建的对象的引用，以便调用它的方法：
 
 ```java
-
 SomeClass obj = new SomeClass();
-
 obj.someMethod();
-
 ```
 
 在调用`new`运算符并分配内存后，相应的（显式或默认）构造函数初始化新对象的状态。我们在第六章中对此进行了广泛讨论，*接口、类和对象构造*。
@@ -790,7 +574,6 @@ obj.someMethod();
 由于数组也是对象，因此也可以使用`new`运算符和任何 Java 类型来创建数组：
 
 ```java
-
 int[] arrInt = new int[42];
 
 ```
@@ -798,9 +581,7 @@ int[] arrInt = new int[42];
 `[]`符号允许我们设置数组长度（最大组件数，也称为元素）-在前面的代码中是`42`。可能会产生混淆的一个潜在来源是，在编译时，Java 允许将值分配给大于数组长度的索引的组件：
 
 ```java
-
 int[] arrInt = new int[42];
-
 arrInt[43] = 22;
 
 ```
@@ -812,7 +593,6 @@ arrInt[43] = 22;
 也可以使用数组初始化程序而不使用`new`运算符来创建数组：
 
 ```java
-
 int[] arrInt = {1,2,3,4};
 
 ```
@@ -822,19 +602,12 @@ int[] arrInt = {1,2,3,4};
 我们在第五章中对此进行了广泛讨论，*Java 语言元素和类型*。如果没有明确初始化，则数组的值将设置为取决于类型的默认值（我们在第五章中也描述了它们，*Java 语言元素和类型*）。以下是一个代码示例：
 
 ```java
-
 int[] arrInt = new int[42];
-
 //arrInt[43] = 22;
-
 System.out.println(arrInt[2]);      //prints: 0
-
 System.out.println(arrInt.length);  //prints: 42
-
 int[] arrInit = {1,2,3,4};
-
 System.out.println(arrInit[2]);      //prints: 3
-
 System.out.println(arrInit.length);  //prints: 4
 
 ```
@@ -846,67 +619,43 @@ System.out.println(arrInit.length);  //prints: 4
 `instanceof`运算符需要两个引用类型的操作数。这是因为它检查对象的父子关系，包括接口的实现。如果左操作数（对象引用）扩展或实现右侧的类型，则求值为`true`，否则为`false`。显然，每个引用`instanceof Object`都返回`true`，因为在 Java 中，每个类都隐式继承了`Object`类。当`instanceof`应用于任何类型的数组时，它仅对右操作数`Object`返回`true`。而且，由于`null`不是任何类型的实例，所以`null instanceof`对于任何类型都返回`false`。以下是演示代码：
 
 ```java
-
 interface IntrfA{}
-
 class ClassA implements IntrfA {}
-
 class ClassB extends ClassA {}
-
 class ClassX implements IntrfA {}
 
 private void instanceofOperator() {
+  ClassA classA = new ClassA();
+  ClassB classB = new ClassB();
+  ClassX classX = new ClassX();
+  int[] arrI = {1,2,3};
+  ClassA[] arrA = {new ClassA(), new ClassA()};
 
-ClassA classA = new ClassA();
-
-ClassB classB = new ClassB();
-
-ClassX classX = new ClassX();
-
-int[] arrI = {1,2,3};
-
-ClassA[] arrA = {new ClassA(), new ClassA()};
-
-System.out.println(classA instanceof Object); //prints: true
-
-System.out.println(arrI instanceof Object);   //prints: true
-
-System.out.println(arrA instanceof Object);   //prints: true
-
+  System.out.println(classA instanceof Object); //prints: true
+  System.out.println(arrI instanceof Object);   //prints: true
+  System.out.println(arrA instanceof Object);   //prints: true
 //System.out.println(arrA instanceof ClassA);   //error
 
-System.out.println(classA instanceof IntrfA); //prints: true
+  System.out.println(classA instanceof IntrfA); //prints: true
+  System.out.println(classB instanceof IntrfA); //prints: true
+  System.out.println(classX instanceof IntrfA); //prints: true
 
-System.out.println(classB instanceof IntrfA); //prints: true
-
-System.out.println(classX instanceof IntrfA); //prints: true
-
-System.out.println(classA instanceof ClassA); //prints: true
-
-System.out.println(classB instanceof ClassA); //prints: true
-
-System.out.println(classA instanceof ClassB); //prints: false
-
+  System.out.println(classA instanceof ClassA); //prints: true
+  System.out.println(classB instanceof ClassA); //prints: true
+  System.out.println(classA instanceof ClassB); //prints: false
 //System.out.println(classX instanceof ClassA); //error
 
-System.out.println(null instanceof ClassA);   //prints: false
-
+  System.out.println(null instanceof ClassA);   //prints: false
 //System.out.println(classA instanceof null);   //error
-
-System.out.println(classA == null);           //prints: false
-
-System.out.println(classA != null);           //prints: true
-
+  System.out.println(classA == null);           //prints: false
+  System.out.println(classA != null);           //prints: true
 }
-
 ```
 
 大多数结果都是直接的，可能是预期的。唯一可能预期的是`classX instanceof ClassA`。`ClassX`和`ClassA`都实现了相同的接口`IntrfA`，所以它们之间有一些亲和力-每个都可以转换为`IntrfA`接口：
 
 ```java
-
 IntrfA intA = (IntrfA)classA;
-
 intA = (IntrfA)classX;
 
 ```
@@ -928,59 +677,35 @@ intA = (IntrfA)classX;
 为了说明这个提示，这里有一些代码可以从多态中受益，而不是使用`intanceof`运算符：
 
 ```java
-
 class ClassBase {
-
 }
-
 class ClassY extends ClassBase {
+  void method(){
 
-void method(){
-
-System.out.println("ClassY.method() is called");
-
+    System.out.println("ClassY.method() is called");
+  }
 }
-
-}
-
 class ClassZ extends ClassBase {
-
-void method(){
-
-System.out.println("ClassZ.method() is called");
-
+  void method(){
+    System.out.println("ClassZ.method() is called");
+  }
 }
-
-}
-
 class SomeClass{
-
-public void doSomething(ClassBase object) {
-
-if(object instanceof ClassY){
-
-((ClassY)object).method();
-
-} else if(object instanceof ClassZ){
-
-((ClassZ)object).method();
-
+  public void doSomething(ClassBase object) {
+    if(object instanceof ClassY){
+      ((ClassY)object).method();
+    } else if(object instanceof ClassZ){
+      ((ClassZ)object).method();
+    }
+    //other code 
+  }
 }
-
-//other code
-
-}
-
-}
-
 ```
 
 如果我们运行以下代码片段：
 
 ```java
-
 SomeClass cl = new SomeClass();
-
 cl.doSomething(new ClassY());
 
 ```
@@ -992,33 +717,21 @@ cl.doSomething(new ClassY());
 然后，我们注意到`ClassY`和`ClassZ`中的方法具有相同的签名，因此我们可以将相同的方法添加到基类`ClassBase`中：
 
 ```java
-
 class ClassBase {
-
-void method(){
-
-System.out.println("ClassBase.method() is called");
-
+  void method(){
+    System.out.println("ClassBase.method() is called");
+  }
 }
-
-}
-
 ```
 
 并简化`SomeClass`的实现：
 
 ```java
-
 class SomeClass{
-
-public void doSomething(ClassBase object) {
-
-object.method();
-
-//other code
-
-}
-
+  public void doSomething(ClassBase object) {
+    object.method();
+    //other code 
+  }
 ```
 
 在调用`new SomeClass().doSomething(new ClassY())`之后，我们仍然会得到相同的结果：
@@ -1030,19 +743,12 @@ object.method();
 并且在重写时，不要忘记使用`@Override`注解：
 
 ```java
-
 class ClassZ extends ClassBase {
-
-@Override
-
-void method(){
-
-System.out.println("ClassY.method() is called");
-
+  @Override
+  void method(){
+    System.out.println("ClassY.method() is called");
+  }
 }
-
-}
-
 ```
 
 注解将帮助您验证您没有错误，并且每个子类中的方法与父类中的方法具有相同的签名。
@@ -1060,59 +766,35 @@ System.out.println("ClassY.method() is called");
 我们已经看到了许多这样的例子。因此，我们将所有情况总结在一个接口和实现它的类中。假设我们有以下名为`InterfaceM`的接口：
 
 ```java
-
 interface InterfaceM {
-
-String INTERFACE_FIELD = "interface field";
-
-static void staticMethod1(){
-
-System.out.println("interface static method 1");
-
+  String INTERFACE_FIELD = "interface field";
+  static void staticMethod1(){
+    System.out.println("interface static method 1");
+  }
+  static void staticMethod2(){
+    System.out.println("interface static method 2");
+  }
+  default void method1(){
+    System.out.println("interface default method 1");
+  }
+  default void method2(){
+    System.out.println("interface default method 2");
+  }
+  void method3();
 }
-
-static void staticMethod2(){
-
-System.out.println("interface static method 2");
-
-}
-
-default void method1(){
-
-System.out.println("interface default method 1");
-
-}
-
-default void method2(){
-
-System.out.println("interface default method 2");
-
-}
-
-void method3();
-
-}
-
 ```
 
 我们可以使用点运算符（`.`）来访问非私有字段或方法，如下所示：
 
 ```java
-
 System.out.println(InterfaceM.INTERFACE_FIELD);    //1: interface field
-
 InterfaceM.staticMethod1();               //2: interface static method
-
 InterfaceM.staticMethod2();               //3: interface static method
-
 //InterfaceM.method1();                         //4: compilation error
-
 //InterfaceM.method2();                         //5: compilation error
-
 //InterfaceM.method3();                         //6: compilation error
 
-System.out.println(ClassM.INTERFACE_FIELD);       //7：接口字段
-
+System.out.println(ClassM.INTERFACE_FIELD);       //7: interface field
 ```
 
 案例 1、2 和 3 很简单。案例 4、5 和 6 会生成编译错误，因为非静态方法只能通过实现接口的类的实例（对象）访问。案例 7 是可能的，但不是访问接口字段（也称为常量）的推荐方式。使用接口名称访问它们（如案例 1 中）使代码更易于理解。
@@ -1120,75 +802,43 @@ System.out.println(ClassM.INTERFACE_FIELD);       //7：接口字段
 现在让我们创建一个实现`InterfaceM`接口的`ClassM`类：
 
 ```java
-
 class ClassM implements InterfaceM {
-
-public static String CLASS_STATIC_FIELD = "类静态字段";
-
-public static void staticMethod2(){
-
-System.out.println("类静态方法 2");
-
+  public static String CLASS_STATIC_FIELD = "class static field";
+  public static void staticMethod2(){
+    System.out.println("class static method 2");
+  }
+  public static void staticMethod3(){
+    System.out.println("class static method 3");
+  }
+  public String instanceField = "instance field";
+  public void method2(){
+    System.out.println("class instance method 2");
+  }
+  public void method3(){
+      System.out.println("class instance method 3");
+    }
 }
-
-public static void staticMethod3(){
-
-System.out.println("类静态方法 3");
-
-}
-
-public String instanceField = "实例字段";
-
-public void method2(){
-
-System.out.println("类实例方法 2");
-
-}
-
-public void method3(){
-
-System.out.println("类实例方法 3");
-
-}
-
-}
-
 ```
 
 以下是使用点运算符（`。）访问类字段和方法的所有可能情况：
 
 ```java
+  //ClassM.staticMethod1();                       //8: compilation error
+  ClassM.staticMethod2();                     //9: class static method 2
+  ClassM.staticMethod3();                    //10: class static method 3
 
-//ClassM.staticMethod1();                       //8：编译错误
-
-ClassM.staticMethod2();                     //9：类静态方法 2
-
-ClassM.staticMethod3();                    //10：类静态方法 3
-
-ClassM classM = new ClassM();
-
-System.out.println(ClassM.CLASS_STATIC_FIELD);//11：类静态字段
-
-System.out.println(classM.CLASS_STATIC_FIELD);//12：类静态字段
-
-//System.out.println(ClassM.instanceField);    //13：编译错误
-
-System.out.println(classM.instanceField);         //14：实例字段
-
-//classM.staticMethod1();                      //15：编译错误
-
-classM.staticMethod2();                   //16：类静态方法 2
-
-classM.staticMethod3();                    //17：类静态方法 3
-
-classM.method1();                     //18：接口默认方法 1
-
-classM.method2();                        //19：类实例方法 2
-
-classM.method3();                        //20：类实例方法 3
-
+  ClassM classM = new ClassM();
+  System.out.println(ClassM.CLASS_STATIC_FIELD);//11: class static field
+  System.out.println(classM.CLASS_STATIC_FIELD);//12: class static field
+  //System.out.println(ClassM.instanceField);    //13: compilation error
+  System.out.println(classM.instanceField);         //14: instance field
+  //classM.staticMethod1();                      //15: compilation error
+  classM.staticMethod2();                   //16: class static method  2
+  classM.staticMethod3();                    //17: class static method 3
+  classM.method1();                     //18: interface default method 1
+  classM.method2();                        //19: class instance method 2
+  classM.method3();                        //20: class instance method 3
 }
-
 ```
 
 案例 8 会生成编译错误，因为静态方法属于实现它的类或接口（在这种情况下）。
@@ -1218,14 +868,11 @@ classM.method3();                        //20：类实例方法 3
 强制转换运算符用于类型转换，将一个类型的值分配给另一个类型的变量。通常，它用于启用编译器否则不允许的转换。例如，我们在讨论整数除法、`char`类型作为数值类型以及将类引用分配给一个已实现接口类型的变量时，我们使用了类型转换：
 
 ```java
-
 int i1 = 11;
-
 int i2 = 3;
+System.out.println((float)i1 / i2);  //prints: 3.6666667
 
-System.out.println((float)i1 / i2);  //输出：3.6666667
-
-System.out.println((int)a);          //输出：97
+System.out.println((int)a);          //prints: 97
 
 IntrfA intA = (IntrfA)classA;
 
@@ -1238,43 +885,24 @@ IntrfA intA = (IntrfA)classA;
 +   对于引用类型，左操作数应该是右操作数的父类（即使是间接的），或者左操作数应该是右操作数所代表的类实现的接口（即使是间接的）：
 
 ```java
-
-接口 I1{}
-
-接口 I2{}
-
-接口 I3{}
-
-类 A 实现 I1, I2 {}
-
-类 B 扩展自 A 并实现 I3{}
-
-类 C 扩展自 B{}
-
-类 D{}
-
+interface I1{}
+interface I2{}
+interface I3{}
+class A implements I1, I2 {}
+class B extends A implements I3{}
+class C extends B {}
+class D {}
 public static void main(String[] args) {
-
-C c = new C();    //1
-
-A a = (A)c;       //2
-
-I1 i1 = (I1)c;    //3
-
-I2 i2 = (I2)c;    //4
-
-I3 i3 = (I3)c;    //5
-
-c = (C)a;         //6
-
-D d = new D();    //7
-
-//a = (A)d;       //8 编译错误
-
-i1 = (I1)d;       //9 运行时错误
-
+   C c = new C();    //1
+   A a = (A)c;       //2
+   I1 i1 = (I1)c;    //3
+   I2 i2 = (I2)c;    //4
+   I3 i3 = (I3)c;    //5
+   c = (C)a;         //6
+   D d = new D();    //7
+   //a = (A)d;       //8 compilation error
+   i1 = (I1)d;       //9 run-time error
 }
-
 ```
 
 在这段代码中，第 6 种情况是可能的，因为我们知道对象`a`最初是基于对象`c`进行转换的，所以我们可以将其转换回类型`C`并期望它能够完全作为类`C`的对象正常运行。
@@ -1292,16 +920,11 @@ i1 = (I1)d;       //9 运行时错误
 也可以将原始类型转换为匹配的引用类型：
 
 ```java
-
-Integer integer1 = 3;                  //行 1
-
-System.out.println(integer1);          //输出：3
-
-Integer integer2 = Integer.valueOf(4);
-
-int i = integer2;                      //行 4
-
-System.out.println(i);                 //输出：4
+Integer integer1 = 3;                  //line 1 
+System.out.println(integer1);          //prints: 3
+Integer integer2 = Integer.valueOf(4); 
+int i = integer2;                      //line 4
+System.out.println(i);                 //prints: 4
 
 ```
 
@@ -1324,14 +947,10 @@ System.out.println(i);                 //输出：4
 表达式的求值也可能产生副作用。也就是说，除了变量赋值或返回值之外，它还可以执行其他操作，例如：
 
 ```java
-
 int x = 0, y;
-
-y = x++;                  //第 2 行
-
-System.out.println(y);    //输出：0
-
-System.out.println(x);    //输出：1
+y = x++;                  //line 2
+System.out.println(y);    //prints: 0
+System.out.println(x);    //prints: 1
 
 ```
 
@@ -1410,17 +1029,13 @@ Java 语句的可能种类有：
 当在同一个表达式中使用多个运算符时，如果没有已建立的规则，可能不明显如何执行它们。例如，在评估以下右侧表达式后，将分配给变量`x`的值是什么：
 
 ```java
-
 int x = 2 + 4 * 5 / 6 + 3 + 7 / 3 * 11 - 4;
-
 ```
 
 我们知道如何做，因为我们在学校学习了运算符优先级-从左到右首先应用乘法和除法运算符，然后从左到右进行加法和减法。但是，事实证明作者实际上想要这个运算符执行顺序：
 
 ```java
-
 int x = 2 + 4 * 5 / 6 + ( 3 + 7 / 3 * (11 - 4));
-
 ```
 
 这将产生不同的结果。
@@ -1472,15 +1087,10 @@ Java 规范没有在一个地方提供运算符优先级。必须从各个部分
 如果存在括号，则首先计算最内层括号内的表达式。例如，看一下这段代码片段：
 
 ```java
-
 int p1 = 10, p2 = 1;
-
 int q = (p1 += 3)  +  (p2 += 3);
-
 System.out.println(q);         //prints: 17
-
 System.out.println(p1);        //prints: 13
-
 System.out.println(p2);        //prints: 4
 
 ```
@@ -1488,17 +1098,11 @@ System.out.println(p2);        //prints: 4
 赋值运算符的优先级最低，但如果在括号内，它们将首先执行，如前面的代码。为了证明这一点，我们可以删除第一组括号，然后再次运行相同的代码：
 
 ```java
-
 p1 = 10;
-
 p2 = 1;
-
 q = p1 += 3  +  (p2 += 3);
-
 System.out.println(q);         //prints: 17
-
 System.out.println(p1);        //prints: 17
-
 System.out.println(p2);        //prints: 4
 
 ```
@@ -1518,12 +1122,9 @@ System.out.println(p2);        //prints: 4
 最终，评估归结为每个运算符及其操作数。二元运算符的操作数从左到右进行评估，以便在右操作数的评估开始之前完全评估左操作数。正如我们所见，左操作数可能具有影响右操作数行为的副作用。这里是一个简单的例子：
 
 ```java
-
 int a = 0, b = 0;
-
-int c = a++ + (a * ++b);       //计算结果为：0 + (1 * 1);
-
-System.out.println(c);         //输出：1
+int c = a++ + (a * ++b);       //evaluates to: 0 + (1 * 1);
+System.out.println(c);         //prints: 1
 
 ```
 
@@ -1540,21 +1141,15 @@ System.out.println(c);         //输出：1
 例如，如果一个类`SomeClass`扩展了`SomeBaseClass`，则以下声明和初始化也是可能的：
 
 ```java
-
 SomeBaseClass someBaseClass = new SomeBaseClass();
-
 someBaseClass = new SomeClass();
-
 ```
 
 而且，由于每个类默认都扩展了`java.lang.Object`类，因此以下声明和初始化也是可能的：
 
 ```java
-
 Object someBaseClass = new SomeBaseClass();
-
-在第 2 行，我们将子类实例引用分配给了超类类型的变量。子类中存在但在超类中不存在的方法无法通过超类类型的引用访问。第 2 行的赋值被称为引用的扩展，因为它变得不太专业化。
-
+someBaseClass = new SomeClass();             //line 2
 ```
 
 在第 2 行，我们将子类实例引用分配给了超类类型的变量。子类中存在但在超类中不存在的方法无法通过超类类型的引用访问。第 2 行的赋值被称为引用的扩展，因为它变得不太专业化。
@@ -1566,45 +1161,25 @@ Object someBaseClass = new SomeBaseClass();
 下面是一个演示情况的代码示例：
 
 ```java
-
 class SomeBaseClass{
-
-void someMethod(){
-
-...
-
-}
-
-}
-
+  void someMethod(){
+    ...
+  }
+} 
 class SomeClass extends SomeBaseClass{
-
-void someOtherMethod(){
-
-...
-
+  void someOtherMethod(){
+    ...
+  }
 }
-
-}
-
 SomeBaseClass someBaseClass = new SomeBaseClass();
-
 someBaseClass = new SomeClass();
-
-someBaseClass.someMethod();                  //完全正常工作
-
-//someBaseClass.someOtherMethod();           //编译错误
-
-((SomeClass)someBaseClass).someOtherMethod(); //完全正常工作
-
-//以下方法可用，因为它们来自 Object：
-
+someBaseClass.someMethod();                  //works just fine
+//someBaseClass.someOtherMethod();           //compilation error
+((SomeClass)someBaseClass).someOtherMethod(); //works just fine
+//The following methods are available as they come from Object:
 int h = someBaseClass.hashCode();
-
 Object o = someBaseClass.clone();
-
-//所有其他公共 Object 的方法也是可访问的
-
+//All other public Object's methods are accessible too
 ```
 
 缩小转换需要转换，当我们讨论转换运算符时，我们已经详细讨论过这一点（参见*转换运算符*部分），包括转换为接口，这是另一种向上转换的形式。
@@ -1652,48 +1227,32 @@ Java 规范定义了 19 种扩展原始转换：
 让我们通过代码示例来看一下这种效果，首先从 `int` 类型转换到 `float` 和 `double` 开始：
 
 ```java
-
 int n = 1234567899;
-
 float f = (float)n;
-
 int r = n - (int)f;
-
-System.out.println(r);    //输出：-46
+System.out.println(r);    //prints: -46
 
 double d = (double)n;
-
 r = n - (int)d;
-
-System.out.println(r);    //输出：0
-
+System.out.println(r);    //prints: 0
 ```
 
 正如规范所述，只有从 `int` 到 `float` 的转换丢失了精度。从 `int` 到 `double` 的转换很好。现在，让我们转换 `long` 类型：
 
 ```java
-
 long l = 1234567899123456L;
-
-浮点数 f = (float)l;
-
+float f = (float)l;
 long rl = l - (long)f;
-
-System.out.println(rl);    //输出：-49017088
+System.out.println(rl);    //prints: -49017088
 
 double d = (double)l;
-
 rl = l - (long)d;
-
-System.out.println(rl);    //输出：0
+System.out.println(rl);    //prints: 0
 
 l = 12345678991234567L;
-
 d = (double)l;
-
 rl = l - (long)d;
-
-System.out.println(rl);    //输出：-1
+System.out.println(rl);    //prints: -1
 
 ```
 
@@ -1720,39 +1279,23 @@ System.out.println(rl);    //输出：-1
 它可能导致值的大小和可能导致精度的损失。缩小过程比扩展过程更复杂，讨论它超出了入门课程的范围。至少可以做的是确保原始值小于目标类型的最大值：
 
 ```java
-
 double dd = 1234567890.0;
-
-System.out.println(Integer.MAX_VALUE); //输出：2147483647
-
-如果 dd < Integer.MAX_VALUE：
-
-int nn = (int)dd;
-
-System.out.println(nn); //输出：1234567890
-
+System.out.println(Integer.MAX_VALUE); //prints: 2147483647
+if(dd < Integer.MAX_VALUE){
+  int nn = (int)dd;
+  System.out.println(nn);              //prints: 1234567890
 } else {
-
-System.out.println(dd - Integer.MAX_VALUE);
-
+  System.out.println(dd - Integer.MAX_VALUE);
 }
 
 dd = 2234567890.0;
-
-System.out.println(Integer.MAX_VALUE); //输出：2147483647
-
+System.out.println(Integer.MAX_VALUE); //prints: 2147483647
 if(dd < Integer.MAX_VALUE){
-
-int nn = (int)dd;
-
-System.out.println(nn);
-
+  int nn = (int)dd;
+  System.out.println(nn);            
 } else {
-
-System.out.println(dd - Integer.MAX_VALUE); //输出：8.7084243E7
-
+  System.out.println(dd - Integer.MAX_VALUE); //prints: 8.7084243E7
 }
-
 ```
 
 从这些示例中可以看出，当数字适合目标类型时，缩小转换就可以很好地进行，但是如果原始值大于目标类型的最大值，我们甚至不会尝试进行转换。
@@ -1802,23 +1345,14 @@ System.out.println(dd - Integer.MAX_VALUE); //输出：8.7084243E7
 此外，每个包装类都有方法，允许将数值的`String`表示转换为相应的原始数值类型或引用类型，例如：
 
 ```java
-
 byte b = Byte.parseByte("3");
-
 Byte bt = Byte.decode("3");
-
 boolean boo = Boolean.getBoolean("true");
-
 Boolean bool = Boolean.valueOf("false");
-
 int n = Integer.parseInt("42");
-
 Integer integer = Integer.getInteger("42");
-
 double d1 = Double.parseDouble("3.14");
-
 Double d2 = Double.valueOf("3.14");
-
 ```
 
 之后，可以使用先前列出的方法（`byteValue()`，`shortValue()`等）将值转换为另一种原始类型。
@@ -1826,11 +1360,8 @@ Double d2 = Double.valueOf("3.14");
 每个包装类都有静态方法`toString(原始值)`，将原始类型值转换为其`String`表示：
 
 ```java
-
 String s1 = Integer.toString(42);
-
 String s2 = Double.toString(3.14);
-
 ```
 
 包装类有许多其他有用的方法，可以将一种原始类型转换为另一种原始类型，以及不同的格式和表示形式。因此，如果需要这样的功能，请首先查看`java.lang`包中的其数值类型类包装器。
@@ -1846,26 +1377,17 @@ String s2 = Double.toString(3.14);
 装箱原始类型可以通过自动方式（称为自动装箱）或显式地使用每个包装类型中可用的`valueOf()`方法来完成：
 
 ```java
-
 int n = 12;
-
-Integer integer = n; //自动装箱的示例
-
-System.out.println(integer); //输出：12
-
+Integer integer = n; //an example of autoboxing
+System.out.println(integer);      //prints: 12
 integer = Integer.valueOf(n);
-
-System.out.println(integer); //输出：12
+System.out.println(integer);      //prints: 12
 
 Byte b = Byte.valueOf((byte)n);
-
 Short s = Short.valueOf((short)n);
-
 Long l = Long.valueOf(n);
-
 Float f = Float.valueOf(n);
-
-Double d = Double.valueOf（n）;
+Double d = Double.valueOf(n);
 
 ```
 
@@ -1876,33 +1398,21 @@ Double d = Double.valueOf（n）;
 拆箱可以使用每个包装类中实现的`Number`类的方法来完成：
 
 ```java
-
-Integer integer = Integer.valueOf（12）;
-
-System.out.println（integer.intValue（））; //打印：12
-
-System.out.println（integer.byteValue（））; //打印：12
-
-System.out.println（integer.shortValue（））; //打印：12
-
-System.out.println（integer.longValue（））; //打印：12
-
-System.out.println（integer.floatValue（））; //打印：12.0
-
-System.out.println（integer.doubleValue（））; //打印：12.0
-
+Integer integer = Integer.valueOf(12);
+System.out.println(integer.intValue());    //prints: 12
+System.out.println(integer.byteValue());   //prints: 12
+System.out.println(integer.shortValue());  //prints: 12
+System.out.println(integer.longValue());   //prints: 12
+System.out.println(integer.floatValue());  //prints: 12.0
+System.out.println(integer.doubleValue()); //prints: 12.0
 ```
 
 类似于自动装箱，也可以自动拆箱：
 
 ```java
-
-Long longWrapper = Long.valueOf（12L）;
-
-long lng = longWrapper; //隐式拆箱
-
-System.out.println（lng）; //打印：12
-
+Long longWrapper = Long.valueOf(12L);
+long lng = longWrapper;    //implicit unboxing
+System.out.println(lng);   //prints: 12
 ```
 
 但是，它不被称为自动装箱。而是使用隐式拆箱这个术语。
@@ -1912,19 +1422,12 @@ System.out.println（lng）; //打印：12
 当应用于引用类型时，等式运算符比较引用值，而不是对象的内容。只有当两个引用（变量值）指向同一个对象时，它才返回`true`。我们已经多次证明了这一点：
 
 ```java
-
-SomeClass o1 = new SomeClass（）;
-
-SomeClass o2 = new SomeClass（）;
-
-System.out.println（o1 == o2）; //打印：false
-
-System.out.println（o1 == o1）; //打印：true
-
+SomeClass o1 = new SomeClass();
+SomeClass o2 = new SomeClass();
+System.out.println(o1 == o2);  //prints: false
+System.out.println(o1 == o1);  //prints: true
 o2 = o1;
-
-System.out.println（o1 == o2）; //打印：真
-
+System.out.println(o1 == o2);  //prints: true
 ```
 
 这意味着即使比较具有相同字段值的相同类的两个对象时，等式运算符也会返回`false`。这通常不是程序员所需要的。相反，我们通常需要在两个对象具有相同类型和相同字段值时将它们视为相等。有时，我们甚至不想考虑所有字段，而只想考虑那些在程序逻辑中唯一标识对象的字段。例如，如果一个人改变了发型或服装，我们仍然认为他或她是同一个人，即使描述该人的对象具有字段`hairstyle`或`dress`。
@@ -1934,58 +1437,37 @@ System.out.println（o1 == o2）; //打印：真
 对于这种对象的比较-按照它们的字段值-应使用`equals()`方法。在第二章中，*Java 语言基础*，我们已经确定所有引用类型都扩展（隐式）`java.lang.Object`类，该类已实现了`equals()`方法：
 
 ```java
-
-公共布尔 equals（Object obj）{
-
-返回（this == obj）;
-
+public boolean equals(Object obj) {
+  return (this == obj);
 }
-
 ```
 
 正如你所看到的，它只使用相等运算符比较引用，这意味着如果一个类或其父类没有实现`equals()`方法（覆盖`Object`类的实现），使用`equals()`方法的结果将与使用相等运算符`==`相同。让我们来演示一下。以下类没有实现`equals()`方法：
 
 ```java
+class PersonNoEquals {
+  private int age;
+  private String name;
 
-类 PersonNoEquals {
-
-私有 int 年龄;
-
-私有字符串名称;
-
-public PersonNoEquals（int age，String name）{
-
-这个年龄=年龄;
-
-这个名字 = 名字;
-
+  public PersonNoEquals(int age, String name) {
+    this.age = age;
+    this.name = name;
+  }
 }
-
-}
-
 ```
 
 如果我们使用它并比较`equals()`方法和`==`运算符的结果，我们将看到以下结果：
 
 ```java
-
-PersonNoEquals p1 = new PersonNoEquals（42，“Nick”）;
-
-PersonNoEquals p2 = new PersonNoEquals（42，“Nick”）;
-
-PersonNoEquals p3 = new PersonNoEquals（25，“Nick”）;
-
-System.out.println（p1.equals（p2））; //假
-
-System.out.println（p1.equals（p3））; //假
-
-System.out.println（p1 == p2）; //假
-
+PersonNoEquals p1 = new PersonNoEquals(42, "Nick");
+PersonNoEquals p2 = new PersonNoEquals(42, "Nick");
+PersonNoEquals p3 = new PersonNoEquals(25, "Nick");
+System.out.println(p1.equals(p2));     //false
+System.out.println(p1.equals(p3));     //false
+System.out.println(p1 == p2);          //false
 p1 = p2;
-
-System.out.println（p1.equals（p2））; //真
-
-System.out.println（p1 == p2）; //真
+System.out.println(p1.equals(p2));     //true
+System.out.println(p1 == p2);          //true
 
 ```
 
@@ -1996,53 +1478,34 @@ System.out.println（p1 == p2）; //真
 现在，让我们实现`equals()`方法：
 
 ```java
+class PersonWithEquals{
+  private int age;
+  private String name;
+  private String hairstyle;
 
-类 PersonWithEquals{
+  public PersonWithEquals(int age, String name, String hairstyle) {
+    this.age = age;
+    this.name = name;
 
-私有 int 年龄;
+    this.hairstyle = hairstyle;
+  }
 
-私有字符串名称;
-
-私有字符串发型;
-
-public PersonWithEquals(int age, String name, String hairstyle) {
-
-这个年龄=年龄；
-
-这个名字=名字；
-
-这个发型=发型；
-
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    PersonWithEquals person = (PersonWithEquals) o;
+    return age == person.age && Objects.equals(name, person.name);
+  }
 }
-
-@Override
-
-public boolean equals(Object o) {
-
-如果(this == o)返回 true；
-
-如果(o == null || getClass() != o.getClass())返回 false；
-
-PersonWithEquals person = (PersonWithEquals) o;
-
-返回年龄==人.年龄&&对象.equals(名字，人.名字)；
-
-}
-
-}
-
 ```
 
 请注意，当建立对象的相等性时，我们忽略了“发型”字段。需要评论的另一个方面是使用`java.utils.Objects`类的`equals()`方法。以下是它的实现：
 
 ```java
-
 public static boolean equals(Object a, Object b) {
-
-返回(a == b) || (a != null && a.equals(b));
-
+  return (a == b) || (a != null && a.equals(b));
 }
-
 ```
 
 如您所见，它首先比较引用，然后确保一个不是`null`（以避免`NullPointerException`），然后使用`java.lang.Object`基类的`equals()`方法或可能存在的子类中的重写实现作为参数值传递。在我们的情况下，我们传递了类型为`String`的参数对象，它们已经实现了`equals()`方法，用于比较`String`类型的值，而不仅仅是引用（我们将很快讨论它）。因此，`PersonWithEquals`对象的任何字段的任何差异都将导致该方法返回 false。
@@ -2050,25 +1513,15 @@ public static boolean equals(Object a, Object b) {
 如果我们再次运行测试，我们将看到这个：
 
 ```java
-
-PersonWithEquals p11 = new PersonWithEquals(42，"Kelly"，"Ponytail");
-
-PersonWithEquals p12 = new PersonWithEquals(42，"Kelly"，"Pompadour");
-
-PersonWithEquals p13 = new PersonWithEquals(25，"Kelly"，"Ponytail");
-
-System.out.println(p11.equals(p12)); //true
-
-System.out.println(p11.equals(p13)); //false
-
-System.out.println(p11 == p12); //false
-
+PersonWithEquals p11 = new PersonWithEquals(42, "Kelly", "Ponytail");
+PersonWithEquals p12 = new PersonWithEquals(42, "Kelly", "Pompadour");
+PersonWithEquals p13 = new PersonWithEquals(25, "Kelly", "Ponytail");
+System.out.println(p11.equals(p12));    //true
+System.out.println(p11.equals(p13));    //false
+System.out.println(p11 == p12);         //false
 p11 = p12;
-
-System.out.println(p11.equals(p12)); //true
-
-System.out.println(p11 == p12); //true
-
+System.out.println(p11.equals(p12));    //true
+System.out.println(p11 == p12);         //true
 ```
 
 现在，`equals()`方法不仅在引用相等时返回 true（因此它们指向相同的对象），而且在引用不同但它们引用的对象具有相同类型和包含在对象标识中的某些字段的相同值时也返回 true。
@@ -2078,83 +1531,49 @@ System.out.println(p11 == p12); //true
 我们可以创建一个基类`Person`，它只有两个字段“年龄”和“名字”，以及`equals()`方法，如前所述实现。然后，我们可以用`PersonWithHair`类扩展它（它有额外的字段“发型”）：
 
 ```java
-
-类 Person{
-
-私人年龄；
-
-私人名字；
-
-public Person(int age, String name) {
-
-这个年龄=年龄；
-
-这个名字=名字；
-
+class Person{
+  private int age;
+  private String name;
+  public Person(int age, String name) {
+    this.age = age;
+    this.name = name;
+  }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Person person = (Person) o;
+    return age == person.age && Objects.equals(name, person.name);
+  }
 }
-
-@Override
-
-public boolean equals(Object o) {
-
-if (this == o) return true;
-
-如果(o == null || getClass() != o.getClass())返回 false；
-
-人=（人）o；
-
-返回年龄==人.年龄&&对象.equals(名字，人.名字)；
-
+class PersonWithHair extends Person{
+  private String hairstyle;
+  public PersonWithHair(int age, String name, String hairstyle) {
+    super(age, name);
+    this.hairstyle = hairstyle;
+  }
 }
-
-}
-
-类 PersonWithHair 扩展自 Person{
-
-私人发型；
-
-public PersonWithHair(int age, String name, String hairstyle) {
-
-超级(年龄，名字)；
-
-这个发型=发型；
-
-}
-
-}
-
 ```
 
 `PersonWithHair`的对象将与`PersonWithEquals`的先前测试中的方式进行比较。
 
 ```java
-
-PersonWithHair p21 = new PersonWithHair(42，"Kelly"，"Ponytail");
-
-PersonWithHair p22 = new PersonWithHair(42，"Kelly"，"Pompadour");
-
-PersonWithHair p23 = new PersonWithHair(25，"Kelly"，"Ponytail");
-
-System.out.println(p21.equals(p22)); //true
-
-System.out.println(p21.equals(p23)); //false
-
-System.out.println(p21 == p22); //false
-
+PersonWithHair p21 = new PersonWithHair(42, "Kelly", "Ponytail");
+PersonWithHair p22 = new PersonWithHair(42, "Kelly", "Pompadour");
+PersonWithHair p23 = new PersonWithHair(25, "Kelly", "Ponytail");
+System.out.println(p21.equals(p22));    //true
+System.out.println(p21.equals(p23));    //false
+System.out.println(p21 == p22);         //false
 p21 = p22;
-
-System.out.println(p21.equals(p22)); //true
-
-System.out.println(p21 == p22); //true
+System.out.println(p21.equals(p22));    //true
+System.out.println(p21 == p22);         //true
 
 ```
 
 这是可能的，因为`PersonWithHair`的对象也是`Person`的类型，所以接受这一行：
 
 ```java
-
-人=（人）o；
-
+Person person = (Person) o;
 ```
 
 `equals()`方法中的前一行不会抛出`ClassCastException`。
@@ -2162,39 +1581,24 @@ System.out.println(p21 == p22); //true
 然后我们可以创建`PersonWithHairDresssed`类：
 
 ```java
-
-PersonWithHairDressed 扩展自 PersonWithHair{
-
-私人穿着；
-
-public PersonWithHairDressed(int age, String name,
-
-发型，穿着) {
-
-超级(年龄，名字，发型)；
-
-this.dress = dress;
-
+PersonWithHairDressed extends PersonWithHair{
+  private String dress;
+  public PersonWithHairDressed(int age, String name, 
+                               String hairstyle, String dress) {
+    super(age, name, hairstyle);
+    this.dress = dress;
+  }
 }
-
-}
-
 ```
 
 如果我们再次运行相同的测试，结果将是一样的。但我们认为服装和发型不是身份识别的一部分，所以我们可以运行测试来比较`Person`的孩子们：
 
 ```java
-
 Person p31 = new PersonWithHair(42, "Kelly", "Ponytail");
-
 Person p32 = new PersonWithHairDressed(42, "Kelly", "Pompadour", "Suit");
-
 Person p33 = new PersonWithHair(25, "Kelly", "Ponytail");
-
 System.out.println(p31.equals(p32));    //false
-
 System.out.println(p31.equals(p33));    //false
-
 System.out.println(p31 == p32);         //false
 
 ```
@@ -2202,7 +1606,6 @@ System.out.println(p31 == p32);         //false
 这不是我们期望的！孩子们被认为不相等，因为在`Person`基类的`equals()`方法中有这行：
 
 ```java
-
 if (o == null || getClass() != o.getClass()) return false;
 
 ```
@@ -2216,17 +1619,13 @@ if (o == null || getClass() != o.getClass()) return false;
 如果我们替换这行：
 
 ```java
-
 if (o == null || getClass() != o.getClass()) return false;
-
 ```
 
 使用以下代码：
 
 ```java
-
 if (o == null) return false;
-
 if(!(o instanceof Person)) return false;
 
 ```
@@ -2234,19 +1633,12 @@ if(!(o instanceof Person)) return false;
 结果将是这样的：
 
 ```java
-
 Person p31 = new PersonWithHair(42, "Kelly", "Ponytail");
-
 Person p32 = new PersonWithHairDressed(42, "Kelly", "Pompadour", "Suit");
-
 Person p33 = new PersonWithHair(25, "Kelly", "Ponytail");
-
 System.out.println(p31.equals(p32));    //true
-
 System.out.println(p31.equals(p33));    //false
-
 System.out.println(p31 == p32);         //false
-
 ```
 
 这就是我们想要的，不是吗？这样，我们已经实现了最初的想法，即不包括发型和服装在人的身份识别中。
@@ -2260,73 +1652,48 @@ System.out.println(p31 == p32);         //false
 在第五章中，*Java 语言元素和类型*，我们已经讨论过这个问题，甚至审查了源代码。这里是源代码：
 
 ```java
-
 public boolean equals(Object anObject) {
+  if (this == anObject) {
+    return true;
+  }
+  if (anObject instanceof String) {
 
-if (this == anObject) {
-
-return true;
-
+    String aString = (String)anObject;
+    if (coder() == aString.coder()) {
+      return isLatin1() ? 
+               StringLatin1.equals(value, aString.value)
+               : StringUTF16.equals(value, aString.value);
+    }
+  }
+  return false;
 }
-
-if (anObject instanceof String) {
-
-String aString = (String)anObject;
-
-if (coder() == aString.coder()) {
-
-return isLatin1() ?
-
-StringLatin1.equals(value, aString.value)
-
-：StringUTF16.equals(value, aString.value);
-
-}
-
-}
-
-return false;
-
-}
-
 ```
 
 如你所见，它重写了`Object`类的实现，以便比较值，而不仅仅是引用。这段代码证明了这一点：
 
 ```java
-
 String sl1 = "test1";
-
 String sl2 = "test2";
-
 String sl3 = "test1";
 
 System.out.println(sl1 == sl2);              //1: false
-
 System.out.println(sl1.equals(sl2));         //2: false
 
 System.out.println(sl1 == sl3);              //3: true
-
 System.out.println(sl1.equals(sl3));         //4: true
 
 String s1 = new String("test1");
-
 String s2 = new String("test2");
-
 String s3 = new String("test1");
 
 System.out.println(s1 == s2);                //5: false
-
 System.out.println(s1.equals(s2));           //6: false
 
 System.out.println(s1 == s3);                //7: false
-
 System.out.println(s1.equals(s3));           //8: true
 
 System.out.println(sl1 == s1);               //9: false
-
 System.out.println(sl1.equals(s1));          //10: true
-
 ```
 
 你可以看到等号运算符`==`有时会正确比较`String`对象的值，有时则不会。然而，`equal()`方法总是正确比较值，即使它们被包装在不同的对象中，而不仅仅是引用文字。
@@ -2344,19 +1711,14 @@ System.out.println(sl1.equals(s1));          //10: true
 如果我们对包装类运行测试，结果将是：
 
 ```java
-
 long ln = 42;
-
 Integer n = 42;
-
 System.out.println(n.equals(42));      //true
 
 System.out.println(n.equals(ln));      //false
-
 System.out.println(n.equals(43));      //false
 
 System.out.println(n.equals(Integer.valueOf(42)));  //true
-
 System.out.println(n.equals(Long.valueOf(42)));     //false
 
 ```
@@ -2364,19 +1726,12 @@ System.out.println(n.equals(Long.valueOf(42)));     //false
 根据我们对`Person`的子类的经验，我们可以相当自信地假设包装类的`equals()`方法包括类名的比较。让我们看看源代码。这是`Integer`类的`equals()`方法：
 
 ```java
-
 public boolean equals(Object obj) {
-
-if (obj instanceof Integer) {
-
-返回值等于((Integer)obj).intValue()。
-
+  if (obj instanceof Integer) {
+    return value == ((Integer)obj).intValue();
+  }
+  return false;
 }
-
-返回 false。
-
-}
-
 ```
 
 这正是我们所期望的。如果一个对象不是`Integer`类的实例，即使它携带完全相同的数值，也永远不能被认为等于另一个类的对象。这看起来就像古代社会阶级制度一样，不是吗？

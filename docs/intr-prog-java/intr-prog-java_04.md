@@ -215,41 +215,23 @@ Java 项目的生命周期包括以下阶段（步骤、阶段）：
 在我们的`pom.xml`文件中，还没有`dependencies`标签。但它可以放置在`<project>...</project>`标签的任何位置。让我们看一下`pom.xml`文件中依赖项的一些示例。我们现在可以将它们添加到项目中，因为无论如何我们以后都会使用它们：
 
 ```java
-
 <dependencies>
-
-<dependency>
-
-<groupId>org.junit.jupiter</groupId>
-
-<artifactId>junit-jupiter-api</artifactId>
-
-<version>5.1.0-M1</version>
-
-</dependency>
-
-<dependency>
-
-<groupId>org.postgresql</groupId>
-
-<artifactId>postgresql</artifactId>
-
-<version>42.2.2</version>
-
-</dependency>
-
-<dependency>
-
-<groupId>org.apache.commons</groupId>
-
-<artifactId>commons-lang3</artifactId>
-
-<version>3.4</version>
-
-</dependency>
-
+  <dependency>
+    <groupId>org.junit.jupiter</groupId>
+    <artifactId>junit-jupiter-api</artifactId>
+    <version>5.1.0-M1</version>
+  </dependency>
+  <dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <version>42.2.2</version>
+  </dependency>
+  <dependency>
+    <groupId>org.apache.commons</groupId>
+    <artifactId>commons-lang3</artifactId>
+    <version>3.4</version>
+  </dependency>
 </dependencies>
-
 ```
 
 第一个`org.junit.jupiter`依赖项是指`junit-jupiter-api-5.1.0-M1.jar`文件，其中包含编写测试所需的`.class`文件。我们将在下一节*编写应用程序代码和测试*中使用它。
@@ -261,31 +243,18 @@ Java 项目的生命周期包括以下阶段（步骤、阶段）：
 每个`.jar`文件都存储在互联网上的一个仓库中。默认情况下，Maven 将搜索其自己的中央仓库，位于[`repo1.maven.org/maven2`](http://repo1.maven.org/maven2)。您需要的绝大多数库都存储在那里。但在您需要指定其他仓库的罕见情况下，除了 Maven 中央仓库之外，您可以这样做：
 
 ```java
-
 <repositories>
-
-<repository>
-
-<id>my-repo1</id>
-
-<name>your custom repo</name>
-
-<url>http://jarsm2.dyndns.dk</url>
-
-</repository>
-
-<repository>
-
-<id>my-repo2</id>
-
-<name>your custom repo</name>
-
-<url>http://jarsm2.dyndns.dk</url>
-
-</repository>
-
+  <repository>
+    <id>my-repo1</id>
+    <name>your custom repo</name>
+    <url>http://jarsm2.dyndns.dk</url>
+  </repository>
+  <repository>
+    <id>my-repo2</id>
+    <name>your custom repo</name>
+    <url>http://jarsm2.dyndns.dk</url>
+  </repository>
 </repositories>
-
 ```
 
 阅读 Maven 指南，了解有关 Maven 的更多详细信息[`maven.apache.org/guides`](http://maven.apache.org/guides)。
@@ -343,11 +312,9 @@ Java 项目的生命周期包括以下阶段（步骤、阶段）：
 包的另一个功能是定义`.java`文件的位置，相对于`src\main\java`目录（适用于 Windows）或`src/main/java`目录（适用于 Linux）。包名必须与属于该包的文件的路径匹配：
 
 ```java
+src\main\java\com\packt\javapath\ch04demo\MyApplication.java (for Windows)
 
-src\main\java\com\packt\javapath\ch04demo\MyApplication.java (适用于 Windows)
-
-src/main/java/com/packt/javapath/ch04demo/MyApplication.java (适用于 Linux)
-
+src/main/java/com/packt/javapath/ch04demo/MyApplication.java (for Linux) 
 ```
 
 包名与文件位置之间的任何不匹配都会触发编译错误。当使用 IDE 向包名右键单击后使用 IDE 向导创建新类时，IDE 会自动将正确的包声明添加为`.java`文件的第一行。但是，如果不使用 IDE 创建新的源文件，那么就需要自己负责匹配包名和`.java`文件的位置。
@@ -357,33 +324,23 @@ src/main/java/com/packt/javapath/ch04demo/MyApplication.java (适用于 Linux)
 在编译过程中，`.class`文件的目录树是由`javac`工具创建的，并且它反映了`.java`文件的目录结构。Maven 在项目根目录中创建了一个`target`目录，并在其中创建了一个`classes`子目录。然后，Maven 在`javac`命令中使用`-d`选项指定这个子目录作为生成文件的输出位置：
 
 ```java
+//For Windows:
+javac -classpath src\main\java -d target\classes 
+ com.packt.javapath.ch04demo.MyApplication.java
 
-//对于 Windows：
-
-javac -classpath src\main\java -d target\classes
-
-com.packt.javapath.ch04demo.MyApplication.java
-
-//对于 Linux：
-
-javac -classpath src/main/java -d target/classes
-
-com.packt.javapath.ch04demo.MyApplication.java
-
+//For Linux:
+javac -classpath src/main/java -d target/classes 
+ com.packt.javapath.ch04demo.MyApplication.java
 ```
 
 在执行过程中，`.class`文件的位置设置在类路径上：
 
 ```java
-
-//对于 Windows：
-
+//For Windows:
 java -classpath target\classes com.packt.javapath.ch04demo.MyApplication
 
-//对于 Linux：
-
+//For Linux:
 java -classpath target/classes com.packt.javapath.ch04demo.MyApplication
-
 ```
 
 有了包声明、其功能以及与目录结构的关系的知识，让我们创建我们的第一个包。
@@ -479,31 +436,20 @@ java -classpath target/classes com.packt.javapath.ch04demo.MyApplication
 首先，我们将以下方法添加到`SimpleMath`类中：
 
 ```java
-
 public int multiplyByTwo(int i){
-
-return i * 2;
-
+  return i * 2;
 }
-
 ```
 
 现在，我们可以将使用上述方法的代码添加到`MyApplication`类中：
 
 ```java
-
 public static void main(String[] args) {
-
-int i = Integer.parseInt(args[0]);
-
-SimpleMath simpleMath = new SimpleMath();
-
-int result = simpleMath.multiplyByTwo(i);
-
-System.out.println(i + " * 2 = " + result);
-
+  int i = Integer.parseInt(args[0]);
+  SimpleMath simpleMath = new SimpleMath();
+  int result = simpleMath.multiplyByTwo(i);
+  System.out.println(i + " * 2 = " + result);
 }
-
 ```
 
 上述代码非常简单。应用程序从`String[] args`输入数组的第一个元素接收一个整数作为输入参数。请注意，Java 数组中的第一个元素的索引是 0，而不是 1。参数作为字符串传递，并且必须通过使用标准 Java 库中`java.lang.Integer`类的`parseInt()`静态方法转换（解析）为`int`类型。我们将在第五章中讨论 Java 类型，*Java 语言元素和类型*。
@@ -671,57 +617,33 @@ System.out.println(i + " * 2 = " + result);
 对于 JUnit 5，可以用于此目的的注释是`@BeforeAll`和`@AfterAll`。这是演示代码：
 
 ```java
-
 public class DemoTest {
-
-@BeforeAll
-
-在所有之前的静态方法中：
-
-System.out.println("beforeAll is executed");
-
+  @BeforeAll
+  static void beforeAll(){
+    System.out.println("beforeAll is executed");
+  }
+  @AfterAll
+  static void afterAll(){
+    System.out.println("afterAll is executed");
+  }
+  @Test
+  void test1(){
+    System.out.println("test1 is executed");
+  }
+  @Test
+  void test2(){
+    System.out.println("test2 is executed");
+  }
 }
-
-@AfterAll
-
-在所有之后的静态方法中：
-
-System.out.println("afterAll is executed");
-
-}
-
-@Test
-
-void test1(){
-
-System.out.println("test1 is executed");
-
-}
-
-@Test
-
-void test2(){
-
-System.out.println("test2 is executed");
-
-}
-
-}
-
 ```
 
 如果您运行它，输出将是：
 
 ```java
-
 beforeAll is executed
-
-test1 被执行
-
+test1 is executed
 test2 is executed
-
-afterAll is executed
-
+afterAll is executed 
 ```
 
 # 总结

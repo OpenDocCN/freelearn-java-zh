@@ -87,27 +87,16 @@ Java 规范提供了关于注释的以下信息：
 这是我们已经编写的`SimpleMath`类中注释的一个例子：
 
 ```java
-
 public class SimpleMath {
-
-/*
-
-这个方法只是将任何整数乘以 2
-
-并返回结果
-
-*/
-
-public int multiplyByTwo(int i){
-
-//我们应该检查 i 是否大于 Integer.MAX_VALUE 的 1/2 吗？
-
-return i * 2; //魔术发生在这里
-
+  /*
+    This method just multiplies any integer by 2
+    and returns the result
+  */
+  public int multiplyByTwo(int i){        
+    //Should we check if i is bigger than 1/2 of Integer.MAX_VALUE ?
+    return i * 2; // The magic happens here
+  }
 }
-
-}
-
 ```
 
 注释不会以任何方式影响代码。它们只是程序员的注释。此外，不要将它们与 JavaDoc 或其他文档生成系统混淆。
@@ -191,13 +180,9 @@ Java 规范规定了八种变量：
 让我们先看一下例子。假设我们连续有这三行代码：
 
 ```java
-
-int x; //变量 x 的声明
-
-x = 1; //初始化变量 x
-
-x = 2; //变量 x 的赋值
-
+int x;  //declartion of variable x
+x = 1;  //initialization of variable x
+x = 2;  //assignment of variable x 
 ```
 
 从前面的例子中可以看出，变量初始化是将第一个（初始）值赋给变量。所有后续的赋值不能称为初始化。
@@ -205,10 +190,8 @@ x = 2; //变量 x 的赋值
 本地变量在初始化之前不能使用：
 
 ```java
-
 int x;
-
-int result = x * 2;  //生成编译错误
+int result = x * 2;  //generates compilation error
 
 ```
 
@@ -219,19 +202,12 @@ int result = x * 2;  //生成编译错误
 在编写 Java 代码时，大多数情况下，程序员将声明和初始化语句结合在一起。例如，可以声明并初始化一个`int`类型的变量来保存整数`1`，如下所示：
 
 ```java
-
 int $ = 1;
-
 int _1 = 1;
-
 int i3 = 1;
-
 int αρετη = 1;
-
 int String = 1;
-
 int MAX_VALUE = 1;
-
 int isLetterOrDigit = 1;
 
 ```
@@ -239,21 +215,13 @@ int isLetterOrDigit = 1;
 相同的标识符可以用来声明和初始化一个`String`类型的变量来保存`abs`：
 
 ```java
-
 String $ = "abc";
-
 String _1 = "abc";
-
 String i3 = "abc";
-
 String αρετη = "abc";
-
 String String = "abc";
-
 String MAX_VALUE = "abc";
-
 String isLetterOrDigit = "abc";
-
 ```
 
 正如您可能已经注意到的，在前面的例子中，我们使用了*Identifier*部分示例中的标识符。
@@ -263,35 +231,22 @@ String isLetterOrDigit = "abc";
 final 变量是一旦初始化就不能被赋予另一个值的变量。它由`final`关键字表示：
 
 ```java
-
 void someMethod(){
-
-final int x = 1;
-
-x = 2; //生成编译错误
-
-//一些其他代码
-
+  final int x = 1;
+  x = 2; //generates compilation error
+  //some other code
 }
-
 ```
 
 尽管如此，以下代码将正常工作：
 
 ```java
-
 void someMethod(){
-
-final int x;
-
-//可以在这里添加任何不使用变量 x 的代码
-
-x = 2;
-
-//一些其他代码
-
+  final int x;
+  //Any code that does not use variable x can be added here
+  x = 2;
+  //some other code 
 }
-
 ```java
 
 前面的代码不会生成编译错误，因为在声明语句中，本地变量不会自动初始化为默认值。只有在变量没有显式初始化时，类、实例变量或数组组件才会被初始化为默认值（参见*Primitive types and literals*和*Reference types and String*部分）。
@@ -301,21 +256,15 @@ x = 2;
 由于 final 变量不能被更改，它是一个常量。如果它具有原始类型或`String`类型，则称为常量变量。但是 Java 程序员通常将术语常量应用于类级别的 final 静态变量，并将本地 final 变量称为 final 变量。按照惯例，类级别常量的标识符以大写字母写入。以下是一些示例：
 
 ```java
-
 static final String FEBRUARY = "February";
-
 static final int DAYS_IN_DECEMBER = 31;
-
 ```
 
 这些常量看起来与以下常量非常相似：
 
 ```java
-
 Month.FEBRUARY;
-
 TimeUnit.DAYS;
-
 DayOfWeek.FRIDAY;
 
 ```
@@ -345,19 +294,12 @@ DayOfWeek.FRIDAY;
 这些关键字用于不同的 Java 元素和语句，不能用作标识符。`goto`，`const`和`_`（下划线）关键字尚未用作关键字，但它们可能在未来的 Java 版本中使用。目前，它们只是包含在保留关键字列表中，以防止它们用作标识符。但它们可以作为标识符的一部分，例如：
 
 ```java
-
-int _ = 3; //错误，下划线是一个保留关键字
-
-int __ = 3; //作为标识符的多个下划线是可以的
-
+int _ = 3; //Error, underscore is a reserved keyword
+int __ = 3; //More than 1 underscore as an identifier is OK
 int _1 = 3;
-
 int y_ = 3;
-
 int goto_x = 3;
-
 int const1 = 3;
-
 ```
 
 `true` 和 `false` 看起来像关键字，不能用作标识符，但实际上它们不是 Java 关键字。它们是布尔字面值（值）。我们将在*基本类型和字面值*部分定义字面值是什么。
@@ -369,25 +311,15 @@ int const1 = 3;
 有十个词被称为受限关键字：`open`，`module`，`requires`，`transitive`，`exports`，`opens`，`to`，`uses`，`provides`和`with`。它们被称为受限，因为它们在模块声明的上下文中不能作为标识符，我们将不在本书中讨论。在所有其他地方，可以将它们用作标识符。以下是这种用法的一个例子：
 
 ```java
-
 int to = 1;
-
 int open = 1;
-
 int uses = 1;
-
 int with = 1;
-
 int opens =1;
-
 int module = 1;
-
 int exports =1;
-
 int provides = 1;
-
 int requires = 1;
-
 int transitive = 1;
 
 ```
@@ -399,9 +331,7 @@ int transitive = 1;
 分隔符是 Java 标记中列出的第三个。以下是它们的全部十二个，没有特定的顺序：
 
 ```java
-
 ;  { }  ( )  [ ]  ,  .  ...  ::  @
-
 ```
 
 # 分号";"
@@ -409,23 +339,14 @@ int transitive = 1;
 到目前为止，您已经非常熟悉分隔符`;`（分号）的用法。它在 Java 中的唯一作用是终止语句：
 
 ```java
-
-int i;  //声明语句
-
-i = 2;  //赋值语句
-
-if(i == 3){    //流程控制语句称为 if 语句
-
-//做一些事情
-
+int i;  //declaration statement
+i = 2;  //assignment statement
+if(i == 3){    //flow control statement called if-statement
+  //do something
 }
-
-for(int i = 0; i < 10; i++){
-
-//对 i 的每个值执行一些操作
-
+for(int i = 0; i < 10; i++){  
+  //do something with each value of i
 }
-
 ```
 
 # 大括号“{}”
@@ -433,67 +354,42 @@ for(int i = 0; i < 10; i++){
 你已经看到了类周围的大括号`{}`：
 
 ```java
-
-类 SomeClass {
-
-//带有代码的类体
-
+class SomeClass {
+  //class body with code
 }
-
 ```
 
 你也看到了方法体周围的大括号：
 
 ```java
-
 void someMethod(int i){
-
-//...
-
-if(i == 2){
-
-//代码块
-
-} else {
-
-//另一个代码块
-
+  //...
+  if(i == 2){
+    //block of code
+  } else {
+    //another block of code
+  }
+  ...
 }
-
-...
-
-}
-
 ```
 
 大括号也用于表示控制流语句中的代码块（参见第十章，*控制流语句*）：
 
 ```java
-
 void someMethod(int i){
-
-//...
-
-if(i == 2){
-
-//代码块
-
-} else {
-
-//另一个代码块
-
+  //...
+  if(i == 2){
+    //block of code
+  } else {
+    //another block of code
+  }
+  ...
 }
-
-...
-
-}
-
 ```
 
 它们用于初始化数组（请参阅*数组*部分）：
 
 ```java
-
 int[] myArray = {2,3,5};
 
 ```
@@ -505,47 +401,32 @@ int[] myArray = {2,3,5};
 您还看到了使用分隔符`()`（括号）在方法定义和方法调用中保持方法参数列表：
 
 ```java
-
 void someMethod(int i) {
-
-//...
-
-String s = anotherMethod();
-
-//...
-
+  //...
+  String s = anotherMethod();
+  //...
 }
-
 ```
 
 它们还用于控制流语句（请参阅第十章，*控制流语句*）：
 
 ```java
-
 if(i == 2){
-
-//...
-
+  //...
 }
-
 ```
 
 在类型转换期间（请参阅*基本类型和文字*部分），它们放在类型周围：
 
 ```java
-
 long v = 23;
-
 int i = (int)v;
-
 ```
 
 至于设置执行的优先级（请参阅第九章，*运算符，表达式和语句*），您应该从基本代数中熟悉它：
 
 ```java
-
 x = (y + z) * (a + b).
-
 ```
 
 # 括号“[]”
@@ -553,9 +434,7 @@ x = (y + z) * (a + b).
 分隔符`[]`（方括号）用于数组声明（请参阅*数组*部分）：
 
 ```java
-
 int[] a = new int[23];
-
 ```
 
 # 逗号“，”
@@ -563,25 +442,17 @@ int[] a = new int[23];
 逗号`,`用于括号中列出方法参数的分隔：
 
 ```java
-
 void someMethod(int i, String s, int j) {
-
-//...
-
-String s = anotherMethod(5, 6.1, "another param");
-
-//...
-
+  //...
+  String s = anotherMethod(5, 6.1, "another param");
+  //...
 }
-
 ```
 
 逗号也可以用于在声明语句中分隔相同类型的变量：
 
 ```java
-
 int i, j = 2; k;
-
 ```
 
 在上面的示例中，`i`，`j`和`k`三个变量都声明为`int`类型，但只有变量`j`初始化为`2`。
@@ -589,13 +460,9 @@ int i, j = 2; k;
 在循环语句中使用逗号具有与声明多个变量相同的目的（请参阅第十章，*控制流语句*）：
 
 ```java
-
 for (int i = 0; i < 10; i++){
-
-//...
-
-}
-
+   //...
+} 
 ```
 
 # 句号“.”
@@ -605,9 +472,7 @@ for (int i = 0; i < 10; i++){
 您还看到了如何使用句号来分隔对象引用和该对象的方法：
 
 ```java
-
 int result = simpleMath.multiplyByTwo(i);
-
 ```
 
 同样，如果`simpleMath`对象具有`a`的公共属性，则可以将其称为`simpleMath.a`。
@@ -617,31 +482,20 @@ int result = simpleMath.multiplyByTwo(i);
 分隔符`...`（省略号）仅用于 varargs：
 
 ```java
-
 int someMethod(int i, String s, int... k){
-
-//k 是一个具有元素 k[0]，k[1]等的数组
-
+  //k is an array with elements k[0], k[1], ...
 }
-
 ```
 
 可以以以下任何一种方式调用前面的方法：
 
 ```java
-
-someMethod(42, "abc");          //数组 k = null
-
+someMethod(42, "abc");          //array k = null
 someMethod(42, "abc", 42, 43);  //k[0] = 42, k[1] = 43
-
 int[] k = new int[2];
-
 k[0] = 42;
-
 k[1] = 43;
-
 someMethod(42, "abc", k);       //k[0] = 42, k[1] = 43
-
 ```
 
 在第二章中，*Java 语言基础*，在讨论`main()`方法时，我们解释了 Java 中`varargs`（可变参数）的概念。
@@ -651,9 +505,7 @@ someMethod(42, "abc", k);       //k[0] = 42, k[1] = 43
 分隔符`::`（冒号）用于 lambda 表达式中的方法引用（请参阅第十七章，*Lambda 表达式和函数式编程*）：
 
 ```java
-
 List<String> list = List.of("1", "32", "765");
-
 list.stream().mapToInt(Integer::valueOf).sum();
 
 ```
@@ -663,15 +515,10 @@ list.stream().mapToInt(Integer::valueOf).sum();
 分隔符`@`（@符号）用于表示注释：
 
 ```java
-
 @Override
-
 int someMethod(String s){
-
-//...
-
+  //...
 }
-
 ```
 
 在第四章中创建单元测试时，您已经看到了注释的几个示例，*您的第一个 Java 项目*。 Java 标准库中有几个预定义的注释（`@Deprecated`，`@Override`和`@FunctionalInterface`等）。 我们将在第十七章中使用其中一个（`@FunctionalInterface`），*Lambda 表达式和函数式编程*。
@@ -699,7 +546,6 @@ Java 只有两种变量类型：基本类型和引用类型。基本类型定义
 这是一个`b`变量声明和初始化为值`true`的示例：
 
 ```java
-
 boolean b = true;
 
 ```
@@ -707,11 +553,8 @@ boolean b = true;
 这是另一个示例，使用表达式将`true`值分配给`b`布尔变量：
 
 ```java
-
-int x = 1, y = 1;
-
-boolean b = 2 == ( x + y );
-
+ int x = 1, y = 1;
+ boolean b = 2 == ( x + y );
 ```
 
 在前面的示例中，在第一行中，声明了两个`int`基本类型的变量`x`和`y`，并分别赋值为`1`。在第二行，声明了一个布尔变量，并将其赋值为`2 == ( x + y )`表达式的结果。括号设置了执行的优先级，如下所示：
@@ -765,23 +608,14 @@ Java 整数类型的值占用不同数量的内存：
 `char`类型的有趣（并且经常令人困惑）之处在于 Unicode 转义和代码点可以互换使用，除非`char`类型的变量参与算术运算。在这种情况下，使用代码点的值。为了证明这一点，让我们看一下以下代码片段（在注释中，我们捕获了输出）：
 
 ```java
-
 char a = '3';
-
 System.out.println(a);         //  3
-
 char b = '$';
-
 System.out.println(b);         //  $
-
 System.out.println(a + b);     //  87
-
 System.out.println(a + 2);     //  53
-
-a = 36;
-
-System.out.println(a);         //  $
-
+a = 36;    
+System.out.println(a);         //  $ 
 ```
 
 如您所见，`char`类型的变量`a`和`b`代表`3`和`$`符号，并且只要它们不参与算术运算，就会显示为这些符号。否则，只使用代码点值。
@@ -807,45 +641,29 @@ System.out.println(a);         //  $
 您可以随时使用每种原始类型的相应包装类访问每种类型的最大值和最小值（我们将在第九章中更详细地讨论包装类，*运算符，表达式和语句*）。以下是一种方法（在注释中，我们已经显示了输出）：
 
 ```java
-
 byte b = Byte.MIN_VALUE;
-
 System.out.println(b);     //  -127
-
 b = Byte.MAX_VALUE;
-
 System.out.println(b);     //   128
 
 short s = Short.MIN_VALUE;
-
-System.out.println(s);      // -32768
-
+System.out.println(s);      // -32768 
 s = Short.MAX_VALUE;
-
 System.out.println(s);      //  32767
 
 int i = Integer.MIN_VALUE;
-
 System.out.println(i);      // -2147483648
-
 i = Integer.MAX_VALUE;
-
 System.out.println(i);      //  2147483647
 
 long l = Long.MIN_VALUE;
-
 System.out.println(l);      // -9223372036854775808
-
 l = Long.MAX_VALUE;
-
-System.out.println(l);      //  9223372036854775807
+System.out.println(l);      //  9223372036854775807 
 
 char c = Character.MIN_VALUE;
-
 System.out.println((int)c); // 0
-
 c = Character.MAX_VALUE;
-
 System.out.println((int)c); // 65535
 
 ```
@@ -863,7 +681,6 @@ System.out.println((int)c); // 65535
 这意味着`float`类型占用 32 位，`double`类型占用 64 位。它们表示带有点“。”后的分数部分的正数和负数值：`1.2`，`345.56`，`10.`，`-1.34`。默认情况下，在 Java 中，带有点的数值被假定为`double`类型。因此，以下赋值会导致编译错误：
 
 ```java
-
 float r = 23.4;
 
 ```
@@ -871,13 +688,9 @@ float r = 23.4;
 为了避免错误，必须通过在值后附加`f`或`F`字符来指示该值必须被视为`float`类型，如下所示：
 
 ```java
-
 float r = 23.4f;
-
-或
-
+or
 float r = 23.4F;
-
 ```
 
 这些值（`23.4f`和`23.4F`）本身称为文字。我们将在*原始类型文字*部分中更多地讨论它们。
@@ -885,15 +698,10 @@ float r = 23.4F;
 最小值和最大值可以通过与整数相同的方式找到。只需运行以下代码片段（在注释中，我们捕获了我们在计算机上得到的输出）：
 
 ```java
-
 System.out.println(Float.MIN_VALUE);  //1.4E-45
-
 System.out.println(Float.MAX_VALUE);  //3.4028235E38
-
-System.out.println(Double.MIN_VALUE); //4.9E-324
-
+System.out.println(Double.MIN_VALUE); //4.9E-324 
 System.out.println(Double.MAX_VALUE); //1.7976931348623157E308
-
 ```
 
 负值的范围与正数的范围相同，只是在每个数字前面加上减号`-`。零可以是`0.0`或`-0.0`。
@@ -903,13 +711,9 @@ System.out.println(Double.MAX_VALUE); //1.7976931348623157E308
 声明变量后，在使用之前必须为其分配一个值。正如我们在*变量声明，定义和初始化*部分中提到的，必须显式初始化或分配值给局部变量。例如：
 
 ```java
-
 int x;
-
 int y = 0;
-
 x = 1;
-
 ```
 
 但是，如果变量被声明为类字段（静态），实例（非静态）属性或数组组件，并且未显式初始化，则会自动使用默认值进行初始化。值本身取决于变量的类型：
@@ -931,19 +735,12 @@ x = 1;
 在原始类型中，`boolean`类型的文字是最简单的。它们只有两个：`true`和`false`。我们可以通过运行以下代码来演示：
 
 ```java
-
 public class LiteralsDemo {
-
-public static void main(String[] args){
-
-System.out.println("boolean literal true: " + true);
-
-System.out.println("boolean literal false: " + false);
-
+  public static void main(String[] args){
+    System.out.println("boolean literal true: " + true);
+    System.out.println("boolean literal false: " + false);
+  }
 }
-
-}
-
 ```
 
 结果将如下所示：
@@ -963,15 +760,10 @@ System.out.println("boolean literal false: " + false);
 以下是`char`类型文字作为单个字符的其他示例：
 
 ```java
-
 System.out.println("char literal 'a': " + 'a');
-
 System.out.println("char literal '%': " + '%');
-
-System.out.println("char literal '\u03a9': " + '\u03a9'); //Ω
-
-System.out.println("char literal '™': " + '™'); //商标符号
-
+System.out.println("char literal '\u03a9': " + '\u03a9'); //Omega
+System.out.println("char literal '™': " + '™'); //Trade mark sign
 ```
 
 如果你运行上面的代码，输出将如下所示：
@@ -999,17 +791,11 @@ System.out.println("char literal '™': " + '™'); //商标符号
 正如你所看到的，转义序列总是以反斜杠（`\`）开头。让我们演示一些转义序列的用法：
 
 ```java
-
 System.out.println("The line breaks \nhere");
-
-System.out.println("The tab is\here");
-
+System.out.println("The tab is\there");
 System.out.println("\"");
-
 System.out.println('\'');
-
 System.out.println('\\');
-
 ```
 
 如果你运行上面的代码，输出将如下所示：
@@ -1021,10 +807,8 @@ System.out.println('\\');
 与`char`类型文字相比，浮点文字要简单得多。如前所述，默认情况下，`23.45`文字为`double`类型，如果要将其设置为`double`类型，则无需添加字母`d`或`D`。但是，如果您愿意更明确，可以这样做。另一方面，`float`类型文字需要在末尾添加字母`f`或`F`。让我们运行以下示例（请注意我们如何使用`\n`转义序列在输出之前添加换行符）：
 
 ```java
-
-System.out.println("\n 浮点文字 123.456f：" + 123.456f);
-
-System.out.println("双文字 123.456d：" + 123.456d);
+System.out.println("\nfloat literal 123.456f: " + 123.456f);
+System.out.println("double literal 123.456d: " + 123.456d);
 
 ```
 
@@ -1035,11 +819,8 @@ System.out.println("双文字 123.456d：" + 123.456d);
 浮点类型文字也可以使用`e`或`E`表示科学计数法（参见[`en.wikipedia.org/wiki/Scientific_notation`](https://en.wikipedia.org/wiki/Scientific_notation)）：
 
 ```java
-
-System.out.println("\n 浮点文字 1.234560e+02f：" + 1.234560e+02f);
-
-System.out.println("双文字 1.234560e+02d：" + 1.234560e+02d);
-
+System.out.println("\nfloat literal 1.234560e+02f: " + 1.234560e+02f);
+System.out.println("double literal 1.234560e+02d: " + 1.234560e+02d);
 ```
 
 前面代码的结果如下：
@@ -1051,13 +832,9 @@ System.out.println("双文字 1.234560e+02d：" + 1.234560e+02d);
 `byte`，`short`，`int`和`long`整数类型的文字默认为`int`类型。以下赋值不会导致任何编译错误：
 
 ```java
-
 byte b = 10;
-
 short s = 10;
-
 int i = 10;
-
 long l = 10;
 
 ```
@@ -1065,13 +842,9 @@ long l = 10;
 但以下每一行都会生成错误：
 
 ```java
-
 byte b = 128;
-
 short s = 32768;
-
 int i = 2147483648;
-
 long l = 2147483648;
 
 ```
@@ -1079,9 +852,7 @@ long l = 2147483648;
 这是因为`byte`类型可以容纳的最大值为 127，`short`类型可以容纳的最大值为 32,767，`int`类型可以容纳的最大值为 2,147,483,647。请注意，尽管`long`类型可以容纳的最大值为 9,223,372,036,854,775,807，但最后一个赋值仍然失败，因为 2,147,483,648 文字默认为`int`类型，但超过了最大的`int`类型值。要创建`long`类型的文字，必须在末尾添加字母`l`或`L`，因此以下赋值也可以正常工作：
 
 ```java
-
 long l = 2147483648L;
-
 ```
 
 使用大写`L`是一个好习惯，因为小写字母`l`很容易与数字`1`混淆。
@@ -1089,16 +860,11 @@ long l = 2147483648L;
 前面的整数字面值示例是用十进制数系统表示的。但是，`byte`，`short`，`int`和`long`类型的文字也可以用二进制（基数 2，数字 0-1），八进制（基数 8，数字 0-7）和十六进制（基数 16，数字 0-9 和 a-f）数系统表示。以下是演示代码：
 
 ```java
-
-System.out.println("\n 打印文字 12：");
-
-System.out.println("- 二进制 0b1100：" + 0b1100);
-
-System.out.println("- 八进制 014：" + 014);
-
-System.out.println("- 十进制 12：" + 12);
-
-System.out.println("- 十六进制 0xc：" + 0xc);
+System.out.println("\nPrint literal 12:");
+System.out.println("- bin 0b1100: "+ 0b1100);
+System.out.println("- oct    014: "+ 014);
+System.out.println("- dec     12: "+ 12);
+System.out.println("- hex    0xc: "+ 0xc);
 
 ```
 
@@ -1111,16 +877,11 @@ System.out.println("- 十六进制 0xc：" + 0xc);
 在文字前面加上减号（`-`）会使值变为负数，无论使用哪种数字系统。以下是演示代码：
 
 ```java
-
-System.out.println("\n 打印文字-12：");
-
-System.out.println("- 二进制 0b1100：" + -0b1100);
-
-System.out.println("- 八进制 014：" + -014);
-
-System.out.println("- 十进制 12：" + -12);
-
-System.out.println("- 十六进制 0xc：" + -0xc);
+System.out.println("\nPrint literal -12:");
+System.out.println("- bin 0b1100: "+ -0b1100);
+System.out.println("- oct    014: "+ -014);
+System.out.println("- dec     12: "+ -12);
+System.out.println("- hex    0xc: "+ -0xc);
 
 ```
 
@@ -1131,21 +892,15 @@ System.out.println("- 十六进制 0xc：" + -0xc);
 另外，为了完成我们对原始类型文字的讨论，我们想提到原始类型文字中下划线（`_`）的可能用法。在长数字的情况下，将其分成组有助于快速估计其数量级。以下是一些示例：
 
 ```java
-
-int speedOfLightMilesSec = 299_792_458;
-
+int speedOfLightMilesSec = 299_792_458; 
 float meanRadiusOfEarthMiles = 3_958.8f;
-
 long creditCardNumber = 1234_5678_9012_3456L;
-
 ```
 
 让我们看看当我们运行以下代码时会发生什么：
 
 ```java
-
 long anotherCreditCardNumber = 9876____5678_____9012____1234L;
-
 System.out.println("\n" + anotherCreditCardNumber);
 
 ```
@@ -1173,27 +928,20 @@ System.out.println("\n" + anotherCreditCardNumber);
 使用相应的类名声明类类型的变量：
 
 ```java
-
-<类名> variableName;
-
+<Class name> variableName;
 ```
 
 它可以通过将`null`或该类的对象（实例）进行赋值来进行初始化。如果该类有一个超类（也称为父类）从中继承（扩展），则可以使用超类的名称进行变量声明。这是由于 Java 多态性的存在，该多态性在第二章中有所描述，*Java 语言基础*。例如，如果`SomeClass`类扩展`SomeBaseClass`，则以下声明和初始化都是可能的：
 
 ```java
-
 SomeBaseClass someBaseClass = new SomeBaseClass();
-
 someBaseClass = new SomeClass();
-
 ```java
 
 而且，由于每个类默认都扩展了`java.lang.Object`类，以下声明和初始化也是可能的：
 
 ```java
-
 Object someBaseClass = new SomeBaseClass();
-
 someBaseClass = new SomeClass();
 
 ```
@@ -1205,55 +953,32 @@ someBaseClass = new SomeClass();
 使用相应的接口名称声明接口类型的变量：
 
 ```java
-
-<接口名称> variableName;
-
+<Interface name> variableName;
 ```java
 
 它可以通过将`null`或实现接口的类的对象（实例）分配给它来进行初始化。这是一个例子：
 
 ```java
-
-接口 SomeInterface {
-
-void someMethod（）;
-
+interface SomeInterface{
+  void someMethod();
 }
-
-接口 SomeOtherInterface {
-
-void someOtherMethod（）;
-
+interface SomeOtherInterface{
+  void someOtherMethod();
 }
-
 class SomeClass implements SomeInterface {
-
-void someMethod（）{
-
-...
-
+  void someMethod(){
+    ...
+  }
+} 
+class SomeOtherClass implements SomeOtherInterface{
+  void someOtherMethod(){
+    ...
+  }
 }
-
-}
-
-class SomeOtherClass implements SomeOtherInterface {
-
-void someOtherMethod（）{
-
-...
-
-}
-
-}
-
-SomeInterface someInterface = new SomeClass（）;
-
-someInterface = new SomeOtherClass（）; //不可能，错误
-
-someInterface.someMethod（）; //运行正常
-
-someInterface.someOtherMethod（）; //不可能，错误
-
+SomeInterface someInterface = new SomeClass();
+someInterface = new SomeOtherClass(); //not possible, error
+someInterface.someMethod();         //works just fine
+someInterface.someOtherMethod();   //not possible, error
 ```
 
 我们将在[第九章]（33ed1fb4-36e0-499b-8156-4d5e88a2c404.xhtml）中更多地讨论将子类型分配给基类型引用。
@@ -1267,15 +992,10 @@ someInterface.someOtherMethod（）; //不可能，错误
 数组声明以类型名称和空括号`[]`开头：
 
 ```java
-
-byte [] bs;
-
-long [] [] ls;
-
-Object [] [] os;
-
-SomeClass [] [] [] scs;
-
+byte[] bs;
+long[][] ls;
+Object[][] os;
+SomeClass[][][] scs; 
 ```
 
 括号对的数量表示数组的维数（或嵌套深度）。
@@ -1285,29 +1005,19 @@ SomeClass [] [] [] scs;
 +   通过创建表达式，使用`new`关键字，类型名称和每个括号中每个维度的长度的括号;例如：
 
 ```java
-
-byte [] bs = new byte [100];
-
-long [] [] ls = new long [2] [3];
-
-Object [] [] os = new Object [3] [2];
-
-SomeClass [] [] [] scs = new SomeClass [3] [2] [1];
-
+        byte[] bs = new byte[100];
+        long[][] ls = new long [2][3];
+        Object[][] os = new Object[3][2];
+        SomeClass[][][] scs = new SomeClass[3][2][1]; 
 ```
 
 +   通过数组初始化程序，使用由大括号括起来的每个维度的逗号分隔值的列表，例如：
 
 ```java
-
-int [] [] is = {{1, 2, 3}, {10, 20}, {3, 4, 5, 6}};
-
-float [] [] fs = {{1.1f，2.2f，3}，{10，20.f，30.f}};
-
-Object [] oss = {new Object（），new SomeClass（），null，“abc”};
-
-SomeInterface [] sis = {new SomeClass（），null，new SomeClass（）};
-
+        int[][] is = { { 1, 2, 3 }, { 10, 20 }, { 3, 4, 5, 6 } };
+        float[][] fs = { { 1.1f, 2.2f, 3 }, { 10, 20.f, 30.f } };
+        Object[] oss = { new Object(), new SomeClass(), null, "abc" };
+        SomeInterface[] sis = { new SomeClass(), null, new SomeClass() };
 ```
 
 从这些示例中可以看出，多维数组可以包含不同长度的数组（`int [] [] is`数组）。此外，只要值可以分配给数组类型的变量（`float [] [] fs`，`Object [] is`和`SomeInterface [] sis`数组），组件类型值可以与数组类型不同。
@@ -1315,26 +1025,16 @@ SomeInterface [] sis = {new SomeClass（），null，new SomeClass（）};
 因为数组是对象，所以每次创建数组时都会初始化其组件。让我们考虑这个例子：
 
 ```java
-
-int [] [] is = new int [2] [3];
-
-System.out.println（“\ nis.length =” + is.length）;
-
-System.out.println（“is [0] .length =” + is [0] .length）;
-
-System.out.println（“is [0] [0] .length =” + is [0] [0]）;
-
-System.out.println（“is [0] [1] .length =” + is [0] [1]）;
-
-System.out.println（“is [0] [2] .length =” + is [0] [2]）;
-
-System.out.println（“is [1] .length =” + is [0] .length）;
-
-System.out.println（“is [1] [0] .length =” + is [1] [0]）;
-
-System.out.println（“is [1] [1] .length =” + is [1] [1]）;
-
-System.out.println（“is [1] [2] .length =” + is [1] [2]）;
+int[][] is = new int[2][3];
+System.out.println("\nis.length=" + is.length);
+System.out.println("is[0].length=" + is[0].length);
+System.out.println("is[0][0].length=" + is[0][0]);
+System.out.println("is[0][1].length=" + is[0][1]);
+System.out.println("is[0][2].length=" + is[0][2]);
+System.out.println("is[1].length=" + is[0].length);
+System.out.println("is[1][0].length=" + is[1][0]);
+System.out.println("is[1][1].length=" + is[1][1]);
+System.out.println("is[1][2].length=" + is[1][2]);
 
 ```
 
@@ -1345,14 +1045,10 @@ System.out.println（“is [1] [2] .length =” + is [1] [2]）;
 可以在不初始化某些维度的情况下创建多维数组：
 
 ```java
-
-int [] [] is = new int [2] [];
-
-System.out.println（“\ nis.length =” + is.length）;
-
-System.out.println（“is [0] =” + is [0]）;
-
-System.out.println（“is [1] =” + is [1]）;
+int[][] is = new int[2][];
+System.out.println("\nis.length=" + is.length);
+System.out.println("is[0]=" + is[0]);
+System.out.println("is[1]=" + is[1]);
 
 ```
 
@@ -1363,12 +1059,9 @@ System.out.println（“is [1] =” + is [1]）;
 缺少的维度可以稍后添加：
 
 ```java
-
-int [] [] is = new int [2] [];
-
-is [0] = new int [3];
-
-is [1] = new int [3];
+int[][] is = new int[2][];
+is[0] = new int[3];
+is[1] = new int[3];
 
 ```
 
@@ -1383,15 +1076,10 @@ is [1] = new int [3];
 `null`字面量表示没有对引用类型变量的任何赋值。让我们看下面的代码片段：
 
 ```java
-
 SomeClass someClass = new SomeClass();
-
 someClass.someMethod();
-
 someClass = null;
-
-someClass.someMethod(); // 抛出 NullPointerException
-
+someClass.someMethod(); // throws NullPointerException
 ```
 
 第一条语句声明了`someClass`变量，并为其分配了`SomeClass`类对象的引用。然后使用其引用调用了该类的一个方法。接下来的一行将`null`字面量赋给`someClass`变量。它从变量中移除了引用值。因此，当在下一行中我们尝试再次调用相同的方法时，我们会得到`NullPointerException`，这只有在使用的引用被赋予`null`值时才会发生。
@@ -1403,14 +1091,10 @@ someClass.someMethod(); // 抛出 NullPointerException
 `String`类型的另一个特性使它看起来像一个原始类型的是，它是唯一一个不仅仅只有`null`字面量的引用类型。`String`类型也可以有零个或多个字符的字面量，用双引号括起来——`""`，`"$"`，`"abc"`和`"12-34"`。`String`字面量的字符也可以包括转义序列。以下是一些例子：
 
 ```java
-
-System.out.println("\n 第一行。\n 第二行。");
-
-System.out.println("制表符\t 在行中");
-
-System.out.println("它被称为\"字符串字面量\"。");
-
-System.out.println("拉丁大写字母 Y 与分音符：\u0178");
+System.out.println("\nFirst line.\nSecond line.");
+System.out.println("Tab space\tin the line");
+System.out.println("It is called a \"String literal\".");
+System.out.println("Latin Capital Letter Y with diaeresis: \u0178");
 
 ```
 
@@ -1421,15 +1105,10 @@ System.out.println("拉丁大写字母 Y 与分音符：\u0178");
 但是，与`char`类型字面量相反，`String`字面量在算术运算中不像数字那样行为。`String`类型适用的唯一算术运算是加法，它的行为类似于连接：
 
 ```java
-
 System.out.println("s1" + "s2");
-
 String s1 = "s1";
-
 System.out.println(s1 + "s2");
-
 String s2 = "s1";
-
 System.out.println(s1 + s2);
 
 ```
@@ -1447,20 +1126,13 @@ System.out.println(s1 + s2);
 +   所有的`String`字面量都存储在同一个称为字符串池的共同内存区域中。在存储新的`String`字面量之前，JVM 会检查是否已经存储了这样的字面量。如果这样的对象已经存在，就不会创建新对象，而是返回对现有对象的引用作为对新对象的引用。以下代码演示了这种情况：
 
 ```java
-
-System.out.println("s1" == "s1");
-
-System.out.println("s1" == "s2");
-
-String s1 = "s1";
-
-System.out.println(s1 == "s1");
-
-System.out.println(s1 == "s2");
-
-String s2 = "s1";
-
-System.out.println(s1 == s2);
+        System.out.println("s1" == "s1");
+        System.out.println("s1" == "s2");
+        String s1 = "s1";
+        System.out.println(s1 == "s1");
+        System.out.println(s1 == "s2");
+        String s2 = "s1";
+        System.out.println(s1 == s2);
 
 ```
 
@@ -1473,15 +1145,10 @@ System.out.println(s1 == s2);
 为了避免不同方法同时修改相同文字的并发修改，每次我们尝试改变`String`文字时，都会创建一个带有更改的文字副本，而原始的`String`文字保持不变。以下是演示它的代码：
 
 ```java
-
-String s1 = "\nthe original string";
-
-String s2 = s1.concat(" has been changed");
-
-System.out.println(s2);
-
-System.out.println(s1);
-
+        String s1 = "\nthe original string";
+        String s2 = s1.concat(" has been changed"); 
+        System.out.println(s2);
+        System.out.println(s1);
 ```
 
 `String`类的`concat()`方法将另一个`String`文字添加到`s1`的原始值，并将结果分配给`s1`变量。此代码的输出如下：
@@ -1499,11 +1166,8 @@ System.out.println(s1);
 在`String`对象不是从文字创建的情况下，情况变得有些复杂，而是使用`String`构造函数`new String("some literal")`。在这种情况下，`String`对象存储在存储所有类的所有对象的相同区域，并且每次使用`new`关键字时，都会分配另一块内存（具有另一个引用）。以下是演示它的代码：
 
 ```java
-
 String s3 = new String("s");
-
 String s4 = new String("s");
-
 System.out.println(s3 == s4);
 
 ```
@@ -1515,33 +1179,19 @@ System.out.println(s3 == s4);
 正如你所看到的，尽管拼写相同，但对象具有不同的内存引用。为了避免混淆并仅通过拼写比较`String`对象，始终使用`String`类的`equals()`方法。以下是演示其用法的代码：
 
 ```java
-
 System.out.println("s5".equals("s5"));  //true
-
 System.out.println("s5".equals("s6"));  //false
-
 String s5 = "s5";
-
 System.out.println(s5.equals("s5"));   //true
-
 System.out.println(s5.equals("s6"));   //false
-
 String s6 = "s6";
-
 System.out.println(s5.equals(s5));     //true
-
 System.out.println(s5.equals(s6));     //false
-
 String s7 = "s6";
-
 System.out.println(s7.equals(s6));     //true
-
 String s8 = new String("s6");
-
 System.out.println(s8.equals(s7));     //true
-
 String s9 = new String("s9");
-
 System.out.println(s8.equals(s9));     //false
 
 ```
@@ -1555,35 +1205,20 @@ System.out.println(s8.equals(s9));     //false
 顺便说一句，你可能记得`equals()`方法是在`Object`类中定义的——`String`类的父类。`String`类有它自己的`equals()`方法，它覆盖了父类中具有相同签名的方法，就像我们在第二章中展示的那样，*Java 语言基础*。`String`类的`equals()`方法的源代码如下：
 
 ```java
-
 public boolean equals(Object anObject) {
-
-if (this == anObject) {
-
-return true;
-
+  if (this == anObject) {
+    return true;
+  }
+  if (anObject instanceof String) {
+    String aString = (String)anObject;
+    if (coder() == aString.coder()) {
+      return isLatin1() ? 
+             StringLatin1.equals(value, aString.value)
+            : StringUTF16.equals(value, aString.value);
+    }
+  }
+  return false;
 }
-
-if (anObject instanceof String) {
-
-String aString = (String)anObject;
-
-if (coder() == aString.coder()) {
-
-返回是否为 Latin1？
-
-StringLatin1.equals(value, aString.value)
-
-: StringUTF16.equals(value, aString.value);
-
-}
-
-}
-
-return false;
-
-}
-
 ```
 
 正如你所看到的，它首先比较引用，如果它们指向相同的对象，则返回`true`。但是，如果引用不同，它会比较值的拼写，这实际上发生在`StringLatin1`和`StringUTF16`类的`equals()`方法中。
@@ -1597,35 +1232,20 @@ return false;
 在描述`enum`类型之前，让我们看一个使用案例作为拥有这种类型的动机。假设我们想创建一个描述`TheBlows`家庭的类：
 
 ```java
-
 public class TheBlows {
-
-private String name, relation, hobby = "biking";
-
-private int age;
-
-public TheBlows(String name, String relation, int age) {
-
-this.name = name;
-
-this.relation = relation;
-
-this.age = age;
-
+  private String name, relation, hobby = "biking";
+  private int age;
+  public TheBlows(String name, String relation, int age) {
+    this.name = name;
+    this.relation = relation;
+    this.age = age;
+  }
+  public String getName() { return name; } 
+  public String getRelation() { return relation; }
+  public int getAge() { return age; }
+  public String getHobby() { return hobby; }
+  public void setHobby(String hobby) { this.hobby = hobby; }
 }
-
-public String getName() { return name; }
-
-public String getRelation() { return relation; }
-
-public int getAge() { return age; }
-
-public String getHobby() { return hobby; }
-
-public void setHobby(String hobby) { this.hobby = hobby; }
-
-}
-
 ```
 
 我们将默认爱好设置为`骑车`，并允许稍后更改，但其他属性必须在对象构造期间设置。这很好，除了我们不想在系统中有超过四个这个家庭的成员，因为我们非常了解`TheBlows`家庭的所有成员。
@@ -1633,55 +1253,32 @@ public void setHobby(String hobby) { this.hobby = hobby; }
 为了强加这些限制，我们决定提前创建`TheBlows`类的所有可能对象，并将构造函数设为私有：
 
 ```java
-
 public class TheBlows {
-
-public static TheBlows BILL = new TheBlows("Bill", "father", 42);
-
-public static TheBlows BECKY = new TheBlows("BECKY", "mother", 37);
-
-public static TheBlows BEE = new TheBlows("Bee", "daughter", 5);
-
-public static TheBlows BOB = new TheBlows("Bob", "son", 3);
-
-private String name, relation, hobby = "biking";
-
-private int age;
-
-private TheBlows(String name, String relation, int age) {
-
-this.name = name;
-
-this.relation = relation;
-
-this.age = age;
-
+  public static TheBlows BILL = new TheBlows("Bill", "father", 42);
+  public static TheBlows BECKY = new TheBlows("BECKY", "mother", 37);
+  public static TheBlows BEE = new TheBlows("Bee", "daughter", 5);
+  public static TheBlows BOB = new TheBlows("Bob", "son", 3);
+  private String name, relation, hobby = "biking";
+  private int age;
+  private TheBlows(String name, String relation, int age) {
+    this.name = name;
+    this.relation = relation;
+    this.age = age;
+  }
+  public String getName() { return name; }
+  public String getRelation() { return relation; }
+  public int getAge() { return age; }
+  public String getHobby() { return hobby; }
+  public void setHobby(String hobby) { this.hobby = hobby; }
 }
-
-public String getName() { return name; }
-
-public String getRelation() { return relation; }
-
-public int getAge() { return age; }
-
-public String getHobby() { return hobby; }
-
-public void setHobby(String hobby) { this.hobby = hobby; }
-
-}
-
 ```
 
 现在只有`TheBlows`类的四个实例存在，这个类的其他对象都不能被创建。让我们看看如果运行以下代码会发生什么：
 
 ```java
-
 System.out.println(TheBlows.BILL.getName());
-
 System.out.println(TheBlows.BILL.getHobby());
-
 TheBlows.BILL.setHobby("fishing");
-
 System.out.println(TheBlows.BILL.getHobby());
 
 ```
@@ -1693,101 +1290,57 @@ System.out.println(TheBlows.BILL.getHobby());
 同样，我们可以创建`TheJohns`家庭，有三个家庭成员：
 
 ```java
-
 public class TheJohns {
-
-public static TheJohns JOE = new TheJohns("Joe", "father", 42);
-
-public static TheJohns JOAN = new TheJohns("Joan", "mother", 37);
-
-public static TheJohns JILL = new TheJohns("Jill", "daughter", 5);
-
-private String name, relation, hobby = "joggling";
-
-private int age;
-
-private TheJohns(String name, String relation, int age) {
-
-this.name = name;
-
-this.relation = relation;
-
-this.age = age;
-
+  public static TheJohns JOE = new TheJohns("Joe", "father", 42);
+  public static TheJohns JOAN = new TheJohns("Joan", "mother", 37);
+  public static TheJohns JILL = new TheJohns("Jill", "daughter", 5);
+  private String name, relation, hobby = "joggling";
+  private int age;
+  private TheJohns(String name, String relation, int age) {
+    this.name = name;
+    this.relation = relation;
+    this.age = age;
+  }
+  public String getName() { return name; }
+  public String getRelation() { return relation; }
+  public int getAge() { return age; }
+  public String getHobby() { return hobby; }
+  public void setHobby(String hobby) { this.hobby = hobby; }
 }
-
-public String getName() { return name; }
-
-public String getRelation() { return relation; }
-
-public int getAge() { return age; }
-
-public String getHobby() { return hobby; }
-
-public void setHobby(String hobby) { this.hobby = hobby; }
-
-}
-
 ```
 
 While doing that, we noticed a lot of commonalities in these two classes and decided to create a `Family` base class:
 
 ```java
-
 public class Family {
-
-private String name, relation, hobby;
-
-private int age;
-
-protected Family(String name, String relation, int age, String hobby) {
-
-this.name = name;
-
-this.relation = relation;
-
-this.age = age;
-
-this.hobby = hobby;
-
+  private String name, relation, hobby;
+  private int age;
+  protected Family(String name, String relation, int age, String hobby) {
+    this.name = name;
+    this.relation = relation;
+    this.age = age;
+    this.hobby = hobby;
+  }
+  public String getName() { return name; }
+  public String getRelation() { return relation; }
+  public int getAge() { return age; }
+  public String getHobby() { return hobby; }
+  public void setHobby(String hobby) { this.hobby = hobby; }
 }
-
-public String getName() { return name; }
-
-public String getRelation() { return relation; }
-
-public int getAge() { return age; }
-
-public String getHobby() { return hobby; }
-
-public void setHobby(String hobby) { this.hobby = hobby; }
-
-}
-
 ```
 
 Now the `TheBlows` and `TheJohns` classes can be substantially simplified after extending the `Family` class. Here's how the `TheBlows` class can now look:
 
 ```java
-
 public class TheBlows extends Family {
-
-public static TheBlows BILL = new TheBlows("Bill", "father", 42);
-
-public static TheBlows BECKY = new TheBlows("Becky", "mother", 37);
-
-public static TheBlows BEE = new TheBlows("Bee", "daughter", 5);
-
-public static TheBlows BOB = new TheBlows("Bob", "son", 3);
-
-private TheBlows(String name, String relation, int age) {
-
-super(name, relation, age, "biking");
-
+  public static TheBlows BILL = new TheBlows("Bill", "father", 42);
+  public static TheBlows BECKY = new TheBlows("Becky", "mother", 37);
+  public static TheBlows BEE = new TheBlows("Bee", "daughter", 5);
+  public static TheBlows BOB = new TheBlows("Bob", "son", 3);
+  private TheBlows(String name, String relation, int age) {
+    super(name, relation, age, "biking");
+  }
 }
-
-}
-
 ```
 
 And that is the idea behind the `enum` type—to allow the creating of classes with a fixed number of named instances.
@@ -1795,9 +1348,7 @@ And that is the idea behind the `enum` type—to allow the creating of classes w
 The `enum` reference type class extends the `java.lang.Enum` class. It defines the set of constants, each of them an instance of the `enum` type it belongs to. The declaration of such a set starts with the `enum` keyword. Here is an example:
 
 ```java
-
 enum Season { SPRING, SUMMER, AUTUMN, WINTER }
-
 ```
 
 Each of the listed items—`SPRING`, `SUMMER`, `AUTUMN`, and `WINTER`—is an instance of `Season`. They are the only four instances of the `Season` class that can exist in an application. No other instance of the `Season` class can be created. And that is the reason for the creation of the `enum` type: it can be used for cases when the list of instances of a class has to be limited to the fixed set, such as the list of possible seasons.
@@ -1805,9 +1356,7 @@ Each of the listed items—`SPRING`, `SUMMER`, `AUTUMN`, and `WINTER`—is an i
 The `enum` declaration can also be written in a camel-case style:
 
 ```java
-
 enum Season { Spring, Summer, Autumn, Winter }
-
 ```
 
 But the all-uppercase style is used more often because, as we mentioned earlier, the static final constant's identifiers in Java programming are written this way by convention, in order to distinguish them from the non-constant variable. And `enum` constants are static and final implicitly.
@@ -1815,31 +1364,20 @@ But the all-uppercase style is used more often because, as we mentioned earlier
 Let's review an example of the `Season` class usage. Here is a method that prints different messages, depending on the season:
 
 ```java
-
 void enumDemo(Season season){
-
-if(season == Season.WINTER){
-
-System.out.println("Dress up warmer");
-
-} else {
-
-System.out.println("You can drees up lighter now");
-
+  if(season == Season.WINTER){
+    System.out.println("Dress up warmer");
+  } else {
+    System.out.println("You can drees up lighter now");
+  }
 }
-
-}
-
 ```
 
 Let's see what happens if we run the following two lines:
 
 ```java
-
 enumDemo(Season.WINTER);
-
 enumDemo(Season.SUMMER);
-
 ```
 
 The result will be as follows:
@@ -1849,11 +1387,8 @@ The result will be as follows:
 You probably have noticed that we used an `==` operator that compares references. That is because the `enum` instances (as all static variables) exist uniquely in memory. And the `equals()` method (implemented in the `java.lang.Enum` parent class) brings the same result. Let's run the following code:
 
 ```java
-
 Season season = Season.WINTER;
-
 System.out.println(Season.WINTER == season);
-
 System.out.println(Season.WINTER.equals(season));
 
 ```
@@ -1865,13 +1400,9 @@ The result will be:
 这是因为`java.lang.Enum`类的`equals()`方法是这样实现的：
 
 ```java
-
 public final boolean equals(Object other) {
-
-返回 this == other;
-
+  return this == other;
 }
-
 ```
 
 正如您所看到的，它确切地比较了两个对象引用-`this`（指代当前对象的保留关键字）和对另一个对象的引用。如果您想知道为什么参数具有`Object`类型，我们想提醒您，所有引用类型，包括`enum`和`String`，都扩展了`java.lang.Object`。它们是隐式的。
@@ -1893,25 +1424,17 @@ public final boolean equals(Object other) {
 让我们看一个它们用法的例子。这是我们将用于演示的`enum`类：
 
 ```java
-
-枚举 Season {
-
-SPRING, SUMMER, AUTUMN, WINTER;
-
+enum Season {
+  SPRING, SUMMER, AUTUMN, WINTER;
 }
-
 ```
 
 以下是使用它的代码：
 
 ```java
-
 System.out.println(Season.SPRING.name());
-
 System.out.println(Season.SUMMER.ordinal());
-
 System.out.println(Enum.valueOf(Season.class, "AUTUMN"));
-
 System.out.println(Season.WINTER.name());
 
 ```
@@ -1925,19 +1448,12 @@ System.out.println(Season.WINTER.name());
 `equals()`，`name()`和`ordinal()`方法在`java.lang.Enum`中被声明为`final`，因此它们不能被重写，而是按原样使用。`valueOf()`方法是静态的，不与任何类实例关联，因此不能被重写。我们唯一可以重写的方法是`toString()`方法：
 
 ```java
-
-枚举 Season {
-
-SPRING, SUMMER, AUTUMN, WINTER;
-
-public String toString() {
-
-返回“最好的季节”;
-
+enum Season {
+  SPRING, SUMMER, AUTUMN, WINTER;
+  public String toString() {
+    return "The best season";
+  }
 }
-
-}
-
 ```
 
 如果我们再次运行前面的代码，结果如下：
@@ -1947,25 +1463,15 @@ public String toString() {
 现在，您可以看到`toString()`方法对于每个常量返回相同的结果。必要时，`toString()`方法可以为每个常量重写。让我们看一下`Season`类的这个版本：
 
 ```java
-
-枚举 Season2 {
-
-SPRING,
-
-SUMMER,
-
-AUTUMN,
-
-WINTER { public String toString() { return "Winter"; } };
-
-public String toString() {
-
-返回“最好的季节”;
-
+enum Season2 {
+  SPRING,
+  SUMMER,
+  AUTUMN,
+  WINTER { public String toString() { return "Winter"; } };
+  public String toString() {
+    return "The best season";
+  }
 }
-
-}
-
 ```
 
 我们只为`WINTER`常量重写了`toString()`方法。如果我们再次运行相同的代码片段，结果将如下：
@@ -1977,43 +1483,25 @@ public String toString() {
 还可以为`enum`常量添加任何属性（以及 getter 和 setter），并将每个常量与相应的值关联起来。这是一个例子：
 
 ```java
+enum Season {
+  SPRING("Spring", "warmer than winter", 60),
+  SUMMER("Summer", "the hottest season", 100),
+  AUTUMN("Autumn", "colder than summer", 70),
+  WINTER("Winter", "the coldest season", 40);
 
-枚举 Season {
-
-SPRING("Spring", "warmer than winter", 60),
-
-SUMMER("Summer", "the hottest season", 100),
-
-AUTUMN("Autumn", "colder than summer", 70),
-
-WINTER("Winter", "the coldest season", 40);
-
-private String feel, toString;
-
-private int averageTemperature;
-
-Season(String toString, String feel, int t) {
-
-this.feel = feel;
-
-this.toString = toString;
-
-this.averageTemperature = t;
-
+  private String feel, toString;
+  private int averageTemperature;
+  Season(String toString, String feel, int t) {
+    this.feel = feel;
+    this.toString = toString;
+    this.averageTemperature = t;
+  }
+  public String getFeel(){ return this.feel; }
+  public int getAverageTemperature(){
+    return this.averageTemperature;
+  }
+  public String toString() { return this.toString; }
 }
-
-public String getFeel(){ return this.feel; }
-
-public int getAverageTemperature(){
-
-return this.averageTemperature;
-
-}
-
-public String toString() { return this.toString; }
-
-}
-
 ```
 
 In the preceding example, we have added three properties to the `Season` class: `feel`, `toString`, and `averageTemperature`. We have also created a constructor (a special method used to assign the initial values of an object state) that takes these three properties and adds getters and `toString()` methods that return values of these properties. Then, in parentheses after each constant, we have set the values that are going to be passed to the constructor when this constant is created.
@@ -2021,29 +1509,19 @@ In the preceding example, we have added three properties to the `Season` class
 Here is a demo method that we are going to use:
 
 ```java
-
 void enumDemo(Season season){
-
-System.out.println(season + " is " + season.getFeel());
-
-System.out.println(season + " has average temperature around "
-
-+ season.getAverageTemperature());
-
+  System.out.println(season + " is " + season.getFeel());
+  System.out.println(season + " has average temperature around " 
+                               + season.getAverageTemperature());
 }
-
 ```
 
 The `enumDemo()` method takes the `enum Season` constant and constructs and displays two sentences. Let's run the preceding code for each season, like this:
 
 ```java
-
 enumDemo2(Season3.SPRING);
-
 enumDemo2(Season3.SUMMER);
-
 enumDemo2(Season3.AUTUMN);
-
 enumDemo2(Season3.WINTER);
 
 ```
@@ -2055,27 +1533,16 @@ The result will be as follows:
 The `enum` class is a very powerful tool that allows us to simplify the code and make it better protected from runtime errors because all possible values are predictable and can be tested in advance. For example, we can test the `SPRING` constant getters using the following unit test:
 
 ```java
-
 @DisplayName("Enum Season tests")
-
 public class EnumSeasonTest {
-
-@Test
-
-@DisplayName("Test Spring getters")
-
-void multiplyByTwo(){
-
-assertEquals("Spring", Season.SPRING.toString());
-
-assertEquals("warmer than winter", Season.SPRING.getFeel());
-
-assertEquals(60, Season.SPRING.getAverageTemperature());
-
+  @Test
+  @DisplayName("Test Spring getters")
+  void multiplyByTwo(){
+    assertEquals("Spring", Season.SPRING.toString());
+    assertEquals("warmer than winter", Season.SPRING.getFeel());
+    assertEquals(60, Season.SPRING.getAverageTemperature());
+  }
 }
-
-}
-
 ```
 
 Granted, the getters don't have much code to make a mistake. But if the `enum` class has more complex methods or the list of the fixed values comes from some application requirements document, such a test will make sure we have written the code as required.
@@ -2083,17 +1550,11 @@ Granted, the getters don't have much code to make a mistake. But if the `enum` c
 In the standard Java libraries, there are several `enum` classes. Here are a few examples of constants from those classes that can give you a hint about what is out there:
 
 ```java
-
 Month.FEBRUARY;
-
 TimeUnit.DAYS;
-
 TimeUnit.MINUTES;
-
 DayOfWeek.FRIDAY;
-
 Color.GREEN;
-
 Color.green;
 
 ```
@@ -2105,67 +1566,38 @@ So, before creating your own `enum`, try to check and see whether the standard l
 One important difference between the reference types and primitive types that merits special discussion is the way their values can be used in a method. Let's see the difference by example. First, we create the `SomeClass` class:
 
 ```java
-
 class SomeClass{
-
-private int count;
-
-public int getCount() {
-
-return count;
-
+  private int count;
+  public int getCount() {
+    return count;
+  }
+  public void setCount(int count) {
+      this.count = count;
+    }
 }
-
-public void setCount(int count) {
-
-this.count = count;
-
-}
-
-}
-
 ```
 
 Then we create a class that uses it:
 
 ```java
-
 public class ReferenceTypeDemo {
-
-public static void main(String[] args) {
-
-float f = 1.0f;
-
-SomeClass someClass = new SomeClass();
-
-System.out.println("\nBefore demoMethod(): f = " + f +
-
-", count = " + someClass.getCount());
-
-demoMethod(f, someClass);
-
-System.out.println("After demoMethod(): f = " + f
-
-+ ", count = " + someClass.getCount());
-
+  public static void main(String[] args) {
+    float f = 1.0f;
+    SomeClass someClass = new SomeClass();
+    System.out.println("\nBefore demoMethod(): f = " + f + 
+                             ", count = " + someClass.getCount());
+    demoMethod(f, someClass);
+    System.out.println("After demoMethod(): f = " + f 
+                           + ", count = " + someClass.getCount());
+  }
+  private static void demoMethod(float f, SomeClass someClass){
+    //... some code can be here
+    f = 42.0f;
+    someClass.setCount(42);
+    someClass = new SomeClass();
+    someClass.setCount(1001);
+  }
 }
-
-private static void demoMethod(float f, SomeClass someClass){
-
-//... some code can be here
-
-f = 42.0f;
-
-someClass.setCount(42);
-
-someClass = new SomeClass();
-
-someClass.setCount(1001);
-
-}
-
-}
-
 ```
 
 首先让我们看看`demoMethod()`内部。我们为演示目的使其非常简单，但假设它做了更多的事情，然后为`f`变量（参数）分配一个新值，并在`SomeClass`类的对象上设置一个新的计数值。然后，此方法尝试用指向具有另一个计数值的新`SomeClass`对象的新值替换传入的引用。
@@ -2201,37 +1633,21 @@ someClass.setCount(1001);
 类似地，当数组作为参数传入时，副作用是可能的。以下是演示它的代码：
 
 ```java
-
 public class ReferenceTypeDemo {
-
-public static void main(String[] args) {
-
-int[] someArray = {1, 2, 3};
-
-System.out.println("\nBefore demoMethod(): someArray[0] = "
-
-+ someArray[0]);
-
-demoMethod(someArray);
-
-System.out.println("After demoMethod(): someArray[0] = "
-
-+ someArray[0]);
-
+  public static void main(String[] args) {
+    int[] someArray = {1, 2, 3};
+    System.out.println("\nBefore demoMethod(): someArray[0] = " 
+                                               + someArray[0]);
+    demoMethod(someArray);
+    System.out.println("After demoMethod(): someArray[0] = " 
+                                                + someArray[0]);
+  }
+  private static void demoMethod(int[] someArray){
+    someArray[0] = 42;
+    someArray = new int[3];
+    someArray[0] = 43;
+  }
 }
-
-private static void demoMethod(int[] someArray){
-
-someArray[0] = 42;
-
-someArray = new int[3];
-
-someArray[0] = 43;
-
-}
-
-}
-
 ```
 
 前面代码的执行结果如下：
@@ -2243,33 +1659,19 @@ someArray[0] = 43;
 并且，为了结束关于引用类型作为方法参数和可能的副作用的讨论，我们想证明`String`类型参数-由于`String`值的不可变性-在作为参数传递时的行为类似于原始类型。这是演示代码：
 
 ```java
-
 public class ReferenceTypeDemo {
-
-public static void main（String[] args）{
-
-String someString =“一些字符串”;
-
-System.out.println（“\n 在 demoMethod（）之前：string =”
-
-+ someString）;
-
-演示方法（someString）;
-
-System.out.println（“在 demoMethod（）之后：string =”
-
-+ someString）;
-
+  public static void main(String[] args) {
+    String someString = "Some string";
+    System.out.println("\nBefore demoMethod(): string = " 
+                                              + someString);
+    demoMethod(someString);
+    System.out.println("After demoMethod(): string = " 
+                                              + someString);
+  }
+  private static void demoMethod(String someString){
+    someString = "Some other string";
+  }
 }
-
-private static void demoMethod（String someString）{
-
-someString =“另一些字符串”;
-
-}
-
-}
-
 ```
 
 上述代码产生以下结果：

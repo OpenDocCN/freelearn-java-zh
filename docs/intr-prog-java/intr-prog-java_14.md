@@ -31,24 +31,18 @@
 每个集合类都有一个接受相同类型元素集合的构造函数。例如，这是如何使用`ArrayList(Collection collection)`构造函数创建`ArrayList`类的对象，以及如何使用`HashSet(Collection collection)`构造函数创建`HashSet`类的对象：
 
 ```java
-
 List<String> list1 = new ArrayList<>();
-
 list1.add("s1");
-
 list1.add("s1");
 
 List<String> list2 = new ArrayList<>(list1);
-
-System.out.println(list2);      //输出：[s1, s1]
+System.out.println(list2);      //prints: [s1, s1]
 
 Set<String> set = new HashSet<>(list1);
-
-System.out.println(set);        //输出：[s1]
+System.out.println(set);        //prints: [s1]
 
 List<String> list3 = new ArrayList<>(set);
-
-System.out.println(list3);      //输出：[s1]
+System.out.println(list3);      //prints: [s1]
 
 ```
 
@@ -59,75 +53,42 @@ System.out.println(list3);      //输出：[s1]
 可以使用双括号初始化器进行集合初始化。当集合是实例字段的值时，它特别适用，因此在对象创建期间会自动初始化。这是一个例子：
 
 ```java
-
 public class ManageCollections {
-
-private List<String> list = new ArrayList<>() {
-
-{
-
-add(null);
-
-add("s2");
-
-add("s3");
-
+  private List<String> list = new ArrayList<>() {
+        {
+            add(null);
+            add("s2");
+            add("s3");
+        }
+  };
+  public List<String> getThatList(){
+      return this.list;
+  }
+  public static void main(String... args){
+    ManageCollections mc = new ManageCollections();
+    System.out.println(mc.getThatList());    //prints: [null, s2, s3]
+  }
 }
-
-};
-
-public List<String> getThatList(){
-
-return this.list;
-
-}
-
-public static void main(String... args){
-
-ManageCollections mc = new ManageCollections();
-
-System.out.println(mc.getThatList());    //输出：[null, s2, s3]
-
-}
-
-}
-
 ```
 
 我们添加了一个 getter，并在`main()`方法运行时使用它。不幸的是，双括号初始化器与构造函数中的传统集合初始化相比并没有节省任何输入时间：
 
 ```java
-
 public class ManageCollections {
-
-private List<String> list = new ArrayList<>();
-
-public ManageCollections(){
-
-list.add(null);
-
-list.add("s2");
-
-list.add("s3");
-
+  private List<String> list = new ArrayList<>();
+  public ManageCollections(){
+        list.add(null);
+        list.add("s2");
+        list.add("s3");
+  }
+  public List<String> getThatList(){
+      return this.list;
+  }
+  public static void main(String... args){
+    ManageCollections mc = new ManageCollections();
+    System.out.println(mc.getThatList());    //prints: [null, s2, s3]
+  }
 }
-
-public List<String> getThatList(){
-
-return this.list;
-
-}
-
-public static void main(String... args){
-
-ManageCollections mc = new ManageCollections();
-
-System.out.println(mc.getThatList());    //输出：[null, s2, s3]
-
-}
-
-}
-
 ```
 
 唯一的区别是每次调用`add()`方法时都需要为`list`变量输入。此外，双括号初始化器有一个额外的开销，它创建了一个只有实例初始化程序和对封闭类的引用的匿名类。它也可能有更多的问题，因此应该避免使用。
@@ -135,7 +96,6 @@ System.out.println(mc.getThatList());    //输出：[null, s2, s3]
 好消息是，有一种更短、更方便的初始化集合的方法，作为字段值或局部变量值：
 
 ```java
-
 private List<String> list = Arrays.asList(null, "s2", "s3");
 
 ```
@@ -143,37 +103,26 @@ private List<String> list = Arrays.asList(null, "s2", "s3");
 `java.util.Arrays`的`asList()`静态方法非常受欢迎（我们将很快更详细地讨论`Arrays`类）。唯一的潜在缺点是这样的列表不允许添加元素：
 
 ```java
-
 List<String> list = Arrays.asList(null, "s2", "s3");
-
-list.add("s4");    //抛出 UnsupportedOperationException
-
+list.add("s4");    // throws UnsupportedOperationException
 ```
 
 但是，我们总是可以通过将初始化的列表传递给构造函数来创建一个新的集合：
 
 ```java
-
 List<String> list = new ArrayList(Arrays.asList(null, "s2", "s3"));
-
-list.add("s4");   //完全正常
+list.add("s4");   //works just fine
 
 Set<String> set = new HashSet<>(Arrays.asList(null, "s2", "s3"));
-
-set.add("s4");   //同样可以正常工作
-
+set.add("s4");   //works just fine as well
 ```
 
 请注意，集合类的构造函数接受实现`Collection`接口的任何对象。它允许从集合创建列表，反之亦然。但是，`Map`接口不扩展`Collection`，因此`Map`实现只允许从另一个映射创建映射：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(1, null);
-
 map.put(2, "s2");
-
 map.put(3, "s3");
 
 Map<Integer, String> anotherMap = new HashMap<>(map);
@@ -183,13 +132,9 @@ Map<Integer, String> anotherMap = new HashMap<>(map);
 新映射的键和值的类型必须与提供的映射中的类型相同，或者必须是提供的映射类型的父类型：
 
 ```java
-
 class A{}
-
 class B extends A{}
-
 Map<Integer, B> mb = new HashMap<>();
-
 Map<Integer, A> ma = new HashMap<>(mb);
 
 ```
@@ -197,9 +142,7 @@ Map<Integer, A> ma = new HashMap<>(mb);
 例如，这是一个可以接受的赋值：
 
 ```java
-
 Map<Integer, String> map1 = new HashMap<>();
-
 Map<Integer, Object> map2 = new HashMap<>(map1);
 
 ```
@@ -207,24 +150,17 @@ Map<Integer, Object> map2 = new HashMap<>(map1);
 这是因为`HashMap`构造函数将类型限制在映射元素的子类型之间：
 
 ```java
-
 HashMap(Map<? extends K,? extends V> map)
-
 ```
 
 还有以下代码也有类似的问题：
 
 ```java
-
 class A {}
-
 class B extends A {}
-
 List<A> l1 = Arrays.asList(new B());
-
 List<B> l2 = Arrays.asList(new B());
-
-//List<B> l3 = Arrays.asList(new A()); //编译错误
+//List<B> l3 = Arrays.asList(new A()); //compiler error
 
 ```
 
@@ -243,51 +179,30 @@ List<B> l2 = Arrays.asList(new B());
 静态字段初始化也有类似的解决方案。静态块可以包含必要的代码，用于生成必须用于静态字段初始化的值：
 
 ```java
-
 class SomeClass{
-
-public String getThatString(){
-
-return "that string";
-
+   public String getThatString(){
+      return "that string";
+   }
 }
-
-}
-
 public class ManageCollections {
-
-private static Set<String> set = new HashSet<>();
-
-static {
-
-SomeClass someClass = new SomeClass();
-
-set.add(someClass.getThatString());
-
-set.add("another string");
-
+  private static Set<String> set = new HashSet<>();
+   static {
+        SomeClass someClass = new SomeClass();
+        set.add(someClass.getThatString());
+        set.add("another string");
+  }
+  public static void main(String... args){
+    System.out.println(set); //prints: [that string, another string]
+  }
 }
-
-public static void main(String... args){
-
-System.out.println(set); //输出：[that string, another string]
-
-}
-
-}
-
 ```
 
 由于`set`是一个静态字段，它不能在构造函数中初始化，因为构造函数只有在创建实例时才会被调用，而静态字段可以在不创建实例的情况下被访问。我们也可以将前面的代码重写如下：
 
 ```java
-
-private static Set<String> set =
-
-new HashSet<>(Arrays.asList(new SomeClass().getThatString(),
-
-"another string"));
-
+private static Set<String> set = 
+    new HashSet<>(Arrays.asList(new SomeClass().getThatString(), 
+                                                "another string"));
 ```
 
 但是，您可以说它看起来有些笨拙和难以阅读。因此，如果它允许编写更易读的代码，静态初始化块可能是更好的选择。
@@ -297,22 +212,15 @@ new HashSet<>(Arrays.asList(new SomeClass().getThatString(),
 自 Java 9 以来，每个接口中都有另一种创建和初始化集合的选项，包括`Map`——`of()`工厂方法。它们被称为*工厂*，因为它们生成对象。有 11 种这样的方法，它们接受 0 到 10 个参数，每个参数都是要添加到集合中的元素，例如：
 
 ```java
-
 List<String> iList0 = List.of();
-
 List<String> iList1 = List.of("s1");
-
 List<String> iList2 = List.of("s1", "s2");
-
-iList3 列表=List.of("s1", "s2", "s3");
+List<String> iList3 = List.of("s1", "s2", "s3");
 
 Set<String> iSet1 = Set.of("s1", "s2", "s3", "s4");
-
 Set<String> iSet2 = Set.of("s1", "s2", "s3", "s4", "s5");
-
-Set<String> iSet3 = Set.of("s1", "s2", "s3", "s4", "s5", "s6",
-
-"s7", "s8", "s9", "s10");
+Set<String> iSet3 = Set.of("s1", "s2", "s3", "s4", "s5", "s6", 
+                                              "s7", "s8", "s9", "s10");
 
 Map<Integer, String> iMap = Map.of(1, "s1", 2, "s2", 3, "s3", 4, "s4");
 
@@ -325,14 +233,10 @@ Map<Integer, String> iMap = Map.of(1, "s1", 2, "s2", 3, "s3", 4, "s4");
 这些工厂方法的另一个特点是它们不允许`null`作为元素值。如果添加，`null`元素将导致运行时错误（`NullPointerException`）。之所以不允许`null`是因为很久以前就不得不禁止它出现在大多数集合中。这个问题对`Set`尤为重要，因为集合为`Map`提供键，而`null`键没有太多意义，对吧？例如，看下面的代码：
 
 ```java
-
 Map<Integer, String> map = new HashMap<>();
-
 map.put(null, "s1");
-
 map.put(2, "s2");
-
-System.out.println(map.get(null)); //输出：s1
+System.out.println(map.get(null));     //prints: s1
 
 ```
 
@@ -343,11 +247,8 @@ System.out.println(map.get(null)); //输出：s1
 这些工厂方法添加的另一个期待已久的特性是集合元素顺序的随机化。这意味着每次执行相同的集合创建时顺序都不同。例如，如果我们运行这些行：
 
 ```java
-
-Set<String> iSet3 = Set.of("s1", "s2", "s3", "s4", "s5", "s6",
-
-"s7", "s8", "s9", "s10");
-
+Set<String> iSet3 = Set.of("s1", "s2", "s3", "s4", "s5", "s6", 
+                                       "s7", "s8", "s9", "s10");
 System.out.println(iSet3);
 
 ```
@@ -373,33 +274,23 @@ System.out.println(iSet3);
 因此，以下两个语句都创建了相等的列表：
 
 ```java
-
 List<String> x1 = Arrays.asList(null, "s2", "s3");
-
 String[] array = {null, "s2", "s3"};
-
 List<String> x2 = Arrays.asList(array);
-
-System.out.println(x1.equals(x2)); //输出：true
+System.out.println(x1.equals(x2));       //prints: true
 
 ```
 
 Java 8 增加了另一种创建集合的方法，引入了流。这是一个可能的列表和集合对象生成的例子（我们将在第十八章中更多地讨论流和管道）：
 
 ```java
-
 List<String> list2 = Stream.of(null, "s2", "s3")
-
-.collect(Collectors.toList());
-
+                           .collect(Collectors.toList());
 System.out.println(list2);               //prints: [null, s2, s3]
 
 Set<String> set2 = Stream.of(null, "s2", "s3")
-
-.collect(Collectors.toSet());
-
+                         .collect(Collectors.toSet());
 System.out.println(set2);               //prints: [null, s2, s3]
-
 ```
 
 如果你阅读关于`Collectors.toList()`或`Collectors.toSet()`方法的文档，你会发现它说“返回的列表的类型、可变性、可序列化性或线程安全性没有保证；如果需要对返回的列表有更多的控制，使用 toCollection(Supplier)。”它们指的是`Collectors`类的`toCollection(Supplier<C> collectionFactory)`方法。
@@ -409,17 +300,12 @@ System.out.println(set2);               //prints: [null, s2, s3]
 在许多情况下（如果不是大多数情况），我们不关心返回的是哪个类（`List`或`Set`的实现）。这正是面向接口编程的美妙之处。但如果我们关心，这里是如何使用`toCollection()`方法的一个例子，根据之前的建议，这是比`toList()`或`toSet()`更好的选择：
 
 ```java
-
 List<String> list3 = Stream.of(null, "s2", "s3")
-
-.collect(Collectors.toCollection(ArrayList::new));
-
+               .collect(Collectors.toCollection(ArrayList::new));
 System.out.println(list3);               //prints: [null, s2, s3]
 
 Set<String> set3 = Stream.of(null, "s2", "s3")
-
-.collect(Collectors.toCollection(HashSet::new));
-
+                 .collect(Collectors.toCollection(HashSet::new));
 System.out.println(set3);               //prints: [null, s2, s3]
 
 ```
@@ -429,37 +315,23 @@ System.out.println(set3);               //prints: [null, s2, s3]
 在`Map`的情况下，文档中还提到了以下代码，没有关于类型的保证：
 
 ```java
-
 Map<Integer, String> m = new HashMap<>();
-
 m.put(1, null);
-
 m.put(2, "s2");
-
 Map<Integer, String> map2 = m.entrySet().stream()
-
-.map(e -> e.getValue() == null ? Map.entry(e.getKey(), "") : e)
-
-.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-
-System.out.println(map2);    //prints: {1=, 2=s2}
-
+  .map(e -> e.getValue() == null ? Map.entry(e.getKey(), "") : e)
+  .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+System.out.println(map2);    //prints: {1=, 2=s2} 
 ```
 
 请注意我们如何处理`null`，通过用空的`String`文字""替换它，以避免可怕的`NullPointerException`。这里是类似于之前的`toCollection()`方法的代码，使用我们选择的实现，这里是`HashMap`类：
 
 ```java
-
 Map<Integer, String> map3 = m.entrySet().stream()
-
-.map(e -> e.getValue() == null ? Map.entry(e.getKey(), "") : e)
-
-.collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue(),
-
-(k,v) -> v, HashMap::new));
-
+   .map(e -> e.getValue() == null ? Map.entry(e.getKey(), "") : e)
+   .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue(),
+                                         (k,v) -> v, HashMap::new));
 System.out.println(map3);    //prints: {1=, 2=s2}
-
 ```
 
 如果提供的示例对你来说看起来太复杂，你是对的；即使对有经验的程序员来说，它们也很复杂。原因有两个：
@@ -499,31 +371,21 @@ System.out.println(map3);    //prints: {1=, 2=s2}
 以下是创建不可修改列表的代码示例：
 
 ```java
-
 List<String> list = Arrays.asList("s1", "s1");
-
-System.out.println(list);          //打印：[s1, s1]
+System.out.println(list);          //prints: [s1, s1]
 
 List<String> unmodfifiableList = Collections.unmodifiableList(list);
-
 //unmodfifiableList.set(0, "s1"); //UnsupportedOperationException
-
 //unmodfifiableList.add("s2");    //UnsupportedOperationException
-
 ```
 
 正如你可能期望的那样，我们既不能更改元素的值，也不能向不可修改的列表中添加新元素。尽管如此，我们仍然可以更改底层列表，因为我们仍然持有对它的引用。之前创建的不可修改列表将捕获到这种更改：
 
-```
-
-System.out.println(unmodfifiableList);      //打印：[s1, s1]
-
+```java
+System.out.println(unmodfifiableList);      //prints: [s1, s1]
 list.set(0, "s0");
-
 //list.add("s2");       //UnsupportedOperationException
-
-System.out.println(unmodfifiableList);      //打印：[s0, s1]
-
+System.out.println(unmodfifiableList);      //prints: [s0, s1] 
 ```
 
 通过改变原始列表，我们成功地改变了之前创建的不可修改列表中元素的值。这就是创建不可修改集合的这种方式的弱点，因为它们基本上只是常规集合的包装器。
@@ -535,23 +397,14 @@ System.out.println(unmodfifiableList);      //打印：[s0, s1]
 公平地说，即使不使用`of()`工厂方法，也有办法创建不可变集合。以下是一种方法：
 
 ```java
-
 List<String> iList =
-
-Collections.unmodifiableList(new ArrayList<>() {{
-
-add("s1");
-
-add("s1");
-
-}});
-
+        Collections.unmodifiableList(new ArrayList<>() {{
+            add("s1");
+            add("s1");
+        }});
 //iList.set(0, "s0");       //UnsupportedOperationException
-
 //iList.add("s2");          //UnsupportedOperationException
-
-System.out.println(iList);  //打印：[s1, s1]
-
+System.out.println(iList);  //prints: [s1, s1]
 ```
 
 关键是不要引用用于创建不可修改集合的原始集合（值的来源），因此不能用于更改底层来源。
@@ -559,19 +412,13 @@ System.out.println(iList);  //打印：[s1, s1]
 这是另一种创建不可变集合的方法，而不使用`of()`工厂方法：
 
 ```java
-
 String[] source = {"s1", "s2"};
-
 List<String> iList2 =
-
-将源代码流转换为列表。
-
-System.out.println(iList2);      //打印：[s1, s2]
+        Arrays.stream(source).collect(Collectors.toList());
+System.out.println(iList2);      //prints: [s1, s2]
 
 source[0]="s0";
-
-System.out.println(iList2);      //打印：[s1, s2]
-
+System.out.println(iList2);      //prints: [s1, s2] 
 ```
 
 看起来好像我们在这里有对原始值的`source`引用。但是，流不会保持值与其源之间的引用。它在处理之前会复制每个值，从而打破值与其源的连接。这就是为什么我们尝试通过更改`source`数组的元素来更改`iList2`的元素并没有成功。我们将在第十八章中更多地讨论流，*流和管道*。
@@ -583,13 +430,9 @@ System.out.println(iList2);      //打印：[s1, s2]
 `Collections`类中还有三个常量，提供了不可变的空集合：
 
 ```java
-
 List<String> list1 = Collections.EMPTY_LIST;
-
 //list1.add("s1");       //UnsupportedOperationException
-
 Set<String> set1 = Collections.EMPTY_SET;
-
 Map<Integer, String> map1 = Collections.EMPTY_MAP;
 
 ```
@@ -597,21 +440,14 @@ Map<Integer, String> map1 = Collections.EMPTY_MAP;
 此外，`Collections`类中还有七种方法可以创建不可变的空集合：
 
 ```java
-
 List<String> list2 = Collections.emptyList();
-
 //list2.add("s1");       //UnsupportedOperationException
-
 Set<String> set2 = Collections.emptySet();
-
 Map<Integer, String> map2 = Collections.emptyMap();
 
 SortedSet<String> set3 = Collections.emptySortedSet();
-
 Map<Integer, String> map3 = Collections.emptySortedMap();
-
 NavigableSet<String> set4 = Collections.emptyNavigableSet();
-
 NavigableMap<Integer, String> map4 = Collections.emptyNavigableMap();
 
 ```
@@ -627,11 +463,8 @@ NavigableMap<Integer, String> map4 = Collections.emptyNavigableMap();
 您可以在以下代码片段中看到它是如何工作的：
 
 ```java
-
 List<String> singletonS1 = Collections.singletonList("s1");
-
 System.out.println(singletonS1);
-
 //singletonS1.add("s1");        //UnsupportedOperationException
 
 ```
@@ -641,11 +474,8 @@ System.out.println(singletonS1);
 但是`Collections`类的`List<T> nCopies(int n, T object)`方法以比`of()`方法更紧凑的方式创建了`n`个相同对象的不可变列表：
 
 ```java
-
 List<String> nList = Collections.nCopies(3, "s1");
-
 System.out.println(nList);
-
 //nList.add("s1");        //UnsupportedOperationException
 
 ```
@@ -653,9 +483,7 @@ System.out.println(nList);
 使用`of()`方法的类似代码更冗长：
 
 ```java
-
 List<String> nList = List.of("s1", "s1", "s1");
-
 ```
 
 如果这对你来说不是太糟糕，想象一下你需要创建一个包含 100 个相同对象的列表。
@@ -675,29 +503,20 @@ List<String> nList = List.of("s1", "s1", "s1");
 `void copy(List<T> dest, List<T> src)`方法将`src`列表的元素复制到`dest`列表并保留元素顺序。如果需要将一个列表作为另一个列表的子列表，这个方法非常有用：
 
 ```java
-
 List<String> list1 = Arrays.asList("s1","s2");
-
 List<String> list2 = Arrays.asList("s3", "s4", "s5");
-
 Collections.copy(list2, list1);
-
-System.out.println(list2);    //输出：[s1, s2, "s5"]
+System.out.println(list2);    //prints: [s1, s2, "s5"]
 
 ```
 
 在执行此操作时，`copy()`方法不会消耗额外的内存 - 它只是将值复制到已分配的内存上。这使得这个方法对于传统的复制相同大小的列表的情况非常有帮助：
 
 ```java
-
 List<String> list1 = Arrays.asList("s1","s2");
-
 List<String> list2 = Arrays.asList("s3", "s4");
-
 list2 = new ArrayList(list1);
-
-System.out.println(list2);    //输出：[s1, s2]
-
+System.out.println(list2);    //prints: [s1, s2]
 ```
 
 这段代码放弃了最初分配给`list2`的值，并分配了新的内存来保存`list1`的值的副本。被放弃的值会一直留在内存中，直到垃圾收集器将它们移除并允许重用内存。想象一下，这些列表的大小是可观的，您就会明白在这种情况下使用`Collections.copy()`会减少很多开销。它还有助于避免`OutOfMemory`异常。
@@ -719,12 +538,9 @@ System.out.println(list2);    //输出：[s1, s2]
 例如，这是类`String`如何实现接口`Comparable`：
 
 ```java
-
 List<String> no = Arrays.asList("a","b", "Z", "10", "20", "1", "2");
-
 Collections.sort(no);
-
-System.out.println(no);     //输出：[1, 10, 2, 20, Z, a, b]
+System.out.println(no);     //prints: [1, 10, 2, 20, Z, a, b]
 
 ```
 
@@ -735,41 +551,23 @@ System.out.println(no);     //输出：[1, 10, 2, 20, Z, a, b]
 虽然对人类来说看起来有些意外，但`String`对`compareTo(T)`方法的实现在许多排序情况下非常有帮助。例如，我们可以用它来实现`Person`类中`Comparable`接口的实现：
 
 ```java
-
-类 Person 实现 Comparable<Person> {
-
-private String firstName = "", lastName = "";
-
-构造函数 public Person(String firstName, String lastName) {
-
-this.firstName = firstName;
-
-this.lastName = lastName;
-
+class Person implements Comparable<Person>{
+    private String firstName = "", lastName = "";
+    public Person(String firstName, String lastName) {
+        this.firstName = firstName;
+        this.lastName = lastName;
+    }
+    public String getFirstName() { return firstName; }
+    public String getLastName() { return lastName; }
+    @Override
+    public int compareTo(Person person){
+        int result = this.firstName.compareTo(person.firstName);
+        if(result == 0) {
+            return this.lastName.compareTo(person.lastName);
+        }
+        return result;
+    }
 }
-
-public String getFirstName() { return firstName; }
-
-public String getLastName() { return lastName; }
-
-@Override
-
-public int compareTo(Person person){
-
-int result = this.firstName.compareTo(person.firstName);
-
-if(result == 0) {
-
-return this.lastName.compareTo(person.lastName);
-
-}
-
-return result;
-
-}
-
-}
-
 ```
 
 我们首先比较名字，如果它们相等，再比较姓。这意味着我们希望`Person`对象按名字顺序排列，然后按姓氏排列。
@@ -777,9 +575,7 @@ return result;
 `String`的`compareTo(T)`方法的实现返回第一个（或 this）和第二个对象的排序位置之间的差异。例如，`a`和`c`的排序位置之间的差异是`2`，这是它们比较的结果：
 
 ```java
-
 System.out.println("a".compareTo("c"));   //prints: -2
-
 System.out.println("c".compareTo("a"));   //prints: 2
 
 ```
@@ -789,39 +585,26 @@ System.out.println("c".compareTo("a"));   //prints: 2
 请注意，`Integer`的`compareTo(T)`实现并不返回排序位置的差异。相反，当对象相等时，它返回`0`，当此对象小于方法参数时，它返回`-1`，否则返回`1`：
 
 ```java
-
 System.out.println(Integer.valueOf(3)
-
-.compareTo(Integer.valueOf(3))); //prints: 0
-
+                          .compareTo(Integer.valueOf(3))); //prints: 0
 System.out.println(Integer.valueOf(3)
-
-.compareTo(Integer.valueOf(4))); //prints: -1
-
+                          .compareTo(Integer.valueOf(4))); //prints: -1
 System.out.println(Integer.valueOf(3)
-
-.compareTo(Integer.valueOf(5))); //prints: -1
-
+                          .compareTo(Integer.valueOf(5))); //prints: -1
 System.out.println(Integer.valueOf(5)
-
-.compareTo(Integer.valueOf(4))); //prints: 1
-
+                          .compareTo(Integer.valueOf(4))); //prints: 1
 System.out.println(Integer.valueOf(5)
-
-.compareTo(Integer.valueOf(3))); //prints: 1
+                          .compareTo(Integer.valueOf(3))); //prints: 1
 
 ```
 
 我们使用`Comparator`及其方法`compare(T o1, T o2)`得到相同的结果：
 
 ```java
-
 Comparator<String> compStr = Comparator.naturalOrder();
-
 System.out.println(compStr.compare("a", "c"));  //prints: -2
 
 Comparator<Integer> compInt = Comparator.naturalOrder();
-
 System.out.println(compInt.compare(3, 5));     //prints: -1
 
 ```
@@ -841,45 +624,29 @@ System.out.println(compInt.compare(3, 5));     //prints: -1
 这就是为什么我们在我们的类`Person`中添加了以下方法`equals()`：
 
 ```java
-
 @Override
-
 public boolean equals(Object other) {
-
-if (other == null) return false;
-
-if (this == other) return true;
-
-if (!(other instanceof Person)) return false;
-
-final Person that = (Person) other;
-
-return this.firstName.equals(that.getFirstName()) &&
-
-this.lastName.equals(that.getLastName());
-
+    if (other == null) return false;
+    if (this == other) return true;
+    if (!(other instanceof Person)) return false;
+    final Person that = (Person) other;
+    return this.firstName.equals(that.getFirstName()) &&
+            this.lastName.equals(that.getLastName());
 }
-
 ```
 
 现在方法`equals()`与方法`compareTo(T)`对齐，因此对于相等的`Person`对象，`compareTo(T)`返回 0：
 
 ```java
-
 Person joe1 = new Person("Joe", "Smith");
-
 Person joe2 = new Person("Joe", "Smith");
-
 Person bob = new Person("Bob", "Smith");
 
 System.out.println(joe1.equals(joe2));    //prints: true
-
 System.out.println(joe1.compareTo(joe2)); //prints: 0
 
 System.out.println(joe1.equals(bob));     //prints: false
-
 System.out.println(joe1.compareTo(bob));  //prints: 8
-
 System.out.println(joe2.compareTo(bob));  //prints: 8
 
 ```
@@ -889,33 +656,21 @@ System.out.println(joe2.compareTo(bob));  //prints: 8
 我们还在我们的类`Person`中添加了以下`toString()`方法：
 
 ```java
-
 @Override
-
 public String toString(){
-
-return this.firstName + " " + this.lastName;
-
+    return this.firstName + " " + this.lastName;
 }
-
 ```
 
 它将允许我们更好地展示排序结果，这正是我们现在要做的。以下是演示代码：
 
 ```java
-
 Person p1 = new Person("Zoe", "Arnold");
-
 Person p2 = new Person("Alex", "Green");
-
 Person p3 = new Person("Maria", "Brown");
-
 List<Person> list7 = Arrays.asList(p1, p2, p3);
-
 System.out.println(list7);  //[Zoe Arnold, Alex Green, Maria Brown]
-
 Collections.sort(list7);
-
 System.out.println(list7);  //[Alex Green, Maria Brown, Zoe Arnold]
 
 ```
@@ -925,29 +680,19 @@ System.out.println(list7);  //[Alex Green, Maria Brown, Zoe Arnold]
 现在，让我们创建一个以不同方式对`Person`类的对象进行排序的比较器：
 
 ```java
-
 class OrderByLastThenFirstName implements Comparator<Person> {
-
-@Override
-
-public int compare(Person p1, Person p2){
-
-return (p1.getLastName() + p1.getFirstName())
-
-.compareTo(p2.getLastName() + p2.getFirstName());
-
+    @Override
+    public int compare(Person p1, Person p2){
+        return (p1.getLastName() + p1.getFirstName())
+                .compareTo(p2.getLastName() + p2.getFirstName());
+    }
 }
-
-}
-
 ```
 
 如您所见，前面的比较器首先根据姓氏的自然顺序，然后根据名字的自然顺序建立了一个顺序。如果我们使用相同的列表和对象与此比较器，我们将得到以下结果：
 
 ```java
-
 Collections.sort(list7, new OrderByLastThenFirstName());
-
 System.out.println(list7);  //[Zoe Arnold, Maria Brown, Alex Green]
 
 ```
@@ -969,39 +714,27 @@ System.out.println(list7);  //[Zoe Arnold, Maria Brown, Alex Green]
 以下是演示列出的方法的代码：
 
 ```java
-
 Person p1 = new Person("Zoe", "Arnold");
-
 Person p2 = new Person("Alex", "Green");
-
 Person p3 = new Person("Maria", "Brown");
-
 List<Person> list7 = Arrays.asList(p1,p2,p3);
-
 System.out.println(list7);  //[Zoe Arnold, Alex Green, Maria Brown]
 
 Collections.reverse(list7);
-
 System.out.println(list7);  //[Maria Brown, Alex Green, Zoe Arnold]
 
 Collections.rotate(list7, 1);
-
 System.out.println(list7);  //[Zoe Arnold, Maria Brown, Alex Green]
 
 Collections.sort(list7, Collections.reverseOrder());
-
 System.out.println(list7);  //[Zoe Arnold, Maria Brown, Alex Green]
 
 Collections.sort(list7, new OrderByLastThenFirstName());
-
 System.out.println(list7);  //[Zoe Arnold, Maria Brown, Alex Green]
 
-Collections.sort(list7,
-
-Collections.reverseOrder(new OrderByLastThenFirstName()));
-
+Collections.sort(list7, 
+         Collections.reverseOrder(new OrderByLastThenFirstName()));
 System.out.println(list7);  //[Alex Green, Maria Brown, Zoe Arnold]
-
 ```
 
 # 搜索和 equals()
@@ -1023,21 +756,14 @@ The `binarySearch()` methods search for the `key` value in the provided list. Th
 The `indexOfSubList()` and `lastIndexOfSubList()` methods return the position of the provided sublist in the provided list:
 
 ```java
-
 List<String> list1 = List.of("s3","s5","s4","s1");
-
 List<String> list2 = List.of("s4","s5");
-
 int index = Collections.indexOfSubList(list1, list2);
-
 System.out.println(index);  //prints: -1
 
 List<String> list3 = List.of("s5","s4");
-
 index = Collections.indexOfSubList(list1, list3);
-
 System.out.println(index);   //prints: 1
-
 ```
 
 Please notice that the sublist should be exactly in the same order. Otherwise, it will not be found.
@@ -1045,35 +771,24 @@ Please notice that the sublist should be exactly in the same order. Otherwise, i
 And the last method, `frequency(Collection, Object)`, returns the number of times the provided object appears in the provided collection:
 
 ```java
-
 List<String> list4 = List.of("s3","s4","s4","s1");
-
 int count = Collections.frequency(list4, "s4");
-
 System.out.println(count);         //prints: 2
-
 ```
 
 If you are going to use these methods (or any other methods that search collections for that matter) and if the collections include objects of custom classes, you have to have the method `equals()` implemented. A typical search algorithm uses the method `equals()` for the identification of the object. If you do not implement the method `equals()` in your custom class, the method `equals()` from the base class `Object` is going to be used, which compares only the object references, not their states (values of their fields). Here is a demonstration of this behavior:
 
 ```java
-
 class A{}
-
 class B extends A{}
 
 List<A> list5 = List.of(new A(), new B());
-
 int c = Collections.frequency(list5, new A());
-
 System.out.println(c);         //prints: 0
 
 A a = new A();
-
 List<A> list6 = List.of(a, new B());
-
 c = Collections.frequency(list6, a);
-
 System.out.println(c);         //prints: 1
 
 ```
@@ -1081,37 +796,23 @@ System.out.println(c);         //prints: 1
 As you can see, the object of class `A` is found only if it is literally the same object. But if we implement the method `equals()`, then the object of class A is found according to the criteria we have put in the method `equals()` implementation:
 
 ```java
-
 class A{
-
-@Override
-
-public boolean equals(Object o){
-
-if (o == null) return false;
-
-return (o instanceof A);
-
+    @Override
+    public boolean equals(Object o){
+        if (o == null) return false;
+        return (o instanceof A);
+    }
 }
-
-}
-
 class B extends A{}
 
 List<A> list5 = List.of(new A(), new B());
-
 int c = Collections.frequency(list5, new A());
-
 System.out.println(c);         //prints: 2
 
 A a = new A();
-
 List<A> list6 = List.of(a, new B());
-
 c = Collections.frequency(list6, a);
-
 System.out.println(c);         //prints: 2
-
 ```
 
 Now, the count of objects `A` in each case is `2` because `B` extends `A` and thus has two types, `B` and `A`.
@@ -1119,37 +820,23 @@ Now, the count of objects `A` in each case is `2` because `B` extends `A` and th
 If we prefer to identify the object by exactly the current class name and not include its parent class in the consideration, we should implement the method `equals()` differently:
 
 ```java
-
 class A{
-
-@Override
-
-public boolean equals(Object o){
-
-if (o == null) return false;
-
-return o.getClass().equals(this.getClass());
-
+    @Override
+    public boolean equals(Object o){
+        if (o == null) return false;
+        return o.getClass().equals(this.getClass());
+    }
 }
-
-}
-
 class B extends A{}
 
 List<A> list5 = List.of(new A(), new B());
-
 int c = Collections.frequency(list5, new A());
-
 System.out.println(c);         //prints: 1
 
 A a = new A();
-
 List<A> list6 = List.of(a, new B());
-
 c = Collections.frequency(list6, a);
-
 System.out.println(c);         //prints: 1
-
 ```
 
 The method `getClass()` returns the class name used when the object was created by the operator `new`. That is why the count in both cases is now `1`.
@@ -1181,27 +868,19 @@ The method `getClass()` returns the class name used when the object was created 
 最小的元素是在排序后的列表中首先出现的元素；最大的元素在排序后的列表的另一端。以下是演示代码：
 
 ```java
-
 Person p1 = new Person("Zoe", "Arnold");
-
 Person p2 = new Person("Alex", "Green");
-
 Person p3 = new Person("Maria", "Brown");
-
 List<Person> list7 = Arrays.asList(p1,p2,p3);
-
 System.out.println(list7);  //[Zoe Arnold, Alex Green, Maria Brown]
 
-System.out.println(Collections.min(list7)); //输出：Alex Green
-
-System.out.println(Collections.max(list7)); //输出：Zoe Arnold
+System.out.println(Collections.min(list7)); //prints: Alex Green
+System.out.println(Collections.max(list7)); //prints: Zoe Arnold
 
 Person min = Collections.min(list7, new OrderByLastThenFirstName());
-
 System.out.println(min);                    //[Zoe Arnold]
 
 Person max = Collections.max(list7, new OrderByLastThenFirstName());
-
 System.out.println(max);                    //[Alex Green]
 
 ```
@@ -1253,27 +932,19 @@ System.out.println(max);                    //[Alex Green]
 以下是演示代码：
 
 ```java
-
 List list = new ArrayList();
-
 list.add("s1");
-
 list.add("s2");
-
 list.add(42);
-
 System.out.println(list);    //prints: [s1, s2, 42]
 
 List cList = Collections.checkedList(list, String.class);
-
 System.out.println(list);   //prints: [s1, s2, 42]
 
 list.add(42);
-
 System.out.println(list);   //prints: [s1, s2, 42, 42]
 
 //cList.add(42);           //throws ClassCastException
-
 ```
 
 您可以观察到转换不会影响集合的当前元素。我们已经向同一个列表添加了`String`类的对象和`Integer`类的对象，并且能够将其转换为一个检查过的列表`cList`，没有任何问题。我们可以继续向原始列表添加不同类型的对象，但是尝试向检查过的列表添加非 String 对象会在运行时生成`ClassCastException`。
@@ -1331,17 +1002,11 @@ System.out.println(list);   //prints: [s1, s2, 42, 42]
 Apache Commons 项目中的`org.apache.commons.collections4.CollectionUtils`类包含了与`java.util.Collections`类的方法相辅相成的静态无状态方法。它们有助于搜索、处理和比较 Java 集合。要使用这个类，您需要将以下依赖项添加到 Maven 配置文件`pom.xml`中：
 
 ```java
-
 <dependency>
-
-<groupId>org.apache.commons</groupId>
-
-<artifactId>commons-collections4</artifactId>
-
-<version>4.1</version>
-
+  <groupId>org.apache.commons</groupId>
+  <artifactId>commons-collections4</artifactId>
+  <version>4.1</version>
 </dependency>
-
 ```
 
 这个类中有很多方法，而且随着时间的推移，可能会添加更多的方法。刚刚审查的`Collections`类可能会涵盖大部分您的需求，特别是当您刚刚进入 Java 编程领域时。因此，我们不会花时间解释每个方法的目的，就像我们为`Collections`类所做的那样。此外，`CollectionUtils`的方法是作为`Collections`方法的补充而创建的，因此它们更加复杂和微妙，不适合本书的范围。
@@ -1499,32 +1164,24 @@ Apache Commons 项目中的`org.apache.commons.collections4.CollectionUtils`类�
 以下是一级数组创建示例：
 
 ```java
-
 int[] ints = new int[10];
-
-System.out.println(ints[0]);     //输出：0
+System.out.println(ints[0]);     //prints: 0
 
 Integer[] intW = new Integer[10];
-
-System.out.println(intW[0]);     //输出：null
+System.out.println(intW[0]);     //prints: null
 
 boolean[] bs = new boolean[10];
-
-System.out.println(bs[0]);       //输出：false
+System.out.println(bs[0]);       //prints: false
 
 Boolean[] bW = new Boolean[10];
-
-System.out.println(bW[0]);       //输出：0
+System.out.println(bW[0]);       //prints: 0
 
 String[] strings = new String[10];
-
-System.out.println(strings[0]);  //输出：null
+System.out.println(strings[0]);  //prints: null
 
 A[] as = new A[10];
-
-System.out.println(as[0]);       //输出：null
-
-System.out.println(as.length);   //输出：10
+System.out.println(as[0]);       //prints: null 
+System.out.println(as.length);   //prints: 10
 
 ```
 
@@ -1533,27 +1190,17 @@ System.out.println(as.length);   //输出：10
 多级嵌套初始化如下所示：
 
 ```java
+    //A[][] as2 = new A[][10];             //compilation error
+    A[][] as2 = new A[10][];
+    System.out.println(as2.length);        //prints: 10
+    System.out.println(as2[0]);            //prints: null
+    //System.out.println(as2[0].length);   //NullPointerException
+    //System.out.println(as2[0][0]);       //NullPointerException
 
-//A[][] as2 = new A[][10];             //编译错误
-
-A[][] as2 = new A[10][];
-
-System.out.println(as2.length);        //输出：10
-
-System.out.println(as2[0]);            //输出：null
-
-//System.out.println(as2[0].length);   //NullPointerException
-
-//System.out.println(as2[0][0]);       //NullPointerException
-
-as2 = new A[2][3];
-
-System.out.println(as2[0]); //prints: ManageArrays$A;@282ba1e
-
-System.out.println(as2[0].length); //prints: 3
-
-System.out.println(as2[0][0]);     //prints: null
-
+    as2 = new A[2][3];
+    System.out.println(as2[0]); //prints: ManageArrays$A;@282ba1e
+    System.out.println(as2[0].length); //prints: 3
+    System.out.println(as2[0][0]);     //prints: null
 ```
 
 首先要注意的是，尝试创建一个没有定义第一级数组长度的数组会生成编译错误。第二个观察是多级数组的`length`属性捕获了第一（顶级）级数组的长度。第三个是顶级数组的每个元素都是一个数组。如果不是最后一级，下一级数组的元素也是数组。
@@ -1563,11 +1210,8 @@ System.out.println(as2[0][0]);     //prints: null
 一旦我们将第二级数组的长度设置为三，我们就能够得到它的长度和第一个元素的值（`null`，因为这是默认值）。奇怪的打印`ManageArrays$A;@282ba1e`是数组二进制引用，因为对象数组没有实现`toString()`方法。您可以得到的最接近的是实用类`java.util.Arrays`的静态方法`toString()`（请参见下一节）。它返回所有数组元素的`String`表示：
 
 ```java
-
-System.out.println(Arrays.toString(as2));
-
-//prints: [[ManageArrays$A;@282ba1e, [ManageArrays$A;@13b6d03]
-
+System.out.println(Arrays.toString(as2));   
+        //prints: [[ManageArrays$A;@282ba1e, [ManageArrays$A;@13b6d03]
 System.out.println(Arrays.toString(as2[0])); //[null, null, null]
 
 ```
@@ -1575,10 +1219,8 @@ System.out.println(Arrays.toString(as2[0])); //[null, null, null]
 对于最后（最深层）嵌套的数组，它可以正常工作，但对于更高级别的数组仍然打印二进制引用。如果要打印所有嵌套数组的所有元素，请使用`Arrays.deepToString(Object[])`方法：
 
 ```java
-
-System.out.println(Arrays.deepToString(as2));
-
-//上面的打印：[[null, null, null], [null, null, null]]
+System.out.println(Arrays.deepToString(as2)); 
+           //the above prints: [[null, null, null], [null, null, null]]
 
 ```
 
@@ -1589,9 +1231,7 @@ System.out.println(Arrays.deepToString(as2));
 数组初始化程序由逗号分隔的表达式列表组成，括在大括号`{}`中。允许并忽略最后一个表达式后面的逗号：
 
 ```java
-
 String[] arr = {"s0", "s1", };
-
 System.out.println(Arrays.toString(arr)); //prints: [s0, s1]
 
 ```
@@ -1603,61 +1243,35 @@ System.out.println(Arrays.toString(arr)); //prints: [s0, s1]
 与集合一样，当需要执行一些代码时，可以使用静态块来初始化数组静态属性：
 
 ```java
-
-类 ManageArrays {
-
+class ManageArrays {
 private static A[] AS_STATIC;
-
-static {
-
-AS_STATIC = new A[2];
-
-for(int i = 0; i< AS_STATIC.length; i++){
-
-AS_STATIC[i] = new A();
-
+  static {
+    AS_STATIC = new A[2];
+    for(int i = 0; i< AS_STATIC.length; i++){
+        AS_STATIC[i] = new A();
+    }
+    AS_STATIC[0] = new A();
+    AS_STATIC[1] = new A();
+  }
+  //... the rest of class code goes here
 }
-
-AS_STATIC[0] = new A();
-
-AS_STATIC[1] = new A();
-
-}
-
-//...类代码的其余部分在这里
-
-}
-
 ```
 
 静态块中的代码在每次加载类时都会执行，甚至在调用构造函数之前。但是，如果字段不是静态的，则可以将相同的初始化代码放在构造函数中：
 
 ```java
-
-类 ManageArrays {
-
-private A[] as;
-
-public ManageArrays(){
-
-as = new A[2];
-
-for(int i = 0; i< as.length; i++){
-
-as[i] = new A();
-
+class ManageArrays {
+  private A[] as;
+  public ManageArrays(){
+    as = new A[2];
+    for(int i = 0; i< as.length; i++){
+        as[i] = new A();
+    }
+    as[0] = new A();
+    as[1] = new A();
+  }
+  //the reat of class code goes here
 }
-
-as[0] = new A();
-
-as[1] = new A();
-
-}
-
-//类代码的其余部分在这里
-
-}
-
 ```
 
 # 从收集
@@ -1665,13 +1279,9 @@ as[1] = new A();
 如果有一个可以用作数组值源的集合，它有一个`toArray()`方法，可以按如下方式调用：
 
 ```java
-
 List<Integer> list = List.of(0, 1, 2, 3);
-
 Integer[] arr1 = list.toArray(new Integer[list.size()]);
-
 System.out.println(Arrays.toString(arr1)); //prints: [0, 1, 2, 3]
-
 ```
 
 # 其他可能的方法
@@ -1679,45 +1289,28 @@ System.out.println(Arrays.toString(arr1)); //prints: [0, 1, 2, 3]
 在不同的上下文中，可能会使用一些其他方法来创建和初始化数组。这也是你喜欢的风格问题。以下是您可以选择的各种数组创建和初始化方法的示例：
 
 ```java
-
 String[] arr2 = new String[3];
-
 Arrays.fill(arr2, "s");
-
 System.out.println(Arrays.toString(arr2));      //prints: [s, s, s]
 
-arr3 = new String[5];
-
+String[] arr3 = new String[5];
 Arrays.fill(arr3, 2, 3, "s");
-
-System.out.println(Arrays.toString(arr3));
-
-//prints: [null, null, s, null, null]
-
+System.out.println(Arrays.toString(arr3)); 
+                              //prints: [null, null, s, null, null]
 String[] arr4 = {"s0", "s1", };
-
 String[] arr4Copy = Arrays.copyOf(arr4, 5);
-
-System.out.println(Arrays.toString(arr4Copy));
-
-//prints: [s0, s1, null, null, null]
-
+System.out.println(Arrays.toString(arr4Copy)); 
+                                //prints: [s0, s1, null, null, null]
 String[] arr5 = {"s0", "s1", "s2", "s3", "s4" };
-
 String[] arr5Copy = Arrays.copyOfRange(arr5, 1, 3);
-
 System.out.println(Arrays.toString(arr5Copy));    //prints: [s1, s2]
 
 Integer[] arr6 = {0, 1, 2, 3, 4 };
-
 Object[] arr6Copy = Arrays.copyOfRange(arr6,1, 3, Object[].class);
-
 System.out.println(Arrays.toString(arr6Copy));      //prints: [1, 2]
 
 String[] arr7 = Stream.of("s0", "s1", "s2").toArray(String[]::new);
-
-System.out.println(Arrays.toString(arr7));    //prints: [s0, s1, s2]
-
+System.out.println(Arrays.toString(arr7));    //prints: [s0, s1, s2] 
 ```
 
 在上面的六个例子中，有五个使用了`java.util.Arrays`类（见下一节）来填充或复制数组。所有这些例子都使用了`Arrays.toString()`方法来打印结果数组的元素。
@@ -1739,33 +1332,23 @@ System.out.println(Arrays.toString(arr7));    //prints: [s0, s1, s2]
 我们已经多次使用了`java.util.Arrays`类。它是数组管理的主要工具。但是，它曾经非常受到那些使用集合的人的欢迎，因为`asList(T...a)`方法是创建和初始化集合的最紧凑的方法：
 
 ```java
-
 List<String> list = Arrays.asList("s0", "s1");
-
 Set<String> set = new HashSet<>(Arrays.asList("s0", "s1");
-
 ```
 
 但是在每个集合中引入了`of()`工厂方法之后，`Arrays`类的流行度大大下降。以下是创建集合的更自然的方法：
 
 ```java
-
 List<String> list = List.of("s0", "s1");
-
 Set<String> set = Set.of("s0", "s1");
-
 ```
 
 这个集合的对象是不可变的。但是，如果需要一个可变的集合，可以按照以下方式创建：
 
 ```java
-
 List<String> list = new ArrayList<>(List.of("s0", "s1"));
-
 Set<String> set1 = new HashSet<>(list);
-
 Set<String> set2 = new HashSet<>(Set.of("s0", "s1"));
-
 ```
 
 我们之前在*管理集合*部分详细讨论过这个问题。
@@ -1797,15 +1380,10 @@ Set<String> set2 = new HashSet<>(Set.of("s0", "s1"));
 相比之下，`equals(a1, a2)`和`deepEquals(a1, a2)`方法不仅比较引用`a1`和`a2`，而且在数组的情况下使用`equals(a)`方法来比较元素。这意味着非嵌套数组是通过它们的元素的值进行比较的，并且当两个数组都为`null`或它们的长度相等且方法`a1[i].equals(a2[i])`对于每个索引返回`true`时被认为是相等的：
 
 ```java
-
 Integer[] as1 = {1,2,3};
-
 Integer[] as2 = {1,2,3};
-
 System.out.println(as1.equals(as2));               //prints: false
-
 System.out.println(Arrays.equals(as1, as2));       //prints: true
-
 System.out.println(Arrays.deepEquals(as1, as2));   //prints: true
 
 ```
@@ -1813,19 +1391,13 @@ System.out.println(Arrays.deepEquals(as1, as2));   //prints: true
 对于嵌套数组，`equals(a1, a2)`方法使用`equals(a)`方法来比较下一级的元素。但是嵌套数组的元素是数组，因此它们仅通过引用而不是它们的元素的值进行比较。如果需要比较所有嵌套级别上的元素的值，请使用方法`deepEquals(a1, a2)`：
 
 ```java
-
-整数[][] aas1 = {{1,2,3}, {4,5,6}};
-
+Integer[][] aas1 = {{1,2,3}, {4,5,6}};
 Integer[][] aas2 = {{1,2,3}, {4,5,6}};
-
 System.out.println(Arrays.equals(aas1, aas2));       //prints: false
-
 System.out.println(Arrays.deepEquals(aas1, aas2));   //prints: true
 
 Integer[][][] aaas1 = {{{1,2,3}, {4,5,6}}, {{7,8,9}, {10,11,12}}};
-
 Integer[][][] aaas2 = {{{1,2,3}, {4,5,6}}, {{7,8,9}, {10,11,12}}};
-
 System.out.println(Arrays.deepEquals(aaas1, aaas2)); //prints: true
 
 ```

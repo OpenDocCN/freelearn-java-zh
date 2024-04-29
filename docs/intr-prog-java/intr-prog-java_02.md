@@ -63,9 +63,7 @@ Java 编程基础的概念有很多解释。一些教程假设基础对于任何
 以下是一个声明语句的示例：
 
 ```java
-
 int i;
-
 ```
 
 前面的语句声明了一个`int`类型的变量`i`，代表*整数*（见第五章，*Java 语言元素和类型*）。
@@ -73,17 +71,13 @@ int i;
 以下是一个表达式语句：
 
 ```java
-
-i + 2;
-
+ i + 2; 
 ```
 
 前面的语句将 2 添加到现有变量`i`的值中。当声明时，`int`变量默认被赋值为 0，因此此表达式的结果为`2`，但未存储。这就是为什么它经常与声明和赋值语句结合使用的原因：
 
 ```java
-
 int j = i + 2;
-
 ```
 
 这告诉处理器创建一个`int`类型的变量`j`，并为其分配一个值，该值等于变量`i`当前分配的值加 2。在第九章，*运算符、表达式和语句*中，我们将更详细地讨论语句和表达式。
@@ -93,15 +87,10 @@ int j = i + 2;
 Java 方法是一组语句，总是一起执行，目的是对某个输入产生某个结果。方法有一个名称，要么一组输入参数，要么根本没有参数，一个在`{}`括号内的主体，以及一个返回类型或`void`关键字，表示该消息不返回任何值。以下是一个方法的示例：
 
 ```java
-
 int multiplyByTwo(int i){
-
-int j = i * 2;
-
-return j;
-
+  int j = i * 2;
+  return j;
 }
-
 ```
 
 在前面的代码片段中，方法名为`multiplyByTwo`。它有一个`int`类型的输入参数。方法名和参数类型列表一起称为**方法签名**。输入参数的数量称为**arity**。如果两个方法具有相同的名称、相同的 arity 和相同的输入参数列表中类型的顺序，则它们具有相同的签名。
@@ -111,21 +100,15 @@ return j;
 同一个前面的方法可以用许多风格重写，并且得到相同的结果：
 
 ```java
-
-int multiplyByTwo(int i){
-
-return i * 2;
-
+int multiplyByTwo(int i){ 
+  return i * 2;
 }
-
 ```
 
 另一种风格如下：
 
 ```java
-
 int multiplyByTwo(int i){ return i * 2; }
-
 ```
 
 一些程序员更喜欢最紧凑的风格，以便能够在屏幕上看到尽可能多的代码。但这可能会降低另一个程序员理解代码的能力，这可能会导致编程缺陷。
@@ -133,9 +116,7 @@ int multiplyByTwo(int i){ return i * 2; }
 另一个例子是一个没有输入参数的方法：
 
 ```java
-
 int giveMeFour(){ return 4; }
-
 ```
 
 这是相当无用的。实际上，没有参数的方法会从数据库中读取数据，例如，或者从其他来源读取数据。我们展示这个例子只是为了演示语法。
@@ -143,9 +124,7 @@ int giveMeFour(){ return 4; }
 这是一个什么都不做的代码示例：
 
 ```java
-
 void multiplyByTwo(){ }
-
 ```
 
 前面的方法什么也不做，也不返回任何东西。语法要求使用关键字`void`来指示没有返回值。实际上，没有返回值的方法通常用于将数据记录到数据库，或者发送数据到打印机、电子邮件服务器、另一个应用程序（例如使用 Web 服务），等等。
@@ -153,15 +132,10 @@ void multiplyByTwo(){ }
 为了完整起见，这是一个具有许多参数的方法的示例：
 
 ```java
-
 String doSomething(int i, String s, double a){
-
-double result = Math.round(Math.sqrt(a)) * i;
-
-返回 s + Double.toString(result);
-
+  double result = Math.round(Math.sqrt(a)) * i;
+  return s + Double.toString(result);
 }
-
 ```
 
 上述方法从第三个参数中提取平方根，将其乘以第一个参数，将结果转换为字符串，并将结果附加（连接）到第二个参数。将在第五章中介绍使用的`Math`类的类型和方法，*Java 语言元素和类型*。这些计算并没有太多意义，仅供说明目的。
@@ -171,15 +145,10 @@ double result = Math.round(Math.sqrt(a)) * i;
 Java 中的所有方法都声明在称为**类**的结构内。一个类有一个名称和一个用大括号`{}`括起来的主体，在其中声明方法：
 
 ```java
-
-我的类 {
-
-int multiplyByTwo(int i){ return i * 2; }
-
-int giveMeFour(){ return 4;}
-
+class MyClass {
+  int multiplyByTwo(int i){ return i * 2; }
+  int giveMeFour(){ return 4;} 
 }
-
 ```
 
 类也有字段，通常称为属性；我们将在下一节讨论它们。
@@ -189,21 +158,15 @@ int giveMeFour(){ return 4;}
 一个类作为 Java 应用程序的入口。在启动应用程序时，必须在`java`命令中指定它：
 
 ```java
-
-java -cp <所有.class 文件的位置> MyGreatApplication
-
+java -cp <location of all .class files> MyGreatApplication
 ```
 
 在上述命令中，`MyGreatApplication`是作为应用程序起点的类的名称。当 JVM 找到文件`MyGreatApplication.class`时，它会将其读入内存，并在其中查找名为`main()`的方法。这个方法有一个固定的签名：
 
 ```java
-
 public static void main(String[] args) {
-
-// 在这里放语句
-
+  // statements go here
 }
-
 ```
 
 让我们把前面的代码片段分成几部分：
@@ -225,13 +188,9 @@ public static void main(String[] args) {
 您还可以看到输入参数写成如下形式：
 
 ```java
-
 public static void main(String... args) {
-
-//执行一些操作的主体
-
+  //body that does something
 }
-
 ```
 
 它看起来像是不同的签名，但实际上是相同的。自 JDK 5 以来，Java 允许将方法签名的*最后一个参数*声明为相同类型的变量可变性的一系列参数。这被称为**varargs**。在方法内部，可以将最后一个输入参数视为数组`String[]`，无论它是显式声明为数组还是作为可变参数。如果你一生中从未使用过 varargs，那么你会没问题。我们告诉你这些只是为了让你在阅读其他人的代码时避免混淆。
@@ -239,9 +198,7 @@ public static void main(String... args) {
 `main（）`方法的最后一个重要特性是其输入参数的来源。没有其他代码调用它。它是由 JVM 本身调用的。那么参数是从哪里来的呢？人们可能会猜想命令行是参数值的来源。在`java`命令中，到目前为止，我们假设没有参数传递给主类。但是如果主方法期望一些参数，我们可以构造命令行如下：
 
 ```java
-
-java -cp <所有.class 文件的位置> MyGreatApplication 1 2
-
+java -cp <location of all .class files> MyGreatApplication 1 2
 ```
 
 这意味着在`main（）`方法中，输入数组`args [0]`的第一个元素的值将是`1`，而输入数组`args [1]`的第二个元素的值将是`2`。是的，你注意到了，数组中元素的计数从`0`开始。我们将在第五章中进一步讨论这个问题，*Java 语言元素和类型*。无论是显式地使用数组`String[] args`描述`main（）`方法签名，还是使用可变参数`String... args`，结果都是一样的。
@@ -265,27 +222,16 @@ Java 类存储在`.java`文件中。每个`.java`文件可以包含多个类。�
 这就是文件`MyClass.java`的内容可能看起来像的样子：
 
 ```java
-
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-public String method1（int i）{
-
-//语句，包括返回语句
-
+  private int field1;
+  private String field2;
+  public String method1(int i){
+    //statements, including return statement
+  }
+  private void method2(String s){
+    //statements without return statement
+  }
 }
-
-私有 void 方法 2（字符串 s）{
-
-//没有返回语句的语句
-
-}
-
-}
-
 ```
 
 它有两个字段。关键字`private`使它们只能从类内部，从它的方法中访问。前面的类有两个方法 - 一个是公共的，一个是私有的。公共方法可以被任何其他类访问，而私有方法只能从同一类的其他方法中访问。
@@ -293,55 +239,33 @@ public String method1（int i）{
 这个类似乎没有构造函数。那么，基于这个类的对象的状态将如何初始化？答案是，事实上，每个没有显式定义构造函数但获得一个默认构造函数的类。这里有两个显式添加的构造函数的例子，一个没有参数，另一个有参数：
 
 ```java
-
 public class SomeClass {
-
-private int field1;
-
-public MyClass(){
-
-this.field1 = 42;
-
-}
-
-//... 类的其他内容 - 方法
-
-//    定义对象行为
-
+  private int field1;
+  public MyClass(){
+    this.field1 = 42;
+  }
+  //... other content of the class - methods
+  //    that define object behavior
 }
 
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
+  private int field1;
+  private String field2;
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+  }
+  //... methods here
 }
-
-//... 方法在这里
-
-}
-
 ```
 
 在上面的代码片段中，关键字`this`表示当前对象。它的使用是可选的。我们可以写`field1 = val1;`并获得相同的结果。但是最好使用关键字`this`来避免混淆，特别是当（程序员经常这样做）参数的名称与字段的名称相同时，比如在下面的构造函数中：
 
 ```java
-
 public MyClass(int field1, String field1){
-
-field1 = field1;
-
-field2 = field2;
-
+  field1 = field1;
+  field2 = field2;
 }
-
 ```
 
 添加关键字`this`使代码更友好。有时候，这是必要的。我们将在第六章中讨论这样的情况，*接口、类和对象构造*。
@@ -349,39 +273,22 @@ field2 = field2;
 一个构造函数也可以调用这个类或任何其他可访问类的方法：
 
 ```java
-
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
-method1(33);
-
-method2(val2);
-
+  private int field1;
+  private String field2;
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+    method1(33);
+    method2(val2);
+  }
+  public String method1(int i){
+    //statements, including return statement
+  }
+  private void method2(String s){
+    //statements without return statement
+  }
 }
-
-public String method1(int i){
-
-//语句，包括返回语句
-
-}
-
-private void method2(String s){
-
-//没有返回语句的语句
-
-}
-
-}
-
 ```
 
 如果一个类没有显式定义构造函数，它会从默认的基类`java.lang.Object`中获得一个默认构造函数。我们将在即将到来的*继承*部分解释这意味着什么。
@@ -389,67 +296,40 @@ private void method2(String s){
 一个类可以有多个不同签名的构造函数，用于根据应用程序逻辑创建具有不同状态的对象。一旦在类中添加了带参数的显式构造函数，除非也显式添加默认构造函数，否则默认构造函数将不可访问。澄清一下，这个类只有一个默认构造函数：
 
 ```java
-
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-//... 其他方法在这里
-
+  private int field1;
+  private String field2;
+  //... other methods here
 }
-
 ```
 
 这个类也只有一个构造函数，但没有默认构造函数：
 
 ```java
-
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
+  private int field1;
+  private String field2;
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+  }
+  //... other methods here
 }
-
-//... 其他方法在这里
-
-}
-
 ```
 
 这个类有两个构造函数，一个有参数，一个没有参数：
 
 ```java
-
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-public MyClass(){ }
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
+  private int field1;
+  private String field2;
+  public MyClass(){ }
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+  }
+  //... other methods here
 }
-
-//... 其他方法在这里
-
-}
-
 ```
 
 没有参数的前面构造函数什么也不做。它只是为了方便客户端代码创建这个类的对象，但不关心对象的特定初始状态。在这种情况下，JVM 创建默认的初始对象状态。我们将在第六章中解释默认状态，*接口、类和对象构造*。
@@ -461,53 +341,33 @@ this.field2 = val2;
 我们之前描述的类-`.java`文件中唯一的一个公共类-也被称为顶级类。它可以包括一个称为内部类的嵌套类：
 
 ```java
-
-public class MyClass { //顶级类
-
-class MyOtherClass { //内部类
-
-//内部类内容在这里
-
+public class MyClass { // top-level class
+  class MyOtherClass { // inner class   
+    //inner class content here
+  }
 }
-
-}
-
 ```
 
 顶级类还可以包括一个静态（关于静态成员的更多信息请参见下一节）嵌套类。`static`类不被称为内部类，只是一个嵌套类：
 
 ```java
-
-public class MyClass { //顶级类
-
-static class MyYetAnotherClass { //嵌套类
-
-//嵌套类内容在这里
-
+public class MyClass { // top-level class
+  static class MyYetAnotherClass { // nested class
+    // nested class content here
+  }
 }
-
-}
-
 ```
 
 任何方法都可以包括一个只能在该方法内部访问的类。它被称为本地类：
 
 ```java
-
-public class MyClass { //顶级类
-
-void someMethod（）{
-
-class MyInaccessibleAnywhereElseClass { //本地类
-
-//本地类内容在这里
-
+public class MyClass { // top-level class
+  void someMethod() {
+    class MyInaccessibleAnywhereElseClass { // local class
+      // local class content here
+    }
+  }
 }
-
-}
-
-}
-
 ```
 
 本地类并不经常使用，但并不是因为它没有用。程序员只是不记得如何创建一个只在一个方法内部需要的类，而是创建一个外部或内部类。
@@ -515,73 +375,44 @@ class MyInaccessibleAnywhereElseClass { //本地类
 最后但并非最不重要的一种可以包含在与公共类相同文件中的类是匿名类。它是一个没有名称的类，允许在原地创建一个对象，可以覆盖现有方法或实现一个接口。让我们假设我们有以下接口，`InterfaceA`，和类`MyClass`：
 
 ```java
-
-public interface InterfaceA {
-
-void doSomething（）;
-
+public interface InterfaceA{
+  void doSomething();
 }
-
-public class MyClass {
-
-void someMethod1（）{
-
-System.out.println("1.常规被称为");
-
+public class MyClass { 
+  void someMethod1() {
+    System.out.println("1\. Regular is called");
+  }
+  void someMethod2(InterfaceA interfaceA) {
+    interfaceA.doSomething();
+  }
 }
-
-void someMethod2（InterfaceA interfaceA）{
-
-interfaceA.doSomething（）;
-
-}
-
-}
-
 ```
 
 我们可以执行以下代码：
 
 ```java
-
-MyClass myClass = new MyClass（）;
-
-myClass.someMethod1（）;
-
-myClass = new MyClass（）{ //匿名类扩展类 MyClass
-
-public void someMethod1（）{ //并覆盖 someMethod1（）
-
-System.out.println("2.匿名被称为");
-
-}
-
+MyClass myClass = new MyClass();
+myClass.someMethod1();
+myClass = new MyClass() {     //Anonymous class extends class MyClass
+  public void someMethod1(){              // and overrides someMethod1()
+    System.out.println("2\. Anonymous is called");
+  }
 };
+myClass.someMethod1();
+myClass.someMethod2(new InterfaceA() { //Anonymous class implements
+  public void doSomething(){     //  InterfaceA
 
-我的类。someMethod1（）;
-
-myClass.someMethod2（new InterfaceA（）{ //匿名类实现
-
-public void doSomething（）{ // InterfaceA
-
-System.out.println("3.匿名被称为");
-
-}
-
+    System.out.println("3\. Anonymous is called");
+  }
 });
-
 ```
 
 结果将是：
 
 ```java
-
-1.常规被称为
-
-2.匿名被称为
-
-3.匿名被称为
-
+1\. Regular is called
+2\. Anonymous is called
+3\. Anonymous is called
 ```
 
 我们不希望读者完全理解前面的代码。我们希望读者在阅读本书后能够做到这一点。
@@ -609,53 +440,32 @@ System.out.println("3.匿名被称为");
 正如我们在前一节中所描述的，对象是基于类创建的，使用关键字`new`和构造函数 - 要么是默认的，要么是显式声明的。例如，考虑以下类：
 
 ```java
-
 public class MyClass {
+  private int field1;
+  private String field2;
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+  }
 
-private int field1;
-
-private String field2;
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
+  public String method1(int i){
+    //statements, including return statement
+  }
+  //... other methods are here
 }
-
-public String method1(int i){
-
-//语句，包括返回语句
-
-}
-
-//... 其他方法在这里
-
-}
-
 ```
 
 如果我们有这个类，我们可以在其他类的方法中写以下内容：
 
 ```java
-
 public AnotherClass {
-
-...
-
-public void someMethod(){
-
-MyClass myClass = new MyClass(3, "some string");
-
-String result = myClass.method1(2);
-
+  ...
+  public void someMethod(){
+    MyClass myClass = new MyClass(3, "some string");
+    String result = myClass.method1(2);
+  }
+  ...
 }
-
-...
-
-}
-
 ```
 
 在前面的代码中，语句`MyClass myClass = new MyClass(3, "some string");`创建了一个`MyClass`类的对象，使用了它的构造函数和关键字`new`，并将新创建的对象的引用分配给变量`myClass`。我们选择了一个对象引用的标识符，它与类名匹配，第一个字母小写。这只是一个约定，我们也可以选择另一个标识符（比如`boo`），结果是一样的。在第五章中，*Java 语言元素和类型*，我们会更详细地讨论标识符和变量。正如你在前面的例子中看到的，在下一行中，一旦创建了一个引用，我们就可以使用它来访问新创建对象的公共成员。
@@ -683,47 +493,29 @@ String result = myClass.method1(2);
 这里是另一个例子。假设我们有以下类：
 
 ```java
+public class MyClass {
+  private int field1;
+  public static String field2;
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+  }
 
-公共类 MyClass {
-
-私有 int 字段 1;
-
-公共静态字符串字段 2;
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
+  public String method1(int i){
+    //statements, including return statement
+  }
+  public static void method2(){
+    //statements
+  }
+  //... other methods are here
 }
-
-public String method1(int i){
-
-//语句，包括返回语句
-
-}
-
-public static void method2(){
-
-//语句
-
-}
-
-//... other methods are here
-
-}
-
 ```
 
 从任何其他类的任何方法，可以通过以下方式访问前述`MyClass`类的公共静态成员：
 
 ```java
-
 MyClass.field2 = "any string";
-
 String s = MyClass.field2 + " and another string";
-
 ```
 
 前述操作的结果将是将变量`s`的值分配为`any string and another string`。`String`类将在第五章中进一步讨论，*Java 语言元素和类型*。
@@ -731,19 +523,14 @@ String s = MyClass.field2 + " and another string";
 同样，可以通过以下方式访问类`MyClass`的公共静态方法`method2()`：
 
 ```java
-
 MyClass.method2();
-
 ```
 
 类`MyClass`的其他方法仍然可以通过实例（对象）访问：
 
 ```java
-
 MyClass mc = new MyClass(3, "any string");
-
 String someResult = mc.method1(42);
-
 ```
 
 显然，如果所有成员都是静态的，就没有必要创建`MyClass`类的对象。
@@ -751,13 +538,9 @@ String someResult = mc.method1(42);
 然而，有时可以通过对象引用访问静态成员。以下代码可能有效 - 这取决于`javac`编译器的实现。如果有效，它将产生与前面代码相同的结果：
 
 ```java
-
 MyClass mc = new MyClass(3, "any string");
-
 mc.field2 = "Some other string";
-
 mc.method2();
-
 ```
 
 有些编译器会提供警告，比如*通过实例引用访问静态成员*，但它们仍然允许你这样做。其他编译器会产生错误*无法使静态引用非静态方法/字段*，并强制你纠正代码。Java 规范不规定这种情况。但是，通过对象引用访问静态类成员不是一个好的做法，因为它使得代码对于人类读者来说是模棱两可的。因此，即使你的编译器更宽容，最好还是避免这样做。
@@ -769,77 +552,44 @@ mc.method2();
 按照长期以来的传统，对象的字段通常声明为私有的。如果必要，提供`set()`和/或`get()`方法来访问这些私有值。它们通常被称为 setter 和 getter，因为它们设置和获取私有字段的值。这是一个例子：
 
 ```java
-
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-public void setField1(String val){
-
-this.field1 = val;
-
+  private int field1;
+  private String field2;
+  public void setField1(String val){
+    this.field1 = val;
+  }
+  public String getField1(){
+    return this.field1;
+  }
+  public void setField2(String val){
+    this.field2 = val;
+  }
+  public String getField2(){
+    return this.field2;
+  }
+  //... other methods are here
 }
-
-public String getField1(){
-
-return this.field1;
-
-}
-
-public void setField2(String val){
-
-this.field2 = val;
-
-}
-
-public String getField2(){
-
-return this.field2;
-
-}
-
-//... other methods are here
-
-}
-
 ```
 
 有时，有必要确保对象状态不能被改变。为了支持这种情况，程序员使用构造函数来设置状态并删除 setter：
 
 ```java
-
 public class MyClass {
+  private int field1;
+  private String field2;
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+  }
+  public String getField1(){
+    return this.field1;
+  }
 
-private int field1;
-
-private String field2;
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
+  public String getField2(){
+    return this.field2;
+  }
+  //... other non-setting methods are here
 }
-
-public String getField1(){
-
-return this.field1;
-
-}
-
-public String getField2(){
-
-return this.field2;
-
-}
-
-//... other non-setting methods are here
-
-}
-
 ```
 
 这样的对象称为不可变的。
@@ -849,63 +599,38 @@ return this.field2;
 具有相同名称但不同签名的两个方法代表方法重载。这是一个例子：
 
 ```java
-
 public class MyClass {
-
-public String method(int i){
-
-//statements
-
+  public String method(int i){
+    //statements
+  }
+  public int method(int i, String v){
+    //statements
+  }
 }
-
-public int method(int i, String v){
-
-//statements
-
-}
-
-}
-
 ```
 
 以下是不允许的，会导致编译错误，因为返回值不是方法签名的一部分，如果它们具有相同的签名，则无法用于区分一个方法和另一个方法：
 
 ```java
-
 public class MyClass {
-
-public String method(int i){
-
-//statements
-
+  public String method(int i){
+    //statements
+  }
+  public int method(int i){ //error
+    //statements
+  }
 }
-
-public int method(int i){ //error
-
-//statements
-
-}
-
-}
-
 ```
 
 然而，这是允许的，因为这些方法具有不同的签名：
 
 ```java
-
 public String method(String v, int i){
-
-//statements
-
+  //statements
 }
-
 public String method(int i, String v){
-
-//语句
-
+  //statements
 }
-
 ```
 
 # 接口、实现和继承
@@ -919,49 +644,29 @@ public String method(int i, String v){
 例如，看下面的类：
 
 ```java
-
 public class MyClass {
-
-private int field1;
-
-private String field2;
-
-public MyClass(int val1, String val2){
-
-this.field1 = val1;
-
-this.field2 = val2;
-
+  private int field1;
+  private String field2;
+  public MyClass(int val1, String val2){
+    this.field1 = val1;
+    this.field2 = val2;
+  }
+  public String method(int i){
+    //statements
+  }
+  public int method(int i, String v){
+    //statements
+  }
 }
-
-public String method(int i){
-
-//语句
-
-}
-
-public int method(int i, String v){
-
-//语句
-
-}
-
-}
-
 ```
 
 它的接口如下：
 
 ```java
-
 public interface MyClassInterface {
-
-String method(int i);
-
-int method(int i, String v);
-
+  String method(int i);
+  int method(int i, String v);
 }
-
 ```
 
 因此，我们可以写`public class MyClass implements MyClassInterface {...}`。我们将在下一节中讨论它。
@@ -989,31 +694,19 @@ We will talk more about interfaces in Chapter 6, *Interfaces, Classes, and Obj
 An interface can be implemented by a class, which means that the class has a body for each of the abstract methods listed in the interface. Here is an example:
 
 ```java
-
 interface Car {
-
-double getWeightInPounds();
-
-double getMaxSpeedInMilesPerHour();
-
+  double getWeightInPounds();
+  double getMaxSpeedInMilesPerHour();
 }
 
 public class CarImpl implements Car{
-
-public double getWeightInPounds(){
-
-return 2000d;
-
+  public double getWeightInPounds(){
+    return 2000d;
+  }
+  public double getMaxSpeedInMilesPerHour(){
+    return 100d;
+  }
 }
-
-public double getMaxSpeedInMilesPerHour(){
-
-return 100d;
-
-}
-
-}
-
 ```
 
 We named the class `CarImpl` to indicate that it is an implementation of the interface `Car`. But we could name it any other way we like.
@@ -1021,69 +714,40 @@ We named the class `CarImpl` to indicate that it is an implementation of the in
 Both interface and its class implementation can have other methods too without causing a compiler error. The only requirement for the extra method in the interface is that it has to be default and have a body. Adding any other method to a class does not interfere with the interface implementation.  For example:
 
 ```java
-
 interface Car {
-
-double getWeightInPounds();
-
-double getMaxSpeedInMilesPerHour();
-
-default int getPassengersCount(){
-
-return 4;
-
-}
-
+  double getWeightInPounds();
+  double getMaxSpeedInMilesPerHour();
+  default int getPassengersCount(){
+    return 4;
+  } 
 }
 
 public class CarImpl implements Car{
-
-private int doors;
-
-private double weight, speed;
-
-public CarImpl(double weight, double speed, int doors){
-
-this.weight = weight;
-
-this.speed = speed;
-
-this.dooes = doors;
-
+  private int doors;
+  private double weight, speed;
+  public CarImpl(double weight, double speed, int doors){
+    this.weight = weight;
+    this.speed = speed;
+    this.dooes = doors;
+  }
+  public double getWeightInPounds(){
+    return this.weight;
+  }
+  public double getMaxSpeedInMilesPerHour(){
+    return this.speed;
+  }
+  public int getNumberOfDoors(){
+    return this.doors;
+  }
 }
-
-public double getWeightInPounds(){
-
-return this.weight;
-
-}
-
-public double getMaxSpeedInMilesPerHour(){
-
-return this.speed;
-
-}
-
-public int getNumberOfDoors(){
-
-return this.doors;
-
-}
-
-}
-
 ```
 
 If we now create an instance of a class `CarImpl`, we can call all the methods we have declared in the class:
 
 ```java
-
-CarImpl car = new CarImpl(500d, 50d, 3);
-
+CarImpl car = new CarImpl(500d, 50d, 3); 
 car.getWeightInPounds();         //Will return 500.0
-
 car.getMaxSpeedInMilesPerHour(); //Will return 50.0
-
 car.getNumberOfDoors();          //Will return 3
 
 ```
@@ -1093,9 +757,7 @@ That was not surprising.
 But, here is something you might not have expected:
 
 ```java
-
 car.getPassengersCount();          //Will return 4
-
 ```
 
 This means that by implementing an interface class acquires all the default methods the interface has. That is the purpose of the default methods: to add functionality to all classes that implement the interface. Without it, if we add an abstract method to an old interface, all current interface implementations will trigger a compiler error. But, if we add a new method with the modifier default, the existing implementations will continue working as usual.
@@ -1103,73 +765,42 @@ This means that by implementing an interface class acquires all the default meth
 Now, another nice trick. If a class implements a method with the same signature as the default method, it will `override` (a technical term) the behavior of the interface. Here is an example:
 
 ```java
-
 interface Car {
-
-double getWeightInPounds();
-
-double getMaxSpeedInMilesPerHour();
-
-default int getPassengersCount(){
-
-return 4;
-
-}
-
+  double getWeightInPounds();
+  double getMaxSpeedInMilesPerHour();
+  default int getPassengersCount(){
+    return 4;
+  } 
 }
 
 public class CarImpl implements Car{
-
-private int doors;
-
-private double weight, speed;
-
-public CarImpl(double weight, double speed, int doors){
-
-this.weight = weight;
-
-this.speed = speed;
-
-this.dooes = doors;
-
+  private int doors;
+  private double weight, speed;
+  public CarImpl(double weight, double speed, int doors){
+    this.weight = weight;
+    this.speed = speed;
+    this.dooes = doors;
+  }
+  public double getWeightInPounds(){
+    return this.weight;
+  }
+  public double getMaxSpeedInMilesPerHour(){
+    return this.speed;
+  }
+  public int getNumberOfDoors(){
+    return this.doors;
+  }
+  public int getPassengersCount(){
+    return 3;
+  } 
 }
-
-public double getWeightInPounds(){
-
-return this.weight;
-
-}
-
-public double getMaxSpeedInMilesPerHour(){
-
-return this.speed;
-
-}
-
-public int getNumberOfDoors(){
-
-return this.doors;
-
-}
-
-public int getPassengersCount(){
-
-返回 3;
-
-}
-
-}
-
 ```
 
 如果我们使用本例中描述的接口和类，我们可以编写以下代码：
 
 ```java
-
-CarImpl car = new CarImpl(500d, 50d, 3);
-
-car.getPassengersCount();        //现在将返回 3 !!!!
-
+CarImpl car = new CarImpl(500d, 50d, 3); 
+car.getPassengersCount();        //Will return 3 now !!!!
 ```
 
 如果接口的所有抽象方法都没有被实现，那么类必须声明为抽象类，并且不能被实例化。
@@ -1177,60 +808,37 @@ car.getPassengersCount();        //现在将返回 3 !!!!
 接口的目的是代表它的实现-所有实现它的类的所有对象。例如，我们可以创建另一个实现`Car`接口的类：
 
 ```java
-
 public class AnotherCarImpl implements Car{
+  public double getWeightInPounds(){
+    return 2d;
+  }
+  public double getMaxSpeedInMilesPerHour(){
+    return 3d;
+  }
+  public int getNumberOfDoors(){
+    return 4;
+  }
+  public int getPassengersCount(){
+      return 5;
 
-public double getWeightInPounds(){
-
-返回 2d;
-
+   } 
 }
-
-public double getMaxSpeedInMilesPerHour(){
-
-返回 3d;
-
-}
-
-public int getNumberOfDoors(){
-
-返回 4;
-
-}
-
-public int getPassengersCount(){
-
-return 5;
-
-}
-
-}
-
 ```
 
 然后我们可以让`Car`接口代表它们中的每一个：
 
 ```java
-
-Car car = new CarImpl(500d, 50d, 3);
-
-car.getWeightInPounds();          //将返回 500.0
-
-car.getMaxSpeedInMilesPerHour();  //将返回 50.0
-
-car.getNumberOfDoors();           //将产生编译器错误
-
-car.getPassengersCount();         //仍然返回 3 !!!!
+Car car = new CarImpl(500d, 50d, 3); 
+car.getWeightInPounds();          //Will return 500.0
+car.getMaxSpeedInMilesPerHour();  //Will return 50.0
+car.getNumberOfDoors();           //Will produce compiler error
+car.getPassengersCount();         //Still returns 3 !!!!
 
 car = new AnotherCarImpl();
-
-car.getWeightInPounds();          //将返回 2.0
-
-car.getMaxSpeedInMilesPerHour();  //将返回 3.0
-
-car.getNumberOfDoors();           //将产生编译器错误
-
-car.getPassengersCount();         //将返回 5
+car.getWeightInPounds();          //Will return 2.0
+car.getMaxSpeedInMilesPerHour();  //Will return 3.0
+car.getNumberOfDoors();           //Will produce compiler error
+car.getPassengersCount();         //Will return 5 
 
 ```
 
@@ -1249,25 +857,17 @@ car.getPassengersCount();         //将返回 5
 一个类可以获取（继承）所有非私有非静态成员，因此当我们使用这个类的对象时，我们无法知道这些成员实际上位于哪里-在这个类中还是在继承它们的类中。为了表示继承，使用关键字`extends`。例如，考虑以下类：
 
 ```java
-
 class A {
-
-private void m1(){...}
-
-public void m2(){...}
-
+  private void m1(){...}
+  public void m2(){...}
 }
 
 class B extends class A {
-
-public void m3(){...}
-
+  public void m3(){...}
 }
 
 class C extends class B {
-
 }
-
 ```
 
 在这个例子中，类`B`和`C`的对象的行为就好像它们各自有方法`m2()`和`m3()`。唯一的限制是一个类只能扩展一个类。类`A`是类`B`和类`C`的基类。类`B`只是类`C`的基类。正如我们已经提到的，它们每个都有默认的基类`java.lang.Object`。类`B`和`C`是类`A`的子类。类`C`也是类`B`的子类。
@@ -1275,19 +875,12 @@ class C extends class B {
 相比之下，一个接口可以同时扩展许多其他接口。如果`AI`，`BI`，`CI`，`DI`，`EI`和`FI`是接口，那么允许以下操作：
 
 ```java
-
-接口 AI 扩展 BI，CI，DI {
-
-//接口主体
-
+interface AI extends BI, CI, DI {
+  //the interface body
 }
-
-接口 DI 扩展 EI，FI {
-
-//接口主体
-
+interface DI extends EI, FI {
+  //the interface body
 }
-
 ```
 
 在上述例子中，接口`AI`继承了接口`BI`，`CI`，`DI`，`EI`和`FI`的所有非私有非静态签名，以及任何其他是接口`BI`，`CI`，`DI`，`EI`和`FI`的基接口。
@@ -1295,31 +888,21 @@ class C extends class B {
 回到上一节的话题，*实现*，一个类可以实现多个接口：
 
 ```java
-
-类 A 扩展 B 实现 AI，BI，CI，DI {
-
-//类主体
-
+class A extends B implements AI, BI, CI, DI {
+  //the class body
 }
-
 ```
 
 这意味着类`A`继承了类`B`的所有非私有非静态成员，并实现了接口`AI`，`BI`，`CI`和`DI`，以及它们的基接口。实现多个接口的能力来自于前面的例子，如果重写成这样，结果将完全相同：
 
 ```java
-
-接口 AI 扩展 BI，CI，DI {
-
-//接口主体
-
+interface AI extends BI, CI, DI {
+  //the interface body
 }
 
-类 A 扩展 B 实现 AI {
-
-//类主体
-
+class A extends B implements AI {
+  //the class body
 }
-
 ```
 
 `扩展`接口（类）也称为超级接口（超类）或父接口（父类）。扩展接口（类）称为子接口（子类）或子接口（子类）。
@@ -1327,35 +910,22 @@ class C extends class B {
 让我们用例子来说明这一点。我们从接口继承开始：
 
 ```java
-
-接口车辆 {
-
-double getWeightInPounds();
-
+interface Vehicle {
+  double getWeightInPounds();
 }
 
-接口 Car 扩展车辆 {
-
-int getPassengersCount();
-
+interface Car extends Vehicle {
+  int getPassengersCount();
 }
 
-public class CarImpl 实现 Car {
-
-public double getWeightInPounds(){
-
-return 2000d;
-
+public class CarImpl implements Car {
+  public double getWeightInPounds(){
+    return 2000d;
+  }
+  public int getPassengersCount(){
+    return 4;
+  }
 }
-
-public int getPassengersCount(){
-
-return 4;
-
-}
-
-}
-
 ```
 
 在上述代码中，类`CarImpl`必须实现两个签名（列在接口`Vehicle`和接口`Car`中），因为从它的角度来看，它们都属于接口`Car`。否则，编译器会抱怨，或者类`CarImpl`必须声明为抽象的（不能被实例化）。
@@ -1363,37 +933,24 @@ return 4;
 现在，让我们看另一个例子：
 
 ```java
-
-接口车辆 {
-
-double getWeightInPounds();
-
+interface Vehicle {
+  double getWeightInPounds();
 }
 
-public class VehicleImpl 实现车辆 {
-
-public double getWeightInPounds(){
-
-return 2000d;
-
+public class VehicleImpl implements Vehicle {
+  public double getWeightInPounds(){
+    return 2000d;
+  }
 }
 
+interface Car extends Vehicle {
+  int getPassengersCount();
 }
 
-接口 Car 扩展车辆 {
-
-int getPassengersCount();
-
-}
-
-public class CarImpl 扩展 VehicleImpl 实现 Car {
-
-public int getPassengersCount(){
-
-return 4;
-
-}
-
+public class CarImpl extends VehicleImpl implements Car {
+  public int getPassengersCount(){
+    return 4;
+  }
 }
 
 ```
@@ -1403,41 +960,26 @@ return 4;
 所述类继承的一个后果通常对于初学者来说并不直观。为了证明这一点，让我们在类`CarImpl`中添加方法`getWeightInPounds()`：
 
 ```java
-
 public class VehicleImpl {
-
-public double getWeightInPounds(){
-
-return 2000d;
-
+  public double getWeightInPounds(){
+    return 2000d;
+  }
 }
 
+public class CarImpl extends VehicleImpl {
+  public double getWeightInPounds(){
+    return 3000d;
+  }
+  public int getPassengersCount(){
+    return 4;
+  }
 }
-
-public class CarImpl 扩展 VehicleImpl {
-
-public double getWeightInPounds(){
-
-return 3000d;
-
-}
-
-public int getPassengersCount(){
-
-return 4;
-
-}
-
-}
-
 ```
 
 在这个例子中，为了简单起见，我们不使用接口。因为类`CarImpl`是类`VehicleImpl`的子类，它可以作为类`VehicleImpl`的对象行为，这段代码将编译得很好：
 
 ```java
-
 VehicleImpl vehicle = new CarImpl();
-
 vehicle.getWeightInPounds();
 
 ```
@@ -1481,31 +1023,20 @@ vehicle.getWeightInPounds();
 `java.lang.Object`类的`equals()`方法看起来是这样的：
 
 ```java
-
 public boolean equals(Object obj) {
-
-//比较当前对象的引用
-
-//和引用对象
-
+  //compares references of the current object
+  //and the reference obj 
 }
-
 ```
 
 这是它的使用示例：
 
 ```java
-
 Car car1 = new CarImpl();
-
 Car car2 = car1;
-
 Car car3 = new CarImpl();
-
-car1.equals(car2);    //返回 true
-
-car1.equals(car3);    //返回 false
-
+car1.equals(car2);    //returns true
+car1.equals(car3);    //returns false
 ```
 
 从前面的例子中可以看出，默认方法`equals()`的实现只比较指向存储对象的地址的内存引用。这就是为什么引用`car1`和`car2`是相等的——因为它们指向同一个对象（内存的相同区域，相同的地址），而`car3`引用指向另一个对象。
@@ -1517,15 +1048,10 @@ car1.equals(car3);    //返回 false
 `java.lang.Object`类的`hashCode()`方法看起来是这样的：
 
 ```java
-
 public int hashCode(){
-
-//返回对象的哈希码值
-
-//基于内存地址的整数表示
-
+  //returns a hash code value for the object 
+  //based on the integer representation of the memory address
 }
-
 ```
 
 Oracle 文档指出，如果两个方法根据`equals()`方法的默认行为是相同的，那么它们具有相同的`hashCode()`返回值。这很棒！但不幸的是，同一份文档指出，根据`equals()`方法，两个不同的对象可能具有相同的`hasCode()`返回值。这就是为什么程序员更喜欢重新实现`hashCode()`方法，并在重新实现`equals()`方法时使用它，而不是使用对象状态。尽管这种需要并不经常出现，我们不会详细介绍这种实现的细节。如果感兴趣，你可以在互联网上找到很好的文章。
@@ -1535,15 +1061,10 @@ Oracle 文档指出，如果两个方法根据`equals()`方法的默认行为是
 `java.lang.Object`类的`getClass()`方法看起来是这样的：
 
 ```java
-
 public Class getClass(){
-
-//返回具有的 Class 类的对象
-
-//提供有用信息的许多方法
-
+  //returns object of class Class that has
+  //many methods that provide useful information
 }
-
 ```
 
 从这个方法中最常用的信息是作为当前对象模板的类的名称。我们将在第六章中讨论为什么可能需要它，*接口、类和对象构造**.*可以通过这个方法返回的`Class`类的对象来访问类的名称。
@@ -1553,25 +1074,17 @@ public Class getClass(){
 `java.lang.Object`类的`toString()`方法看起来像这样：
 
 ```java
-
 public String toString(){
-
-//返回对象的字符串表示
-
+  //return string representation of the object
 }
-
 ```
 
 这个方法通常用于打印对象的内容。它的默认实现看起来像这样：
 
 ```java
-
 public String toString() {
-
-return getClass().getName()+"@"+Integer.toHexString(hashCode());
-
+  return getClass().getName()+"@"+Integer.toHexString(hashCode());
 }
-
 ```
 
 正如你所看到的，它并不是非常具有信息性，所以程序员们会在他们的类中重新实现它。这是类`Object`中最常重新实现的方法。程序员们几乎为他们的每个类都这样做。我们将在第九章中更详细地解释`String`类及其方法，*运算符、表达式和语句*。
@@ -1581,13 +1094,9 @@ return getClass().getName()+"@"+Integer.toHexString(hashCode());
 `java.lang.Object`类的`clone()`方法看起来像这样：
 
 ```java
-
 protected Object clone(){
-
-//创建对象的副本
-
+  //creates copy of the object
 }
-
 ```
 
 这个方法的默认结果返回对象字段的副本，这是可以接受的，如果值不是对象引用。这样的值被称为**原始类型**，我们将在第五章中精确定义，*Java 语言元素和类型*。但是，如果对象字段持有对另一个对象的引用，那么只有引用本身会被复制，而不是引用的对象本身。这就是为什么这样的副本被称为浅层副本。要获得深层副本，必须重新实现`clone()`方法，并遵循可能相当广泛的对象树的所有引用。幸运的是，`clone()`方法并不经常使用。事实上，你可能永远不会遇到需要使用它的情况。

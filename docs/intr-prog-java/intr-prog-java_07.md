@@ -25,25 +25,19 @@
 导入允许我们在`.java`文件的开头只指定一次完全限定的类或接口名称，然后是类或接口声明。导入语句的格式如下：
 
 ```java
-
 import <package>.<class or interface name>;
-
 ```
 
 例如，看下面的例子：
 
 ```java
-
 import com.packt.javapath.ch04demo.MyApplication;
-
 ```
 
 从现在开始，这个类只能在代码中通过它的名字`MyApplication`来引用。还可以使用通配符字符(`*`)导入包的所有类或接口：
 
 ```java
-
 import com.packt.javapath.ch04demo.*;
-
 ```
 
 注意，前面的导入语句导入了`com.packt.javapath.ch04demo`包的子包的类和接口。如果需要，每个子包都必须单独导入。
@@ -57,33 +51,23 @@ import com.packt.javapath.ch04demo.*;
 我们假设`src/main/java` (for Linux)或`src\main\java` (for Windows)项目目录包含所有`.java`文件，并且`MyClass`和`MyEnum`类以及`MyInterface`接口的定义来自`com.packt.javapath`包存储在以下文件中：
 
 ```java
-
-src/main/java/com/packt/javapath/MyClass.java (for Linux)
-
+src/main/java/com/packt/javapath/MyClass.java (for Linux) 
 src/main/java/com/packt/javapath/MyEnum.java
-
-src/main/java/com/packt/javapath/MyInterface.java
-
+src/main/java/com/packt/javapath/MyInterface.java 
 ```
 
 或（对于 Windows）
 
 ```java
-
-src\main\java\com\packt\javapath\MyClass.java (for Windows)
-
+src\main\java\com\packt\javapath\MyClass.java (for Windows) 
 src\main\java\com\packt\javapath\MyEnum.java
-
-src\main\java\com\packt\javapath\MyInterface.java
-
+src\main\java\com\packt\javapath\MyInterface.java 
 ```
 
 这些文件的每一行的第一行如下：
 
 ```java
-
 package com.packt.javapath;
-
 ```
 
 如果我们没有导入任何内容，那么每个文件的下一行就是一个类或接口声明。
@@ -91,11 +75,8 @@ package com.packt.javapath;
 `MyClass`类的声明如下：
 
 ```java
-
-public class MyClass extends SomeClass
-
-implements Interface1, Interface2, ... {...}
-
+public class MyClass extends SomeClass 
+     implements Interface1, Interface2, ... {...}
 ```
 
 它包括以下内容：
@@ -115,9 +96,7 @@ implements Interface1, Interface2, ... {...}
 `MyEnum`类的声明如下：
 
 ```java
-
 public enum MyEnum implements Interface1, Interface2, ... {...}
-
 ```
 
 它包括以下内容：
@@ -137,9 +116,7 @@ public enum MyEnum implements Interface1, Interface2, ... {...}
 `MyInterface`接口的声明如下：
 
 ```java
-
 public interface MyInterface extends Interface1, Interface2, ... {...}
-
 ```
 
 它包括以下内容：
@@ -157,25 +134,17 @@ public interface MyInterface extends Interface1, Interface2, ... {...}
 如果不导入，我们需要通过完全限定的名称引用我们使用的每个类或接口，其中包括包名和类或接口名。例如，`MyClass`类的声明将如下所示：
 
 ```java
-
-我的类
-
-extends com.packt.javapath.something.AnotherMyClass
-
-implements com.packt.javapath.something2.Interface1,
-
-com.packt.javapath.something3.Interface2
-
+public class MyClass 
+          extends com.packt.javapath.something.AnotherMyClass 
+          implements com.packt.javapath.something2.Interface1,
+                     com.packt.javapath.something3.Interface2
 ```
 
 或者，假设我们想要实例化`com.packt.javapath.something`包中的`SomeClass`类。该类的完全限定名称将是`com.packt.javapath.something.SomeClass`，其对象创建语句如下所示：
 
 ```java
-
 com.packt.javapath.something.SomeClass someClass =
-
-new com.packt.javapath.something.SomeClass();
-
+                    new com.packt.javapath.something.SomeClass();
 ```
 
 太啰嗦了，不是吗？这就是包导入发挥作用的地方。
@@ -185,21 +154,13 @@ new com.packt.javapath.something.SomeClass();
 为了避免在代码中使用完全限定的类或接口名称，我们可以在包声明和类或接口声明之间的空间中添加一个导入语句：
 
 ```java
-
 package com.packt.javapath;
-
 import com.packt.javapath.something.SomeClass;
-
 public class MyClass {
-
-//...
-
-SomeClass someClass = new SomeClass();
-
-//...
-
+  //... 
+  SomeClass someClass = new SomeClass();
+  //...
 }
-
 ```
 
 正如你所看到的，import 语句允许避免使用完全限定的类名，这样使得代码更容易阅读。
@@ -211,23 +172,14 @@ SomeClass someClass = new SomeClass();
 如果`SomeClass`和`SomeOtherClass`属于同一个包，则导入语句可能如下所示：
 
 ```java
-
 package com.packt.javapath;
-
 import com.packt.javapath.something.*;
-
 public class MyClass {
-
-//...
-
-SomeClass someClass = new SomeClass();
-
-SomeOtherClass someClass1 = new SomeOtherClass();
-
-//...
-
+  //... 
+  SomeClass someClass = new SomeClass();
+  SomeOtherClass someClass1 = new SomeOtherClass();
+  //...
 }
-
 ```
 
 使用星号的优点是更短的导入语句列表，但这种样式隐藏了导入的类和接口的名称。因此，程序员可能不知道它们确切来自哪里。此外，当两个或更多个包包含具有相同名称的成员时，您只需将它们作为单个类导入显式导入。否则，编译器将生成错误。
@@ -249,7 +201,6 @@ SomeOtherClass someClass1 = new SomeOtherClass();
 静态导入允许单独导入一个类或接口，以及它的公共成员——字段和方法。如果你查看我们的一个测试类，你会看到以下静态导入语句：
 
 ```java
-
 import static org.junit.jupiter.api.Assertions.*;
 
 ```
@@ -257,9 +208,7 @@ import static org.junit.jupiter.api.Assertions.*;
 这个语句允许我们编写以下内容：
 
 ```java
-
 Person p = new Person("Joe", "Blow", dob);
-
 assertTrue(p.equals(p));
 
 ```
@@ -267,9 +216,7 @@ assertTrue(p.equals(p));
 这样写：
 
 ```java
-
 Person p = new Person("Joe", "Blow", dob);
-
 Assertions.assertTrue(p.equals(p));
 
 ```
@@ -277,59 +224,36 @@ Assertions.assertTrue(p.equals(p));
 这是静态导入用法的一个普遍情况。另一个常见情况是静态导入接口或`enum`的常量。例如，如果我们有一个如下的接口：
 
 ```java
-
 package com.packt.javapath.api;
-
 public interface Constants {
-
-String NAME = "name";
-
+  String NAME = "name";
 }
-
 ```java
 
 然后，要使用它的常量，可以静态导入它们：
 
 ```java
-
 package com.packt.javapath;
-
 import static com.packt.javapath.api.Constants.*;
-
 public class MyClass {
-
-//...
-
-String s = "My " + NAME + " is Joe";
-
-System.out.println(s);        //打印：My name is Joe
-
-//...
-
-}
-
+  //...
+  String s = "My " + NAME + " is Joe";
+  System.out.println(s);        //Prints: My name is Joe
+  //...
+} 
 ```
 
 顺便说一句，通过非静态导入`Constants`接口并让类实现它也可以达到同样的效果：
 
 ```java
-
 package com.packt.javapath;
-
 import com.packt.javapath.api.Constants;
-
 public class MyClass implements Constants {
-
-//...
-
-String s = "My " + NAME + " is Joe";
-
-System.out.println(s);        //打印：My name is Joe
-
-//...
-
-}
-
+  //...
+  String s = "My " + NAME + " is Joe";
+  System.out.println(s);        //Prints: My name is Joe
+  //...
+} 
 ```
 
 这种实现接口以使用它们的常量的方式在 Java 程序员中相当流行。
@@ -337,9 +261,7 @@ System.out.println(s);        //打印：My name is Joe
 使用静态导入来使用`enum`常量的示例看起来很相似：
 
 ```java
-
 import static java.time.DayOfWeek.*;
-
 ```
 
 它允许代码将`DayOfWeek`常量用作`MONDAY`，而不是`DayOfWeek.MONDAY`。
@@ -351,49 +273,32 @@ import static java.time.DayOfWeek.*;
 为了演示可访问性，让我们创建一个`com.packt.javapath.Ch07demo.pack01`包，其中包含两个类和两个接口：
 
 ```java
-
 public class PublicClass01 {
-
-public static void main(String[] args){
-
-//我们将在这里编写代码
-
+  public static void main(String[] args){
+    //We will write code here
+  }
 }
 
-}
-
-类 DefaultAccessClass01 {
-
+class DefaultAccessClass01 {
 }
 
 public interface PublicInterface01 {
-
-String name = "PublicInterface01";
-
+  String name = "PublicInterface01";
 }
 
-接口 DefaultAccessInterface01 {
-
-String name = "DefaultAccessInterface01";
-
+interface DefaultAccessInterface01 {
+  String name = "DefaultAccessInterface01";
 }
-
 ```
 
 我们还将创建另一个`com.packt.javapath.Ch07demo.pack02`包，并在其中创建一个类：
 
 ```java
-
 public class PublicClass02 {
-
-public static void main(String[] args){
-
-//我们将在这里编写代码
-
+  public static void main(String[] args){
+    //We will write code here
+  }
 }
-
-}
-
 ```
 
 前面的每个类和接口都在自己的文件中：
@@ -407,27 +312,18 @@ public static void main(String[] args){
 公共类或接口可以从任何地方访问。我们可以导入它们并从另一个包中访问它们：
 
 ```java
-
 import com.packt.javapath.Ch07demo.pack01.PublicClass01;
-
 import com.packt.javapath.Ch07demo.pack01.PublicInterface01;
-
 //import com.packt.javapath.Ch07demo.pack01.DefaultAccessClass01;
-
 //import com.packt.javapath.Ch07demo.pack01.DefaultAccessInterface01;
 
 public class PublicClass02 {
+  public static void main(String[] args){
+    System.out.println(PublicInterface01.name);
+    PublicClass01 o = new PublicClass01();
 
-public static void main(String[] args){
-
-System.out.println(PublicInterface01.name);
-
-PublicClass01 o = new PublicClass01();
-
+  }
 }
-
-}
-
 ```
 
 在上述代码中，两个导入语句被注释掉，因为它们会生成错误。这是因为在`DefaultAccessClass01`类和`DefaultAccessClass01`接口中，我们没有使用访问修饰符，这使它们只能被同一包的成员访问。
@@ -465,63 +361,37 @@ PublicClass01 o = new PublicClass01();
 相同的可访问性规则也适用于内部类和接口。这是一个包含内部类和接口的类的示例：
 
 ```java
-
 public class PublicClass01 {
-
-public static void main(String[] args){
-
-System.out.println(DefaultAccessInterface01.name);
-
-DefaultAccessClass01 o = new DefaultAccessClass01();
-
+  public static void main(String[] args){
+    System.out.println(DefaultAccessInterface01.name);
+    DefaultAccessClass01 o = new DefaultAccessClass01();
+  }
+  class DefaultAccessClass{
+  }
+  protected class ProtectedClass{
+  }
+  private class PrivateClass{
+  }
+  interface DefaultAccessInterface {
+  }
+  protected class ProtectedInterface{
+  }
+  private class PrivateInterface{
+  }
 }
-
-class DefaultAccessClass{
-
-}
-
-受保护的类 ProtectedClass{
-
-}
-
-private class PrivateClass{
-
-}
-
-默认访问接口{
-
-}
-
-protected class ProtectedInterface{
-
-}
-
-private class PrivateInterface{
-
-}
-
-}
-
 ```
 
 这是一个带有内部类和接口的接口：
 
 ```java
-
 public interface PublicInterface01 {
+  String name = "PublicInterface01";
 
-String name = "PublicInterface01";
-
-类 DefaultAccessClass{
-
+  class DefaultAccessClass{
+  }
+  interface DefaultAccessInterface {
+  }
 }
-
-接口 DefaultAccessInterface {
-
-}
-
-}
-
 ```
 
 正如你所看到的，接口的内部类和接口只允许默认（公共）访问。
@@ -541,33 +411,19 @@ String name = "PublicInterface01";
 构造函数的有趣之处在于它们只能具有私有访问权限。这意味着一个类可以提供自己的工厂方法（参见第六章，*接口、类和对象构造*），控制每个对象的构造方式，甚至控制可以将多少个对象放入流通中。在每个对象都需要访问某个资源（文件或另一个数据库）的情况下，最后一个特性尤为有价值，因为这些资源对并发访问的支持有限。以下是一个具有有限创建对象数量的最简单版本的工厂方法的样子：
 
 ```java
-
-私有 String field;
-
-私有静态 int count;
-
-私有 PublicClass02(String s){
-
-this.field = s;
-
+private String field;
+private static int count;
+private PublicClass02(String s){
+  this.field = s;
 }
-
 public static PublicClass02 getInstance(String s){
-
-if(count > 5){
-
-返回 null;
-
-} else {
-
-count++;
-
-返回新的 PublicClass02(s);
-
+  if(count > 5){
+    return null;
+  } else {
+    count++;
+    return new PublicClass02(s);
+  }
 }
-
-}
-
 ```
 
 这段代码的用处并不大，我们只是为了演示私有可访问的构造函数如何被使用。这是可能的，因为每个类成员都可以访问所有其他类成员，无论它们的访问修饰符是什么。
@@ -607,43 +463,43 @@ count++;
 例如，在第六章中，*接口、类和对象构造*，我们演示了一种灵活的解决方案，用于实现对象工厂：
 
 ```java
-
 public static Calculator createInstance(){
-
-WhichImpl whichImpl =
-
-Utils.getWhichImplValueFromConfig(Utils.class,
-
-Calculator.CONF_NAME, Calculator.CONF_WHICH_IMPL);
-
-switch (whichImpl){
-
-案例乘法：
-
-return new CalculatorImpl();
-
-案例添加：
-
-返回新的 AnotherCalculatorImpl();
-
-default:
-
-抛出新的 RuntimeException("休斯顿，我们又有问题了。"+
-
-"我们没有关键的实现" +
-
-Calculator.CONF_WHICH_IMPL + "值" + whichImpl);
-
+  WhichImpl whichImpl = 
+      Utils.getWhichImplValueFromConfig(Utils.class,
+            Calculator.CONF_NAME, Calculator.CONF_WHICH_IMPL);
+  switch (whichImpl){
+    case multiplies:
+      return new CalculatorImpl();
+    case adds:
+      return new AnotherCalculatorImpl();
+    default:
+      throw new RuntimeException("Houston, we have another problem."+
+                  " We do not have implementation for the key " +
+                  Calculator.CONF_WHICH_IMPL + " value " + whichImpl);
+    }
 }
-
 ```
 
-```
-
-它与其`Calculator`接口（其 API）紧密耦合，但这是不可避免的，因为这是实现必须遵守的合同。至于工厂内部的实现，只要遵守合同，就可以更自由地进行任何限制。
-
-我们只能创建每个实现的一个实例，并且只返回该实例（使每个类成为单例）。以下是`CalculatorImpl`作为单例的示例：
-
+```java
+private static Calculator calculator = null;
+public static Calculator createInstance(){
+  WhichImpl whichImpl = 
+      Utils.getWhichImplValueFromConfig(Utils.class,
+            Calculator.CONF_NAME, Calculator.CONF_WHICH_IMPL);
+  switch (whichImpl){
+    case multiplies:
+      if(calculator == null){
+        calculator = new CalculatorImpl();
+      }
+      return calculator;
+    case adds:
+      return new AnotherCalculatorImpl();
+    default:
+      throw new RuntimeException("Houston, we have another problem."+
+                      " We do not have implementation for the key " +
+                  Calculator.CONF_WHICH_IMPL + " value " + whichImpl);
+    }
+}
 ```java
 
 private static Calculator calculator = null;
@@ -680,62 +536,42 @@ default:
 
 Calculator.CONF_WHICH_IMPL + "值" + whichImpl);
 
-```
+```java
+public static Calculator createInstance(){
+  String whichImpl = Utils.getStringValueFromConfig(CalculatorFactory.class,
+            "calculator.conf", "which.impl");
+  if(whichImpl.equals("multiplies")){
+    return new Whatever();
+  } else if (whichImpl.equals("adds")){
+    return new AnotherCalculatorImpl();
+  } else {
+    throw new RuntimeException("Houston, we have a problem. " +
+              "Unknown key which.impl value " + whichImpl +
+              " is in config.");
+  }
 
 }
 
+static class Whatever implements Calculator {
+  public static String addOneAndConvertToString(double d){
+    System.out.println(Whatever.class.getName());
+    return Double.toString(d + 1);
+  }
+  public int multiplyByTwo(int i){
+    System.out.println(Whatever.class.getName());
+    return i * 2;
+  }
+}
 ```
 
 或者我们可以将另一个`Calculator`实现作为嵌套类添加到工厂中，并使用它来代替`CalculatorImpl`：
 
 ```java
-
-public static Calculator createInstance(){
-
-String whichImpl = Utils.getStringValueFromConfig(CalculatorFactory.class,
-
-"calculator.conf", "which.impl");
-
-如果(whichImpl.equals("multiplies")){
-
-return new Whatever();
-
-} else if (whichImpl.equals("adds")){
-
-return new AnotherCalculatorImpl();
-
-} else {
-
-throw new RuntimeException("休斯顿，我们有问题。" +
-
-"未知的键 which.impl 值 " + whichImpl +
-
-" is in config.");
-
+public long sum(String s1, String s2){
+  int i1 = Integer.parseInt(s1);
+  int i2 = Integer.parseInt(s1);
+  return i1 + i2;
 }
-
-}
-
-static class Whatever implements Calculator {
-
-public static String addOneAndConvertToString(double d){
-
-System.out.println(Whatever.class.getName());
-
-return Double.toString(d + 1);
-
-}
-
-public int multiplyByTwo(int i){
-
-System.out.println(Whatever.class.getName());
-
-return i * 2;
-
-}
-
-}
-
 ```
 
 而这个工厂的客户端代码永远不会知道这种区别，除非它通过对从工厂返回的对象使用`getClass()`方法打印类的信息。但这是另一回事。从功能上讲，我们的`Whatever`的新实现将像旧的一样工作。
@@ -743,107 +579,63 @@ return i * 2;
 这实际上是一个常见的做法——从一个版本到另一个版本改变内部实现。当然有 bug 修复，还有新功能添加。随着实现代码的演变，程序员们不断地关注重构的可能性。在计算机科学中，factoring 是 decomposition 的同义词，它是将复杂的代码分解成更简单的部分，目的是使代码更易读和易维护。例如，假设我们被要求编写一个方法，接受两个`String`类型的参数（每个表示一个整数），并将它们的和作为整数返回。思考了一会儿后，我们决定这样做：
 
 ```java
-
 public long sum(String s1, String s2){
-
-int i1 = Integer.parseInt(s1);
-
-int i2 = Integer.parseInt(s1);
-
-return i1 + i2;
-
+  long l1 = Long.parseLong(s1);
+  long l2 = Long.parseLong(s2);
+  return l1 + l2;
 }
-
 ```
 
 但后来我们要求提供可能输入值的样本，这样我们就可以在接近生产条件的情况下测试我们的代码。结果发现，一些值可能高达 10,000,000,000，这超过了 2,147,483,647（Java 允许的最大`Integer.MAX_VALUE` int 值）。因此，我们将我们的代码更改为以下内容：
 
 ```java
-
-public long sum(String s1, String s2){
-
 long l1 = Long.parseLong(s1);
-
-long l2 = Long.parseLong(s2);
-
-return l1 + l2;
-
-}
 
 ```
 
 现在我们的代码可以处理高达 9,223,372,036,854,775,807 的值（即`Long.MAX_VALUE`）。我们将代码部署到生产环境，它在几个月内都运行良好，被一个处理统计数据的大型软件系统使用。然后系统切换到了新的数据源，代码开始出现问题。我们调查后发现，新的数据源产生的值可能包含字母和其他一些字符。我们已经为这种情况测试了我们的代码，并发现以下行会抛出`NumberFormatException`：
 
 ```java
-
-long l1 = Long.parseLong(s1);
-
+public long sum(String s1, String s2){
+  long l1 = 0;
+  try{
+    l1 = Long.parseLong(s1);
+  } catch (NumberFormatException ex){
+    //make a record to a log
+  }
+  long l2 = 0;
+  try{
+    l2 = Long.parseLong(s2);
+  } catch (NumberFormatException ex){
+    //make a record to a log
+  }
+  return l1 + l2;
+}
 ```
 
 我们与领域专家讨论了这种情况，他们建议我们记录不是整数的值，跳过它们，并继续进行求和计算。因此，我们已经修复了我们的代码，如下所示：
 
 ```java
-
+private long getLong(String s){
+  double d = 0;
+  try{
+    d = Double.parseDouble(s);
+  } catch (NumberFormatException ex){
+    //make a record to a log
+  }
+  return Math.round(d);
+}
 public long sum(String s1, String s2){
-
-long l1 = 0;
-
-尝试{
-
-l1 = Long.parseLong(s1);
-
-} catch (NumberFormatException ex){
-
-//记录日志
-
+  return getLong(s1) + getLong(s2);
 }
-
-long l2 = 0;
-
-尝试{
-
-l2 = Long.parseLong(s2);
-
-} catch (NumberFormatException ex){
-
-//记录日志
-
-}
-
-返回 l1 + l2;
-
-}
-
 ```
 
 我们迅速将代码发布到生产环境，但在下一个版本中得到了新的要求：输入的`String`值可以包含小数。因此，我们已经改变了处理输入`String`值的方式，假设它们包含小数值（也包括整数值），并重构了代码，如下所示：
 
 ```java
-
-private long getLong(String s){
-
-double d = 0;
-
-尝试{
-
-d = Double.parseDouble(s);
-
-} catch (NumberFormatException ex){
-
-//记录日志
-
+public long sum(int i, String s2){
+  return i + getLong(s2);
 }
-
-返回 Math.round(d);
-
-}
-
-public long sum(String s1, String s2){
-
-返回 getLong(s1) + getLong(s2);
-
-}
-
 ```
 
 这就是重构的作用。它重新构造代码而不改变其 API。随着新的需求不断出现，我们可以改变`getLong()`方法，甚至不用触及`sum()`方法。我们还可以在其他地方重用`getLong()`方法，这将是下一节的主题。
@@ -853,29 +645,26 @@ public long sum(String s1, String s2){
 封装绝对使得实现可重用性更容易，因为它隐藏了实现细节。例如，我们在上一节中编写的`getLong()`方法可以被同一类的另一个方法重用：
 
 ```java
-
-public long sum(int i, String s2){
-
-返回 i + getLong(s2);
-
-}
-
+int i = new Ch07DemoApp().getLong("23", "45.6");
 ```
 
 它甚至可以被设为公共的并被其他类使用，就像以下行一样：
 
 ```java
-
-int i = new Ch07DemoApp().getLong("23", "45.6");
-
+int i = Ch07DemoApp.getLong("23", "45.6");
 ```
 
 这将是一个组合的例子，当某些功能是使用不相关的类的方法构建（组合）时。而且，由于它不依赖于对象状态（这样的方法称为无状态），它可以被设为静态：
 
 ```java
-
-int i = Ch07DemoApp.getLong("23", "45.6");
-
+public class ShadowingDemo {
+  private String x = "x";
+  public void printX(){
+    System.out.println(x);   
+    String x = "y";
+    System.out.println(x);   
+  }
+}
 ```
 
 嗯，如果该方法在运行时被几个其他方法同时使用，即使是这样一个简单的代码也可能需要受到保护（同步）以防并行使用。但这些考虑超出了本书的范围。现在，如果有疑问，不要将方法设为静态。
@@ -899,46 +688,22 @@ int i = Ch07DemoApp.getLong("23", "45.6");
 以下是一个可能的解决方案：
 
 ```java
-
-公共类 ShadowingDemo {
-
-私有字符串 x = "x";
-
-public void printX(){
-
-System.out.println(x);
-
-字符串 x = "y";
-
-System.out.println(x);
-
-}
-
-}
+String x = "y";
 
 ```
 
 如果您运行`new ShadowingDemo().printX();`，它将首先打印`x`，然后打印`y`，因为以下行中的局部变量`x`遮蔽了`x`实例变量：
 
 ```java
-
-String x = "y";
-
+private String x = "x";
+public void setX(String x) {
+  this.x = x;
+}
 ```
 
 请注意，遮蔽可能是程序的缺陷来源，也可以用于程序的利益。如果没有它，您将无法使用已经被实例变量使用的局部变量标识符。这里是另一个变量遮蔽有帮助的情况的例子：
 
-```java
-
-private String x = "x";
-
-public void setX(String x) {`;
-
-this.x = x;
-
-}
-
-```
+[PRE40]
 
 `x`局部变量（参数）遮蔽了`x`实例变量。它允许使用相同的标识符作为已经用于实例变量名称的局部变量名称。为了避免可能的混淆，建议使用关键字`this`来引用实例变量，就像我们在上面的示例中所做的那样。
 

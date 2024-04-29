@@ -203,13 +203,9 @@ JVM 规范只对类加载器进程进行了规定。执行引擎的实现在很�
 前两种方法具有相同的功能，因为`System.exit()`的实现方式如下：
 
 ```java
-
 public static void exit(int status) {
-
-Runtime.getRuntime().exit(status);
-
+  Runtime.getRuntime().exit(status);
 }
-
 ```
 
 要在 IDE 中查看源代码，只需单击该方法。
@@ -301,69 +297,41 @@ JVM 内存的每个运行时数据区都属于两个类别之一：
 无论使用什么方法，最终我们都会得到一个具有`start()`方法的`Thread`类对象。这个方法调用开始线程执行。让我们看一个例子。让我们创建一个名为`AThread`的类，它扩展了`Thread`并重写了它的`run()`方法：
 
 ```java
-
 public class AThread extends Thread {
-
-int i1, i2;
-
-public AThread(int i1, int i2) {
-
-this.i1 = i1;
-
-this.i2 = i2;
-
+  int i1, i2;
+  public AThread(int i1, int i2) {
+    this.i1 = i1;
+    this.i2 = i2;
+  }
+  public void run() {
+    for (int i = i1; i <= i2; i++) {
+      System.out.println("child thread " + (isDaemon() ? "daemon" : "user") + " " + i);
+      try {
+        TimeUnit.SECONDS.sleep(1);
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
+  }
 }
-
-public void run() {
-
-for (int i = i1; i <= i2; i++) {
-
-System.out.println("child thread " + (isDaemon() ? "daemon" : "user") + " " + i);
-
-try {
-
-TimeUnit.SECONDS.sleep(1);
-
-} catch (InterruptedException e) {
-
-e.printStackTrace();
-
-}
-
-}
-
-}
-
-}
-
 ```
 
 重写`run()`方法很重要，否则线程将不执行任何操作。`Thread`类实现了`Runnable`接口，并且有`run()`方法的实现，但它看起来如下：
 
 ```java
-
 public void run() {
-
-if (target != null) {
-
-target.run();
-
+  if (target != null) {
+    target.run();
+  }
 }
-
-}
-
 ```
 
 变量`target`保存在构造函数中传递的值：
 
 ```java
-
 public Thread(Runnable target) {
-
-init(null, target, "Thread-" + nextThreadNum(), 0);
-
+  init(null, target, "Thread-" + nextThreadNum(), 0);
 }
-
 ```
 
 但是我们的`AThread`类没有向父类`Target`传递任何值；变量 target 是`null`，所以`Thread`类中的`run()`方法不执行任何操作。
@@ -385,28 +353,19 @@ init(null, target, "Thread-" + nextThreadNum(), 0);
 让我们使用我们的新类`AThread`来演示我们所描述的行为。这是我们首先要运行的代码：
 
 ```java
+Thread thr1 = new AThread(1, 4);
+thr1.start();
 
-Thread thr1 = new AThread（1,4）;
+Thread thr2 = new AThread(11, 14);
+thr2.setDaemon(true);
+thr2.start();
 
-thr1.start（）;
-
-Thread thr2 = new AThread（11,14）;
-
-thr2.setDaemon（true）;
-
-thr2.start（）;
-
-尝试 {
-
-TimeUnit.SECONDS.sleep（1）;
-
-} 捕获（InterruptedException e）{
-
-e.printStackTrace（）;
-
+try {
+  TimeUnit.SECONDS.sleep(1);
+} catch (InterruptedException e) {
+  e.printStackTrace();
 }
-
-System.out.println（“主线程存在”）;
+System.out.println("Main thread exists");
 
 ```
 
@@ -419,10 +378,8 @@ System.out.println（“主线程存在”）;
 让用户线程只运行 2 秒：
 
 ```java
-
-Thread thr1 = new AThread（1,2）;
-
-thr1.start（）;
+Thread thr1 = new AThread(1, 2);
+thr1.start();
 
 ```
 
@@ -437,41 +394,25 @@ thr1.start（）;
 创建线程的第二种方法是使用实现`Runnable`的类。以下是一个几乎与类`AThread`具有完全相同功能的类的示例：
 
 ```java
-
 public class ARunnable implements Runnable {
+  int i1, i2;
 
-int i1，i2;
+  public ARunnable(int i1, int i2) {
+    this.i1 = i1;
+    this.i2 = i2;
+  }
 
-public ARunnable（int i1，int i2）{
-
-this.i1 = i1;
-
-this.i2 = i2;
-
+  public void run() {
+    for (int i = i1; i <= i2; i++) {
+      System.out.println("child thread "  + i);
+      try {
+        TimeUnit.SECONDS.sleep(1);
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
+  }
 }
-
-public void run（）{
-
-for（int i = i1; i <= i2; i ++）{
-
-System.out.println（“子线程”+ i）;
-
-尝试 {
-
-TimeUnit.SECONDS.sleep（1）;
-
-} 捕获（InterruptedException e）{
-
-e.printStackTrace（）;
-
-}
-
-}
-
-}
-
-}
-
 ```
 
 唯一的区别是`Runnable`接口中没有`isDaemon（）`方法，因此我们无法打印线程是否为守护线程。
@@ -481,29 +422,20 @@ e.printStackTrace（）;
 以下是如何使用此类创建两个子线程-一个用户线程和另一个守护线程-与我们之前所做的完全相同：
 
 ```java
+Thread thr1 = new Thread(new ARunnable(1, 4));
+thr1.start();
 
-Thread thr1 = new Thread（new ARunnable（1,4））;
+Thread thr2 = new Thread(new ARunnable(11, 14));
+thr2.setDaemon(true);
+thr2.start();
 
-thr1.start（）;
-
-Thread thr2 = new Thread（new ARunnable（11,14））;
-
-thr2.setDaemon（true）;
-
-thr2.start（）;
-
-尝试 {
-
-TimeUnit.SECONDS.sleep（1）;
-
-} 捕获（InterruptedException e）{
-
-e.printStackTrace（）;
-
+try {
+  TimeUnit.SECONDS.sleep(1);
+} catch (InterruptedException e) {
+  e.printStackTrace();
 }
 
-System.out.println（“主线程存在”）;
-
+System.out.println("Main thread exists");
 ```
 
 如果我们运行前面的代码，结果将与基于扩展`Thread`类的线程运行相同。
@@ -513,51 +445,30 @@ System.out.println（“主线程存在”）;
 实现`Runnable`的优点（在某些情况下，也是唯一可能的选项）是允许实现扩展另一个类。当您想要向现有类添加类似线程的行为时，这是特别有帮助的。
 
 ```java
-
 public class BRunnable extends SomeClass implements Runnable {
-
-int i;
-
-BRunnable(int i, String s) {
-
-super(s);
-
-this.i = i;
-
+  int i; 
+  BRunnable(int i, String s) {
+    super(s);
+    this.i = i;
+  }
+  public int calculateSomething(double x) {
+    //calculate result
+    return result;
+  }
+  public void run() {
+    //any code you need goes here
+  }
 }
-
-public int calculateSomething(double x) {
-
-//计算结果
-
-返回结果;
-
-}
-
-public void run() {
-
-//您需要的任何代码都在这里
-
-}
-
-}
-
 ```
 
 您甚至可以直接调用方法`run()`，而不将对象传递到 Thread 构造函数中：
 
 ```java
-
 BRunnable obj = new BRunnable(2, "whatever");
-
 int i = obj.calculateSomething(42d);
-
-obj.run();
-
+obj.run(); 
 Thread thr = new Thread (obj);
-
-thr.start();
-
+thr.start(); 
 ```
 
 在上面的代码片段中，我们展示了执行实现`Runnable`的类的方法的许多不同方式。因此，实现`Runnable`允许更灵活地使用。但是，与扩展`Thread`相比，在功能上没有区别。
@@ -613,29 +524,21 @@ thr.start();
 我们已经设置了`java`命令选项`-Xlog:gc`和环境变量`myprop1=whatever`。IDE 将使用这些设置来形成以下`java`命令：
 
 ```java
-
 java -Xlog:gc -Dmyprop1=whatever com.packt.javapath.ch04demo.MyApplication 2
-
 ```
 
 选项`-Xlog:gc`告诉 JVM 显示来自垃圾回收过程的日志消息。我们将在下一节中使用此选项来演示垃圾回收的工作原理。可以使用以下语句在应用程序的任何位置检索变量`myprop1`的值：
 
 ```java
-
-String myprop = System.getenv("myprop1");     //返回："whatever"
-
+String myprop = System.getenv("myprop1");     //returns: "whatever"
 ```
 
 我们已经看到参数 2 如何在主方法中读取：
 
 ```java
-
 public static void main(String[] args) {
-
-String p1 = args[0];          //返回："2"
-
+  String p1 = args[0];          //returns: "2"
 }
-
 ```
 
 # 带有类路径上的类的命令行
@@ -643,35 +546,22 @@ String p1 = args[0];          //返回："2"
 让我们使用我们在第四章中创建的第一个程序，*Your First Java Project*，来演示如何使用命令行。以下是我们当时编写的程序：
 
 ```java
-
 package com.packt.javapath.ch04demo;
-
 import com.packt.javapath.ch04demo.math.SimpleMath;
-
 public class MyApplication {
-
-public static void main(String[] args) {
-
-int i = Integer.parseInt(args[0]);
-
-SimpleMath simpleMath = new SimpleMath();
-
-int result = simpleMath.multiplyByTwo(i);
-
-System.out.println(i + " * 2 = " + result);
-
+  public static void main(String[] args) {
+    int i = Integer.parseInt(args[0]);
+    SimpleMath simpleMath = new SimpleMath();
+    int result = simpleMath.multiplyByTwo(i);
+    System.out.println(i + " * 2 = " + result);
+  }
 }
-
-}
-
 ```
 
 要从命令行运行它，必须首先使用`javac`命令对其进行编译。使用 Maven 的 IDE 将`.class`文件放在目录`target/classes`中。如果进入项目的根目录或单击 Terminal（IntelliJ IDEA 左下角），可以运行以下命令：
 
 ```java
-
 java -cp target/classes com.packt.javapath.ch04demo.MyApplication 2
-
 ```
 
 结果应显示为`2 * 2 = 4`。
@@ -681,19 +571,14 @@ java -cp target/classes com.packt.javapath.ch04demo.MyApplication 2
 创建一个带有编译应用程序代码的`.jar`文件，转到项目根目录并运行以下命令：
 
 ```java
-
 cd target/classes
-
 jar -cf myapp.jar com/packt/javapath/ch04demo/**
-
 ```
 
 创建了一个带有类`MyApplication`和`SimpleMath`的`.jar`文件。现在我们可以将其放在类路径上并再次运行应用程序：
 
 ```java
-
 java -cp myapp.jar com.packt.javapath.ch04demo.MyApplication 2
-
 ```
 
 结果将显示相同；`2 * 2 = 4`。
@@ -713,9 +598,7 @@ java -cp myapp.jar com.packt.javapath.ch04demo.MyApplication 2
 现在，运行以下命令：
 
 ```java
-
 java -jar  myapp.jar  2
-
 ```
 
 结果将再次显示为`2 * 2 = 4`。
@@ -759,25 +642,15 @@ java -jar  myapp.jar  2
 为了演示 GC 的工作原理，让我们创建一个产生比我们通常的示例更多垃圾的程序：
 
 ```java
-
 public class GarbageCollectionDemo {
-
-public static void main(String... args) {
-
-int max = 99888999;
-
-List<Integer> list = new ArrayList<>();
-
-for(int i = 1; i < max; i++){
-
-list.add(Integer.valueOf(i));
-
+  public static void main(String... args) {
+    int max = 99888999;
+    List<Integer> list = new ArrayList<>();
+    for(int i = 1; i < max; i++){
+      list.add(Integer.valueOf(i));
+    }
+  }
 }
-
-}
-
-}
-
 ```
 
 此程序生成接近 100,000,000 个占用大量堆空间的对象，并迫使 GC 将它们从 Eden 移动到 S0、S1 等。正如我们已经提到的，要查看 GC 的日志消息，必须在`java`命令中包含选项`-Xlog:gc`。我们选择使用 IDE，正如我们在上一节中描述的那样：

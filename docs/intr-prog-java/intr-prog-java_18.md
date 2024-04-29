@@ -87,53 +87,36 @@
 以下代码演示了前面方法的用法：
 
 ```java
-
-Stream.empty().forEach(System.out::println);    //不打印任何内容
-
-Stream.of(1).forEach(System.out::println);      //打印：1
+Stream.empty().forEach(System.out::println);    //prints nothing
+Stream.of(1).forEach(System.out::println);      //prints: 1
 
 List<String> list = List.of("1 ", "2");
-
 //printList1(null);                             //NullPointerException
-
-printList1(list);                               //打印：1 2
+printList1(list);                               //prints: 1 2
 
 void printList1(List<String> list){
-
-list.stream().forEach(System.out::print);;
-
+    list.stream().forEach(System.out::print);;
 }
-
 ```
 
 注意，当列表不为空时，第一次调用`printList1()`方法会生成`NullPointerException`并打印`1 2`。为了避免异常，我们可以将`printList1()`方法实现如下：
 
 ```java
-
 void printList1(List<String> list){
-
-(list == null ? Stream.empty() : list.stream())
-
-.forEach(System.out::print);
-
+     (list == null ? Stream.empty() : list.stream())
+                                         .forEach(System.out::print);
 }
-
 ```
 
 相反，我们使用了`ofNullable(T t)`方法，如下面的`printList2()`方法的实现所示：
 
 ```java
-
 printList2(null);                                //prints nothing
-
 printList2(list);                                //prints: [1 , 2]
 
 void printList2(List<String> list){
-
-Stream.ofNullable(list).forEach(System.out::print);
-
+      Stream.ofNullable(list).forEach(System.out::print);
 }
-
 ```
 
 这就是激发`ofNullable(T t)`方法创建的用例。但是您可能已经注意到，`ofNullable()`创建的流将列表作为一个对象发出：它被打印为`[1 , 2]`。
@@ -141,10 +124,8 @@ Stream.ofNullable(list).forEach(System.out::print);
 在这种情况下处理列表的每个元素，我们需要添加一个中间的`Stream`操作`flatMap()`，将每个元素转换为`Stream`对象：
 
 ```java
-
 Stream.ofNullable(list).flatMap(e -> e.stream())
-
-.forEach(System.out::print);      //prints: 1 2
+                       .forEach(System.out::print);      //prints: 1 2
 
 ```
 
@@ -153,11 +134,8 @@ Stream.ofNullable(list).flatMap(e -> e.stream())
 在前面的代码中传递给`flatMap()`操作的函数也可以表示为方法引用：
 
 ```java
-
 Stream.ofNullable(list).flatMap(Collection::stream)
-
-.forEach(System.out::print);      //prints: 1 2
-
+                       .forEach(System.out::print);      //prints: 1 2
 ```
 
 # iterate(Object, UnaryOperator)
@@ -171,14 +149,11 @@ Stream.ofNullable(list).flatMap(Collection::stream)
 以下代码演示了这些方法的用法：
 
 ```java
-
 Stream.iterate(1, i -> ++i).limit(9)
-
-.forEach(System.out::print);        //prints: 123456789
+        .forEach(System.out::print);        //prints: 123456789
 
 Stream.iterate(1, i -> i < 10, i -> ++i)
-
-.forEach(System.out::print);        //prints: 123456789
+        .forEach(System.out::print);        //prints: 123456789
 
 ```
 
@@ -189,15 +164,11 @@ Stream.iterate(1, i -> i < 10, i -> ++i)
 `Stream<T>` concatenate (`Stream<> a`, `Stream<T> b`) `Stream` 接口的静态方法基于传递的两个`Stream`对象`a`和`b`创建一个值流。新创建的流由第一个参数`a`的所有元素组成，后跟第二个参数`b`的所有元素。以下代码演示了`Stream`对象创建的这种方法：
 
 ```java
-
 Stream<Integer> stream1 = List.of(1, 2).stream();
-
 Stream<Integer> stream2 = List.of(2, 3).stream();
 
 Stream.concat(stream1, stream2)
-
-.forEach(System.out::print);        //prints: 1223
-
+        .forEach(System.out::print);        //prints: 1223
 ```
 
 请注意，原始流中存在`2`元素，并且因此在生成的流中出现两次。
@@ -207,23 +178,15 @@ Stream.concat(stream1, stream2)
 `Stream<T> generate(Supplier<T> supplier)` `Stream` 接口的静态方法创建一个无限流，其中每个元素由提供的`Supplier<T>`函数生成。以下是两个示例：
 
 ```java
-
 Stream.generate(() -> 1).limit(5)
-
-.forEach(System.out::print);       //prints: 11111
+        .forEach(System.out::print);       //prints: 11111
 
 Stream.generate(() -> new Random().nextDouble()).limit(5)
-
-.forEach(System.out::println);     //prints: 0.38575117472619247
-
-//        0.5055765386778835
-
-//        0.6528038976983277
-
-//        0.4422354489467244
-
-//        0.06770955839148762
-
+        .forEach(System.out::println);     //prints: 0.38575117472619247
+                                           //        0.5055765386778835
+                                           //        0.6528038976983277
+                                           //        0.4422354489467244
+                                           //        0.06770955839148762
 ```
 
 由于流是无限的，我们已经添加了`limit()`操作。
@@ -233,14 +196,11 @@ Stream.generate(() -> new Random().nextDouble()).limit(5)
 `Stream<T> of(T... values)` 方法接受可变参数或值数组，并使用提供的值作为流元素创建`Stream`对象：
 
 ```java
+    Stream.of("1 ", 2).forEach(System.out::print);      //prints: 1 2
+    //Stream<String> stringStream = Stream.of("1 ", 2); //compile error
 
-Stream.of("1 ", 2).forEach(System.out::print);      //prints: 1 2
-
-//Stream<String> stringStream = Stream.of("1 ", 2); //compile error
-
-String[] strings = {"1 ", "2"};
-
-Stream.of(strings).forEach(System.out::print);      //输出：1 2
+    String[] strings = {"1 ", "2"};
+    Stream.of(strings).forEach(System.out::print);      //prints: 1 2
 
 ```
 
@@ -249,13 +209,9 @@ Stream.of(strings).forEach(System.out::print);      //输出：1 2
 `of(T... values)`方法也可用于连接多个流。例如，假设我们有以下四个流，并且我们想要将它们连接成一个：
 
 ```java
-
 Stream<Integer> stream1 = Stream.of(1, 2);
-
 Stream<Integer> stream2 = Stream.of(2, 3);
-
 Stream<Integer> stream3 = Stream.of(3, 4);
-
 Stream<Integer> stream4 = Stream.of(4, 5);
 
 ```
@@ -263,23 +219,16 @@ Stream<Integer> stream4 = Stream.of(4, 5);
 我们期望新流发出值`1`、`2`、`2`、`3`、`3`、`4`、`4`和`5`。首先，我们尝试以下代码：
 
 ```java
-
 Stream.of(stream1, stream2, stream3, stream4)
-
-.forEach(System.out::print);
-
-//输出：java.util.stream.ReferencePipeline$Head@58ceff1j
-
+     .forEach(System.out::print); 
+           //prints: java.util.stream.ReferencePipeline$Head@58ceff1j
 ```
 
 上述代码并没有达到我们的期望。它将每个流都视为`java.util.stream.ReferencePipeline`内部类的对象，该内部类用于`Stream`接口实现。因此，我们添加了一个`flatMap()`操作，将每个流元素转换为流（我们将在*中间操作*部分中描述它）：
 
 ```java
-
 Stream.of(stream1, stream2, stream3, stream4)
-
-.flatMap(e -> e).forEach(System.out::print);   //输出：12233445
-
+     .flatMap(e -> e).forEach(System.out::print);   //prints: 12233445
 ```java
 
 我们将作为参数传递给`flatMap()`的函数（`e -> e`）可能看起来好像什么都没做，但这是因为流的每个元素已经是一个流，所以我们不需要对其进行转换。通过将元素作为`flatMap()`操作的结果返回，我们已经告诉管道将其视为`Stream`对象。已经完成了这一点，并且显示了预期的结果。
@@ -297,11 +246,8 @@ Stream.of(stream1, stream2, stream3, stream4)
 使用`add()`方法很简单：
 
 ```java
-
 Stream.<String>builder().add("cat").add(" dog").add(" bear")
-
-.build().forEach(System.out::print);  //输出：cat dog bear
-
+        .build().forEach(System.out::print);  //prints: cat dog bear
 ```
 
 只需注意我们在`builder()`方法前面添加的`<String>`泛型。这样，我们告诉构建器我们正在创建的流将具有`String`类型的元素。否则，它将将它们添加为`Object`类型。
@@ -309,37 +255,24 @@ Stream.<String>builder().add("cat").add(" dog").add(" bear")
 当构建器作为`Consumer`对象传递时，或者不需要链接添加元素的方法时，使用`accept()`方法。例如，以下是构建器作为`Consumer`对象传递的方式：
 
 ```java
-
 Stream.Builder<String> builder = Stream.builder();
-
 List.of("1", "2", "3").stream().forEach(builder);
-
-builder.build().forEach(System.out::print);        //输出：123
+builder.build().forEach(System.out::print);        //prints: 123
 
 ```
 
 还有一些情况不需要在添加流元素时链接方法。以下方法接收`String`对象的列表，并将其中一些对象（包含字符`a`的对象）添加到流中：
 
 ```java
-
 Stream<String> buildStream(List<String> values){
-
-Stream.Builder<String> builder = Stream.builder();
-
-for(String s: values){
-
-如果(s.contains("a")){
-
-builder.accept(s);
-
+    Stream.Builder<String> builder = Stream.builder();
+    for(String s: values){
+        if(s.contains("a")){
+            builder.accept(s);
+        }
+    }
+    return builder.build();
 }
-
-}
-
-return builder.build();
-
-}
-
 ```
 
 请注意，出于同样的原因，我们为`Stream.Builder`接口添加了`<String>`泛型，告诉构建器我们添加的元素应该被视为`String`类型。
@@ -347,11 +280,8 @@ return builder.build();
 当调用前面的方法时，它会产生预期的结果：
 
 ```java
-
 List<String> list = List.of("cat", " dog", " bear");
-
-buildStream(list).forEach(System.out::print);        //输出：cat bear
-
+buildStream(list).forEach(System.out::print);        //prints: cat bear
 ```
 
 # 其他类和接口
@@ -365,10 +295,8 @@ buildStream(list).forEach(System.out::print);        //输出：cat bear
 这意味着扩展此接口的所有集合接口，包括`Set`和`List`，都有这些方法。这是一个例子：
 
 ```java
-
 List<Integer> list = List.of(1, 2, 3, 4, 5);
-
-list.stream().forEach(System.out::print);    //输出：12345
+list.stream().forEach(System.out::print);    //prints: 12345
 
 ```
 
@@ -395,10 +323,8 @@ list.stream().forEach(System.out::print);    //输出：12345
 这是一个从数组的子集创建流的示例：
 
 ```java
-
 int[] arr = {1, 2, 3, 4, 5};
-
-Arrays.stream(arr, 2, 4).forEach(System.out::print);    //输出：34
+Arrays.stream(arr, 2, 4).forEach(System.out::print);    //prints: 34
 
 ```
 
@@ -419,13 +345,9 @@ Arrays.stream(arr, 2, 4).forEach(System.out::print);    //输出：34
 以下是前述方法的示例之一：
 
 ```java
-
 new Random().ints(5, 8)
-
-.limit(5)
-
-.forEach(System.out::print);    //打印：56757
-
+            .limit(5)
+            .forEach(System.out::print);    //prints: 56757
 ```
 
 `java.nio.File`类有六个静态方法，用于创建行和路径流：
@@ -489,28 +411,17 @@ new Random().ints(5, 8)
 以下代码演示了前面的操作是如何工作的：
 
 ```java
-
 Stream.of("3", "2", "3", "4", "2").distinct()
-
-.forEach(System.out::print);  //prints: 324
-
+                            .forEach(System.out::print);  //prints: 324
 List<String> list = List.of("1", "2", "3", "4", "5");
-
 list.stream().skip(3).forEach(System.out::print);         //prints: 45
-
 list.stream().limit(3).forEach(System.out::print);        //prints: 123
-
 list.stream().filter(s -> Objects.equals(s, "2"))
-
-.forEach(System.out::print);  //prints: 2
-
+                            .forEach(System.out::print);  //prints: 2
 list.stream().dropWhile(s -> Integer.valueOf(s) < 3)
-
-.forEach(System.out::print);  //prints: 345
-
+                            .forEach(System.out::print);  //prints: 345
 list.stream().takeWhile(s -> Integer.valueOf(s) < 3)
-
-.forEach(System.out::print);  //prints: 12
+                            .forEach(System.out::print);  //prints: 12
 
 ```
 
@@ -539,64 +450,35 @@ list.stream().takeWhile(s -> Integer.valueOf(s) < 3)
 以下是这些操作的用法示例：
 
 ```java
-
 List<String> list = List.of("1", "2", "3", "4", "5");
-
 list.stream().map(s -> s + s)
-
-.forEach(System.out::print);        //prints: 1122334455
-
+             .forEach(System.out::print);        //prints: 1122334455
 list.stream().mapToInt(Integer::valueOf)
-
-.forEach(System.out::print);             //prints: 12345
-
+             .forEach(System.out::print);             //prints: 12345
 list.stream().mapToLong(Long::valueOf)
-
-.forEach(System.out::print);             //prints: 12345
-
+             .forEach(System.out::print);             //prints: 12345
 list.stream().mapToDouble(Double::valueOf)
-
-.mapToObj(Double::toString)
-
-.map(s -> s + " ")
-
-.forEach(System.out::print);//prints: 1.0 2.0 3.0 4.0 5.0
-
+             .mapToObj(Double::toString)
+             .map(s -> s + " ")
+             .forEach(System.out::print);//prints: 1.0 2.0 3.0 4.0 5.0 
 list.stream().mapToInt(Integer::valueOf)
-
-.flatMap(n -> IntStream.iterate(1, i -> i < n, i -> ++i))
-
-.forEach(System.out::print);        //prints: 1121231234
-
+             .flatMap(n -> IntStream.iterate(1, i -> i < n, i -> ++i))
+             .forEach(System.out::print);        //prints: 1121231234
 list.stream().map(Integer::valueOf)
-
-.flatMapToInt(n ->
-
-IntStream.iterate(1, i -> i < n, i -> ++i))
-
-.forEach(System.out::print);        //prints: 1121231234
-
+             .flatMapToInt(n -> 
+                           IntStream.iterate(1, i -> i < n, i -> ++i))
+             .forEach(System.out::print);        //prints: 1121231234
 list.stream().map(Integer::valueOf)
-
-.flatMapToLong(n ->
-
-LongStream.iterate(1, i -> i < n, i -> ++i))
-
-.forEach(System.out::print);        //prints: 1121231234;
-
+             .flatMapToLong(n ->  
+                          LongStream.iterate(1, i -> i < n, i -> ++i))
+             .forEach(System.out::print);        //prints: 1121231234;
 list.stream().map(Integer::valueOf)
-
-.flatMapToDouble(n ->
-
-DoubleStream.iterate(1, i -> i < n, i -> ++i))
-
-.mapToObj(Double::toString)
-
-.map(s -> s + " ")
-
-.forEach(System.out::print);
-
-//prints: 1.0 1.0 2.0 1.0 2.0 3.0 1.0 2.0 3.0 4.0
+             .flatMapToDouble(n -> 
+                        DoubleStream.iterate(1, i -> i < n, i -> ++i))
+             .mapToObj(Double::toString)
+             .map(s -> s + " ")
+             .forEach(System.out::print);  
+                    //prints: 1.0 1.0 2.0 1.0 2.0 3.0 1.0 2.0 3.0 4.0 
 
 ```
 
@@ -613,14 +495,10 @@ DoubleStream.iterate(1, i -> i < n, i -> ++i))
 以下是演示代码：
 
 ```java
-
 List<String> list = List.of("2", "1", "5", "4", "3");
-
 list.stream().sorted().forEach(System.out::print);  //prints: 12345
-
 list.stream().sorted(Comparator.reverseOrder())
-
-.forEach(System.out::print);           //prints: 54321
+             .forEach(System.out::print);           //prints: 54321
 
 ```
 
@@ -631,19 +509,12 @@ list.stream().sorted(Comparator.reverseOrder())
 以下代码显示了它的工作原理：
 
 ```java
-
 List<String> list = List.of("1", "2", "3", "4", "5");
-
 list.stream().peek(s-> {
-
-if("3".equals(s)){
-
-System.out.print(3);
-
-}
-
+    if("3".equals(s)){
+        System.out.print(3);
+    }
 }).forEach(System.out::print);  //prints: 123345
-
 ```
 
 # 终端操作
@@ -651,13 +522,9 @@ System.out.print(3);
 终端操作是流管道中最重要的操作。不需要任何其他操作就可以轻松完成所有操作。我们已经使用了`forEach(Consumer<T>)`终端操作来打印每个元素。它不返回值；因此，它用于其副作用。但是`Stream`接口还有许多更强大的终端操作，它们会返回值。其中最重要的是`collect()`操作，它有两种形式，`R collect(Collector<T, A, R> collector)`和`R collect(Supplier<R> supplier, BiConsumer<R, T> accumulator, BiConsumer<R, R> combiner)`。这些允许我们组合几乎可以应用于流的任何过程。经典示例如下：
 
 ```java
-
-List<String> asList = stringStream.collect(ArrayList::new,
-
-ArrayList::add,
-
-ArrayList::addAll);
-
+List<String> asList = stringStream.collect(ArrayList::new, 
+                                           ArrayList::add, 
+                                           ArrayList::addAll);
 ```
 
 如您所见，它是为并行处理而实现的。它使用第一个函数基于流元素生成值，使用第二个函数累积结果，然后结合处理流的所有线程累积的结果。
@@ -681,88 +548,51 @@ ArrayList::addAll);
 这种操作被用于*任何类型*的流处理是很常见的，特别是当代码是由经验不足的程序员编写时。对于下面的例子，我们创建了`Person`类：
 
 ```java
-
 class Person {
-
-private int age;
-
-private String name;
-
-public Person(int age, String name) {
-
-this.name = name;
-
-this.age = age;
-
+    private int age;
+    private String name;
+    public Person(int age, String name) {
+        this.name = name;
+        this.age = age;
+    }
+    public String getName() { return this.name; }
+    public int getAge() {return this.age; }
+    @Override
+    public String toString() {
+        return "Person{" + "name='" + this.name + "'" +
+                         ", age=" + age + "}";
+    }
 }
-
-public String getName() { return this.name; }
-
-public int getAge() {return this.age; }
-
-@Override
-
-public String toString() {
-
-return "Person{" + "name='" + this.name + "'" +
-
-", age=" + age + "}";
-
-}
-
-}
-
 ```
 
 我们将在终端操作的讨论中使用这个类。在这个例子中，我们将从文件中读取逗号分隔的值（年龄和姓名），并创建`Person`对象。我们已经将以下`persons.csv`文件（**逗号分隔值（CSV）**）放在`resources`文件夹中：
 
 ```java
-
-23 , Ji m
-
-2 5 , Bob
-
+ 23 , Ji m
+ 2 5 , Bob
 15 , Jill
-
-17 , Bi ll
-
+ 17 , Bi ll
 ```
 
 请注意我们在值的外部和内部添加的空格。我们这样做是为了借此机会向您展示一些简单但非常有用的处理现实数据的技巧。以下是一个经验不足的程序员可能编写的代码，用于读取此文件并创建`Person`对象列表：
 
 ```java
-
 List<Person> persons = new ArrayList<>();
-
 Path path = Paths.get("src/main/resources/persons.csv");
-
 try (Stream<String> lines = Files.newBufferedReader(path).lines()) {
-
-lines.forEach(s -> {
-
-String[] arr = s.split(",");
-
-int age = Integer.valueOf(StringUtils.remove(arr[0], ' '));
-
-persons.add(new Person(age, StringUtils.remove(arr[1], ' ')));
-
-});
-
+    lines.forEach(s -> {
+        String[] arr = s.split(",");
+        int age = Integer.valueOf(StringUtils.remove(arr[0], ' '));
+        persons.add(new Person(age, StringUtils.remove(arr[1], ' ')));
+    });
 } catch (IOException ex) {
-
-ex.printStackTrace();
-
+    ex.printStackTrace();
 }
-
-persons.stream().forEach(System.out::println);
-
-//prints: Person{name='Jim', age=23}
-
-//        Person{name='Bob', age=25}
-
-//        Person{name='Jill', age=15}
-
-//        Person{name='Bill', age=17}
+persons.stream().forEach(System.out::println);  
+                                 //prints: Person{name='Jim', age=23}
+                                 //        Person{name='Bob', age=25}
+                                 //        Person{name='Jill', age=15}
+                                 //        Person{name='Bill', age=17}
 
 ```
 
@@ -773,29 +603,17 @@ persons.stream().forEach(System.out::println);
 相比之下，这是前面代码的正确实现：
 
 ```java
-
 List<Person> persons = new ArrayList<>();
-
 Path path = Paths.get("src/main/resources/persons.csv");
-
 try (Stream<String> lines = Files.newBufferedReader(path).lines()) {
-
-persons = lines.map(s -> s.split(","))
-
-.map(arr -> {
-
-int age = Integer.valueOf(StringUtils.remove(arr[0], ' '));
-
-return new Person(age, StringUtils.remove(arr[1], ' '));
-
-}).collect(Collectors.toList());
-
+    persons = lines.map(s -> s.split(","))
+       .map(arr -> {
+          int age = Integer.valueOf(StringUtils.remove(arr[0], ' '));
+          return new Person(age, StringUtils.remove(arr[1], ' '));
+       }).collect(Collectors.toList());
 } catch (IOException ex) {
-
-ex.printStackTrace();
-
+    ex.printStackTrace();
 }
-
 persons.stream().forEach(System.out::println);
 
 ```
@@ -803,39 +621,22 @@ persons.stream().forEach(System.out::println);
 为了提高可读性，可以创建一个执行映射工作的方法：
 
 ```java
-
 public List<Person> createPersons() {
-
-List<Person> persons = new ArrayList<>();
-
-Path path = Paths.get("src/main/resources/persons.csv");
-
-try (Stream<String> lines = Files.newBufferedReader(path).lines()) {
-
-persons = lines.map(s -> s.split(","))
-
-.map(this::createPerson)
-
-.collect(Collectors.toList());
-
-} catch (IOException ex) {
-
-ex.printStackTrace();
-
+   List<Person> persons = new ArrayList<>();
+   Path path = Paths.get("src/main/resources/persons.csv");
+   try (Stream<String> lines = Files.newBufferedReader(path).lines()) {
+        persons = lines.map(s -> s.split(","))
+                .map(this::createPerson)
+                .collect(Collectors.toList());
+   } catch (IOException ex) {
+        ex.printStackTrace();
+   }
+   return persons;
 }
-
-return persons;
-
-}
-
 private Person createPerson(String[] arr){
-
-int age = Integer.valueOf(StringUtils.remove(arr[0], ' '));
-
-return new Person(age, StringUtils.remove(arr[1], ' '));
-
+    int age = Integer.valueOf(StringUtils.remove(arr[0], ' '));
+    return new Person(age, StringUtils.remove(arr[1], ' '));
 }
-
 ```
 
 正如你所看到的，我们使用了`collect()`操作和`Collectors.toList()`方法创建的`Collector`函数。我们将在*Collect*子部分中看到更多由`Collectors`类创建的`Collector`函数。
@@ -845,14 +646,10 @@ return new Person(age, StringUtils.remove(arr[1], ' '));
 `long count()`终端操作的`Stream`接口看起来很简单，也很温和。它返回这个流中的元素数量。习惯于使用集合和数组的人可能会毫不犹豫地使用`count()`操作。下面是一个例子，证明它可以正常工作：
 
 ```java
-
 long count = Stream.of("1", "2", "3", "4", "5")
-
-.peek(System.out::print)
-
-.count();
-
-System.out.print(count);                 //输出：5
+        .peek(System.out::print)
+        .count();
+System.out.print(count);                 //prints: 5
 
 ```
 
@@ -861,14 +658,10 @@ System.out.print(count);                 //输出：5
 既然我们正在讨论计算元素的话，我们想展示另一种可能的确定流大小的方法，使用`collect()`操作：
 
 ```java
-
 int count = Stream.of("1", "2", "3", "4", "5")
-
-.peek(System.out::print)         //输出：12345
-
-.collect(Collectors.counting());
-
-System.out.println(count);                //输出：5
+        .peek(System.out::print)         //prints: 12345
+        .collect(Collectors.counting());
+System.out.println(count);                //prints: 5
 
 ```
 
@@ -887,47 +680,26 @@ System.out.println(count);                //输出：5
 以下是它们的使用示例：
 
 ```java
-
 List<String> list = List.of("1", "2", "3", "4", "5");
-
 boolean found = list.stream()
-
-.peek(System.out::print)          //输出：123
-
-.anyMatch(e -> "3".equals(e));
-
-System.out.print(found);                  //输出：true   <= 第 5 行
-
+        .peek(System.out::print)          //prints: 123
+        .anyMatch(e -> "3".equals(e));
+System.out.print(found);                  //prints: true   <= line 5
 found = list.stream()
-
-.peek(System.out::print)          //输出：12345
-
-.anyMatch(e -> "0".equals(e));
-
-System.out.print(found);                  //输出：false
-
-boolean noneMatches = list.stream()
-
-.peek(System.out::print)          //输出：123
-
-.noneMatch(e -> "3".equals(e));
-
-System.out.print(noneMatches);            //输出：false
-
+        .peek(System.out::print)          //prints: 12345
+        .anyMatch(e -> "0".equals(e));
+System.out.print(found);                  //prints: false  
+boolean noneMatches = list.stream()       
+        .peek(System.out::print)          //prints: 123
+        .noneMatch(e -> "3".equals(e));
+System.out.print(noneMatches);            //prints: false
 noneMatches = list.stream()
-
-.peek(System.out::print)          //输出：12345
-
-.noneMatch(e -> "0".equals(e));
-
-System.out.print(noneMatches);            //输出：true  <= 第 17 行
-
-boolean allMatch = list.stream()
-
-.peek(System.out::print)          //输出：1
-
-.allMatch(e -> "3".equals(e));
-
+        .peek(System.out::print)          //prints: 12345
+        .noneMatch(e -> "0".equals(e));
+System.out.print(noneMatches);            //prints: true  <= line 17
+boolean allMatch = list.stream()          
+        .peek(System.out::print)          //prints: 1
+        .allMatch(e -> "3".equals(e));
 System.out.print(allMatch);               //prints: false
 
 ```
@@ -949,27 +721,19 @@ System.out.print(allMatch);               //prints: false
 以下示例说明了这些操作：
 
 ```java
-
 List<String> list = List.of("1", "2", "3", "4", "5");
 
 Optional<String> result = list.stream().findAny();
-
 System.out.println(result.isPresent());    //prints: true
-
 System.out.println(result.get());          //prints: 1
 
 result = list.stream().filter(e -> "42".equals(e)).findAny();
-
 System.out.println(result.isPresent());    //prints: true
-
 //System.out.println(result.get());        //NoSuchElementException
 
 result = list.stream().findFirst();
-
 System.out.println(result.isPresent());    //prints: true
-
 System.out.println(result.get());          //prints: 1
-
 ```
 
 如您所见，它们返回相同的结果。这是因为我们在单个线程中执行管道。这两个操作之间的差异在并行处理中更加显著。当流被分成几个部分进行并行处理时，如果流不为空，`findFirst()`操作总是返回流的第一个元素，而`findAny()`操作只在一个处理线程中返回第一个元素。
@@ -981,41 +745,27 @@ System.out.println(result.get());          //prints: 1
 `java.util.Optional`对象用于避免返回`null`，因为它可能会导致`NullPointerException`。相反，`Optional`对象提供了可以用来检查值是否存在并在没有值的情况下替换它的方法。例如：
 
 ```java
-
 List<String> list = List.of("1", "2", "3", "4", "5");
 
 String result = list.stream().filter(e -> "42".equals(e))
-
-.findAny().or(() -> Optional.of("Not found")).get();
-
+       .findAny().or(() -> Optional.of("Not found")).get();
 System.out.println(result);                       //prints: Not found
 
 result = list.stream().filter(e -> "42".equals(e))
-
-.findAny().orElse("Not found");
-
+                            .findAny().orElse("Not found");
 System.out.println(result);                        //prints: Not found
 
 Supplier<String> trySomethingElse = () -> {
-
-//尝试其他操作的代码
-
-return "43";
-
+    //Code that tries something else
+    return "43";
 };
-
 result = list.stream().filter(e -> "42".equals(e))
-
-.findAny().orElseGet(trySomethingElse);
-
+                   .findAny().orElseGet(trySomethingElse);
 System.out.println(result);                          //prints: 43
 
 list.stream().filter(e -> "42".equals(e))
-
-.findAny().ifPresentOrElse(System.out::println,
-
-() -> System.out.println("Not found"));  //prints: Not found
-
+    .findAny().ifPresentOrElse(System.out::println, 
+            () -> System.out.println("Not found"));  //prints: Not found
 ```
 
 As you can see, if the `Optional` object is empty, then:
@@ -1039,15 +789,11 @@ The following Terminal operations return the minimum or maximum value of the str
 Here is the demonstration code:
 
 ```java
-
 List<String> list = List.of("a", "b", "c", "c", "a");
-
 String min = list.stream().min(Comparator.naturalOrder()).orElse("0");
-
 System.out.println(min);     //prints: a
 
 String max = list.stream().max(Comparator.naturalOrder()).orElse("0");
-
 System.out.println(max);     //prints: c
 
 ```
@@ -1055,13 +801,9 @@ System.out.println(max);     //prints: c
 As you can see, in the case of non-numerical values, the minimum element is the one that is first (when ordered from the left to the right), according to the provided comparator; the maximum, accordingly, is the last element. In the case of numeric values, the minimum and maximum are just that—the biggest and the smallest number among the stream elements:
 
 ```java
-
 int mn = Stream.of(42, 33, 77).min(Comparator.naturalOrder()).orElse(0);
-
 System.out.println(mn);    //prints: 33
-
 int mx = Stream.of(42, 33, 77).max(Comparator.naturalOrder()).orElse(0);
-
 System.out.println(mx);    //prints: 77
 
 ```
@@ -1069,67 +811,42 @@ System.out.println(mx);    //prints: 77
 Let's look at another example, assuming that there is a `Person` class:
 
 ```java
-
 class Person {
-
-private int age;
-
-private String name;
-
-public Person(int age, String name) {
-
-this.age = age;
-
-this.name = name;
-
+    private int age;
+    private String name;
+    public Person(int age, String name) {
+        this.age = age;
+        this.name = name;
+    }
+    public int getAge() { return this.age; }
+    public String getName() { return this.name; }
+    @Override
+    public String toString() {
+        return "Person{name:" + this.name + ",age:" + this.age + "}";
+    }
 }
-
-public int getAge() { return this.age; }
-
-public String getName() { return this.name; }
-
-@Override
-
-public String toString() {
-
-return "Person{name:" + this.name + ",age:" + this.age + "}";
-
-}
-
-}
-
 ```
 
 The task is to find the oldest person in the following list:
 
 ```java
-
 List<Person> persons = List.of(new Person(23, "Bob"),
-
-new Person(33, "Jim"),
-
-new Person(28, "Jill"),
-
-new Person(27, "Bill"));
-
+                               new Person(33, "Jim"),
+                               new Person(28, "Jill"),
+                               new Person(27, "Bill"));
 ```
 
 In order to do that, we can create the following `Compartor<Person>`:
 
 ```java
-
 Comparator<Person> perComp = (p1, p2) -> p1.getAge() - p2.getAge();
-
 ```
 
 Then, using this comparator, we can find the oldest person:
 
 ```java
-
 Person theOldest = persons.stream().max(perComp).orElse(null);
-
 System.out.println(theOldest);  //prints: Person{name:Jim,age:33}
-
 ```
 
 # The toArray() operation
@@ -1143,15 +860,11 @@ These two Terminal operations generate an array that contains the stream element
 Let's look at an example:
 
 ```java
-
 List<String> list = List.of("a", "b", "c");
-
 Object[] obj = list.stream().toArray();
-
 Arrays.stream(obj).forEach(System.out::print);    //prints: abc
 
 String[] str = list.stream().toArray(String[]::new);
-
 Arrays.stream(str).forEach(System.out::print);    //prints: abc
 
 ```
@@ -1161,27 +874,19 @@ The first example is straightforward. It converts elements to an array of the sa
 `String[]::new` is a method reference that represents the following lambda expression:
 
 ```java
-
-字符串[] str = list.stream().toArray(i -> new String[i]);
-
-Arrays.stream(str).forEach(System.out::print);    //打印：abc
+String[] str = list.stream().toArray(i -> new String[i]);
+Arrays.stream(str).forEach(System.out::print);    //prints: abc
 
 ```
 
 这已经是`IntFunction<String[]>`，根据其文档，它接受一个`int`参数并返回指定类型的结果。可以通过使用匿名类来定义，如下所示：
 
 ```java
-
 IntFunction<String[]> intFunction = new IntFunction<String[]>() {
-
-@Override
-
-public String[] apply(int i) {
-
-return new String[i];
-
-}
-
+    @Override
+    public String[] apply(int i) {
+        return new String[i];
+    }
 };
 
 ```
@@ -1189,10 +894,8 @@ return new String[i];
 您可能还记得（来自第十三章，*Java 集合*）我们如何将集合转换为数组：
 
 ```java
-
 str = list.toArray(new String[list.size()]);
-
-Arrays.stream(str).forEach(System.out::print);    //打印：abc
+Arrays.stream(str).forEach(System.out::print);    //prints: abc
 
 ```
 
@@ -1215,60 +918,38 @@ Arrays.stream(str).forEach(System.out::print);    //打印：abc
 为了演示`reduce()`操作，我们将使用之前的`Person`类：
 
 ```java
-
-类 Person {
-
-private int age;
-
-private String name;
-
-public Person(int age, String name) {
-
-this.age = age;
-
-this.name = name;
-
+class Person {
+    private int age;
+    private String name;
+    public Person(int age, String name) {
+        this.age = age;
+        this.name = name;
+    }
+    public int getAge() { return this.age; }
+    public String getName() { return this.name; }
+    @Override
+    public String toString() {
+        return "Person{name:" + this.name + ",age:" + this.age + "}";
+    }
 }
-
-public int getAge() { return this.age; }
-
-public String getName() { return this.name; }
-
-@Override
-
-public String toString() {
-
-return "Person{name:" + this.name + ",age:" + this.age + "}";
-
-}
-
-}
-
 ```
 
 我们还将使用相同的`Person`对象列表作为我们流示例的来源：
 
 ```java
-
 List<Person> list = List.of(new Person(23, "Bob"),
-
-new Person(33, "Jim"),
-
-new Person(28, "Jill"),
-
-new Person(27, "Bill"));
+                            new Person(33, "Jim"),
+                            new Person(28, "Jill"),
+                            new Person(27, "Bill"));
 
 ```
 
 现在，使用`reduce()`操作，让我们找到此列表中年龄最大的人：
 
 ```java
-
 Person theOldest = list.stream()
-
-.reduce((p1, p2) -> p1.getAge() > p2.getAge() ? p1 : p2).orElse(null);
-
-System.out.println(theOldest);         //打印：Person{name:Jim,age:33}
+  .reduce((p1, p2) -> p1.getAge() > p2.getAge() ? p1 : p2).orElse(null);
+System.out.println(theOldest);         //prints: Person{name:Jim,age:33}
 
 ```
 
@@ -1277,12 +958,9 @@ System.out.println(theOldest);         //打印：Person{name:Jim,age:33}
 现在，让我们明确地累积一些东西。让我们将人员名单中的所有名称组合成一个逗号分隔的列表：
 
 ```java
-
 String allNames = list.stream().map(p->p.getName())
-
-.reduce((n1, n2) -> n1 + "，" + n2).orElse(null);
-
-System.out.println(allNames);            //打印：Bob, Jim, Jill, Bill
+                      .reduce((n1, n2) -> n1 + ", " + n2).orElse(null);
+System.out.println(allNames);            //prints: Bob, Jim, Jill, Bill
 
 ```
 
@@ -1291,12 +969,9 @@ System.out.println(allNames);            //打印：Bob, Jim, Jill, Bill
 现在，让我们使用身份值提供一个初始值：
 
 ```java
-
 String allNames = list.stream().map(p->p.getName())
-
-.reduce("所有名称：", (n1，n2) -> n1 + "，" + n2);
-
-System.out.println(allNames);       //所有名称：，Bob, Jim, Jill, Bill
+                    .reduce("All names: ", (n1, n2) -> n1 + ", " + n2);
+System.out.println(allNames);       //All names: , Bob, Jim, Jill, Bill
 
 ```
 
@@ -1305,24 +980,18 @@ System.out.println(allNames);       //所有名称：，Bob, Jim, Jill, Bill
 但是，结果字符串看起来并不像我们希望的那样漂亮。显然，提供的初始值被视为任何其他流元素，并且累加器创建的后面添加了逗号。为了使结果再次看起来漂亮，我们可以再次使用`reduce()`操作的第一个版本，并通过这种方式添加初始值：
 
 ```java
-
-String allNames = "所有名称：" + list.stream().map(p->p.getName())
-
-.reduce((n1, n2) -> n1 + "，" + n2).orElse(null);
-
-System.out.println(allNames);         //所有名称：Bob, Jim, Jill, Bill
+String allNames = "All names: " + list.stream().map(p->p.getName())
+                      .reduce((n1, n2) -> n1 + ", " + n2).orElse(null);
+System.out.println(allNames);         //All names: Bob, Jim, Jill, Bill
 
 ```
 
 我们决定使用空格作为分隔符，而不是逗号，以进行演示：
 
 ```java
-
 String allNames = list.stream().map(p->p.getName())
-
-.reduce("所有名称：", (n1, n2) -> n1 + " " + n2);
-
-System.out.println(allNames);        //所有名称：Bob, Jim, Jill, Bill
+                     .reduce("All names:", (n1, n2) -> n1 + " " + n2);
+System.out.println(allNames);        //All names: Bob, Jim, Jill, Bill
 
 ```
 
@@ -1331,14 +1000,10 @@ System.out.println(allNames);        //所有名称：Bob, Jim, Jill, Bill
 现在，让我们看看如何使用`reduce()`操作的第三种形式——具有三个参数的形式，最后一个称为组合器。将组合器添加到前面的`reduce()`操作中不会改变结果：
 
 ```java
-
 String allNames = list.stream().map(p->p.getName())
-
-.reduce("所有名称：", (n1, n2) -> n1 + " " + n2,
-
-(n1, n2) -> n1 + " " + n2 );
-
-System.out.println(allNames);          //所有名称：Bob, Jim, Jill, Bill
+                      .reduce("All names:", (n1, n2) -> n1 + " " + n2, 
+                                            (n1, n2) -> n1 + " " + n2 );
+System.out.println(allNames);          //All names: Bob, Jim, Jill, Bill
 
 ```
 
@@ -1347,30 +1012,21 @@ System.out.println(allNames);          //所有名称：Bob, Jim, Jill, Bill
 如果我们使流并行，结果会改变：
 
 ```java
-
 String allNames = list.parallelStream().map(p->p.getName())
-
-.reduce("所有名称：", (n1, n2) -> n1 + " " + n2,
-
-(n1, n2) -> n1 + " " + n2 );
-
-System.out.println(allNames);
-
-//所有名称：Bob 所有名称：Jim 所有名称：Jill 所有名称：Bill
+                      .reduce("All names:", (n1, n2) -> n1 + " " + n2, 
+                                            (n1, n2) -> n1 + " " + n2 );
+System.out.println(allNames);   
+         //All names: Bob All names: Jim All names: Jill All names: Bill
 
 ```
 
 显然，对于并行流，元素序列被分成子序列，每个子序列都是独立处理的；它们的结果由组合器聚合。这样做时，组合器将初始值（身份）添加到每个结果中。即使我们删除组合器，并行流处理的结果仍然是相同的，因为提供了默认的组合器行为：
 
 ```java
-
 String allNames = list.parallelStream().map(p->p.getName())
-
-.reduce("所有名称：", (n1, n2) -> n1 + " " + n2);
-
-System.out.println(allNames);
-
-//所有名称：Bob 所有名称：Jim 所有名称：Jill 所有名称：Bill
+                      .reduce("All names:", (n1, n2) -> n1 + " " + n2);
+System.out.println(allNames);   
+        //All names: Bob All names: Jim All names: Jill All names: Bill
 
 ```
 
@@ -1379,14 +1035,10 @@ System.out.println(allNames);
 为了消除结果中重复的标识值，我们决定从 combiner 的第二个参数中删除它：
 
 ```java
-
 allNames = list.parallelStream().map(p->p.getName())
-
-.reduce("所有名称:", (n1, n2) -> n1 + " " + n2，
-
-(n1, n2) -> n1 + " " + StringUtils.remove(n2, "所有名称:"));
-
-System.out.println(allNames); //所有名称：Bob, Jim, Jill, Bill
+    .reduce("All names:", (n1, n2) -> n1 + " " + n2,
+        (n1, n2) -> n1 + " " + StringUtils.remove(n2, "All names:"));
+System.out.println(allNames);       //All names: Bob, Jim, Jill, Bill
 
 ```
 
@@ -1395,25 +1047,18 @@ System.out.println(allNames); //所有名称：Bob, Jim, Jill, Bill
 到目前为止，我们的例子中，标识不仅起到了初始值的作用，还起到了结果中的标识（标签）的作用。当流的元素是数字时，标识看起来更像是初始值。让我们看下面的例子：
 
 ```java
-
-整数列表= List.of(1, 2, 3);
-
+List<Integer> ints = List.of(1, 2, 3);
 int sum = ints.stream().reduce((i1, i2) -> i1 + i2).orElse(0);
-
-System.out.println(sum); //打印：6
+System.out.println(sum);                          //prints: 6
 
 sum = ints.stream().reduce(Integer::sum).orElse(0);
-
-System.out.println(sum); //打印：6
+System.out.println(sum);                          //prints: 6
 
 sum = ints.stream().reduce(10, Integer::sum);
-
-System.out.println(sum); //打印：16
+System.out.println(sum);                         //prints: 16
 
 sum = ints.stream().reduce(10, Integer::sum, Integer::sum);
-
-System.out.println(sum); //打印：16
-
+System.out.println(sum);                         //prints: 16
 ```
 
 前两个流管道完全相同，只是第二个管道使用了方法引用而不是 lambda 表达式。第三个和第四个管道也具有相同的功能。它们都使用初始值 10。现在第一个参数作为初始值比标识更有意义，不是吗？在第四个管道中，我们添加了一个组合器，但它没有被使用，因为流不是并行的。
@@ -1421,29 +1066,22 @@ System.out.println(sum); //打印：16
 让我们并行处理一下，看看会发生什么：
 
 ```java
-
-整数列表= List.of(1, 2, 3);
-
+List<Integer> ints = List.of(1, 2, 3);
 int sum = ints.parallelStream().reduce(10, Integer::sum, Integer::sum);
-
-System.out.println(sum); //打印：36
+System.out.println(sum);                                   //prints: 36
 
 ```
 
 结果为 36，因为初始值 10 被添加了三次-每次都有部分结果。显然，流被分成了三个子序列。但情况并非总是如此，随着流的增长和计算机上 CPU 数量的增加而发生变化。因此，不能依赖于一定数量的子序列，最好不要在这种情况下使用它，如果需要，可以添加到结果中：
 
 ```java
-
-整数列表= List.of(1, 2, 3);
+List<Integer> ints = List.of(1, 2, 3);
 
 int sum = ints.parallelStream().reduce(0, Integer::sum, Integer::sum);
-
-System.out.println(sum); //打印：6
+System.out.println(sum);                                   //prints: 6
 
 sum = 10 + ints.parallelStream().reduce(0, Integer::sum, Integer::sum);
-
-System.out.println(sum); //打印：16
-
+System.out.println(sum);                                   //prints: 16
 ```
 
 # 收集操作
@@ -1465,96 +1103,59 @@ System.out.println(sum); //打印：16
 让我们看看`collect()`操作的第二种形式。它与`reduce()`操作非常相似，具有我们刚刚演示的三个参数。最大的区别在于`collect()`操作中的第一个参数不是标识或初始值，而是容器——一个对象，将在函数之间传递，并维护处理的状态。对于以下示例，我们将使用`Person1`类作为容器：
 
 ```java
-
 class Person1 {
-
-private String name;
-
-private int age;
-
-public Person1(){}
-
-public String getName() { return this.name; }
-
-public void setName(String name) { this.name = name; }
-
-public int getAge() {return this.age; }
-
-public void setAge(int age) { this.age = age;}
-
-@Override
-
-public String toString() {
-
-return "人{name:" + this.name + ",年龄:" + age + "}";
-
+    private String name;
+    private int age;
+    public Person1(){}
+    public String getName() { return this.name; }
+    public void setName(String name) { this.name = name; }
+    public int getAge() {return this.age; }
+    public void setAge(int age) { this.age = age;}
+    @Override
+    public String toString() {
+        return "Person{name:" + this.name + ",age:" + age + "}";
+    }
 }
-
-}
-
 ```
 
 正如你所看到的，容器必须有一个没有参数的构造函数和 setter，因为它应该能够接收和保留部分结果——迄今为止年龄最大的人的姓名和年龄。`collect()`操作将在处理每个元素时使用这个容器，并且在处理完最后一个元素后，将包含年龄最大的人的姓名和年龄。这是人员名单，你应该很熟悉：
 
 ```java
-
 List<Person> list = List.of(new Person(23, "Bob"),
-
-new Person(33, "吉姆"),
-
-新的人(28, "吉尔"),
-
-new Person(27, "Bill"));
+                            new Person(33, "Jim"),
+                            new Person(28, "Jill"),
+                            new Person(27, "Bill"));
 
 ```
 
 这是应该在列表中找到最年长的人的`collect()`操作：
 
 ```java
-
 Person1 theOldest = list.stream().collect(Person1::new,
-
-(p1, p2) -> {
-
-if(p1.getAge() < p2.getAge()){
-
-p1.setAge(p2.getAge());
-
-p1.setName(p2.getName());
-
-}
-
-},
-
-(p1, p2) -> { System.out.println("组合器被调用了!"); });
+    (p1, p2) -> {
+        if(p1.getAge() < p2.getAge()){
+            p1.setAge(p2.getAge());
+            p1.setName(p2.getName());
+        }
+    },
+    (p1, p2) -> { System.out.println("Combiner is called!"); });
 
 ```
 
 我们尝试在操作调用中内联函数，但看起来有点难以阅读，所以这是相同代码的更好版本：
 
 ```java
-
 BiConsumer<Person1, Person> accumulator = (p1, p2) -> {
-
-if(p1.getAge() < p2.getAge()){
-
-p1.setAge(p2.getAge());
-
-p1.setName(p2.getName());
-
-}
-
+    if(p1.getAge() < p2.getAge()){
+        p1.setAge(p2.getAge());
+        p1.setName(p2.getName());
+    }
 };
-
 BiConsumer<Person1, Person1> combiner = (p1, p2) -> {
-
-System.out.println("组合器被调用了!");        //不打印任何内容
-
+    System.out.println("Combiner is called!");        //prints nothing
 };
-
 theOldest = list.stream().collect(Person1::new, accumulator, combiner);
-
-System.out.println(theOldest);        //打印：人{name:吉姆,年龄:33}
+System.out.println(theOldest);        //prints: Person{name:Jim,age:33}
 
 ```
 
@@ -1565,27 +1166,16 @@ System.out.println(theOldest);        //打印：人{name:吉姆,年龄:33}
 组合器从未被调用，因为流不是并行的。但是当我们并行时，我们需要实现组合器如下：
 
 ```java
-
 BiConsumer<Person1, Person1> combiner = (p1, p2) -> {
-
-System.out.println("组合器被调用了!");   //打印 3 次
-
-if(p1.getAge() < p2.getAge()){
-
-p1.setAge(p2.getAge());
-
-p1.setName(p2.getName());
-
-}
-
+    System.out.println("Combiner is called!");   //prints 3 times
+    if(p1.getAge() < p2.getAge()){
+        p1.setAge(p2.getAge());
+        p1.setName(p2.getName());
+    }
 };
-
 theOldest = list.parallelStream()
-
-.collect(Person1::new, accumulator, combiner);
-
+                .collect(Person1::new, accumulator, combiner);
 System.out.println(theOldest);  //prints: Person{name:Jim,age:33}
-
 ```
 
 组合器比较了所有流子序列的部分结果，并得出最终结果。现在我们看到`Combiner is called!`消息打印了三次。但是，与`reduce()`操作一样，部分结果（流子序列）的数量可能会有所不同。
@@ -1627,73 +1217,47 @@ System.out.println(theOldest);  //prints: Person{name:Jim,age:33}
 The following demo code shows how to use the collectors created by these methods. First, we demonstrate usage of the  `toList()`, `toSet()`, `toMap()`, and `toCollection()` methods:
 
 ```java
-
 List<String> ls = Stream.of("a", "b", "c").collect(Collectors.toList());
-
 System.out.println(ls);                //prints: [a, b, c]
 
 Set<String> set = Stream.of("a", "a", "c").collect(Collectors.toSet());
-
 System.out.println(set);                //prints: [a, c]
 
 List<Person> persons = List.of(new Person(23, "Bob"),
-
-new Person(33, "Jim"),
-
-new Person(28, "Jill"),
-
-new Person(27, "Bill"));
-
+                               new Person(33, "Jim"),
+                               new Person(28, "Jill"),
+                               new Person(27, "Bill"));
 Map<String, Person> map = persons.stream()
-
-.collect(Collectors.toMap(p->p.getName() + "-" + p.getAge(), p->p));
-
-System.out.println(map); //prints: {Bob-23=Person{name:Bob,age:23},
-
-Bill-27=Person{name:Bill,age:27},
-
-Jill-28=Person{name:Jill,age:28},
-
-Jim-33=Person{name:Jim,age:33}}
-
+    .collect(Collectors.toMap(p->p.getName() + "-" + p.getAge(), p->p));
+System.out.println(map); //prints: {Bob-23=Person{name:Bob,age:23}, 
+                                    Bill-27=Person{name:Bill,age:27}, 
+                                    Jill-28=Person{name:Jill,age:28}, 
+                                    Jim-33=Person{name:Jim,age:33}}
 Set<Person> personSet = persons.stream()
-
-.collect(Collectors.toCollection(HashSet::new));
-
-System.out.println(personSet);  //prints: [Person{name:Bill,age:27},
-
-Person{name:Jim,age:33},
-
-Person{name:Bob,age:23},
-
-Person{name:Jill,age:28}]
+                        .collect(Collectors.toCollection(HashSet::new));
+System.out.println(personSet);  //prints: [Person{name:Bill,age:27}, 
+                                           Person{name:Jim,age:33}, 
+                                           Person{name:Bob,age:23}, 
+                                           Person{name:Jill,age:28}]
 
 ```
 
 The `joining()` method allows concatenating the `Character` and `String` values in a delimited list with a prefix and suffix:
 
 ```java
-
 List<String> list = List.of("a", "b", "c", "d");
-
 String result = list.stream().collect(Collectors.joining());
-
 System.out.println(result);           //abcd
 
 result = list.stream().collect(Collectors.joining(", "));
-
 System.out.println(result);           //a, b, c, d
 
 result = list.stream()
-
-.collect(Collectors.joining(", ", "The result: ", ""));
-
+             .collect(Collectors.joining(", ", "The result: ", ""));
 System.out.println(result);          //The result: a, b, c, d
 
 result = list.stream()
-
-.collect(Collectors.joining(", ", "The result: ", ". The End."));
-
+      .collect(Collectors.joining(", ", "The result: ", ". The End."));
 System.out.println(result);          //The result: a, b, c, d. The End.
 
 ```
@@ -1701,35 +1265,21 @@ System.out.println(result);          //The result: a, b, c, d. The End.
 The `summingInt()` and `summarizingInt()` methods create collectors that calculate the sum and other statistics of the `int` values produced by the provided function applied to each element:
 
 ```java
-
 List<Person> list = List.of(new Person(23, "Bob"),
-
-new Person(33, "Jim"),
-
-new Person(28, "Jill"),
-
-new Person(27, "Bill"));
-
+                            new Person(33, "Jim"),
+                            new Person(28, "Jill"),
+                            new Person(27, "Bill"));
 int sum = list.stream().collect(Collectors.summingInt(Person::getAge));
-
 System.out.println(sum);  //prints: 111
 
-IntSummaryStatistics stats =
-
-list.stream().collect(Collectors.summarizingInt(Person::getAge));
-
-System.out.println(stats);     //IntSummaryStatistics{count=4, sum=111,
-
-//    min=23, average=27.750000, max=33}
-
+IntSummaryStatistics stats = 
+      list.stream().collect(Collectors.summarizingInt(Person::getAge));
+System.out.println(stats);     //IntSummaryStatistics{count=4, sum=111, 
+                               //    min=23, average=27.750000, max=33}
 System.out.println(stats.getCount());    //4
-
 System.out.println(stats.getSum());      //111
-
 System.out.println(stats.getMin());      //23
-
 System.out.println(stats.getAverage());  //27.750000
-
 System.out.println(stats.getMax());      //33
 
 ```
@@ -1739,25 +1289,15 @@ There are also `summingLong()`, `summarizingLong()` , `summingDouble()`, and
 The `partitioningBy()` method creates a collector that groups the elements by the provided criteria and put the groups (lists) in a `Map` object with a `boolean` value as the key:
 
 ```java
-
 List<Person> list = List.of(new Person(23, "Bob"),
-
-new Person(33, "Jim"),
-
-new Person(28, "Jill"),
-
-new Person(27, "Bill"));
-
-Map<Boolean, List<Person>> map =
-
-list.stream().collect(Collectors.partitioningBy(p->p.getAge() > 27));
-
-System.out.println(map);
-
-//{false=[Person{name:Bob,age:23}, Person{name:Bill,age:27}],
-
-//  true=[Person{name:Jim,age:33}, Person{name:Jill,age:28}]}
-
+                            new Person(33, "Jim"),
+                            new Person(28, "Jill"),
+                            new Person(27, "Bill"));
+Map<Boolean, List<Person>> map = 
+   list.stream().collect(Collectors.partitioningBy(p->p.getAge() > 27));
+System.out.println(map);  
+              //{false=[Person{name:Bob,age:23}, Person{name:Bill,age:27}], 
+              //  true=[Person{name:Jim,age:33}, Person{name:Jill,age:28}]}
 ```
 
 As you can see, using the `p.getAge() > 27` criteria, we were able to put all the people in two groups—one is below or equals 27 years of age (the key is `false`), and the other is above 27 (the key is `true`).
@@ -1765,24 +1305,15 @@ As you can see, using the `p.getAge() > 27` criteria, we were able to put all 
 And, finally, the `groupingBy()` method allows us to group elements by a value and put the groups (lists) in a `Map` object with this value as a key:
 
 ```java
-
 List<Person> list = List.of(new Person(23, "Bob"),
-
-new Person(33, "Jim"),
-
-new Person(23, "Jill"),
-
-new Person(33, "Bill"));
-
-Map<Integer, List<Person>> map =
-
-list.stream().collect(Collectors.groupingBy(Person::getAge));
-
-System.out.println(map);
-
-//{33=[Person{name:Jim,age:33}, Person{name:Bill,age:33}],
-
-// 23=[Person{name:Bob,age:23}, Person{name:Jill,age:23}]}
+                            new Person(33, "Jim"),
+                            new Person(23, "Jill"),
+                            new Person(33, "Bill"));
+Map<Integer, List<Person>> map = 
+           list.stream().collect(Collectors.groupingBy(Person::getAge));
+System.out.println(map);  
+              //{33=[Person{name:Jim,age:33}, Person{name:Bill,age:33}], 
+              // 23=[Person{name:Bob,age:23}, Person{name:Jill,age:23}]}
 
 ```
 
@@ -1833,9 +1364,7 @@ System.out.println(map);
 `range(lower, upper)`方法按顺序生成所有值，从`lower`值开始，以`upper`值之前的值结束：
 
 ```java
-
 IntStream.range(1, 3).forEach(System.out::print);  //prints: 12
-
 LongStream.range(1, 3).forEach(System.out::print);  //prints: 12
 
 ```
@@ -1843,9 +1372,7 @@ LongStream.range(1, 3).forEach(System.out::print);  //prints: 12
 `rangeClosed(lower, upper)` 方法按顺序生成所有值，从`lower`值开始，以`upper`值结束：
 
 ```java
-
 IntStream.rangeClosed(1, 3).forEach(System.out::print);  //prints: 123
-
 LongStream.rangeClosed(1, 3).forEach(System.out::print);  //prints: 123
 
 ```
@@ -1859,30 +1386,18 @@ LongStream.rangeClosed(1, 3).forEach(System.out::print);  //prints: 123
 `boxed()` 中间操作将原始数值类型的元素转换（装箱）为相应的包装类型：
 
 ```java
-
 //IntStream.range(1, 3).map(Integer::shortValue)        //compile error
-
-//                     .forEach(System.out::print);
-
+//                     .forEach(System.out::print);  
 IntStream.range(1, 3).boxed().map(Integer::shortValue)
-
-.forEach(System.out::print);  //prints: 12
-
+                             .forEach(System.out::print);  //prints: 12
 //LongStream.range(1, 3).map(Long::shortValue)          //compile error
-
-//                      .forEach(System.out::print);
-
+//                      .forEach(System.out::print);  
 LongStream.range(1, 3).boxed().map(Long::shortValue)
-
-.forEach(System.out::print);  //prints: 12
-
+                              .forEach(System.out::print);  //prints: 12
 //DoubleStream.of(1).map(Double::shortValue)            //compile error
-
-//                  .forEach(System.out::print);
-
+//                  .forEach(System.out::print);  
 DoubleStream.of(1).boxed().map(Double::shortValue)
-
-.forEach(System.out::print);      //打印：1
+                          .forEach(System.out::print);      //prints: 1
 
 ```
 
@@ -1891,30 +1406,18 @@ DoubleStream.of(1).boxed().map(Double::shortValue)
 `mapToObj()`中间操作进行了类似的转换，但它不像`boxed()`操作那样专门化，并且允许使用原始类型的元素来生成任何类型的对象：
 
 ```java
-
 IntStream.range(1, 3).mapToObj(Integer::valueOf)
-
-.map(Integer::shortValue)
-
-.forEach(System.out::print);       //打印：12
-
+                     .map(Integer::shortValue)
+                     .forEach(System.out::print);       //prints: 12
 IntStream.range(42, 43).mapToObj(i -> new Person(i, "John"))
-
-.forEach(System.out::print);
-
-//打印：Person{name:John,age:42}
-
+                       .forEach(System.out::print);  
+                                   //prints: Person{name:John,age:42}
 LongStream.range(1, 3).mapToObj(Long::valueOf)
-
-.map(Long::shortValue)
-
-.forEach(System.out::print);      //打印：12
-
+                      .map(Long::shortValue)
+                      .forEach(System.out::print);      //prints: 12
 DoubleStream.of(1).mapToObj(Double::valueOf)
-
-.map(Double::shortValue)
-
-.forEach(System.out::print);          //打印：1
+                  .map(Double::shortValue)
+                  .forEach(System.out::print);          //prints: 1
 
 ```
 
@@ -1925,42 +1428,30 @@ DoubleStream.of(1).mapToObj(Double::valueOf)
 `mapToInt()`、`mapToLong()`、`mapToDouble()`中间操作允许我们将一个类型的数值流转换为另一种类型的数值流。在演示代码中，我们通过将每个`String`值映射到其长度，将`String`值列表转换为不同类型的数值流：
 
 ```java
-
 list.stream().mapToInt(String::length)
-
-.forEach(System.out::print); //打印：335
-
+                   .forEach(System.out::print); //prints: 335
 list.stream().mapToLong(String::length)
-
-.forEach(System.out::print); //打印：335
-
+                   .forEach(System.out::print); //prints: 335
 list.stream().mapToDouble(String::length)
-
-.forEach(d -> System.out.print(d + " "));   //打印：3.0 3.0 5.0
+    .forEach(d -> System.out.print(d + " "));   //prints: 3.0 3.0 5.0
 
 ```
 
 创建的数值流的元素是原始类型的：
 
 ```java
-
 //list.stream().mapToInt(String::length)
-
-//             .map(Integer::shortValue)   //编译错误
-
-//             .forEach(System.out::print);
+//             .map(Integer::shortValue)   //compile error
+//             .forEach(System.out::print); 
 
 ```
 
 既然我们在这个话题上，如果您想将元素转换为数值包装类型，`map()`中间操作就是这样做的方法（而不是`mapToInt()`）：
 
 ```java
-
 list.stream().map(String::length)
-
-.map(Integer::shortValue)
-
-.forEach(System.out::print);  //打印：335
+             .map(Integer::shortValue)
+             .forEach(System.out::print);  //prints: 335
 
 ```
 
@@ -1969,32 +1460,23 @@ list.stream().map(String::length)
 `flatMapToInt()`、`flatMapToLong()`、`flatMapToDouble()`中间操作会生成相应类型的数值流：
 
 ```java
-
 List<Integer> list = List.of(1, 2, 3);
 
 list.stream().flatMapToInt(i -> IntStream.rangeClosed(1, i))
-
-.forEach(System.out::print);    //打印：112123
-
+                        .forEach(System.out::print);    //prints: 112123
 list.stream().flatMapToLong(i -> LongStream.rangeClosed(1, i))
-
-.forEach(System.out::print);    //打印：112123
-
+                        .forEach(System.out::print);    //prints: 112123
 list.stream().flatMapToDouble(DoubleStream::of)
-
-.forEach(d -> System.out.print(d + " "));  //打印：1.0 2.0 3.0
+        .forEach(d -> System.out.print(d + " "));  //prints: 1.0 2.0 3.0
 
 ```
 
 如您所见，在上述代码中，我们在原始流中使用了`int`值。但它可以是任何类型的流：
 
 ```java
-
 List<String> str = List.of("one", "two", "three");
-
 str.stream().flatMapToInt(s -> IntStream.rangeClosed(1, s.length()))
-
-.forEach(System.out::print);  //打印：12312312345
+                      .forEach(System.out::print);  //prints: 12312312345
 
 ```
 
@@ -2011,38 +1493,29 @@ str.stream().flatMapToInt(s -> IntStream.rangeClosed(1, s.length()))
 如果您需要计算数值流元素的总和或平均值，则流的唯一要求是它不应该是无限的。否则，计算永远不会完成：
 
 ```java
-
 int sum = IntStream.empty().sum();
-
-System.out.println(sum);          //打印：0
+System.out.println(sum);          //prints: 0
 
 sum = IntStream.range(1, 3).sum();
-
-System.out.println(sum);          //打印：3
+System.out.println(sum);          //prints: 3
 
 double av = IntStream.empty().average().orElse(0);
-
-System.out.println(av);           //打印：0.0
+System.out.println(av);           //prints: 0.0
 
 av = IntStream.range(1, 3).average().orElse(0);
-
-System.out.println(av);           //打印：1.5
+System.out.println(av);           //prints: 1.5
 
 long suml = LongStream.range(1, 3).sum();
-
-System.out.println(suml);         //打印：3
+System.out.println(suml);         //prints: 3
 
 double avl = LongStream.range(1, 3).average().orElse(0);
-
-System.out.println(avl);          //打印：1.5
+System.out.println(avl);          //prints: 1.5
 
 double sumd = DoubleStream.of(1, 2).sum();
-
-System.out.println(sumd);         //打印：3.0
+System.out.println(sumd);         //prints: 3.0
 
 double avd = DoubleStream.of(1, 2).average().orElse(0);
-
-System.out.println(avd);          //打印：1.5
+System.out.println(avd);          //prints: 1.5
 
 ```
 
@@ -2081,19 +1554,14 @@ System.out.println(avd);          //打印：1.5
 使用流来将以下列表的所有值相乘：
 
 ```java
-
 List<Integer> list = List.of(2, 3, 4);
-
 ```
 
 # 答案
 
 ```java
-
 int r = list.stream().reduce(1, (x, y) -> x * y);
-
-System.out.println(r);     //打印：24
-
+System.out.println(r);     //prints: 24
 ```
 
 # 总结

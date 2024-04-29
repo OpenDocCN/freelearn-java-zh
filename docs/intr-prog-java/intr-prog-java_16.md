@@ -49,25 +49,15 @@
 以下是连接到数据库的代码片段：
 
 ```java
-
 String URL = "jdbc:postgresql://localhost/javaintro";
-
-属性 prop = new Properties（）;
-
-//prop.put（"user"，“java”）;
-
-//prop.put（"password"，“secretPass123”）;
-
-尝试{
-
-Connection conn = DriverManager.getConnection（URL，prop）;
-
-} catch（SQLException ex）{
-
-ex.printStackTrace（）;
-
+Properties prop = new Properties( );
+//prop.put( "user", "java" );
+//prop.put( "password", "secretPass123" );
+try {
+  Connection conn = DriverManager.getConnection(URL, prop);
+} catch(SQLException ex){
+  ex.printStackTrace();
 }
-
 ```
 
 注释行显示了如何使用`java.util.Properties`类为连接设置用户和密码。上述只是一个示例，说明如何直接使用`DriverManger`类获取连接。传入属性的许多键对于所有主要数据库都是相同的，但其中一些是特定于数据库的。因此，请阅读您的数据库供应商文档以获取此类详细信息。
@@ -79,25 +69,17 @@ ex.printStackTrace（）;
 另一种连接到数据库的方法是使用`DataSource`接口。它的实现包含在与数据库驱动程序相同的`.jar`中。在 PostgreSQL 的情况下，有两个实现了`DataSource`接口的类：`org.postgresql.ds.PGSimpleDataSource`和`org.postgresql.ds.PGConnectionPoolDataSource`。我们可以使用它们来代替`DriverManager`。以下是使用`org.postgresql.ds.PGSimpleDataSource`类创建数据库连接的示例：
 
 ```java
-
 PGSimpleDataSource source = new PGSimpleDataSource();
-
 source.setServerName("localhost");
-
 source.setDatabaseName("javaintro");
-
 source.setLoginTimeout(10);
-
 Connection conn = source.getConnection();
-
 ```
 
 要使用`org.postgresql.ds.PGConnectionPoolDataSource`类连接到数据库，我们只需要用以下内容替换前面代码中的第一行：
 
 ```java
-
 PGConnectionPoolDataSource source = new PGConnectionPoolDataSource();
-
 ```
 
 使用`PGConnectionPoolDataSource`类允许我们在内存中创建一个`Connection`对象池。这是一种首选的方式，因为创建`Connection`对象需要时间。池化允许我们提前完成这个过程，然后根据需要重复使用已经创建的对象。池的大小和其他参数可以在`postgresql.conf`文件中设置。
@@ -113,199 +95,114 @@ PGConnectionPoolDataSource source = new PGConnectionPoolDataSource();
 在 Java 7 之前，关闭连接的方法是通过在`finally`块中调用`close()`方法，无论是否有 catch 块：
 
 ```java
-
 Connection conn = getConnection();
-
-尝试 {
-
-//在这里使用 conn 对象
-
-} 最后 {
-
-if(conn != null){
-
-conn.close();
-
+try {
+  //use object conn here 
+} finally {
+  if(conn != null){
+    conn.close();
+  }
 }
-
-}
-
 ```
 
 `finally`块中的代码总是会被执行，无论 try 块中的异常是否被抛出。但自 Java 7 以来，`try...with...resources`结构可以很好地处理实现了`java.lang.AutoCloseable`或`java.io.Closeable`接口的任何对象。由于`java.sql.Connection`对象实现了`AutoCloseable`，我们可以将上一个代码片段重写如下：
 
 ```java
-
-尝试 (Connection conn = getConnection()) {
-
-//在这里使用 conn 对象
-
+try (Connection conn = getConnection()) {
+  //use object conn here
 }
-
-捕获(SQLException ex) {
-
-ex.printStackTrace();
-
+catch(SQLException ex) {
+  ex.printStackTrace();
 }
-
 ```
 
 捕获子句是必要的，因为可自动关闭的资源会抛出`java.sql.SQLException`。有人可能会说，这样做并没有节省多少输入。但是`Connection`类的`close()`方法也可能会抛出`SQLException`，所以带有`finally`块的代码应该更加谨慎地编写：
 
 ```java
-
 Connection conn = getConnection();
-
-尝试 {
-
-//在这里使用 conn 对象
-
-} 最后 {
-
-if(conn != null){
-
-尝试 {
-
-conn.close();
-
-} 捕获(SQLException ex){
-
-//在这里做必须要做的事情
-
+try {
+  //use object conn here 
+} finally {
+  if(conn != null){
+    try {
+      conn.close();
+    } catch(SQLException ex){
+      //do here what has to be done
+    }
+  }
 }
-
-}
-
-}
-
 ```
 
 前面的代码块看起来确实像是更多的样板代码。更重要的是，如果考虑到通常在`try`块内，一些其他代码也可能抛出`SQLException`，那么前面的代码应该如下所示：
 
 ```java
-
 Connection conn = getConnection();
-
-尝试 {
-
-//在这里使用 conn 对象
-
-} 捕获(SQLException ex) {
-
-ex.printStackTrace();
-
-} 最后 {
-
-if(conn != null){
-
-尝试 {
-
-conn.close();
-
-} 捕获(SQLException ex){
-
-//在这里做必须要做的事情
-
+try {
+  //use object conn here 
+} catch(SQLException ex) {
+  ex.printStackTrace();
+} finally {
+  if(conn != null){
+    try {
+      conn.close();
+    } catch(SQLException ex){
+      //do here what has to be done
+    }
+  }
 }
-
-}
-
-}
-
 ```
 
 样板代码增加了，不是吗？这还不是故事的结束。在接下来的章节中，您将了解到，要发送数据库请求，还需要创建一个`java.sql.Statement`，它会抛出`SQLException`，也必须关闭。然后前面的代码会变得更多：
 
 ```java
-
-Connection conn = getConnection（）;
-
-尝试{
-
-Statement statement = conn.createStatement（）;
-
-尝试{
-
-//在这里使用语句
-
-} catch(SQLException ex){
-
-//这里有一些代码
-
-} finally {
-
-if(statement != null){
-
-尝试{
-
-} catch (SQLException ex){
-
-//这里有一些代码
-
-}
-
-}
-
-}
-
+Connection conn = getConnection();
+try {
+  Statement statement = conn.createStatement();
+  try{
+    //use statement here
+  } catch(SQLException ex){
+    //some code here
+  } finally {
+    if(statement != null){
+      try {
+      } catch (SQLException ex){
+        //some code here
+      }
+    } 
+  }
 } catch(SQLException ex) {
-
-ex.printStackTrace（）;
-
+  ex.printStackTrace();
 } finally {
-
-if(conn != null){
-
-尝试{
-
-conn.close（）;
-
-} catch(SQLException ex){
-
-//在这里做必须做的事情
-
+  if(conn != null){
+    try {
+      conn.close();
+    } catch(SQLException ex){
+      //do here what has to be done
+    }
+  }
 }
-
-}
-
-}
-
 ```
 
 现在我们可以充分欣赏`try...with...resources`结构的优势，特别是考虑到它允许我们在同一个子句中包含多个可自动关闭的资源：
 
 ```java
-
-尝试（Connection conn = getConnection（）;
-
-Statement statement = conn.createStatement（）{
-
-//在这里使用语句
-
+try (Connection conn = getConnection();
+  Statement statement = conn.createStatement()) {
+  //use statement here
 } catch(SQLException ex) {
-
-ex.printStackTrace（）;
-
+  ex.printStackTrace();
 }
-
 ```
 
 自 Java 9 以来，我们甚至可以使其更简单：
 
 ```java
-
-Connection conn = getConnection（）;
-
-尝试（conn; Statement statement = conn.createStatement（））{
-
-//在这里使用语句
-
+Connection conn = getConnection();
+try (conn; Statement statement = conn.createStatement()) {
+  //use statement here
 } catch(SQLException ex) {
-
-ex.printStackTrace（）;
-
+  ex.printStackTrace();
 }
-
 ```
 
 现在很明显，`try...with...resources`结构是一个无可争议的赢家。
@@ -361,21 +258,15 @@ JDBC 连接允许将前述 SQL 语句中的一个或多个组合包装在提供�
 阅读数据库说明，并首先创建一个`java`用户和一个`javaintro`数据库（或选择任何其他您喜欢的名称，并在提供的代码示例中使用它们）。以下是我们在 PostgreSQL 中的操作方式：
 
 ```java
-
 CREATE USER java SUPERUSER;
-
 CREATE DATABASE javaintro OWNER java;
-
 ```
 
 如果您犯了一个错误并决定重新开始，您可以使用以下语句删除创建的用户和数据库：
 
 ```java
-
 DROP USER java;
-
 DROP DATABASE javaintro;
-
 ```
 
 我们为我们的用户选择了`SUPERUSER`角色，但是良好的安全实践建议只将这样一个强大的角色分配给管理员。对于应用程序，建议创建一个用户，该用户不能创建或更改数据库本身——其表和约束——但只能管理数据。此外，创建另一个逻辑层，称为**模式**，该模式可以具有自己的一组用户和权限，也是一个良好的实践。这样，同一数据库中的几个模式可以被隔离，每个用户（其中一个是您的应用程序）只能访问特定的模式。在企业级别上，通常的做法是为数据库模式创建同义词，以便没有应用程序可以直接访问原始结构。
@@ -389,73 +280,43 @@ DROP DATABASE javaintro;
 表的标准 SQL 语句如下：
 
 ```java
-
 CREATE TABLE tablename (
-
-column1 type1，
-
-column2 type2，
-
-column3 type3，
-
-....
-
+  column1 type1,
+  column2 type2,
+  column3 type3,
+  ....
 );
-
 ```
 
 表名、列名和可以使用的值类型的限制取决于特定的数据库。以下是在 PostgreSQL 中创建表 person 的命令示例：
 
 ```java
-
-创建表 person (
-
-id SERIAL PRIMARY KEY,
-
-first_name VARCHAR NOT NULL，
-
-last_name VARCHAR NOT NULL，
-
-dob DATE NOT NULL
-
+CREATE TABLE person (
+  id SERIAL PRIMARY KEY,
+  first_name VARCHAR NOT NULL,
+  last_name VARCHAR NOT NULL,
+  dob DATE NOT NULL
 );
-
 ```
 
 正如您所看到的，我们已经将`dob`（出生日期）列设置为不可为空。这对我们的`Person` Java 类施加了约束，该类将表示此表的记录：其`dob`字段不能为`null`。这正是我们在第六章中所做的，当时我们创建了我们的`Person`类，如下所示：
 
 ```java
-
 class Person {
-
-private String firstName, lastName;
-
-private LocalDate dob;
-
-public Person(String firstName, String lastName, LocalDate dob) {
-
-this.firstName = firstName == null ? "" : firstName;
-
-this.lastName = lastName == null ? "" : lastName;
-
-if(dob == null){
-
-throw new RuntimeException("Date of birth is null");
-
+  private String firstName, lastName;
+  private LocalDate dob;
+  public Person(String firstName, String lastName, LocalDate dob) {
+    this.firstName = firstName == null ? "" : firstName;
+    this.lastName = lastName == null ? "" : lastName;
+    if(dob == null){
+      throw new RuntimeException("Date of birth is null");
+    }
+    this.dob = dob;
+  }
+  public String getFirstName() { return firstName; }
+  public String getLastName() { return lastName; }
+  public LocalDate getDob() { return dob; }
 }
-
-this.dob = dob;
-
-}
-
-public String getFirstName() { return firstName; }
-
-public String getLastName() { return lastName; }
-
-public LocalDate getDob() { return dob; }
-
-}
-
 ```
 
 我们没有设置`VARCHAR`类型的列的大小，因此允许这些列存储任意长度的值，而整数类型允许它们存储从公元前 4713 年到公元 5874897 年的数字。添加了`NOT NULL`，因为默认情况下列将是可空的，而我们希望确保每条记录的所有列都被填充。我们的`Person`类通过将名字和姓氏设置为空的`String`值来支持它，如果它们是`null`，作为`Person`构造函数的参数。
@@ -463,67 +324,38 @@ public LocalDate getDob() { return dob; }
 我们还将`id`列标识为`PRIMARY KEY`，这表示该列唯一标识记录。`SERIAL`关键字表示我们要求数据库在添加新记录时生成下一个整数值，因此每条记录将有一个唯一的整数编号。或者，我们可以从`first_name`、`last_name`和`dob`的组合中创建`PRIMARY KEY`：
 
 ```java
-
 CREATE TABLE person (
-
-first_name VARCHAR NOT NULL,
-
-last_name VARCHAR NOT NULL,
-
-dob DATE NOT NULL,
-
-PRIMARY KEY (first_name, last_name, dob)
-
+  first_name VARCHAR NOT NULL,
+  last_name VARCHAR NOT NULL,
+  dob DATE NOT NULL,
+  PRIMARY KEY (first_name, last_name, dob)
 );
-
 ```
 
 但有可能有两个人有相同的名字，并且出生在同一天，所以我们决定不这样做，并添加了`Person`类的另一个字段和构造函数：
 
 ```java
-
 public class Person {
-
-private String firstName, lastName;
-
-private LocalDate dob;
-
-private int id;
-
-public Person(int id, String firstName,
-
-String lastName, LocalDate dob) {
-
-this(firstName, lastName, dob);
-
-this.id = id;
-
+  private String firstName, lastName;
+  private LocalDate dob;
+  private int id;
+  public Person(int id, String firstName, 
+                                  String lastName, LocalDate dob) {
+    this(firstName, lastName, dob);
+    this.id = id;
+  }   
+  public Person(String firstName, String lastName, LocalDate dob) {
+    this.firstName = firstName == null ? "" : firstName;
+    this.lastName = lastName == null ? "" : lastName;
+    if(dob == null){
+      throw new RuntimeException("Date of birth is null");
+    }
+    this.dob = dob;
+  }
+  public String getFirstName() { return firstName; }
+  public String getLastName() { return lastName; }
+  public LocalDate getDob() { return dob; }
 }
-
-public Person(String firstName, String lastName, LocalDate dob) {
-
-this.firstName = firstName == null ? "" : firstName;
-
-this.lastName = lastName == null ? "" : lastName;
-
-if(dob == null){
-
-throw new RuntimeException("Date of birth is null");
-
-}
-
-this.dob = dob;
-
-}
-
-public String getFirstName() { return firstName; }
-
-public String getLastName() { return lastName; }
-
-public LocalDate getDob() { return dob; }
-
-}
-
 ```
 
 我们将使用接受`id`的构造函数来基于数据库中的记录构建对象，而另一个构造函数将用于在插入新记录之前创建对象。
@@ -535,25 +367,19 @@ public LocalDate getDob() { return dob; }
 如果必要，可以通过`DROP`命令删除表：
 
 ```java
-
 DROP table person;
-
 ```
 
 可以使用`ALTER`命令更改现有表。例如，我们可以添加一个`address`列：
 
 ```java
-
 ALTER table person add column address VARCHAR;
-
 ```
 
 如果您不确定这样的列是否已经存在，可以添加 IF EXISTS 或 IF NOT EXISTS：
 
 ```java
-
 ALTER table person add column IF NOT EXISTS address VARCHAR;
-
 ```
 
 但这种可能性只存在于 PostgreSQL 9.6 之后。
@@ -565,17 +391,13 @@ ALTER table person add column IF NOT EXISTS address VARCHAR;
 如果我们认为（并通过实验已经证明）它将有助于应用程序的性能，我们也可以自己添加任何索引。例如，我们可以通过添加以下索引来允许不区分大小写的搜索名字和姓氏：
 
 ```java
-
 CREATE INDEX idx_names ON person ((lower(first_name), lower(last_name));
-
 ```
 
 如果搜索速度提高，我们会保留索引。如果没有，可以删除它：
 
 ```java
-
 drop index idx_names;
-
 ```
 
 我们删除它，因为索引会增加额外的写入和存储空间开销。
@@ -583,9 +405,7 @@ drop index idx_names;
 我们也可以从表中删除列：
 
 ```java
-
 ALTER table person DROP column address;
-
 ```
 
 在我们的示例中，我们遵循了 PostgreSQL 的命名约定。如果您使用不同的数据库，建议您查找其命名约定并遵循，以便您创建的名称与自动创建的名称对齐。
@@ -597,17 +417,11 @@ ALTER table person DROP column address;
 但是管理数据是另一回事。这是我们现在要编写的程序的主要目的。为了做到这一点，首先我们将以下依赖项添加到`pom.xml`文件中，因为我们已经安装了 PostgreSQL 9.6：
 
 ```java
-
 <dependency>
-
-<groupId>org.postgresql</groupId>
-
-<artifactId>postgresql</artifactId>
-
-<version>42.2.2</version>
-
+  <groupId>org.postgresql</groupId>
+  <artifactId>postgresql</artifactId>
+  <version>42.2.2</version>
 </dependency>
-
 ```
 
 # INSERT 语句
@@ -615,21 +429,15 @@ ALTER table person DROP column address;
 在数据库中创建（填充）数据的 SQL 语句具有以下格式：
 
 ```java
-
-INSERT INTO table_name（column1，column2，column3，...）
-
-VALUES（value1，value2，value3，...）;
-
+INSERT INTO table_name (column1,column2,column3,...)
+   VALUES (value1,value2,value3,...);
 ```
 
 当必须添加多个表记录时，它看起来像这样：
 
 ```java
-
-INSERT INTO table_name（column1，column2，column3，...）
-
-VALUES（value1，value2，value3，...），（value11，value21，value31，...），...;
-
+INSERT INTO table_name (column1,column2,column3,...)
+ VALUES (value1,value2,value3,...), (value11,value21,value31,...), ...;
 ```
 
 在编写程序之前，让我们测试我们的`INSERT`语句：
@@ -639,33 +447,21 @@ VALUES（value1，value2，value3，...），（value11，value21，value31，..
 它没有错误，返回的插入行数为 1，所以我们将创建以下方法：
 
 ```java
-
-void executeStatement（String sql）{
-
-Connection conn = getConnection（）;
-
-尝试（conn; Statement st = conn.createStatement（））{
-
-st.execute（sql）;
-
-} catch（SQLException ex）{
-
-ex.printStackTrace（）;
-
+void executeStatement(String sql){
+  Connection conn = getConnection();
+  try (conn; Statement st = conn.createStatement()) {
+    st.execute(sql);
+  } catch (SQLException ex) {
+    ex.printStackTrace();
+  }
 }
-
-}
-
 ```
 
 我们可以执行前面的方法并插入另一行：
 
 ```java
-
-executeStatement（"insert into person（first_name，last_name，dob）"+
-
-“值（'Bill'，'Grey'，'1980-01-27'）”
-
+executeStatement("insert into person (first_name, last_name, dob)" +
+                             " values ('Bill', 'Grey', '1980-01-27')");
 ```
 
 我们将在下一节中看到此前`INSERT`语句执行的结果以及`SELECT`语句的演示。
@@ -675,79 +471,46 @@ executeStatement（"insert into person（first_name，last_name，dob）"+
 +   `boolean execute（String sql）`：如果执行的语句返回数据（作为`java.sql.ResultSet`对象），则返回`true`，可以使用`java.sql.Statement`接口的`ResultSet getResultSet（）`方法检索数据。如果执行的语句不返回数据（SQL 语句可能正在更新或插入某些行），则返回`false`，并且随后调用`java.sql.Statement`接口的`int getUpdateCount（）`方法返回受影响的行数。例如，如果我们在`executeStatement（）`方法中添加了打印语句，那么在插入一行后，我们将看到以下结果：
 
 ```java
-
-void executeStatement（String sql）{
-
-Connection conn = getConnection();
-
-尝试（conn; Statement st = conn.createStatement（））{
-
-System.out.println（st.execute（sql））; //打印：false
-
-System.out.println（st.getResultSet（））; //打印：null
-
-System.out.println（st.getUpdateCount（））; //打印：1
-
-} catch（SQLException ex）{
-
-ex.printStackTrace（）;
-
-}
-
-}
-
+        void executeStatement(String sql){
+          Connection conn = getConnection();
+          try (conn; Statement st = conn.createStatement()) {
+            System.out.println(st.execute(sql));      //prints: false
+            System.out.println(st.getResultSet());    //prints: null
+            System.out.println(st.getUpdateCount());  //prints: 1
+          } catch (SQLException ex) {
+            ex.printStackTrace();
+          }
+        }
 ```
 
 +   `ResultSet executeQuery（String sql）`：它将数据作为`java.sql.ResultSet`对象返回（预计执行的 SQL 语句是`SELECT`语句）。可以通过随后调用`java.sql.Statement`接口的`ResultSet getResultSet（）`方法检索相同的数据。`java.sql.Statement`接口的`int getUpdateCount（）`方法返回`-1`。例如，如果我们更改我们的`executeStatement（）`方法并使用`executeQuery（）`，则`executeStatement（"select first_name from person"）`的结果将是：
 
 ```java
-
-void executeStatement（String sql）{
-
-Connection conn = getConnection();
-
-尝试（conn; Statement st = conn.createStatement（））{
-
-System.out.println（st.executeQuery（sql））; //打印：ResultSet
-
-System.out.println（st.getResultSet（））; //打印：ResultSet
-
-System.out.println（st.getUpdateCount（））; //打印：-1
-
-} catch (SQLException ex) {
-
-ex.printStackTrace();
-
-}
-
-}
-
+        void executeStatement(String sql){
+          Connection conn = getConnection();
+          try (conn; Statement st = conn.createStatement()) {
+             System.out.println(st.executeQuery(sql)); //prints: ResultSet
+             System.out.println(st.getResultSet());    //prints: ResultSet
+             System.out.println(st.getUpdateCount());  //prints: -1
+          } catch (SQLException ex) {
+             ex.printStackTrace();
+          }
+        }
 ```
 
 +   `int executeUpdate(String sql)`: 它返回受影响的行数（执行的 SQL 语句预期为`UPDATE`语句）。`java.sql.Statement`接口的`int getUpdateCount()`方法的后续调用返回相同的数字。`java.sql.Statement`接口的`ResultSet getResultSet()`方法的后续调用返回`null`。例如，如果我们更改我们的`executeStatement()`方法并使用`executeUpdate()`，`executeStatement("update person set first_name = 'Jim' where last_name = 'Adams'")`的结果将是：
 
 ```java
-
-void executeStatement4(String sql){
-
-Connection conn = getConnection();
-
-try (conn; Statement st = conn.createStatement()) {
-
-System.out.println(st.executeUpdate(sql));//prints: 1
-
-System.out.println(st.getResultSet());    //prints: null
-
-System.out.println(st.getUpdateCount());  //prints: 1
-
-} catch (SQLException ex) {
-
-ex.printStackTrace();
-
-}
-
-}
-
+        void executeStatement4(String sql){
+          Connection conn = getConnection();
+          try (conn; Statement st = conn.createStatement()) {
+            System.out.println(st.executeUpdate(sql));//prints: 1
+            System.out.println(st.getResultSet());    //prints: null
+            System.out.println(st.getUpdateCount());  //prints: 1
+          } catch (SQLException ex) {
+            ex.printStackTrace();
+          }
+        }
 ```
 
 # SELECT 语句
@@ -755,47 +518,30 @@ ex.printStackTrace();
 `SELECT`语句的格式如下：
 
 ```java
-
 SELECT column_name, column_name
-
 FROM table_name WHERE some_column = some_value;
-
 ```
 
 当需要选择所有列时，格式如下：
 
 ```java
-
 SELECT * FROM table_name WHERE some_column=some_value;
-
 ```
 
 这是`WHERE`子句的更一般的定义：
 
 ```java
-
 WHERE column_name operator value
-
-操作符：
-
-=   等于
-
-<>  不等于。在某些版本的 SQL 中，!=
-
-> 大于
-
-<   小于
-
->=  大于或等于
-
-<=  小于或等于
-
-IN  指定列的多个可能值
-
-LIKE  指定搜索模式
-
-BETWEEN  指定列中值的包含范围
-
+Operator:
+   =   Equal
+   <>  Not equal. In some versions of SQL, !=
+   >   Greater than
+   <   Less than
+   >=  Greater than or equal
+   <=  Less than or equal
+   IN  Specifies multiple possible values for a column
+   LIKE  Specifies the search pattern
+   BETWEEN  Specifies the inclusive range of vlaues in a column
 ```
 
 `column_name` operator value 构造可以使用`AND`和`OR`逻辑运算符组合，并用括号`( )`分组。
@@ -803,25 +549,15 @@ BETWEEN  指定列中值的包含范围
 在前面的语句中，我们执行了一个`select first_name from person`的`SELECT`语句，返回了`person`表中记录的所有名字。现在让我们再次执行它并打印出结果：
 
 ```java
-
 Connection conn = getConnection();
-
 try (conn; Statement st = conn.createStatement()) {
-
-ResultSet rs = st.executeQuery("select first_name from person");
-
-while (rs.next()){
-
-System.out.print(rs.getString(1) + " "); //prints: Jim Bill
-
-}
-
+  ResultSet rs = st.executeQuery("select first_name from person");
+  while (rs.next()){
+    System.out.print(rs.getString(1) + " "); //prints: Jim Bill
+  }
 } catch (SQLException ex) {
-
-ex.printStackTrace();
-
+  ex.printStackTrace();
 }
-
 ```
 
 `ResultSet`接口的`getString(int position)`方法从位置`1`（`SELECT`语句中列的第一个）提取`String`值。对于所有原始类型，如`getInt()`和`getByte()`，都有类似的获取器。
@@ -829,9 +565,7 @@ ex.printStackTrace();
 还可以通过列名从`ResultSet`对象中提取值。在我们的情况下，它将是`getString("first_name")`。当`SELECT`语句如下时，这是特别有用的：
 
 ```java
-
 select * from person;
-
 ```
 
 但请记住，通过列名从`ResultSet`对象中提取值效率较低。性能差异非常小，只有在操作发生多次时才变得重要。只有实际的测量和测试才能告诉您这种差异对您的应用程序是否重要。通过列名提取值尤其有吸引力，因为它提供更好的代码可读性，在应用程序维护期间可以得到很好的回报。
@@ -843,17 +577,13 @@ select * from person;
 数据可以通过`UPDATE`语句更改：
 
 ```java
-
 UPDATE table_name SET column1=value1,column2=value2,... WHERE-clause;
-
 ```
 
 我们已经使用这样的语句来改变记录中的名字，将原始值`John`改为新值`Jim`：
 
 ```java
-
 update person set first_name = 'Jim' where last_name = 'Adams'
-
 ```
 
 稍后，使用`SELECT`语句，我们将证明更改是成功的。没有`WHERE`子句，表的所有记录都将受到影响。
@@ -863,17 +593,13 @@ update person set first_name = 'Jim' where last_name = 'Adams'
 数据可以通过`DELETE`语句删除：
 
 ```java
-
 DELETE FROM table_name WHERE-clause;
-
 ```
 
 没有`WHERE`子句，表的所有记录都将被删除。在`person`表的情况下，我们可以使用`delete from person` SQL 语句删除所有记录。以下语句从`person`表中删除所有名为 Jim 的记录：
 
 ```java
-
 delete from person where first_name = 'Jim';
-
 ```
 
 # 使用 PreparedStatement 类
@@ -883,125 +609,77 @@ delete from person where first_name = 'Jim';
 生成`Statement`对象的相同 SQL 语句也可以用于生成`PreparedStatement`对象。事实上，考虑使用`PreparedStatement`来调用多次的任何 SQL 语句是一个好主意，因为它的性能优于`Statement`。要做到这一点，我们只需要更改前面示例代码中的这两行：
 
 ```java
-
 try (conn; Statement st = conn.createStatement()) {
-
-ResultSet rs = st.executeQuery(sql);
-
+  ResultSet rs = st.executeQuery(sql);
 ```
 
 或者，我们可以以同样的方式使用`PreparedStatement`类：
 
 ```java
-
 try (conn; PreparedStatement st = conn.prepareStatement(sql)) {
-
-ResultSet rs = st.executeQuery();
-
+  ResultSet rs = st.executeQuery();
 ```
 
 但是`PreparedStatement`的真正用处在于它能够接受参数-替换（按照它们出现的顺序）`?`符号的输入值。例如，我们可以创建以下方法：
 
 ```java
-
 List<Person> selectPersonsByFirstName(String sql, String searchValue){
-
-List<Person> list = new ArrayList<>();
-
-Connection conn = getConnection();
-
-try (conn; PreparedStatement st = conn.prepareStatement(sql)) {
-
-st.setString(1, searchValue);
-
-ResultSet rs = st.executeQuery();
-
-while (rs.next()){
-
-list.add(new Person(rs.getInt("id"),
-
-rs.getString("first_name"),
-
-rs.getString("last_name"),
-
-rs.getDate("dob").toLocalDate()));
-
+  List<Person> list = new ArrayList<>();
+  Connection conn = getConnection();
+  try (conn; PreparedStatement st = conn.prepareStatement(sql)) {
+    st.setString(1, searchValue);
+    ResultSet rs = st.executeQuery();
+    while (rs.next()){
+      list.add(new Person(rs.getInt("id"),
+               rs.getString("first_name"),
+               rs.getString("last_name"),
+               rs.getDate("dob").toLocalDate()));
+    }
+  } catch (SQLException ex) {
+    ex.printStackTrace();
+  }
+  return list;
 }
-
-} catch (SQLException ex) {
-
-ex.printStackTrace();
-
-}
-
-return list;
-
-}
-
 ```
 
 我们可以使用前面的方法从`person`表中读取与`WHERE`子句匹配的记录。例如，我们可以找到所有名为`Jim`的记录：
 
 ```java
-
 String sql = "select * from person where first_name = ?";
-
 List<Person> list = selectPersonsByFirstName(sql, "Jim");
-
 for(Person person: list){
-
-System.out.println(person);
-
+  System.out.println(person);
 }
-
 ```
 
 结果将是：
 
 ```java
-
 Person{firstName='Jim', lastName='Adams', dob=1999-08-23, id=1}
-
 ```
 
 `Person`对象以这种方式打印，因为我们添加了以下`toString()`方法：
 
 ```java
-
 @Override
-
 public String toString() {
-
-return "Person{" +
-
-"firstName='" + firstName + '\'' +
-
-", lastName='" + lastName + '\'' +
-
-", dob=" + dob +
-
-", id=" + id +
-
-'}';
-
+  return "Person{" +
+          "firstName='" + firstName + '\'' +
+          ", lastName='" + lastName + '\'' +
+          ", dob=" + dob +
+          ", id=" + id +
+          '}';
 }
-
 ```
 
 我们可以通过运行以下代码获得相同的结果：
 
 ```java
-
 String sql = "select * from person where last_name = ?";
-
 List<Person> list = selectPersonsByFirstName(sql, "Adams");
-
 for(Person person: list){
-
-System.out.println(person);
-
+    System.out.println(person);
 }
-
 ```
 
 总是使用准备好的语句进行 CRUD 操作并不是一个坏主意。如果只执行一次，它们可能会慢一点，但您可以测试看看这是否是您愿意支付的代价。使用准备好的语句可以获得一致的（更易读的）代码、更多的安全性（准备好的语句不容易受到 SQL 注入攻击的影响）以及少做一个决定-只需在任何地方重用相同的代码。
@@ -1017,9 +695,7 @@ System.out.println(person);
 使用`distinct`关键字。以下 SQL 语句返回唯一的名字：
 
 ```java
-
-从人员表中选择不同的名字;
-
+select distinct first_name from person;
 ```
 
 # 摘要

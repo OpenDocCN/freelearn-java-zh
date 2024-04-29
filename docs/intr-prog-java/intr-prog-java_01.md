@@ -227,9 +227,7 @@ Java 被构想为一种允许用户*一次编写，到处运行*的工具-这是
 如你所见，在上述每个命令中，都必须显式提供一个主类。它是必须首先执行的`.class`文件。它充当应用程序的主入口，并启动加载其他类（在需要时）以运行应用程序的链。这样的命令示例是：
 
 ```java
-
 java MyGreatApplication
-
 ```
 
 实际上，这意味着当前目录中有一个名为`MyGreatApplication.class`的文件，但我们不应指定文件扩展名。否则，JVM 将寻找文件`MyGreatApplication.class.class`，当然找不到，也无法运行任何内容。
@@ -253,25 +251,17 @@ java MyGreatApplication
 如你所见，还有另一个目录`dir3`，我们创建它来存储另一个文件`SomeOtherProgram.class`，这是你的应用程序使用的。我们还在`dir4`中放入了其他支持的`.class`文件库，这些文件被收集在`SomeLibrary.jar`中。然后运行你的应用程序的命令行如下：
 
 ```java
-
 java -cp dir2:dir3:dir4/SomeLibrary.jar  MyGreatApplication //on Unix
-
 java -cp dir2;dir3;dir4\SomeLibrary.jar  MyGreatApplication //on Windows
-
 ```
 
 或者，我们可以将`SomeOtherProgram.class`和`MyGreatApplication.class`放入`some.jar`或`some.zip`文件，并将其放在`dir5`中。然后，命令将采用以下形式之一：
 
 ```java
-
 java -cp dir4/SomeLibrary.jar:dir5/some.zip MyGreatApplication //Unix
-
 java -cp dir4/SomeLibrary.jar:dir5/some.jar MyGreatApplication //Unix
-
 java -cp dir4\SomeLibrary.jar;dir5\some.zip MyGreatApplication //Windows
-
 java -cp dir4\SomeLibrary.jar;dir5\some.jar MyGreatApplication //Windows
-
 ```
 
 我们可以使用`-cp`选项，也可以使用`-classpath`或`--class-path`选项。它们只是三种不同的约定，以便习惯于其中一种的人可以直观地编写命令行。这些风格中没有一个比其他更好或更差，尽管我们每个人都有偏好和意见。如果没有使用任何 classpath 选项，JVM 只会在当前目录中查找类。一些类（标准库）总是位于 Java 安装的某些目录中，因此无需使用 classpath 选项列出它们。我们将在第三章中更详细地讨论设置 classpath。
@@ -311,9 +301,7 @@ java -cp dir4\SomeLibrary.jar;dir5\some.jar MyGreatApplication //Windows
 帮助告诉我们，这个命令的格式如下：
 
 ```java
-
 javac <options> <source files>
-
 ```
 
 要编译一些文件，可以在选项后的命令行中列出它们（如果文件不在当前目录中，必须使用绝对或相对路径前置文件名）。 列出的文件在 Oracle Solaris 中用冒号（`:`）分隔，在 Windows 中用分号（`;`）分隔，可以是目录、`.jar`文件或`.zip`文件。 还可以列出文件中的所有源文件，并使用`@filename`选项提供此文件名（请参阅前面的屏幕截图）。 但不要试图记住所有这些。 您很少（如果有的话）会显式运行`java`或`javac`命令。 您可能会使用一个 IDE 为您执行（请参阅第三章，*您的开发环境设置*）。 这也是我们将跳过前面屏幕截图中列出的大多数选项并仅提到其中两个选项的原因：`--class-path`（或`-classpath`或`-cp`），它指定当前编译代码所需的`.class`文件的位置，和`-d`，它指示创建`.class`文件的位置。
