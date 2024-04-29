@@ -1,4 +1,4 @@
-# 流和管道
+# 第五章：流和管道
 
 在 Java 8 和 9 中，通过引入流和利用 lambda 表达式进行内部迭代，集合 API 得到了重大改进。在 Java 10（JDK 18.3）中，添加了新方法`List.copyOf`、`Set.copyOf`和`Map.copyOf`，允许我们从现有实例创建新的不可变集合。此外，在`java.util.stream`包的`Collectors`类中添加了新方法`toUnmodifiableList`、`toUnmodifiableSet`和`toUnmodifiableMap`，允许将`Stream`的元素收集到不可变集合中。本章将向您展示如何使用流并链接多个操作来创建管道。此外，读者将学习如何并行进行这些操作。示例包括以下内容：
 
