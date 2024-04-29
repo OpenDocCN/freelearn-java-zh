@@ -768,25 +768,26 @@ list.stream().filter(e -> "42".equals(e))
             () -> System.out.println("Not found"));  //prints: Not found
 ```
 
-As you can see, if the `Optional` object is empty, then:
 
-+   The `or()` method of the `Optional` class allows for returning an alternative `Optional` object (with a value).
+如您所见，如果`Optional`对象为空，则：
 
-+   The `orElse()` method allows for returning an alternative value.
++   `Optional`类的`or()`方法允许返回另一个带有值的`Optional`对象。
 
-+   The `orElseGet()` method allows for providing the `Supplier` function, which returns an alternative value.
++   `orElse()`方法允许返回一种替代值。
 
-+   The `ifPresentOrElse()` method allows for providing two functions: one that consumes the value from the `Optional` object, and another that does something if the `Optional` object is empty.
++   `orElseGet()`方法允许提供`Supplier`函数，该函数返回一种替代值。
 
-# Min and max
++   `ifPresentOrElse()`方法允许提供两个函数：一个从`Optional`对象中消费值，另一个在`Optional`对象为空时执行某些操作。
 
-The following Terminal operations return the minimum or maximum value of the stream elements, if present:
+# 最小值和最大值
 
-+   `Optional<T> min`(Comparator<T> comparator): Returns the minimum element of this stream, using the provided Comparator object.
+以下终端操作如果存在则返回流元素的最小或最大值：
 
-+   `Optional<T> max`(Comparator<T> comparator): Returns the maximum element of this stream, using the provided Comparator object.
++   `Optional<T> min`(Comparator<T> comparator)：使用提供的 Comparator 对象返回此流的最小元素。
 
-Here is the demonstration code:
++   `Optional<T> max`(Comparator<T> comparator)：使用提供的 Comparator 对象返回此流的最大元素。
+
+下面是演示代码：
 
 ```java
 List<String> list = List.of("a", "b", "c", "c", "a");
@@ -798,7 +799,7 @@ System.out.println(max);     //prints: c
 
 ```
 
-As you can see, in the case of non-numerical values, the minimum element is the one that is first (when ordered from the left to the right), according to the provided comparator; the maximum, accordingly, is the last element. In the case of numeric values, the minimum and maximum are just that—the biggest and the smallest number among the stream elements:
+如您所见，在非数值值的情况下，最小元素是从左到右排序时的第一个元素，根据提供的比较器；相应地，最大值是最后一个元素。在数值值的情况下，最小值和最大值就是流元素中的最大数和最小数：
 
 ```java
 int mn = Stream.of(42, 33, 77).min(Comparator.naturalOrder()).orElse(0);
@@ -808,7 +809,7 @@ System.out.println(mx);    //prints: 77
 
 ```
 
-Let's look at another example, assuming that there is a `Person` class:
+让我们看另一个例子，假设有一个`Person`类：
 
 ```java
 class Person {
@@ -827,7 +828,7 @@ class Person {
 }
 ```
 
-The task is to find the oldest person in the following list:
+任务是在以下列表中找到最年长的人：
 
 ```java
 List<Person> persons = List.of(new Person(23, "Bob"),
@@ -836,28 +837,28 @@ List<Person> persons = List.of(new Person(23, "Bob"),
                                new Person(27, "Bill"));
 ```
 
-In order to do that, we can create the following `Compartor<Person>`:
+为了做到这一点，我们可以创建以下的`Compartor<Person>`：
 
 ```java
 Comparator<Person> perComp = (p1, p2) -> p1.getAge() - p2.getAge();
 ```
 
-Then, using this comparator, we can find the oldest person:
+然后，使用这个比较器，我们可以找到最年长的人：
 
 ```java
 Person theOldest = persons.stream().max(perComp).orElse(null);
 System.out.println(theOldest);  //prints: Person{name:Jim,age:33}
 ```
 
-# The toArray() operation
+# toArray()操作
 
-These two Terminal operations generate an array that contains the stream elements:
+这两个终端操作生成一个包含流元素的数组：
 
-+   `Object[] toArray()` : Creates an array of objects; each object is an element of this stream.
++   `Object[] toArray()`：创建一个包含该流每个元素的对象数组。
 
-+   `A[] toArray(IntFunction<A[]> generator)`: Creates an array of the stream elements using the provided function.
++   `A[] toArray(IntFunction<A[]> generator)`: 使用提供的函数创建流元素的数组。
 
-Let's look at an example:
+让我们看一个例子：
 
 ```java
 List<String> list = List.of("a", "b", "c");
@@ -869,9 +870,10 @@ Arrays.stream(str).forEach(System.out::print);    //prints: abc
 
 ```
 
-The first example is straightforward. It converts elements to an array of the same type. As for the second example, the representation of `IntFunction` as `String[]::new` is probably not obvious, so let's walk through it.
+第一个例子很直接。它将元素转换为相同类型的数组。至于第二个例子，`IntFunction`作为`String[]::new`的表示可能不够明显，所以让我们逐步来看一下。
 
-`String[]::new` is a method reference that represents the following lambda expression:
+`String[]::new`是一个方法引用，代表以下 lambda 表达式：
+
 
 ```java
 String[] str = list.stream().toArray(i -> new String[i]);
