@@ -1,1257 +1,165 @@
-# 第一章
+# 前言
 
-![](img/96afc5a2-c38b-4925-b5ae-ef376c779c08.jpg)[mapt.io](https://mapt.io/)
+本书的目的是让读者对 Java 基础知识有扎实的理解，通过一系列从基础到实际编程的实践步骤来引导他们。讨论和示例旨在激发专业直觉，使用经过验证的编程原则和实践。
 
-Mapt 是一个在线数字图书馆，为您提供超过 5,000 本书籍和视频的完全访问权限，以及行业领先的工具，帮助您规划个人发展并推动职业发展。欲了解更多信息，请访问我们的网站。
+完成本书后，您将能够做到以下事情：
 
-# 为什么订阅？
++   安装 Java 虚拟机并运行它
 
-+   花更少的时间学习，更多时间编码，使用来自 4,000 多名行业专业人士的实用电子书和视频
++   安装和配置集成开发环境（编辑器）
 
-+   通过专为您构建的技能计划来提高学习效果
++   编写、编译和执行 Java 程序和测试
 
-+   每月获取免费电子书或视频
++   理解并使用 Java 语言基础知识
 
-+   Mapt 是完全可搜索的
++   理解并应用面向对象设计原则
 
-+   复制、粘贴、打印和书签内容
++   掌握最常用的 Java 构造
 
-# PacktPub.com
+# 本书适合对象
 
-您知道 Packt 提供每本书的电子书版本，提供 PDF 和 ePub 文件吗？您可以在[www.PacktPub.com](http://www.PacktPub.com)升级到电子书版本，并且作为印刷书籍客户，您有资格获得电子书折扣。欲了解更多详情，请通过`service@packtpub.com`与我们联系。
+目标受众是那些想要在现代 Java 编程中追求职业的人，以及想要刷新他们对最新 Java 版本知识的初学者和中级 Java 程序员。
 
-在[www.PacktPub.com](http://www.packtpub.com)上，您还可以阅读一系列免费技术文章，注册一系列免费新闻通讯，并获得 Packt 书籍和电子书的独家折扣和优惠。
+# 本书涵盖内容
 
-# 目录
+第一章，*计算机上的 Java 虚拟机（JVM）*，介绍了 Java 作为一种语言和工具。它描述了 Java 创建的动机、历史、版本、架构原则和组件。还概述了 Java 的营销定位和主要应用领域。然后，一系列实际步骤将引导您完成 Java 虚拟机在计算机上的安装和配置，以及其使用和主要命令。
 
-1.  标题页
+第二章，*Java 语言基础*，介绍了 Java 作为面向对象编程（OOP）语言的基本概念。您将学习类、接口、对象及其关系，以及 OOP 的概念和特性。
 
-1.  版权和鸣谢
+第三章，*您的开发环境设置*，解释了开发环境是什么，并指导您进行配置和调整。它还概述了流行的编辑器和构建框架。逐步说明帮助读者创建自己的开发环境，并进行配置，包括设置类路径并在实践中使用它。
 
-1.  编程简介
+第四章，*你的第一个 Java 项目*，利用到目前为止学到的一切，引导读者编写程序和开发者测试并运行它们的过程。
 
-1.  致谢
+第五章，*Java 语言元素和类型*，使读者熟悉 Java 语言元素：标识符、变量、文字、关键字、分隔符、注释等。它还描述了基本类型和引用类型。特别关注了 String 类、枚举类型和数组。
 
-1.  贡献者
+第六章，*接口、类和对象构造*，解释了 Java 编程的最重要方面——应用程序编程接口（API）、对象工厂、方法重写、隐藏和重载。还介绍了关键字 this 和 super 的用法。该章节以讨论最终类和方法结束。
 
-1.  关于作者
+第七章，*包和可访问性（可见性）*，介绍了包的概念，并教读者如何创建和使用它以提高代码清晰度。它还描述了类和类成员（方法和属性）的不同可访问性（可见性）级别。最后讨论了封装的关键面向对象设计概念。
 
-1.  关于评论者
+第八章，*面向对象设计（OOD）原则*，提供了 Java 编程的更高层次视图。它讨论了良好设计的标准，并提供了经过验证的 OOD 原则指南。它还演示了说明所讨论原则的代码示例。
 
-1.  Packt 正在寻找像您这样的作者
+第九章，*运算符、表达式和语句*，帮助您深入了解 Java 编程的三个核心元素：运算符、表达式和语句。您将看到所有 Java 运算符的列表，了解最受欢迎的运算符的详细信息，并能够执行说明每个运算符的关键方面的具体示例。
 
-1.  Packt 升级
+第十章，*控制流语句*，描述了允许根据实现的算法逻辑构建程序流的 Java 语句，包括条件语句、迭代语句、分支语句和异常。
 
-1.  为什么订阅？
+第十一章，*JVM 进程和垃圾回收*，让读者深入了解 JVM，看到它不仅仅是一个程序运行器。除了应用程序线程外，它还执行多个服务线程。其中一个服务线程执行一个重要任务，释放未使用对象的内存。
 
-1.  PacktPub.com
+第十二章，*Java 标准和外部库*，概述了包含在 JDK 中的最受欢迎的库和外部库。简要示例演示了库的功能。该章还指导用户如何在互联网上找到库。
 
-1.  前言
+第十三章，*Java 集合*，向您介绍了 Java 集合，并提供了演示它们用法的代码示例。
 
-1.  本书适合谁
+第十四章，*管理集合和数组*，向您介绍了允许您创建、初始化和修改集合和数组的类。它们还允许创建不可修改和不可变的集合。其中一些类属于 Java 标准库，另一些属于流行的 Apache Commons 库。
 
-1.  本书涵盖内容
+第十五章，*管理对象、字符串、时间和随机数*，演示了 Java 标准库和 Apache Commons 中的类和实用程序，每个程序员都必须掌握，以成为有效的编码人员。
 
-1.  充分利用本书
+第十六章，*数据库编程*，解释了如何编写能够操作数据库中数据的 Java 代码——插入、读取、更新和删除。它还提供了 SQL 语言和基本数据库操作的简要介绍。
 
-1.  下载示例代码文件
+第十七章，*Lambda 表达式和函数式编程*，解释了函数式编程的概念。它概述了 JDK 提供的函数式接口，并解释了如何在 lambda 表达式中使用它们。
 
-1.  下载彩色图片
+第十八章，*流和管道*，向读者介绍了数据流处理的强大概念。它解释了流是什么，如何使用 lambda 表达式处理它们，以及如何构建处理管道。它还展示了如何轻松地并行组织流处理。
 
-1.  使用的约定
+第十九章，*响应式系统*，概述了您未来职业工作的前景。随着更多数据被处理和服务变得更加复杂，对更具适应性、高度可扩展和分布式流程的需求呈指数级增长，这正是我们将在本章中解决的问题——这样的软件系统在实践中是什么样子。
 
-1.  联系我们
+# 充分利用本书
 
-1.  评论
+读者不需要对 Java 编程有先验知识，尽管对编程的理解会帮助他们从本书中获得最多的知识。
 
-1.  在您的计算机上安装 Java 虚拟机（JVM）
+# 下载示例代码文件
 
-1.  什么是 Java？
+您可以从[www.packtpub.com](http://www.packtpub.com)的帐户中下载本书的示例代码文件。如果您在其他地方购买了本书，您可以访问[www.packtpub.com/support](http://www.packtpub.com/support)并注册，以便直接通过电子邮件接收文件。
 
-1.  基本术语
+您可以按照以下步骤下载代码文件：
 
-1.  历史和流行度
+1.  在[www.packtpub.com](http://www.packtpub.com/support)登录或注册。
 
-1.  原则
+1.  选择“支持”选项卡。
 
-1.  Java 平台、版本、版本和技术
+1.  Click on Code Downloads & Errata.
 
-1.  平台和版本
+1.  在搜索框中输入书名，然后按照屏幕上的说明进行操作。
 
-1.  版本
+文件下载后，请确保使用以下最新版本解压或提取文件夹：
 
-1.  技术
++   WinRAR/7-Zip for Windows
 
-1.  Java SE 开发工具包（JDK）安装和配置
++   Zipeg/iZip/UnRarX for Mac
 
-1.  从哪里开始
++   7-Zip/PeaZip for Linux
 
-1.  包含 Java 安装程序的页面
+本书的代码包也托管在 GitHub 上，网址为[`github.com/PacktPublishing/Introduction-to-Programming`](https://github.com/PacktPublishing/Introduction-to-Programming)。我们还有其他代码包，来自我们丰富的图书和视频目录，可在**[`github.com/PacktPublishing/`](https://github.com/PacktPublishing/)**上获得。请查看！
 
-1.  如何安装
+# 下载彩色图片
 
-1.  主要 Java 命令
+我们还提供了一个 PDF 文件，其中包含本书中使用的屏幕截图/图表的彩色图片。您可以在此处下载：[`www.packtpub.com/sites/default/files/downloads/IntroductiontoProgramming_ColorImages.pdf`](http://www.packtpub.com/sites/default/files/downloads/IntroductiontoProgramming_ColorImages.pdf)。
 
-1.  JVM 执行命令
+# 使用的约定
 
-1.  编译命令
+本书中使用了许多文本约定。
 
-1.  命令 jcmd 和其他命令
+`CodeInText`：表示文本中的代码单词、数据库表名、文件夹名、文件名、文件扩展名、路径名、虚拟 URL、用户输入和 Twitter 句柄。例如："将下载的`WebStorm-10*.dmg`磁盘映像文件挂载为系统中的另一个磁盘"。
 
-1.  练习- JDK 工具和实用程序
+代码块设置如下：
 
-1.  答案
+```java
 
-1.  摘要
+html, body, #map {
 
-1.  Java 语言基础
+height: 100%;
 
-1.  Java 编程的基本术语
+margin: 0;
 
-1.  字节码
+padding: 0
 
-1.  缺陷（错误）及其严重性和优先级
+}
 
-1.  Java 程序依赖
+```
 
-1.  语句
+当我们希望引起您对代码块的特别关注时，相关行或项目将以粗体显示：
 
-1.  方法
+```java
 
-1.  类
+[default]
 
-1.  主类和主方法
+exten => s,1,Dial(Zap/1|30)
 
-1.  类和对象（实例）
+exten => s,2,Voicemail(u100)
 
-1.  Java 类
+exten => s,102,Voicemail(b100)
 
-1.  Java 对象（类实例）
+exten => i,1,Voicemail(s0)
 
-1.  类（静态）和对象（实例）成员
+```
 
-1.  私有和公共
+任何命令行输入或输出都将按照以下格式编写：
 
-1.  静态成员
+```java
 
-1.  对象（实例）成员
+$ mkdir css
 
-1.  方法重载
+$ cd css
 
-1.  接口、实现和继承
+```
 
-1.  接口
+**粗体**：表示新术语、重要单词或屏幕上看到的单词。例如，菜单或对话框中的单词会以这种方式出现在文本中。例如："从管理面板中选择系统信息"。
 
-1.  实现
+警告或重要提示会显示为这样。
 
-1.  继承
+提示和技巧会显示为这样。
 
-1.  java.lang.Object 类
+# Get in touch
 
-1.  equals()方法
+我们始终欢迎读者的反馈。
 
-1.  hashCode()方法
+**一般反馈**：请通过电子邮件`feedback@packtpub.com`，并在主题中提及书名。如果您对本书的任何方面有疑问，请通过电子邮件`questions@packtpub.com`与我们联系。
 
-1.  getClass()方法
+**勘误**：尽管我们已经尽一切努力确保内容的准确性，但错误确实会发生。如果您在本书中发现错误，我们将不胜感激，如果您能向我们报告。请访问[www.packtpub.com/submit-errata](http://www.packtpub.com/submit-errata)，选择您的书，点击勘误提交表单链接，并输入详细信息。
 
-1.  toString()方法
+**盗版**：如果您在互联网上发现我们作品的任何非法副本，我们将不胜感激，如果您能向我们提供位置地址或网站名称。请通过`copyright@packtpub.com`与我们联系，并提供材料链接。
 
-1.  clone()方法
+**如果您有兴趣成为作者**：如果您对某个专题有专业知识，并且有兴趣撰写或为书籍做出贡献，请访问[authors.packtpub.com](http://authors.packtpub.com/)。
 
-1.  wait()和 notify()方法
+# 评论
 
-1.  面向对象编程概念
+请留下评论。阅读并使用本书后，为什么不在购买书籍的网站上留下评论呢？潜在的读者可以看到并使用您的客观意见来做出购买决策，我们在 Packt 可以了解您对我们产品的看法，我们的作者可以看到您对他们书籍的反馈。谢谢！
 
-1.  对象/类
-
-1.  封装
-
-1.  继承
-
-1.  接口（抽象）
-
-1.  多态
-
-1.  练习 - 接口与抽象类
-
-1.  答案
-
-1.  摘要
-
-1.  您的开发环境设置
-
-1.  什么是开发环境？
-
-1.  Java 编辑器是您的主要工具
-
-1.  源代码编译
-
-1.  代码共享
-
-1.  代码和测试执行
-
-1.  设置类路径
-
-1.  手动设置
-
-1.  在类路径上搜索
-
-1.  IDE 自动设置类路径
-
-1.  有很多 IDE
-
-1.  NetBeans
-
-1.  星际争霸
-
-1.  IntelliJ IDEA
-
-1.  安装和配置 IntelliJ IDEA
-
-1.  下载和安装
-
-1.  配置 IntelliJ IDEA
-
-1.  练习 - 安装 NetBeans IDE
-
-1.  答案
-
-1.  摘要
-
-1.  你的第一个 Java 项目
-
-1.  什么是项目？
-
-1.  项目的定义和起源
-
-1.  与项目相关的术语
-
-1.  项目的生命周期
-
-1.  创建项目
-
-1.  使用项目向导创建项目
-
-1.  Maven 项目配置
-
-1.  随时更改 IDE 设置
-
-1.  编写应用程序代码
-
-1.  Java 包声明
-
-1.  创建包
-
-1.  创建 MyApplication 类
-
-1.  构建应用程序
-
-1.  隐藏一些文件和目录
-
-1.  创建 SimpleMath 类
-
-1.  创建方法
-
-1.  执行和单元测试应用程序
-
-1.  使用 IDE 执行应用程序
-
-1.  创建单元测试
-
-1.  执行单元测试
-
-1.  多少单元测试足够？
-
-1.  练习 - JUnit @Before 和@After 注释
-
-1.  答案
-
-1.  摘要
-
-1.  Java 语言元素和类型
-
-1.  Java 语言元素是什么？
-
-1.  输入元素
-
-1.  类型
-
-1.  注释
-
-1.  标识符和变量
-
-1.  标识符
-
-1.  变量
-
-1.  变量声明、定义和初始化
-
-1.  最终变量（常量）
-
-1.  保留和受限关键字
-
-1.  保留关键字
-
-1.  受限关键字
-
-1.  分隔符
-
-1.  分号“;”
-
-1.  大括号“{}”
-
-1.  括号“（）”
-
-1.  括号“[]”
-
-1.  逗号“，”
-
-1.  句号“。”
-
-1.  省略号“...”
-
-1.  冒号“::”
-
-1.  at 符号“@”
-
-1.  原始类型和文字
-
-1.  布尔类型
-
-1.  整数类型
-
-1.  浮点类型
-
-1.  原始类型的默认值
-
-1.  原始类型文字
-
-1.  引用类型和字符串
-
-1.  类类型
-
-1.  接口类型
-
-1.  数组
-
-1.  引用类型的默认值
-
-1.  引用类型文字
-
-1.  字符串不可变性
-
-1.  枚举类型
-
-1.  将引用类型值作为方法参数传递
-
-1.  练习-变量声明和初始化
-
-1.  答案
-
-1.  摘要
-
-1.  接口，类和对象构造
-
-1.  什么是 API？
-
-1.  Java API
-
-1.  命令行 API
-
-1.  基于 HTTP 的 API
-
-1.  软件组件 API
-
-1.  接口和对象工厂作为 API
-
-1.  接口
-
-1.  对象工厂
-
-1.  读取配置文件
-
-1.  使用 json-simple 库
-
-1.  使用 json-api 库
-
-1.  单元测试
-
-1.  计算器 API
-
-1.  向 API 添加静态方法
-
-1.  API 是完整的
-
-1.  重载，重写和隐藏
-
-1.  接口方法重载
-
-1.  接口方法重写
-
-1.  接口静态成员隐藏
-
-1.  类成员隐藏
-
-1.  实例方法重写
-
-1.  实例方法重载
-
-1.  this，super 和构造函数
-
-1.  this 关键字及其用法
-
-1.  关键字 super 及其用法
-
-1.  构造函数
-
-1.  最终变量，最终方法或最终类
-
-1.  最终变量
-
-1.  最终方法
-
-1.  最终类
-
-1.  练习-将类实例化限制为单个共享实例
-
-1.  答案
-
-1.  摘要
-
-1.  包和可访问性（可见性）
-
-1.  什么是导入？
-
-1.  .java 文件和包的结构
-
-1.  单类导入
-
-1.  多类导入
-
-1.  静态导入
-
-1.  访问修饰符
-
-1.  顶级类或接口的可访问性
-
-1.  访问类或接口成员
-
-1.  构造函数的可访问性与任何类成员相同
-
-1.  封装
-
-1.  数据隐藏和解耦
-
-1.  灵活性，可维护性和重构
-
-1.  可重用性
-
-1.  [可测试性]
-
-1.  [练习 - 遮蔽]
-
-1.  [答案]
-
-1.  [摘要]
-
-1.  [面向对象设计（OOD）原则]
-
-1.  [设计的目的是什么？]
-
-1.  [项目的可行性]
-
-1.  [需求收集和原型制作]
-
-1.  [高级设计]
-
-1.  [详细设计]
-
-1.  [编码]
-
-1.  [测试]
-
-1.  [良好设计的路线图]
-
-1.  [封装和编码到一个接口]
-
-1.  [利用多态的优势]
-
-1.  [尽可能解耦]
-
-1.  [更喜欢聚合而不是继承]
-
-1.  [这么多 OOD 原则，时间却那么少]
-
-1.  [练习 - 设计模式]
-
-1.  [答案]
-
-1.  [摘要]
-
-1.  [运算符、表达式和语句]
-
-1.  [Java 编程的核心元素是什么？]
-
-1.  [运算符]
-
-1.  [算术一元（+   -）和二元运算符：+   -   *   /   %]
-
-1.  [递增和递减一元运算符：++   --]
-
-1.  [相等运算符：==   !=]
-
-1.  [关系运算符：<   >   <=   >=]
-
-1.  [逻辑运算符：!   &   |]
-
-1.  [条件运算符：&&   ||   ? : (三元)]
-
-1.  [赋值运算符（最受欢迎）：=   +=   -=   *=   /=   %=]
-
-1.  [实例创建运算符：new]
-
-1.  [类型比较运算符：instanceof]
-
-1.  [更喜欢多态而不是 instanceof 运算符]
-
-1.  [字段访问或方法调用运算符：.]
-
-1.  [强制转换运算符：(目标类型)]
-
-1.  [表达式]
-
-1.  [语句]
-
-1.  [运算符优先级和操作数的求值顺序]
-
-1.  [运算符优先级]
-
-1.  [操作数的求值顺序]
-
-1.  [引用类型的扩宽和缩窄]
-
-1.  [扩宽]
-
-1.  [缩窄]
-
-1.  [基本类型的扩宽和缩窄转换]
-
-1.  [扩宽]
-
-1.  [缩窄]
-
-1.  [基本类型转换的方法]
-
-1.  基本类型和引用类型之间的装箱和拆箱
-
-1.  装箱
-
-1.  拆箱
-
-1.  引用类型的 equals()方法
-
-1.  使用基类 Object 的实现
-
-1.  覆盖 equals()方法
-
-1.  使用父类中实现的标识
-
-1.  String 类的 equals()方法
-
-1.  基本类型的包装类中的 equals()方法
-
-1.  练习-命名语句
-
-1.  回答
-
-1.  总结
-
-1.  控制流语句
-
-1.  什么是控制流？
-
-1.  选择语句
-
-1.  迭代语句
-
-1.  分支语句
-
-1.  异常处理语句
-
-1.  选择语句
-
-1.  如果
-
-1.  如果...否则
-
-1.  如果...否则如果...否则
-
-1.  开关...情况
-
-1.  迭代语句
-
-1.  当
-
-1.  做...当
-
-1.  为
-
-1.  增强
-
-1.  具有多个初始化程序和表达式的 for 循环
-
-1.  分支语句
-
-1.  中断和标记中断
-
-1.  继续和标记继续
-
-1.  返回
-
-1.  异常处理语句
-
-1.  抛出
-
-1.  尝试...捕获
-
-1.  已检查和未检查（运行时）异常
-
-1.  抛出
-
-1.  自定义异常
-
-1.  什么是异常处理？
-
-1.  异常处理的一些最佳实践
-
-1.  最后
-
-1.  断言需要 JVM 选项-ea
-
-1.  练习-无限循环
-
-1.  回答
-
-1.  总结
-
-1.  JVM 进程和垃圾收集
-
-1.  JVM 进程是什么？
-
-1.  加载
-
-1.  链接
-
-1.  初始化
-
-1.  实例化
-
-1.  执行
-
-1.  垃圾收集
-
-1.  应用程序终止
-
-1.  JVM 架构
-
-1.  运行时数据区域
-
-1.  类加载器
-
-1.  执行引擎
-
-1.  线程
-
-1.  扩展 Thread 类
-
-1.  什么是守护进程？
-
-1.  运行扩展 Thread 的线程
-
-1.  实现 Runnable
-
-1.  实现 Runnable 的运行线程
-
-1.  扩展 Thread vs 实现 Runnable
-
-1.  [如何执行 main(String[])方法](cfe8bd2f-f88e-479a-8fb5-3d84bca3f968.xhtml)
-
-1.  使用 IDE
-
-1.  带有类路径上的类的命令行
-
-1.  带有类路径上的.jar 文件的命令行
-
-1.  带有可执行.jar 文件的命令行
-
-1.  垃圾收集
-
-1.  响应性，吞吐量和停止世界
-
-1.  对象年龄和代
-
-1.  当不可避免的停止世界
-
-1.  练习-在运行应用程序时监视 JVM
-
-1.  答案
-
-1.  总结
-
-1.  Java 标准和外部库
-
-1.  标准和外部库是什么？
-
-1.  Java 标准库
-
-1.  java.lang
-
-1.  java.util
-
-1.  java.time
-
-1.  java.io 和 java.nio
-
-1.  java.sql 和 javax.sql
-
-1.  java.net
-
-1.  java.math
-
-1.  java.awt，javax.swing 和 javafx
-
-1.  Java 外部库
-
-1.  org.junit
-
-1.  org.mockito
-
-1.  org.apache.log4j 和 org.slf4j
-
-1.  org.apache.commons
-
-1.  org.apache.commons.io
-
-1.  org.apache.commons.lang 和 lang3
-
-1.  org.apache.commons.codec.binary
-
-1.  练习-比较 String.indexOf()和 StringUtils.indexOf()
-
-1.  答案
-
-1.  总结
-
-1.  Java 集合
-
-1.  什么是集合？
-
-1.  java.util 包
-
-1.  Apache Commons 集合
-
-1.  集合 vs 数组
-
-1.  这是我们将要讨论的内容
-
-1.  List - ArrayList 保留顺序
-
-1.  首选变量类型 List
-
-1.  为什么叫 ArrayList？
-
-1.  添加元素
-
-1.  size(), isEmpty(), clear()
-
-1.  迭代和流
-
-1.  使用泛型添加
-
-1.  添加集合
-
-1.  实现 equals()和 hashCode()
-
-1.  定位元素
-
-1.  检索元素
-
-1.  删除元素
-
-1.  替换元素
-
-1.  排序字符串和数字类型
-
-1.  排序自定义对象
-
-1.  与另一个集合比较
-
-1.  转换为数组
-
-1.  列表实现
-
-1.  集合 - HashSet 不允许重复
-
-1.  更喜欢变量类型 Set
-
-1.  为什么叫 HashSet？
-
-1.  添加元素
-
-1.  size()，isEmpty()和 clear()
-
-1.  迭代和流
-
-1.  使用泛型添加
-
-1.  添加集合
-
-1.  实现 equals()和 hashCode()
-
-1.  定位元素
-
-1.  检索元素
-
-1.  删除元素
-
-1.  替换元素
-
-1.  排序
-
-1.  与另一个集合比较
-
-1.  转换为数组
-
-1.  集合实现
-
-1.  Map - HashMap 通过键存储/检索对象
-
-1.  更喜欢变量类型 Map
-
-1.  为什么叫 HashMap？
-
-1.  添加和可能替换
-
-1.  size()，isEmpty()和 clear()
-
-1.  迭代和流
-
-1.  使用泛型添加
-
-1.  添加另一个 Map
-
-1.  实现 equals()和 hashCode()
-
-1.  定位元素
-
-1.  检索元素
-
-1.  删除元素
-
-1.  替换元素
-
-1.  排序
-
-1.  与另一个集合比较
-
-1.  映射实现
-
-1.  练习 - EnumSet 方法
-
-1.  答案
-
-1.  摘要
-
-1.  管理集合和数组
-
-1.  管理集合
-
-1.  初始化集合
-
-1.  集合构造函数
-
-1.  实例初始化程序（双括号）
-
-1.  静态初始化块
-
-1.  of()的工厂方法
-
-1.  使用其他对象和流
-
-1.  不可变集合
-
-1.  不可变与不可修改
-
-1.  Immutable without methods of()
-
-1.  Methods add() and put() confusion
-
-1.  java.util.Collections class&#xA0;&#xA0;
-
-1.  Copy&#xA0;
-
-1.  Sort and equals()
-
-1.  Reverse and rotate
-
-1.  Search and equals()&#xA0;
-
-1.  Comparing two collections
-
-1.  Min and max elements
-
-1.  Add and replace elements
-
-1.  Shuffle and swap elements
-
-1.  Converting to a checked collection
-
-1.  Convert to a thread-safe collection
-
-1.  Convert to another collection type
-
-1.  Create enumeration and iterator
-
-1.  Class collections4.CollectionUtils
-
-1.  Manage arrays
-
-1.  Initialize arrays
-
-1.  Creation expression
-
-1.  Array initializer
-
-1.  Static initialization block
-
-1.  From collection
-
-1.  Other possible methods
-
-1.  Class java.util.Arrays
-
-1.  Class lang3.ArrayUtils
-
-1.  Exercise &#x2013; Sort list of objects
-
-1.  Answer
-
-1.  Summary
-
-1.  Managing Objects, Strings, Time, and Random Numbers
-
-1.  Managing&#xA0;objects
-
-1.  Class java.util.Objects
-
-1.  equals() and deepEquals()&#xA0;
-
-1.  hash() and hashCode()
-
-1.  isNull() and nonNull()
-
-1.  requireNonNull()&#xA0;
-
-1.  checkIndex()
-
-1.  compare()
-
-1.  toString()
-
-1.  Class lang3.ObjectUtils
-
-1.  Managing strings
-
-1.  StringBuilder&#xA0;and&#xA0;StringBuffer
-
-1.  Class java.lang.String
-
-1.  Constructors
-
-1.  format()
-
-1.  replace()
-
-1.  compareTo()
-
-1.  valueOf(Objectj)
-
-1.  [valueOf(primitive or char[])](e82b485b-9a34-4663-a101-2c822ae90e9d.xhtml)
-
-1.  [copyValueOf(char[])](94de094f-5a00-4c2c-ba22-a47e2f22b329.xhtml)
-
-1.  indexOf() and substring()
-
-1.  contains() and&#xA0;matches()
-
-1.  split(),&#xA0;concat(), and join()
-
-1.  startsWith() and endsWith()
-
-1.  equals() and&#xA0;equalsIgnoreCase()
-
-1.  contentEquals() and copyValueOf()
-
-1.  length(), isEmpty(), and hashCode()
-
-1.  trim()，toLowerCase()和 toUpperCase()
-
-1.  getBytes()，getChars()和 toCharArray()
-
-1.  通过索引或流获取代码点
-
-1.  Class lang3.StringUtils
-
-1.  管理时间
-
-1.  java.time.LocalDate
-
-1.  java.time.LocalTime
-
-1.  java.time.LocalDateTime
-
-1.  周期和持续时间
-
-1.  管理随机数
-
-1.  方法 java.lang.Math.random()
-
-1.  Class java.util.Random
-
-1.  练习-Objects.equals()结果
-
-1.  答案
-
-1.  摘要
-
-1.  数据库编程
-
-1.  什么是 Java 数据库连接（JDBC）？
-
-1.  连接到数据库
-
-1.  关闭数据库连接
-
-1.  结构化查询语言（SQL）
-
-1.  创建数据库及其结构
-
-1.  创建和删除数据库及其用户
-
-1.  创建，更改和删除表
-
-1.  创建，读取，更新和删除（CRUD）数据
-
-1.  INSERT 语句
-
-1.  SELECT 语句
-
-1.  UPDATE 语句
-
-1.  DELETE 语句
-
-1.  使用 PreparedStatement 类
-
-1.  练习-选择唯一的名字
-
-1.  答案
-
-1.  摘要
-
-1.  Lambda 表达式和函数式编程
-
-1.  函数式编程
-
-1.  什么是功能接口？
-
-1.  可直接使用的标准功能接口
-
-1.  Function<T, R>
-
-1.  Consumer<T>
-
-1.  Supplier<T>
-
-1.  Predicate<T>
-
-1.  其他标准功能接口
-
-1.  链接标准函数
-
-1.  链接两个 Function<T,R>
-
-1.  链接两个 Consumer<T>
-
-1.  链接两个 Predicate<T>
-
-1.  identity()和其他默认方法
-
-1.  Lambda 表达式
-
-1.  什么是 lambda 表达式？
-
-1.  重新实现函数
-
-1.  Lambda 限制
-
-1.  有效的最终局部变量
-
-1.  this 关键字解释
-
-1.  方法引用
-
-1.  练习 - 使用方法引用创建新对象
-
-1.  答案
-
-1.  总结
-
-1.  流和管道
-
-1.  什么是流？
-
-1.  流操作
-
-1.  创建流
-
-1.  流接口
-
-1.  empty()，of(T t)，ofNullable(T t)
-
-1.  iterate(Object, UnaryOperator)
-
-1.  concat(Stream a, Stream b)
-
-1.  generate(Supplier)
-
-1.  of(T... values)
-
-1.  Stream.Builder 接口
-
-1.  其他类和接口
-
-1.  中间操作
-
-1.  过滤
-
-1.  映射
-
-1.  排序
-
-1.  窥视
-
-1.  终端操作
-
-1.  处理每个元素
-
-1.  计算所有元素的数量
-
-1.  匹配所有、任意或无
-
-1.  查找任意或第一个
-
-1.  Optional 类
-
-1.  最小和最大
-
-1.  toArray()操作
-
-1.  reduce 操作
-
-1.  收集操作
-
-1.  类收集器
-
-1.  数值流接口
-
-1.  创建流
-
-1.  range()，rangeClosed()
-
-1.  中间操作
-
-1.  boxed()和 mapToObj()
-
-1.  mapToInt()，mapToLong()和 mapToDouble()
-
-1.  flatMapToInt()，flatMapToLong()和 flatMapToDouble()
-
-1.  终端操作
-
-1.  sum()和 average()
-
-1.  并行处理
-
-1.  无状态和有状态操作
-
-1.  顺序或并行处理？
-
-1.  练习 - 将所有流元素相乘
-
-1.  答案
-
-1.  总结
-
-1.  响应式系统
-
-1.  如何快速处理大量数据
-
-1.  异步
-
-1.  顺序与并行流
-
-1.  使用 CompletableFuture 类
-
-1.  非阻塞
-
-1.  java.io 与 java.nio 包
-
-1.  事件循环或运行循环
-
-1.  分布式
-
-1.  可扩展的
-
-1.  响应式
-
-1.  响应式的
-
-1.  有弹性的
-
-1.  Elastic
-
-1.  消息驱动的
-
-1.  微服务
-
-1.  Vert.x 基础知识
-
-1.  HTTP 服务器作为微服务
-
-1.  周期性服务作为微服务
-
-1.  HTTP 客户端作为微服务
-
-1.  其他微服务
-
-1.  响应式系统
-
-1.  消息驱动系统
-
-1.  消息消费者
-
-1.  消息发送者
-
-1.  消息发布者
-
-1.  现实检验
-
-1.  练习 - 创建 io.reactivex.Observable
-
-1.  答案
-
-1.  摘要
-
-1.  您可能喜欢的其他书籍
-
-1.  留下评论 - 让其他读者知道您的想法
+有关 Packt 的更多信息，请访问[packtpub.com](https://www.packtpub.com/)。

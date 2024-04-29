@@ -1,371 +1,1677 @@
-# 第二章：在您的计算机上安装 Java 虚拟机（JVM）
+# 第三章：Java 语言基础
 
-本书将指导您达到中级 Java 编程技能。编程不仅仅是了解语言语法。它还涉及编写、编译和执行程序或运行整个软件系统所需的工具和信息来源。这条路上的第一步是学习 Java 的重要组件，包括**Java 开发工具包**（**JDK**）和**Java 虚拟机**（**JVM**）。
+现在您对 Java 及其相关术语和工具有了一个大致的了解，我们将开始讨论 Java 作为一种编程语言。
 
-本章将介绍 Java 作为一种语言和工具，并建立最重要的术语。它还将描述 Java 创建背后的动机，涵盖其历史、版本、版本和技术，并概述 Java 的营销位置和主要应用领域。然后，一系列实际步骤将引导读者完成在其计算机上安装和配置 Java，并介绍主要的 Java 命令。
+本章将介绍 Java 作为**面向对象编程**（**OOP**）语言的基本概念。您将了解类、接口和对象及其关系。您还将学习 OOP 的概念和特性。
 
 在本章中，我们将涵盖以下主题：
 
-+   什么是 Java？
++   Java 编程的基本术语
 
-+   Java 平台、版本、版本和技术
++   类和对象（实例）
 
-+   Java SE 开发工具包（JDK）的安装和配置
++   类（静态）和对象（实例）成员
 
-+   主要的 Java 命令
++   接口、实现和继承
 
-+   练习- JDK 工具和实用程序
++   OOP 的概念和特性
 
-# 什么是 Java？
++   练习-接口与抽象类
 
-由于本书是为初学者编写的，我们将假设你对 Java 几乎一无所知。但即使你知道一些，甚至很多，回顾基础知识也总是有帮助的，即使只是让你通过欣赏自己已经掌握了多少而感到自豪。因此，我们将从定义 Java、JVM、编译、字节码等术语开始。
+我们称它们为基础，因为它们是 Java 作为一种语言的基本原则，而在您可以开始专业编程之前还有更多要学习。对于那些第一次学习 Java 的人来说，学习 Java 的基础是一个陡峭的斜坡，但之后的道路会变得更容易。
 
-# 基本术语
+# Java 编程的基本术语
 
-在谈论 Java 时，人们将 Java、JVM、JDK、SDK 和 Java 平台视为同义词。法律定义将 Java 视为*Sun 公司一套技术的商标*，但我们通常不会将 Java 视为商标。最常见的情况是，当有人说 Java 时，他们指的是一种由人类用来表达一系列指令（程序）的编程语言，这些指令可以由计算机执行（不是直接执行，而是在程序被编译/转换为计算机理解的代码之后）。人类可读的 Java 程序称为**源代码**，经过所有转换后的计算机可读程序称为**二进制代码**，因为它只使用 1 和 0 来表示。
+Java 编程基础的概念有很多解释。一些教程假设基础对于任何面向对象的语言都是相同的。其他人讨论语法和基本语言元素和语法规则。还有一些人将基础简化为允许计算的值类型、运算符、语句和表达式。
 
-您可以在[`docs.oracle.com/javase/specs/`](https://docs.oracle.com/javase/specs/)找到完整的**Java 语言规范**（描述）。它比人们预期的要容易得多，即使对于新手来说，它也可能会有所帮助，特别是如果将其用作参考文档。不要因为前几节的正式语言而感到泄气。尽量阅读你能理解的部分，并在理解 Java 的过程中回来，以及对更深入和更精确的定义的动力增加时再来阅读。
+我们对 Java 基础的看法包括了前面各种方法的一些元素。我们选择的唯一标准是实用性和逐渐增加的复杂性。我们将从本节的简单定义开始，然后在后续章节中深入探讨。
 
-JVM 是一个程序，它将 Java`.class`文件的字节码翻译成二进制机器码，并将其发送到微处理器执行。
+# 字节码
 
-你有没有注意到有两个类似的术语，*bytecode*和*byte code*？在对话中，这两者的区别几乎是不可察觉的，所以人们可以互换使用它们。但是它们是有区别的。*Byte code*（或*Byte Code*，更准确地说）是一种可以由名为 JVM 的特殊程序执行的语言。相比之下，*bytecode*是由 Java 编译器（另一个程序）生成的指令的格式（每个指令占用一个字节，因此得名），该编译器读取人类可读的源代码并将其转换为 Byte Code。
+在最广泛的意义上，Java 程序（或任何计算机程序）意味着一系列顺序指令，告诉计算机该做什么。在计算机上执行之前，程序必须从人类可读的高级编程语言编译成机器可读的二进制代码。
 
-Bytecode 是以 JVM 理解的格式表达的二进制代码。然后，JVM 读取（加载，使用名为**类加载器**的程序）字节码，将指令转换为二进制代码（JVM 正在运行的特定计算机微处理器理解的格式中的指令），并将结果传递给 CPU，即执行它的微处理器。
+在 Java 的情况下，人类可读的文本，称为源代码，存储在一个`.java`文件中，并可以通过 Java 编译器`javac`编译成字节码。Java 字节码是 JVM 的指令集。字节码存储在一个`.class`文件中，并可以由 JVM 或更具体地说是由 JVM 使用的**即时**（**JIT**）编译器解释和编译成二进制代码。然后由微处理器执行二进制代码。
 
-类是由 Java 编译器生成的文件（扩展名为.class），从具有相同名称和扩展名为.java 的源代码文件中生成。有十多种 JVM 实现，由不同公司创建，但我们将重点关注 Oracle JVM 的实现，称为 HotSpot。在第十一章，JVM 进程和垃圾收集中，我们将更仔细地查看 JVM 的功能、架构和进程。
+字节码的一个重要特点是它可以从一台机器复制到另一台机器的 JVM 上执行。这就是 Java 可移植性的含义。
 
-在 Java 语言规范（https://docs.oracle.com/javase/specs）的同一页上，您可以找到 Java 虚拟机规范。我们建议您将其用作术语和理解 JVM 功能的参考来源。
+# 缺陷（bug）及其严重程度和优先级
 
-JDK 是一组软件工具和支持库，允许创建和执行 Java 语言程序。
+*bug*这个词，意思是*小故障和困难*，早在 19 世纪就存在了。这个词的起源是未知的，但看起来好像动词*to bug*的意思是*打扰*，来自于一种讨厌的感觉，来自于一个嗡嗡作响并威胁要咬你或其他东西的昆虫-虫子。这个词在计算机第一次建造时就被用于编程缺陷。
 
-自 Java 9 以来，不再支持小程序（可以在浏览器中执行的组件），因此我们将不再详细讨论它们。应用程序是可以（编译后）在安装了 JVM 的计算机上执行的 Java 程序。因此，JDK 至少包括编译器、JVM 和 Java 类库（JCL）-一组可供应用程序调用的即用程序。但实际上，它还有许多其他工具和实用程序，可以帮助您编译、执行和监视 Java 应用程序。包含 JVM、JCL、类加载器和支持文件的 JDK 子集允许执行（运行）字节码。这样的组合称为 Java 运行时环境（JRE）。每个 Java 应用程序都在单独的 JVM 实例（副本）中执行，该实例具有自己分配的计算机内存，因此两个 Java 应用程序不能直接交流，而只能通过网络（Web 服务和类似手段）进行交流。
+缺陷的严重程度各不相同-它们对程序执行或结果的影响程度。一些缺陷是相当微不足道的，比如数据以人类可读的格式呈现。如果同样的数据必须由其他无法处理这种格式的系统消耗，那就另当别论了。那么这样的缺陷可能被归类为关键，因为它将不允许系统完成数据处理。
 
-软件开发工具包（SDK）是一组软件工具和支持库，允许使用特定编程语言创建应用程序。Java 的 SDK 称为 JDK。
+缺陷的严重程度取决于它对程序的影响，而不是修复它有多困难。
 
-因此，当人们在提到 JDK 时使用 SDK 时，他们是正确的，但不够精确。
+一些缺陷可能会导致程序在达到期望结果之前退出。例如，一个缺陷可能导致内存或其他资源的耗尽，并导致 JVM 关闭。
 
-Java 平台由编译器、JVM、支持库和其他工具组成。
+缺陷优先级，缺陷在待办事项列表中的高度，通常与严重性相对应。但是，由于客户的感知，一些低严重性的缺陷可能会被优先考虑。例如，网站上的语法错误，或者可能被视为冒犯的拼写错误。
 
-在前述定义中的支持库是 Java 标准库，也称为 JCL，并且对于执行字节码是必需的。如果程序需要一些其他库（不包括在 JCL 中），则它们必须在编译时添加（参见第三章，您的开发环境设置，描述了如何执行此操作），并包含在生成的字节码中。Java 平台可以是以下四种之一：Java 平台标准版（Java SE）、Java 平台企业版（Java EE）、Java 平台微型版（Java ME）或 Java Card。以前还有 JavaFX 平台，但自 Java 8 以来已合并到 Java SE 中。我们将在下一节讨论差异。
+缺陷的优先级通常对应于其严重性，但有时，优先级可能会根据客户的感知而提高。
 
-Open JDK 是 Java SE 的免费开源实现。
+# Java 程序依赖
 
-这些是最基本的术语。其他术语将根据需要在本书的相应上下文中介绍。
+我们还提到，程序可能需要使用已编译为字节码的其他程序和过程。为了让 JVM 找到它们，您必须在`java`命令中使用`-classpath`选项列出相应的`.class`文件。几个程序和过程组成了一个 Java 应用程序。
 
-# 历史和流行度
+应用程序用于其任务的其他程序和过程称为应用程序依赖项。
 
-Java 于 1995 年首次由 Sun Microsystems 发布。它源自 C 和 C++，但不允许用户在非常低的层次上操纵计算机内存，这是许多困难的根源，包括内存泄漏相关的问题，如果 C 和 C++程序员对此不太小心的话，他们会遇到。Java 因其简单性、可移植性、互操作性和安全性而脱颖而出，这使其成为最受欢迎的编程语言之一。据估计，截至 2017 年，全球有近 2000 万程序员（其中近 400 万在美国），其中大约一半使用 Java。有充分的理由相信，未来对软件开发人员的需求，包括 Java 开发人员，只会增长。因此，学习 Java 看起来是迈向稳定职业的一步。而学习 Java 实际上并不是非常困难。我们将向您展示如何做到这一点；只需继续阅读、思考，并在计算机上实践所有建议。
+请注意，JVM 在其他类代码请求之前不会读取`.class`文件。因此，如果在应用程序执行期间不发生需要它们的条件，那么类路径上列出的一些`.class`文件可能永远不会被使用。
 
-Java 被构想为一种允许用户*一次编写，到处运行*的工具-这是另一个解释和理解的术语。这意味着编译后的 Java 代码可以在支持 Java 的所有计算机上运行，而无需重新编译。正如您已经了解的那样，*支持 Java*意味着对于每个操作系统，都存在一个可以将字节码转换为二进制代码的解释器。这就是*到处运行*的实现方式：只要有 Java 解释器可用的地方。
+# 语句
 
-在概念被证明受欢迎并且 Java 牢固地确立为其他面向对象语言中的主要参与者之一后，Sun Microsystems 将其大部分 JVM 作为自由和开源软件，并受 GNU**通用公共许可证**（**GPL**）管理。2007 年，Sun Microsystems 将其所有 JVM 的核心代码都以自由和开源的分发条款提供，除了一小部分 Sun 没有版权的代码。2010 年，甲骨文收购了 Sun Microsystems，并宣布自己是*Java 技术的管理者，致力于培育参与和透明度的社区*。
+语句是一种语言构造，可以编译成一组指令给计算机。与日常生活中的 Java 语句最接近的类比是英语语句，这是一种表达完整思想的基本语言单位。Java 中的每个语句都必须以`;`（分号）结尾。
 
-如今，Java 在许多领域中被广泛使用，最突出的是在 Android 编程和其他移动应用程序中，在各种嵌入式系统（各种芯片和专用计算机）、桌面**图形用户界面**（**GUI**）开发以及各种网络应用程序，包括网络应用程序和网络服务。Java 也广泛用于科学应用程序，包括快速扩展的机器学习和人工智能领域。
-
-# 原则
-
-根据*Java 编程语言的设计目标*（[`www.oracle.com/technetwork/java/intro-141325.html`](http://www.oracle.com/technetwork/java/intro-141325.html)），在创建 Java 语言时有五个主要目标。Java 语言必须是：
-
-+   **面向对象和熟悉**：这意味着它必须看起来像 C++，但没有不必要的复杂性（我们将在第二章中讨论面向对象的术语，*Java 语言基础*）
-
-+   **架构中立和可移植**：这意味着能够使用 JVM 作为将语言（源代码）与每个特定操作系统的知识（通常称为平台）隔离的环境
-
-+   **高性能**：它应该与当时领先的编程语言一样工作
-
-+   **解释性**：它可以在不链接的情况下移至执行阶段（从多个`.class`文件创建单个可执行文件），从而允许更快的编写-编译-执行循环（尽管现代 JVM 经过优化，以保持经常使用的`.class`文件的二进制版本，以避免重复解释）
-
-+   **多线程**：它应该允许多个并发执行作业（线程），例如同时下载图像和处理其他用户命令和数据
-
-+   动态：链接应该在执行期间发生
-
-+   安全：它必须在运行时受到良好的保护，以防未经授权的修改
-
-结果证明这些目标是明确定义的和富有成效的，因为 Java 成为了互联网时代的主要语言。
-
-# Java 平台、版本、版本和技术
-
-在日常讨论中，一些程序员会交替使用这些术语，但是 Java 平台、版本、版本和技术之间是有区别的。本节将重点解释这一点。
-
-# 平台和版本
-
-我们几乎每天都会听到“平台”这个术语。它的含义取决于上下文，但在最一般的意义上，它指的是一个允许某人做某事的设备或环境。它作为一个基础、一个环境、一个平台。在信息技术领域，平台提供了一个操作环境，软件程序可以在其中开发和执行。操作系统是平台的典型例子。Java 有自己的操作环境，正如我们在前面的部分中提到的，它有四个平台（和六个版本）：
-
-+   Java 平台标准版（Java SE）：当人们说 Java 时，他们指的是这个版本。它包括 JVM、JCL 和其他工具和实用程序，允许在桌面和服务器上开发和部署 Java 应用程序。在本书中，我们将在这个版本的范围内进行讨论，并且只在本节中提到其他版本。
-
-+   Java 平台企业版（Java EE）：由 Java SE、服务器（提供应用程序服务的计算机程序）、增强库、代码示例、教程和其他文档组成，用于开发和部署大规模、多层次和安全的网络应用程序。
-
-+   Java 平台微型版（Java ME）：这是 Java SE 的一个小型（使用少量资源）子集，具有一些专门的类库，用于开发和部署嵌入式和移动设备的 Java 应用程序，比如手机、个人数字助理、电视机顶盒、打印机、传感器等。还有一个针对 Android 编程的 Java ME 变体（具有自己的 JVM 实现），由 Google 开发。它被称为 Android SDK。
-
-+   Java Card：这是 Java 平台中最小的一个，用于开发和部署 Java 应用程序到小型嵌入式设备，比如智能卡。它有两个版本（引用自官方 Oracle 文档，网址为[`www.oracle.com/technetwork/java/embedded/javacard/documentation/javacard-faq-1970428.html#3`](http://www.oracle.com/technetwork/java/embedded/javacard/documentation/javacard-faq-1970428.html#3)）：
-
-+   Java Card Classic Edition，它针对的是当今所有垂直市场上部署的智能卡，基于 ISO7816 和 ISO14443 通信。
-
-+   Java Card Connected Edition，这是为了支持一个 Web 应用程序模型而开发的，其中 servlet 在卡上运行，TCP/IP 作为基本协议，并且在高端安全微控制器上运行，通常基于 32 位处理器，并支持像 USB 这样的高速通信接口。
-
-# 版本
-
-自 1996 年首次发布以来，Java 已经发展了九个主要版本：
-
-+   JDK 1.0（1996 年 1 月 23 日）
-
-+   JDK 1.1（1997 年 2 月 19 日）
-
-+   J2SE 1.2（1998 年 12 月 8 日）
-
-+   J2SE 1.3（2000 年 5 月 8 日）
-
-+   J2SE 1.4（2002 年 2 月 6 日）
-
-+   J2SE 5.0（2004 年 9 月 30 日）
-
-+   Java SE 6（2006 年 12 月 11 日）
-
-+   Java SE 7（2011 年 7 月 28 日）
-
-+   Java SE 8（2014 年 3 月 18 日）
-
-+   Java SE 9（2017 年 9 月 21 日）
-
-+   Java SE 10（2018 年 3 月 20 日）
-
-关于更改 Java 版本方案有几个建议。自 Java 10 以来，JDK 引入了新的基于时间的版本`$YEAR.$MONTH`。此外，计划每年 3 月和 9 月发布一个新的 Java 版本。因此，Java 11 将于 2018 年 9 月发布，JVM 版本为 18.9。我们将很快向您展示如何显示您正在使用的 JDK 版本。
-
-# 技术
-
-技术这个词被滥用了。程序员几乎用它来表示任何东西。如果您查看甲骨文的 Java 技术列表（[`www.oracle.com/java/technologies/index.html`](https://www.oracle.com/java/technologies/index.html)），您将找到以下列表：
-
-+   **嵌入式**，包括以前列出的除了 Java EE 之外的所有 Java 平台，通常经过一些修改，通常具有更小的占用空间和其他优化
-
-+   **Java SE**，包括 Java SE 和 Java SE Advanced，其中包括 Java SE 和一些用于企业级（不仅仅是开发计算机）安装的监控和管理工具
-
-+   **Java EE**，如前所述
-
-+   **云**，包括基于云的可靠、可扩展和弹性的服务
-
-但在 Oracle 词汇表（[`www.oracle.com/technetwork/java/glossary-135216.html`](http://www.oracle.com/technetwork/java/glossary-135216.html)）中，以下技术被添加到列表中：
-
-+   **JavaSpaces**：提供分布式持久性的技术
-
-+   **Jini 技术**：一种**应用程序编程接口**（**API**），可以自动连接设备和服务
-
-在其他地方，在 Oracle Java 10 文档的首页（[`docs.oracle.com/javase/10`](https://docs.oracle.com/javase/10)），客户端技术列如下：
-
-![](img/0f75d553-ab94-43fe-97be-59330e69902a.png)
-
-与此同时，在 Oracle Java 教程（[`docs.oracle.com/javase/tutorial/getStarted/intro/cando.html`](https://docs.oracle.com/javase/tutorial/getStarted/intro/cando.html)）中，**Java Web Start**和**Java Plug-In**被提及为部署技术，<q>用于将您的应用程序部署到最终用户。</q>
-
-然而，甲骨文提供的最大的 Java 技术列表在专门用于技术网络的页面上（[`www.oracle.com/technetwork/java/index.html`](http://www.oracle.com/technetwork/java/index.html)）。除了 Java SE、Java SE Advanced 和 Suite、Java 嵌入式、Java EE、Java FX 和 Java Card 之外，还列出了**Java TV**、**Java DB**和**开发工具**。如果您转到 Java SE 或 Java EE 页面，在“技术”选项卡下，您会发现超过两打的 API，以及各种软件组件也列为技术。因此，人们不应该感到惊讶在任何地方找到任何种类的 Java 技术列表。
-
-似乎与 Java 有关的任何东西都至少被称为技术一次。为了避免进一步的混淆，从现在开始，在本书中，我们将尽量避免使用技术这个词。
-
-# Java SE 开发工具包（JDK）安装和配置
-
-从现在开始，每当我们谈论 Java 时，我们指的是 Java SE 10 版。我们将把它称为 Java 10，或 Java，或 JDK，除非另有说明。
-
-# 从哪里开始
-
-在您的计算机上进行任何 Java 开发之前，您需要安装和配置 JDK。为了做到这一点，搜索互联网以获取 JDK 下载，并选择任何以[`www.oracle.com/`](https://www.oracle.com/)开头的链接。截至目前，最好的链接应该是[`www.oracle.com/technetwork/java/javase/downloads/index.html`](http://www.oracle.com/technetwork/java/javase/downloads/index.html)。
-
-如果您按照上述链接，您将看到这个部分：
-
-![](img/9b51d6bc-b626-4ca3-a965-d102a78ee09d.png)
-
-让我们称这个页面为*Page1*，以供以后参考。现在，您可以点击 JDK 下的下载链接。其他两个下载链接提供了 JRE，正如您已经知道的，它只允许您运行已经编译的 Java 程序；我们需要编写一个程序，将其编译成字节码，然后运行它。
-
-# 带有 Java 安装程序的页面
-
-点击后，您将看到一个页面（*Page2*）有这个部分：
-
-![](img/b9d20525-9bb2-4d9a-a75d-dab18a26a376.png)
-
-这些是不同**操作系统**（**OS**）的 Java 安装程序。您需要选择适合您操作系统的程序，并单击相应的链接（不要忘记使用单选按钮点击接受许可协议；如果有疑问，通过链接 Oracle Binary Code License Agreement for Java SE 阅读许可协议）。对于 Linux，有两个安装程序 - 一个是 Red Hat Package Manager 格式（`.rpm`），另一个只是一个存档（`.tar`）和压缩（`.gz`）版本。还要注意，在此列表中，只有 64 位操作系统的安装程序。截至目前，尚不清楚 32 位版本是否会被正式弃用，尽管它作为早期访问版本可用。
-
-选择您需要的安装程序，并下载它。
-
-# 如何安装
-
-现在是安装 Java 的时候，基本上包括以下四个步骤：
-
-1.  扩展安装程序
-
-1.  创建目录
-
-1.  将文件复制到这些目录中
-
-1.  使 Java 可执行文件无需输入完整路径
-
-要找到详细的安装说明，返回*Page1*并点击安装说明链接。找到适用于您操作系统的链接，并按照提供的步骤进行操作，但只选择与 JDK 相关的步骤。
-
-最终，您将能够运行`java -version`命令，它将显示以下内容：
-
-![](img/0e2ef525-125a-441b-8eac-2eef6fc60824.png)
-
-如您所见，它显示 Java 的版本为 10.0.1，JRE 和 JVM 的版本为 18.3（构建 10.0.1）。目前还不清楚未来的 Java、JRE 和 JVM 版本是否会遵循相同的格式。
-
-无论如何，如果`java -version`命令显示您尝试安装的版本，这意味着您已经正确安装了 Java，现在可以享受与之一起工作。从现在开始，每当有新版本发布时，您都会收到升级提示，您只需点击提供的链接即可进行升级。或者，您可以转到安装程序页面（*Page2*），下载相应的安装程序，启动它，并重复您已经熟悉的过程。
-
-实际上，程序员并不会每次都升级他们的 Java 安装。他们会保持开发版本与生产环境中的 Java 版本相同（以避免潜在的不兼容性）。如果他们想在升级生产环境之前尝试新版本，他们可能会在计算机上安装两个版本的 Java，并行使用。在第三章中，*您的开发环境设置*，您将学习如何做到这一点，以及如何在它们之间切换。
-
-# 主要的 Java 命令
-
-在前一节中，您看到了一个 Java 命令的示例，显示了 JVM 版本。顺便说一句，命令`java`启动了 JVM，并用于运行编译后的 Java 程序的字节码（我们将在第四章中详细演示如何做到这一点，*您的第一个 Java 项目*）。
-
-# JVM 执行命令
-
-现在，如果您只运行`java`，输出将显示帮助的简短版本。由于它相当长，我们将分几部分显示。这是第一部分：
-
-![](img/87e0ce48-eb94-46dc-8449-d9cb351d6ac3.png)
-
-它显示了三种运行 JVM 的方式：
-
-+   执行一个类，一个包含字节码的`.class`文件
-
-+   要执行一个 jar 文件，一个带有扩展名`.jar`的文件，其中包含以 ZIP 格式的`.class`文件（甚至可能是整个应用程序），还包括一个特定于 Java 的清单文件
-
-+   执行模块中的主类（一组`.class`文件和其他资源，比`.jar`文件更好地结构化），通常是应用程序或其一部分
-
-如你所见，在上述每个命令中，都必须显式提供一个主类。它是必须首先执行的`.class`文件。它充当应用程序的主入口，并启动加载其他类（在需要时）以运行应用程序的链。这样的命令示例是：
+以下是一个声明语句的示例：
 
 ```java
 
-java MyGreatApplication
+int i;
 
 ```
 
-实际上，这意味着当前目录中有一个名为`MyGreatApplication.class`的文件，但我们不应指定文件扩展名。否则，JVM 将寻找文件`MyGreatApplication.class.class`，当然找不到，也无法运行任何内容。
+前面的语句声明了一个`int`类型的变量`i`，代表*整数*（见第五章，*Java 语言元素和类型*）。
 
-在本书中，我们不会显式使用这些命令中的任何一个，并且将其留给编辑器在幕后运行，因为现代编辑器不仅帮助编写和修改源代码；它还可以编译和执行编写的代码。这就是为什么它不仅被称为编辑器，而是**集成开发环境**（**IDE**）。
-
-尽管如此，我们将继续概述所有`java`命令选项，这样你就会知道在你的 IDE 背后发生了什么。要享受驾车乐趣，不需要了解引擎的内部工作细节，但了解其运作原理是有帮助的。此外，随着你的专业水平的提高和你所工作的应用程序的增长，你将需要调整 JVM 配置，因此这是第一次在幕后偷看。
-
-以下是`java`命令输出的下一部分：
-
-![](img/b6f9936b-a8d5-4edc-8a84-7a918271ae38.png)
-
-在前面的屏幕截图中，你可以看到两个已弃用的选项，后面是与类路径和模块路径相关的选项。最后两个选项非常重要。它们允许指定应用程序所在位置的类和应用程序使用的库的位置。后者可以是你编写的类或第三方库。
-
-模块的概念超出了本书的范围，但模块路径的使用方式与类路径非常相似。类路径选项告诉 JVM 在哪里查找类，而模块路径告诉 JVM 模块的位置。可以在同一命令行中同时使用两者。
-
-例如，假设你有一个名为`MyGreatApplication.class`的文件（其中包含你的程序的字节码`MyGreatApplication.java`），存储在`dir2`目录中，这是`dir1`目录的子目录，你的终端窗口当前显示的是`dir1`目录的内容：
-
-![](img/b9813eaf-2def-48f2-9e64-c8dbce1e73e1.png)
-
-如你所见，还有另一个目录`dir3`，我们创建它来存储另一个文件`SomeOtherProgram.class`，这是你的应用程序使用的。我们还在`dir4`中放入了其他支持的`.class`文件库，这些文件被收集在`SomeLibrary.jar`中。然后运行你的应用程序的命令行如下：
+以下是一个表达式语句：
 
 ```java
 
-java -cp dir2:dir3:dir4/SomeLibrary.jar  MyGreatApplication //on Unix
-
-java -cp dir2;dir3;dir4\SomeLibrary.jar  MyGreatApplication //on Windows
+i + 2;
 
 ```
 
-或者，我们可以将`SomeOtherProgram.class`和`MyGreatApplication.class`放入`some.jar`或`some.zip`文件，并将其放在`dir5`中。然后，命令将采用以下形式之一：
+前面的语句将 2 添加到现有变量`i`的值中。当声明时，`int`变量默认被赋值为 0，因此此表达式的结果为`2`，但未存储。这就是为什么它经常与声明和赋值语句结合使用的原因：
 
 ```java
 
-java -cp dir4/SomeLibrary.jar:dir5/some.zip MyGreatApplication //Unix
-
-java -cp dir4/SomeLibrary.jar:dir5/some.jar MyGreatApplication //Unix
-
-java -cp dir4\SomeLibrary.jar;dir5\some.zip MyGreatApplication //Windows
-
-java -cp dir4\SomeLibrary.jar;dir5\some.jar MyGreatApplication //Windows
+int j = i + 2;
 
 ```
 
-我们可以使用`-cp`选项，也可以使用`-classpath`或`--class-path`选项。它们只是三种不同的约定，以便习惯于其中一种的人可以直观地编写命令行。这些风格中没有一个比其他更好或更差，尽管我们每个人都有偏好和意见。如果没有使用任何 classpath 选项，JVM 只会在当前目录中查找类。一些类（标准库）总是位于 Java 安装的某些目录中，因此无需使用 classpath 选项列出它们。我们将在第三章中更详细地讨论设置 classpath。
+这告诉处理器创建一个`int`类型的变量`j`，并为其分配一个值，该值等于变量`i`当前分配的值加 2。在第九章，*运算符、表达式和语句*中，我们将更详细地讨论语句和表达式。
 
-`java`命令输出的下一部分列出了一些选项，允许在实际执行应用程序之前验证一切是否设置正确：
+# 方法
 
-![](img/2d68305f-2660-4ee9-83a2-67aa2bd588e4.png)
-
-由于模块超出了本书的范围，我们将跳过这些内容，继续输出的下一部分：
-
-![](img/dfd31045-7e5c-4c9e-b7f8-c960ae35dc06.png)
-
-`-D` 选项允许设置一个可供应用程序访问的带有值的参数。它经常用于向应用程序传递一些值或标志，应用程序可以用来改变其行为。如果需要传递更多信息，那么就使用`.properties`文件（带有许多标志和各种值），而属性文件的位置则通过`-D`选项传递。完全取决于程序员，`.properties`文件或通过`-D`选项传递的值应该是什么。但是与应用程序配置相关的最佳实践也取决于您使用的特定框架或库。您将随着时间学会它们，这些实践超出了初学者程序员课程。
-
-`-verbose` 选项提供了更多信息（比我们在这些截图中看到的）和一些特定的数据，取决于标志`class`、`module`、`gc`或`jni`，其中**gc**代表**垃圾收集器**，将在第十一章中讨论。对于其他标志，您可以阅读官方的 Oracle 文档，但很可能您不会很快使用它们。
-
-`-version` 选项显示已安装的 Java 版本。这在第一天就非常有用，因为它允许随时检查当前使用的 Java 版本。在前面的部分中，我们演示了如何做到这一点，以及它产生的输出。当发布新版本的 Java 时，许多程序员会与他们当前使用的版本并行安装它，并在它们之间切换，无论是为了学习新功能还是为了开始为新版本编写代码，同时保留为旧版本编写的旧代码。您将学会如何在同一台计算机上安装两个版本的 Java，并在第三章中，*您的开发环境设置*中学会如何在它们之间切换。
-
-我们将跳过与模块相关的选项。
-
-在前面的截图中的其余选项与帮助相关。选项`-?`、`-h`、`-help`和`--help`显示了我们在这些截图中展示的内容，而选项`-X`和`--help-extra`提供了额外的信息。您可以自己尝试所有这些选项。
-
-帮助输出的最后一部分如下：
-
-![](img/c0b12db1-c3f7-45da-9dea-6608a94380c2.png)
-
-我们将不讨论这些选项。只需注意如何使用上一行中解释的长选项（带有两个连字符）。
-
-# 编译命令
-
-如前所述，用 Java 编写的程序称为源代码，并存储在`.java`文件中。编译命令`javac`读取它，并创建相应的带有 Java 字节码的`.class`文件。
-
-让我们运行`javac`命令，而不指定`.java`文件。它将显示帮助信息。让我们分部分地进行审查：
-
-![](img/e6ec3374-6a59-4980-a82b-b21297711b17.png)
-
-帮助告诉我们，这个命令的格式如下：
+Java 方法是一组语句，总是一起执行，目的是对某个输入产生某个结果。方法有一个名称，要么一组输入参数，要么根本没有参数，一个在`{}`括号内的主体，以及一个返回类型或`void`关键字，表示该消息不返回任何值。以下是一个方法的示例：
 
 ```java
 
-javac <options> <source files>
+int multiplyByTwo(int i){
+
+int j = i * 2;
+
+return j;
+
+}
 
 ```
 
-要编译一些文件，可以在选项后的命令行中列出它们（如果文件不在当前目录中，必须使用绝对或相对路径前置文件名）。 列出的文件在 Oracle Solaris 中用冒号（`:`）分隔，在 Windows 中用分号（`;`）分隔，可以是目录、`.jar`文件或`.zip`文件。 还可以列出文件中的所有源文件，并使用`@filename`选项提供此文件名（请参阅前面的屏幕截图）。 但不要试图记住所有这些。 您很少（如果有的话）会显式运行`java`或`javac`命令。 您可能会使用一个 IDE 为您执行（请参阅第三章，*您的开发环境设置*）。 这也是我们将跳过前面屏幕截图中列出的大多数选项并仅提到其中两个选项的原因：`--class-path`（或`-classpath`或`-cp`），它指定当前编译代码所需的`.class`文件的位置，和`-d`，它指示创建`.class`文件的位置。
+在前面的代码片段中，方法名为`multiplyByTwo`。它有一个`int`类型的输入参数。方法名和参数类型列表一起称为**方法签名**。输入参数的数量称为**arity**。如果两个方法具有相同的名称、相同的 arity 和相同的输入参数列表中类型的顺序，则它们具有相同的签名。
 
-以下是`javac`帮助的下一部分：
+这是从 Java 规范第*8.4.2 节方法签名*中摘取的方法签名定义的另一种措辞。另一方面，在同一规范中，人们可能会遇到诸如：*具有相同名称和签名的多个方法*，*类*`Tuna`*中的方法*`getNumberOfScales`*具有名称、签名和返回类型*等短语。因此，要小心；即使是规范的作者有时也不将方法名包括在方法签名的概念中，如果其他程序员也这样做，不要感到困惑。
 
-![](img/a1407f79-99c0-4b2a-b893-f77b46ebf783.png)
+同一个前面的方法可以用许多风格重写，并且得到相同的结果：
 
-我们将在此提到前面屏幕截图中的唯一选项是`--help`（或`-help`），它提供了我们现在正在浏览的相同帮助消息。
+```java
 
-最后，`javac`帮助的最后一部分如下：
+int multiplyByTwo(int i){
 
-![](img/b406bf77-f4fa-46d0-9655-02f290994bc9.png)
+return i * 2;
 
-我们已经描述了选项`--source-path`（或`-sourcepath`）。 选项`-verbose`要求编译器提供更详细的报告，说明它正在做什么，而选项`--version`（或`-version`）显示 JDK 版本：
+}
 
-![](img/dab1a888-24c1-4bcb-b3a1-9b098ae8b5bf.png)
+```
 
-# 命令 jcmd 和其他命令
+另一种风格如下：
 
-还有十几个其他的 Java 命令（工具和实用程序），您可能只有在专业编程几年后才会开始使用，如果有的话。 它们都在 Oracle Java 在线文档中有描述。 只需搜索 Java 实用程序和工具。
+```java
 
-其中，我们只找到一个从 Java 编程的第一天起就非常有用的命令`jcmd`。 如果运行它，它会显示计算机上正在运行的所有 Java 进程（JVM 实例）。 在此示例中，您可以看到三个 Java 进程，进程 ID 分别为 3408、3458 和 3454：
+int multiplyByTwo(int i){ return i * 2; }
 
-![](img/67653ba6-e839-41af-bf2c-d41b31ad5ebe.png)
+```
 
-进程 3408 运行 Maven 服务器（您的 IDE 通常会启动它）。 进程 3458 是我们运行`jcmd`。 进程 3454 是一个编辑器（IDE）IntelliJ IDEA，正在运行小型演示应用程序`com.packt.javapath.App`。
+一些程序员更喜欢最紧凑的风格，以便能够在屏幕上看到尽可能多的代码。但这可能会降低另一个程序员理解代码的能力，这可能会导致编程缺陷。
 
-这样，您可以随时检查您的计算机上是否有一个失控的 Java 进程。 如果您想要停止它，可以使用任务管理器，或者需要 PID 的`kill`命令。
+另一个例子是一个没有输入参数的方法：
 
-当您想要监视您的 Java 应用程序时，也需要了解 PID。 我们将在第十一章，*JVM 进程和垃圾收集*中讨论这一点。
+```java
 
-通过这一点，我们完成了对 Java 命令的概述。 正如我们已经提到的，您的 IDE 将在幕后使用所有这些命令，因此您可能永远不会使用它们，除非您进行生产支持（这是在您开始学习 Java 几年后）。 但我们认为您需要了解它们，这样您就可以连接 Java 开发过程的各个方面。
+int giveMeFour(){ return 4; }
 
-# 练习 - JDK 工具和实用程序
+```
 
-在您的计算机上，找到 Java 安装目录，并列出所有命令（工具和实用程序） - 执行文件 - 存在那里。
+这是相当无用的。实际上，没有参数的方法会从数据库中读取数据，例如，或者从其他来源读取数据。我们展示这个例子只是为了演示语法。
 
-如果您在其他可执行文件中看到`java`和`javac`，则您就在正确的位置。
+这是一个什么都不做的代码示例：
+
+```java
+
+void multiplyByTwo(){ }
+
+```
+
+前面的方法什么也不做，也不返回任何东西。语法要求使用关键字`void`来指示没有返回值。实际上，没有返回值的方法通常用于将数据记录到数据库，或者发送数据到打印机、电子邮件服务器、另一个应用程序（例如使用 Web 服务），等等。
+
+为了完整起见，这是一个具有许多参数的方法的示例：
+
+```java
+
+String doSomething(int i, String s, double a){
+
+double result = Math.round(Math.sqrt(a)) * i;
+
+返回 s + Double.toString(result);
+
+}
+
+```
+
+上述方法从第三个参数中提取平方根，将其乘以第一个参数，将结果转换为字符串，并将结果附加（连接）到第二个参数。将在第五章中介绍使用的`Math`类的类型和方法，*Java 语言元素和类型*。这些计算并没有太多意义，仅供说明目的。
+
+# 类
+
+Java 中的所有方法都声明在称为**类**的结构内。一个类有一个名称和一个用大括号`{}`括起来的主体，在其中声明方法：
+
+```java
+
+我的类 {
+
+int multiplyByTwo(int i){ return i * 2; }
+
+int giveMeFour(){ return 4;}
+
+}
+
+```
+
+类也有字段，通常称为属性；我们将在下一节讨论它们。
+
+# 主类和主方法
+
+一个类作为 Java 应用程序的入口。在启动应用程序时，必须在`java`命令中指定它：
+
+```java
+
+java -cp <所有.class 文件的位置> MyGreatApplication
+
+```
+
+在上述命令中，`MyGreatApplication`是作为应用程序起点的类的名称。当 JVM 找到文件`MyGreatApplication.class`时，它会将其读入内存，并在其中查找名为`main()`的方法。这个方法有一个固定的签名：
+
+```java
+
+public static void main(String[] args) {
+
+// 在这里放语句
+
+}
+
+```
+
+让我们把前面的代码片段分成几部分：
+
++   `public`表示这个方法对任何外部程序都是可访问的（参见第七章，*包和可访问性（可见性）*）
+
++   `static`表示该方法在所有内存中只存在一个副本（参见下一节）
+
++   `void`表示它不返回任何东西
+
++   `main`是方法名
+
++   `String[] args`表示它接受一个 String 值的数组作为输入参数（参见第五章，*Java 语言元素和类型*）
+
++   `//`表示这是一个注释，JVM 会忽略它，这里只是为了人类（参见第五章，*Java 语言元素和类型*）
+
+前面的`main()`方法什么也不做。如果运行，它将成功执行但不会产生结果。
+
+您还可以看到输入参数写成如下形式：
+
+```java
+
+public static void main(String... args) {
+
+//执行一些操作的主体
+
+}
+
+```
+
+它看起来像是不同的签名，但实际上是相同的。自 JDK 5 以来，Java 允许将方法签名的*最后一个参数*声明为相同类型的变量可变性的一系列参数。这被称为**varargs**。在方法内部，可以将最后一个输入参数视为数组`String[]`，无论它是显式声明为数组还是作为可变参数。如果你一生中从未使用过 varargs，那么你会没问题。我们告诉你这些只是为了让你在阅读其他人的代码时避免混淆。
+
+`main（）`方法的最后一个重要特性是其输入参数的来源。没有其他代码调用它。它是由 JVM 本身调用的。那么参数是从哪里来的呢？人们可能会猜想命令行是参数值的来源。在`java`命令中，到目前为止，我们假设没有参数传递给主类。但是如果主方法期望一些参数，我们可以构造命令行如下：
+
+```java
+
+java -cp <所有.class 文件的位置> MyGreatApplication 1 2
+
+```
+
+这意味着在`main（）`方法中，输入数组`args [0]`的第一个元素的值将是`1`，而输入数组`args [1]`的第二个元素的值将是`2`。是的，你注意到了，数组中元素的计数从`0`开始。我们将在第五章中进一步讨论这个问题，*Java 语言元素和类型*。无论是显式地使用数组`String[] args`描述`main（）`方法签名，还是使用可变参数`String... args`，结果都是一样的。
+
+然后`main（）`方法中的代码调用同一 main`.class`文件中的方法或使用`-classpath`选项列出的其他`.class`文件中的方法。在接下来的部分中，我们将看到如何进行这样的调用。
+
+# 类和对象（实例）
+
+类用作创建对象的模板。创建对象时，类中声明的所有字段和方法都被复制到对象中。对象中字段值的组合称为**对象状态**。方法提供对象行为。对象也称为类的实例。
+
+每个对象都是使用运算符`new`和看起来像一种特殊类型的方法的构造函数创建的。构造函数的主要职责是设置初始对象状态。
+
+现在让我们更仔细地看一看 Java 类和对象。
+
+# Java 类
+
+Java 类存储在`.java`文件中。每个`.java`文件可以包含多个类。它们由 Java 编译器`javac`编译并存储在`.class`文件中。每个`.class`文件只包含一个已编译的类。
+
+每个`.java`文件只包含一个`public`类。类名前的关键字`public`使其可以从其他文件中的类访问。文件名必须与公共类名匹配。文件还可以包含其他类，它们被编译成自己的`.class`文件，但只能被给出其名称的公共类访问`.java`文件。
+
+这就是文件`MyClass.java`的内容可能看起来像的样子：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public String method1（int i）{
+
+//语句，包括返回语句
+
+}
+
+私有 void 方法 2（字符串 s）{
+
+//没有返回语句的语句
+
+}
+
+}
+
+```
+
+它有两个字段。关键字`private`使它们只能从类内部，从它的方法中访问。前面的类有两个方法 - 一个是公共的，一个是私有的。公共方法可以被任何其他类访问，而私有方法只能从同一类的其他方法中访问。
+
+这个类似乎没有构造函数。那么，基于这个类的对象的状态将如何初始化？答案是，事实上，每个没有显式定义构造函数但获得一个默认构造函数的类。这里有两个显式添加的构造函数的例子，一个没有参数，另一个有参数：
+
+```java
+
+public class SomeClass {
+
+private int field1;
+
+public MyClass(){
+
+this.field1 = 42;
+
+}
+
+//... 类的其他内容 - 方法
+
+//    定义对象行为
+
+}
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+}
+
+//... 方法在这里
+
+}
+
+```
+
+在上面的代码片段中，关键字`this`表示当前对象。它的使用是可选的。我们可以写`field1 = val1;`并获得相同的结果。但是最好使用关键字`this`来避免混淆，特别是当（程序员经常这样做）参数的名称与字段的名称相同时，比如在下面的构造函数中：
+
+```java
+
+public MyClass(int field1, String field1){
+
+field1 = field1;
+
+field2 = field2;
+
+}
+
+```
+
+添加关键字`this`使代码更友好。有时候，这是必要的。我们将在第六章中讨论这样的情况，*接口、类和对象构造*。
+
+一个构造函数也可以调用这个类或任何其他可访问类的方法：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+method1(33);
+
+method2(val2);
+
+}
+
+public String method1(int i){
+
+//语句，包括返回语句
+
+}
+
+private void method2(String s){
+
+//没有返回语句的语句
+
+}
+
+}
+
+```
+
+如果一个类没有显式定义构造函数，它会从默认的基类`java.lang.Object`中获得一个默认构造函数。我们将在即将到来的*继承*部分解释这意味着什么。
+
+一个类可以有多个不同签名的构造函数，用于根据应用程序逻辑创建具有不同状态的对象。一旦在类中添加了带参数的显式构造函数，除非也显式添加默认构造函数，否则默认构造函数将不可访问。澄清一下，这个类只有一个默认构造函数：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+//... 其他方法在这里
+
+}
+
+```
+
+这个类也只有一个构造函数，但没有默认构造函数：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+}
+
+//... 其他方法在这里
+
+}
+
+```
+
+这个类有两个构造函数，一个有参数，一个没有参数：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public MyClass(){ }
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+}
+
+//... 其他方法在这里
+
+}
+
+```
+
+没有参数的前面构造函数什么也不做。它只是为了方便客户端代码创建这个类的对象，但不关心对象的特定初始状态。在这种情况下，JVM 创建默认的初始对象状态。我们将在第六章中解释默认状态，*接口、类和对象构造*。
+
+同一个类的每个对象，由任何构造函数创建，都有相同的方法（相同的行为），即使它的状态（分配给字段的值）是不同的。
+
+这些关于 Java 类的信息对于初学者来说已经足够了。尽管如此，我们还想描述一些其他类，这些类可以包含在同一个`.java`文件中，这样你就可以在其他人的代码中识别它们。这些其他类被称为**嵌套类**。它们只能从同一个文件中的类中访问。
+
+我们之前描述的类-`.java`文件中唯一的一个公共类-也被称为顶级类。它可以包括一个称为内部类的嵌套类：
+
+```java
+
+public class MyClass { //顶级类
+
+class MyOtherClass { //内部类
+
+//内部类内容在这里
+
+}
+
+}
+
+```
+
+顶级类还可以包括一个静态（关于静态成员的更多信息请参见下一节）嵌套类。`static`类不被称为内部类，只是一个嵌套类：
+
+```java
+
+public class MyClass { //顶级类
+
+static class MyYetAnotherClass { //嵌套类
+
+//嵌套类内容在这里
+
+}
+
+}
+
+```
+
+任何方法都可以包括一个只能在该方法内部访问的类。它被称为本地类：
+
+```java
+
+public class MyClass { //顶级类
+
+void someMethod（）{
+
+class MyInaccessibleAnywhereElseClass { //本地类
+
+//本地类内容在这里
+
+}
+
+}
+
+}
+
+```
+
+本地类并不经常使用，但并不是因为它没有用。程序员只是不记得如何创建一个只在一个方法内部需要的类，而是创建一个外部或内部类。
+
+最后但并非最不重要的一种可以包含在与公共类相同文件中的类是匿名类。它是一个没有名称的类，允许在原地创建一个对象，可以覆盖现有方法或实现一个接口。让我们假设我们有以下接口，`InterfaceA`，和类`MyClass`：
+
+```java
+
+public interface InterfaceA {
+
+void doSomething（）;
+
+}
+
+public class MyClass {
+
+void someMethod1（）{
+
+System.out.println("1.常规被称为");
+
+}
+
+void someMethod2（InterfaceA interfaceA）{
+
+interfaceA.doSomething（）;
+
+}
+
+}
+
+```
+
+我们可以执行以下代码：
+
+```java
+
+MyClass myClass = new MyClass（）;
+
+myClass.someMethod1（）;
+
+myClass = new MyClass（）{ //匿名类扩展类 MyClass
+
+public void someMethod1（）{ //并覆盖 someMethod1（）
+
+System.out.println("2.匿名被称为");
+
+}
+
+};
+
+我的类。someMethod1（）;
+
+myClass.someMethod2（new InterfaceA（）{ //匿名类实现
+
+public void doSomething（）{ // InterfaceA
+
+System.out.println("3.匿名被称为");
+
+}
+
+});
+
+```
+
+结果将是：
+
+```java
+
+1.常规被称为
+
+2.匿名被称为
+
+3.匿名被称为
+
+```
+
+我们不希望读者完全理解前面的代码。我们希望读者在阅读本书后能够做到这一点。
+
+这是一个很长的部分，包含了很多信息。其中大部分只是供参考，所以如果你记不住所有内容，不要感到难过。在完成本书并获得一些 Java 编程的实际经验后，再回顾这一部分。
+
+接下来还有几个介绍性部分。然后[第三章]（18c6e8b8-9d8a-4ece-9a3f-cd00474b713e.xhtml），*您的开发环境设置*，将引导您配置计算机上的开发工具，并且在[第四章]（64574f55-0e95-4eda-9ddb-b05da6c41747.xhtml），*您的第一个 Java 项目*，您将开始编写代码并执行它-每个软件开发人员都记得的时刻。
+
+再走几步，你就可以称自己为 Java 程序员了。
+
+# Java 对象（类实例）
+
+人们经常阅读-甚至 Oracle 文档也不例外-对象被*用于模拟现实世界的对象*。这种观点起源于面向对象编程之前的时代。那时，程序有一个用于存储中间结果的公共或全局区域。如果不小心管理，不同的子例程和过程-那时称为方法-修改这些值，互相干扰，使得很难追踪缺陷。自然地，程序员们试图规范对数据的访问，并且使中间结果只能被某些方法访问。一组方法和只有它们可以访问的数据开始被称为对象。
+
+这些构造也被视为现实世界对象的模型。我们周围的所有对象可能都有某种内在状态，但我们无法访问它，只知道对象的行为。也就是说，我们可以预测它们对这个或那个输入会有什么反应。在类（对象）中创建只能从同一类（对象）的方法中访问的私有字段似乎是隐藏对象状态的解决方案。因此，模拟现实世界对象的原始想法得以延续。
+
+但是经过多年的面向对象编程，许多程序员意识到这样的观点可能会产生误导，并且在试图将其一贯应用于各种软件对象时实际上可能会产生相当大的危害。例如，一个对象可以携带用作算法参数的值，这与任何现实世界的对象无关，但与计算效率有关。或者，另一个例子，一个带回计算结果的对象。程序员通常称之为**数据传输对象**（**DTO**）。除非扩展现实世界对象的定义，否则它与现实世界对象无关，但那将是一个伸展。
+
+软件对象只是计算机内存中的数据结构，实际值存储在其中。内存是一个现实世界的对象吗？物理内存单元是，但它们携带的信息并不代表这些单元。它代表软件对象的值和方法。关于对象的这些信息甚至不是存储在连续的内存区域中：对象状态存储在一个称为堆的区域中，而方法存储在方法区中，具体取决于 JVM 实现，可能或可能不是堆的一部分。
+
+在我们的经验中，对象是计算过程的一个组成部分，通常不是在现实世界对象的模型上运行。对象用于传递值和方法，有时相关，有时不相关。方法和值的集合可能仅仅为了方便或其他考虑而被分组在一个类中。
+
+公平地说，有时软件对象确实代表现实世界对象的模型。但关键是这并不总是如此。因此，除非真的是这样，让我们不将软件对象视为现实世界对象的模型。相反，让我们看看对象是如何创建和使用的，以及它们如何帮助我们构建有用的功能 - 应用程序。
+
+正如我们在前一节中所描述的，对象是基于类创建的，使用关键字`new`和构造函数 - 要么是默认的，要么是显式声明的。例如，考虑以下类：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+}
+
+public String method1(int i){
+
+//语句，包括返回语句
+
+}
+
+//... 其他方法在这里
+
+}
+
+```
+
+如果我们有这个类，我们可以在其他类的方法中写以下内容：
+
+```java
+
+public AnotherClass {
+
+...
+
+public void someMethod(){
+
+MyClass myClass = new MyClass(3, "some string");
+
+String result = myClass.method1(2);
+
+}
+
+...
+
+}
+
+```
+
+在前面的代码中，语句`MyClass myClass = new MyClass(3, "some string");`创建了一个`MyClass`类的对象，使用了它的构造函数和关键字`new`，并将新创建的对象的引用分配给变量`myClass`。我们选择了一个对象引用的标识符，它与类名匹配，第一个字母小写。这只是一个约定，我们也可以选择另一个标识符（比如`boo`），结果是一样的。在第五章中，*Java 语言元素和类型*，我们会更详细地讨论标识符和变量。正如你在前面的例子中看到的，在下一行中，一旦创建了一个引用，我们就可以使用它来访问新创建对象的公共成员。
+
+任何 Java 对象都只能通过使用关键字（运算符）`new`和构造函数来创建。这个过程也被称为**类实例化**。对对象的引用可以像任何其他值一样传递（作为变量、参数或返回值），每个有权访问引用的代码都可以使用它来访问对象的公共成员。我们将在下一节中解释什么是**公共成员**。
+
+# 类（静态）和对象（实例）成员
+
+我们已经提到了与对象相关的公共成员这个术语。在谈到`main()`方法时，我们还使用了关键字`static`。我们还声明了一个被声明为`static`的成员在 JVM 内存中只能有一个副本。现在，我们将定义所有这些，以及更多。
+
+# 私有和公共
+
+关键字`private`和`public`被称为**访问修饰符**。还有默认和`protected`访问修饰符，但我们将在第七章中讨论它们，*包和可访问性（可见性）*。它们被称为访问修饰符，因为它们调节类、方法和字段的可访问性（有时也被称为可见性），并且它们修改相应的类、方法或字段的声明。
+
+一个类只有在它是嵌套类时才能是私有的。在前面的*Java 类*部分，我们没有为嵌套类使用显式访问修饰符（因此，我们使用了默认的），但如果我们希望只允许从顶级类和同级访问这些类，我们也可以将它们设为私有。
+
+私有方法或私有字段只能从声明它的类（对象）中访问。
+
+相比之下，公共类、方法或字段可以从任何其他类中访问。请注意，如果封闭类是私有的，那么方法或字段就不能是公共的。这是有道理的，不是吗？如果类本身在公共上是不可访问的，那么它的成员如何能是公共的呢？
+
+# 静态成员
+
+只有当类是嵌套类时，才能声明一个类为静态。类成员——方法和字段——也可以是静态的，只要类不是匿名的或本地的。任何代码都可以访问类的静态成员，而不需要创建类实例（对象）。在前面的章节中，我们在一个代码片段中使用了类`Math`，就是这样的一个例子。静态类成员在字段的情况下也被称为类变量，方法的情况下被称为类方法。请注意，这些名称包含`class`这个词作为形容词。这是因为静态成员与类相关联，而不是与类实例相关联。这意味着在 JVM 内存中只能存在一个静态成员的副本，尽管在任何时刻可以创建和驻留在那里的类的许多实例（对象）。
+
+这里是另一个例子。假设我们有以下类：
+
+```java
+
+公共类 MyClass {
+
+私有 int 字段 1;
+
+公共静态字符串字段 2;
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+}
+
+public String method1(int i){
+
+//语句，包括返回语句
+
+}
+
+public static void method2(){
+
+//语句
+
+}
+
+//... other methods are here
+
+}
+
+```
+
+从任何其他类的任何方法，可以通过以下方式访问前述`MyClass`类的公共静态成员：
+
+```java
+
+MyClass.field2 = "any string";
+
+String s = MyClass.field2 + " and another string";
+
+```
+
+前述操作的结果将是将变量`s`的值分配为`any string and another string`。`String`类将在第五章中进一步讨论，*Java 语言元素和类型*。
+
+同样，可以通过以下方式访问类`MyClass`的公共静态方法`method2()`：
+
+```java
+
+MyClass.method2();
+
+```
+
+类`MyClass`的其他方法仍然可以通过实例（对象）访问：
+
+```java
+
+MyClass mc = new MyClass(3, "any string");
+
+String someResult = mc.method1(42);
+
+```
+
+显然，如果所有成员都是静态的，就没有必要创建`MyClass`类的对象。
+
+然而，有时可以通过对象引用访问静态成员。以下代码可能有效 - 这取决于`javac`编译器的实现。如果有效，它将产生与前面代码相同的结果：
+
+```java
+
+MyClass mc = new MyClass(3, "any string");
+
+mc.field2 = "Some other string";
+
+mc.method2();
+
+```
+
+有些编译器会提供警告，比如*通过实例引用访问静态成员*，但它们仍然允许你这样做。其他编译器会产生错误*无法使静态引用非静态方法/字段*，并强制你纠正代码。Java 规范不规定这种情况。但是，通过对象引用访问静态类成员不是一个好的做法，因为它使得代码对于人类读者来说是模棱两可的。因此，即使你的编译器更宽容，最好还是避免这样做。
+
+# 对象（实例）成员
+
+非静态类成员在字段的情况下也称为实例变量，或者在方法的情况下称为实例方法。它只能通过对象的引用后跟一个点“。”来访问。我们已经看到了几个这样的例子。
+
+按照长期以来的传统，对象的字段通常声明为私有的。如果必要，提供`set()`和/或`get()`方法来访问这些私有值。它们通常被称为 setter 和 getter，因为它们设置和获取私有字段的值。这是一个例子：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public void setField1(String val){
+
+this.field1 = val;
+
+}
+
+public String getField1(){
+
+return this.field1;
+
+}
+
+public void setField2(String val){
+
+this.field2 = val;
+
+}
+
+public String getField2(){
+
+return this.field2;
+
+}
+
+//... other methods are here
+
+}
+
+```
+
+有时，有必要确保对象状态不能被改变。为了支持这种情况，程序员使用构造函数来设置状态并删除 setter：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+}
+
+public String getField1(){
+
+return this.field1;
+
+}
+
+public String getField2(){
+
+return this.field2;
+
+}
+
+//... other non-setting methods are here
+
+}
+
+```
+
+这样的对象称为不可变的。
+
+# 方法重载
+
+具有相同名称但不同签名的两个方法代表方法重载。这是一个例子：
+
+```java
+
+public class MyClass {
+
+public String method(int i){
+
+//statements
+
+}
+
+public int method(int i, String v){
+
+//statements
+
+}
+
+}
+
+```
+
+以下是不允许的，会导致编译错误，因为返回值不是方法签名的一部分，如果它们具有相同的签名，则无法用于区分一个方法和另一个方法：
+
+```java
+
+public class MyClass {
+
+public String method(int i){
+
+//statements
+
+}
+
+public int method(int i){ //error
+
+//statements
+
+}
+
+}
+
+```
+
+然而，这是允许的，因为这些方法具有不同的签名：
+
+```java
+
+public String method(String v, int i){
+
+//statements
+
+}
+
+public String method(int i, String v){
+
+//语句
+
+}
+
+```
+
+# 接口、实现和继承
+
+现在，我们要进入 Java 编程的最重要领域——接口、实现和继承这些广泛使用的 Java 编程术语。
+
+# 接口
+
+在日常生活中，“接口”这个词非常流行。它的含义与 Java 接口在编程中所扮演的角色非常接近。它定义了对象的公共界面。它描述了如何与对象进行交互以及可以期望它具有什么。它隐藏了内部类的工作原理，只公开了具有返回值和访问修饰符的方法签名。接口不能被实例化。接口类型的对象只能通过创建实现该接口的类的对象来创建（接口实现将在下一节中更详细地介绍）。
+
+例如，看下面的类：
+
+```java
+
+public class MyClass {
+
+private int field1;
+
+private String field2;
+
+public MyClass(int val1, String val2){
+
+this.field1 = val1;
+
+this.field2 = val2;
+
+}
+
+public String method(int i){
+
+//语句
+
+}
+
+public int method(int i, String v){
+
+//语句
+
+}
+
+}
+
+```
+
+它的接口如下：
+
+```java
+
+public interface MyClassInterface {
+
+String method(int i);
+
+int method(int i, String v);
+
+}
+
+```
+
+因此，我们可以写`public class MyClass implements MyClassInterface {...}`。我们将在下一节中讨论它。
+
+由于接口是*公共*的界面，默认情况下假定方法访问修饰符`public`，可以省略。
+
+接口不描述如何创建类的对象。要发现这一点，必须查看类并查看它的构造函数的签名。还可以检查并查看是否存在可以在不创建对象的情况下访问的公共静态类成员。因此，接口只是类*实例*的公共界面。
+
+让我们来看看接口的其余功能。根据 Java 规范，*接口的主体可以声明接口的成员，即字段、方法、类和接口。*如果您感到困惑，并问接口和类之间的区别是什么，您有一个合理的关注，我们现在将解决这个问题。
+
+接口中的字段隐式地是公共的、静态的和最终的。修饰符`final`表示它们的值不能被改变。相比之下，在类中，类本身、它的字段、方法和构造函数的默认访问修饰符是包私有的，这意味着它只在自己的包内可见。包是相关类的命名组。您将在第七章中了解它们，*包和可访问性（可见性）*。
+
+接口主体中的方法可以声明为默认、静态或私有。默认方法的目的将在下一节中解释。静态方法可以通过接口名称和点“`.`”从任何地方访问。私有方法只能被同一接口内的其他方法访问。相比之下，类中方法的默认访问修饰符是包私有的。
+
+至于在接口内声明的类，它们隐式地是静态的。它们也是公共的，可以在没有接口实例的情况下访问，而创建接口实例是不可能的。我们不会再多谈论这样的类，因为它们用于超出本书范围的非常特殊的领域。
+
+与类类似，接口允许在其内部声明内部接口。可以像任何静态成员一样从外部访问它，使用顶级接口和点“`.`”。我们想提醒您，接口默认是公共的，不能被实例化，因此默认是静态的。
+
+There is one last very important term related to interfaces. A method signature listed in the interface without an implementation is called an **abstract method** and the interface itself is called **abstraction** because it abstracts, summarizes, and removes the signatures from the implementation. An abstraction cannot be instantiated. As an example, if you put the keyword `abstract` in front of any class and try to create its object, the compiler will throw an error even if all the methods in the class are not abstract. In such a case, the class behaves as an interface with the default methods only. Yet, there is a significant difference in their usage, which you will see after reading the upcoming *Inheritance* section of this chapter.
+
+We will talk more about interfaces in Chapter 6, *Interfaces, Classes, and Objects Construction*, and cover their access modifiers in Chapter 7, *Packages and Accessibility (Visibility)*.
+
+# Implementation
+
+An interface can be implemented by a class, which means that the class has a body for each of the abstract methods listed in the interface. Here is an example:
+
+```java
+
+interface Car {
+
+double getWeightInPounds();
+
+double getMaxSpeedInMilesPerHour();
+
+}
+
+public class CarImpl implements Car{
+
+public double getWeightInPounds(){
+
+return 2000d;
+
+}
+
+public double getMaxSpeedInMilesPerHour(){
+
+return 100d;
+
+}
+
+}
+
+```
+
+We named the class `CarImpl` to indicate that it is an implementation of the interface `Car`. But we could name it any other way we like.
+
+Both interface and its class implementation can have other methods too without causing a compiler error. The only requirement for the extra method in the interface is that it has to be default and have a body. Adding any other method to a class does not interfere with the interface implementation.  For example:
+
+```java
+
+interface Car {
+
+double getWeightInPounds();
+
+double getMaxSpeedInMilesPerHour();
+
+default int getPassengersCount(){
+
+return 4;
+
+}
+
+}
+
+public class CarImpl implements Car{
+
+private int doors;
+
+private double weight, speed;
+
+public CarImpl(double weight, double speed, int doors){
+
+this.weight = weight;
+
+this.speed = speed;
+
+this.dooes = doors;
+
+}
+
+public double getWeightInPounds(){
+
+return this.weight;
+
+}
+
+public double getMaxSpeedInMilesPerHour(){
+
+return this.speed;
+
+}
+
+public int getNumberOfDoors(){
+
+return this.doors;
+
+}
+
+}
+
+```
+
+If we now create an instance of a class `CarImpl`, we can call all the methods we have declared in the class:
+
+```java
+
+CarImpl car = new CarImpl(500d, 50d, 3);
+
+car.getWeightInPounds();         //Will return 500.0
+
+car.getMaxSpeedInMilesPerHour(); //Will return 50.0
+
+car.getNumberOfDoors();          //Will return 3
+
+```
+
+That was not surprising.
+
+But, here is something you might not have expected:
+
+```java
+
+car.getPassengersCount();          //Will return 4
+
+```
+
+This means that by implementing an interface class acquires all the default methods the interface has. That is the purpose of the default methods: to add functionality to all classes that implement the interface. Without it, if we add an abstract method to an old interface, all current interface implementations will trigger a compiler error. But, if we add a new method with the modifier default, the existing implementations will continue working as usual.
+
+Now, another nice trick. If a class implements a method with the same signature as the default method, it will `override` (a technical term) the behavior of the interface. Here is an example:
+
+```java
+
+interface Car {
+
+double getWeightInPounds();
+
+double getMaxSpeedInMilesPerHour();
+
+default int getPassengersCount(){
+
+return 4;
+
+}
+
+}
+
+public class CarImpl implements Car{
+
+private int doors;
+
+private double weight, speed;
+
+public CarImpl(double weight, double speed, int doors){
+
+this.weight = weight;
+
+this.speed = speed;
+
+this.dooes = doors;
+
+}
+
+public double getWeightInPounds(){
+
+return this.weight;
+
+}
+
+public double getMaxSpeedInMilesPerHour(){
+
+return this.speed;
+
+}
+
+public int getNumberOfDoors(){
+
+return this.doors;
+
+}
+
+public int getPassengersCount(){
+
+返回 3;
+
+}
+
+}
+
+```
+
+如果我们使用本例中描述的接口和类，我们可以编写以下代码：
+
+```java
+
+CarImpl car = new CarImpl(500d, 50d, 3);
+
+car.getPassengersCount();        //现在将返回 3 !!!!
+
+```
+
+如果接口的所有抽象方法都没有被实现，那么类必须声明为抽象类，并且不能被实例化。
+
+接口的目的是代表它的实现-所有实现它的类的所有对象。例如，我们可以创建另一个实现`Car`接口的类：
+
+```java
+
+public class AnotherCarImpl implements Car{
+
+public double getWeightInPounds(){
+
+返回 2d;
+
+}
+
+public double getMaxSpeedInMilesPerHour(){
+
+返回 3d;
+
+}
+
+public int getNumberOfDoors(){
+
+返回 4;
+
+}
+
+public int getPassengersCount(){
+
+return 5;
+
+}
+
+}
+
+```
+
+然后我们可以让`Car`接口代表它们中的每一个：
+
+```java
+
+Car car = new CarImpl(500d, 50d, 3);
+
+car.getWeightInPounds();          //将返回 500.0
+
+car.getMaxSpeedInMilesPerHour();  //将返回 50.0
+
+car.getNumberOfDoors();           //将产生编译器错误
+
+car.getPassengersCount();         //仍然返回 3 !!!!
+
+car = new AnotherCarImpl();
+
+car.getWeightInPounds();          //将返回 2.0
+
+car.getMaxSpeedInMilesPerHour();  //将返回 3.0
+
+car.getNumberOfDoors();           //将产生编译器错误
+
+car.getPassengersCount();         //将返回 5
+
+```
+
+从前面的代码片段中可以得出一些有趣的观察。首先，当变量`car`声明为接口类型时（而不是类类型，如前面的例子），不能调用接口中未声明的方法。
+
+其次，`car.getPassengersCount()`方法第一次返回`3`。人们可能期望它返回`4`，因为`car`被声明为接口类型，人们可能期望默认方法起作用。但实际上，变量`car`指的是`CarImpl`类的对象，这就是为什么执行`car.getPassengersCount()`方法的是类的实现。
+
+使用接口时，应该记住签名来自接口，但实现来自类，或者来自默认接口方法（如果类没有实现它）。这里还有默认方法的另一个特性。它们既可以作为可以实现的签名，也可以作为实现（如果类没有实现它）。
+
+如果接口中有几个默认方法，可以创建私有方法，只能由接口的默认方法访问。它们可以用来包含公共功能，而不是在每个默认方法中重复。私有方法无法从接口外部访问。
+
+有了这个，我们现在可以达到 Java 基础知识的高峰。在此之后，直到本书的结尾，我们只会添加一些细节并增强您的编程技能。这将是在高海拔高原上的一次漫步-您走得越久，就会感到越舒适。但是，要到达那个高度，我们需要爬上最后的上坡路；继承。
+
+# 继承
+
+一个类可以获取（继承）所有非私有非静态成员，因此当我们使用这个类的对象时，我们无法知道这些成员实际上位于哪里-在这个类中还是在继承它们的类中。为了表示继承，使用关键字`extends`。例如，考虑以下类：
+
+```java
+
+class A {
+
+private void m1(){...}
+
+public void m2(){...}
+
+}
+
+class B extends class A {
+
+public void m3(){...}
+
+}
+
+class C extends class B {
+
+}
+
+```
+
+在这个例子中，类`B`和`C`的对象的行为就好像它们各自有方法`m2()`和`m3()`。唯一的限制是一个类只能扩展一个类。类`A`是类`B`和类`C`的基类。类`B`只是类`C`的基类。正如我们已经提到的，它们每个都有默认的基类`java.lang.Object`。类`B`和`C`是类`A`的子类。类`C`也是类`B`的子类。
+
+相比之下，一个接口可以同时扩展许多其他接口。如果`AI`，`BI`，`CI`，`DI`，`EI`和`FI`是接口，那么允许以下操作：
+
+```java
+
+接口 AI 扩展 BI，CI，DI {
+
+//接口主体
+
+}
+
+接口 DI 扩展 EI，FI {
+
+//接口主体
+
+}
+
+```
+
+在上述例子中，接口`AI`继承了接口`BI`，`CI`，`DI`，`EI`和`FI`的所有非私有非静态签名，以及任何其他是接口`BI`，`CI`，`DI`，`EI`和`FI`的基接口。
+
+回到上一节的话题，*实现*，一个类可以实现多个接口：
+
+```java
+
+类 A 扩展 B 实现 AI，BI，CI，DI {
+
+//类主体
+
+}
+
+```
+
+这意味着类`A`继承了类`B`的所有非私有非静态成员，并实现了接口`AI`，`BI`，`CI`和`DI`，以及它们的基接口。实现多个接口的能力来自于前面的例子，如果重写成这样，结果将完全相同：
+
+```java
+
+接口 AI 扩展 BI，CI，DI {
+
+//接口主体
+
+}
+
+类 A 扩展 B 实现 AI {
+
+//类主体
+
+}
+
+```
+
+`扩展`接口（类）也称为超级接口（超类）或父接口（父类）。扩展接口（类）称为子接口（子类）或子接口（子类）。
+
+让我们用例子来说明这一点。我们从接口继承开始：
+
+```java
+
+接口车辆 {
+
+double getWeightInPounds();
+
+}
+
+接口 Car 扩展车辆 {
+
+int getPassengersCount();
+
+}
+
+public class CarImpl 实现 Car {
+
+public double getWeightInPounds(){
+
+return 2000d;
+
+}
+
+public int getPassengersCount(){
+
+return 4;
+
+}
+
+}
+
+```
+
+在上述代码中，类`CarImpl`必须实现两个签名（列在接口`Vehicle`和接口`Car`中），因为从它的角度来看，它们都属于接口`Car`。否则，编译器会抱怨，或者类`CarImpl`必须声明为抽象的（不能被实例化）。
+
+现在，让我们看另一个例子：
+
+```java
+
+接口车辆 {
+
+double getWeightInPounds();
+
+}
+
+public class VehicleImpl 实现车辆 {
+
+public double getWeightInPounds(){
+
+return 2000d;
+
+}
+
+}
+
+接口 Car 扩展车辆 {
+
+int getPassengersCount();
+
+}
+
+public class CarImpl 扩展 VehicleImpl 实现 Car {
+
+public int getPassengersCount(){
+
+return 4;
+
+}
+
+}
+
+```
+
+在这个例子中，类`CarImpl`不需要实现`getWeightInPounds()`的抽象方法，因为它已经从基类`VehicleImpl`继承了实现。
+
+所述类继承的一个后果通常对于初学者来说并不直观。为了证明这一点，让我们在类`CarImpl`中添加方法`getWeightInPounds()`：
+
+```java
+
+public class VehicleImpl {
+
+public double getWeightInPounds(){
+
+return 2000d;
+
+}
+
+}
+
+public class CarImpl 扩展 VehicleImpl {
+
+public double getWeightInPounds(){
+
+return 3000d;
+
+}
+
+public int getPassengersCount(){
+
+return 4;
+
+}
+
+}
+
+```
+
+在这个例子中，为了简单起见，我们不使用接口。因为类`CarImpl`是类`VehicleImpl`的子类，它可以作为类`VehicleImpl`的对象行为，这段代码将编译得很好：
+
+```java
+
+VehicleImpl vehicle = new CarImpl();
+
+vehicle.getWeightInPounds();
+
+```
+
+问题是，你期望在前面片段的第二行中返回什么值？如果你猜测是 3,000，你是正确的。如果不是，不要感到尴尬。习惯需要时间。规则是，基类类型的引用可以引用其任何子类的对象。它被广泛用于覆盖基类行为。
+
+峰会就在眼前。只剩下一步了，尽管它带来了一些你在读这本书之前可能没有预料到的东西，如果你对 Java 一无所知。
+
+# java.lang.Object 类
+
+所以，这里有一个惊喜。每个 Java 类，默认情况下（没有显式声明），都扩展了`Object`类。准确地说，它是`java.lang.Object`，但我们还没有介绍包，只会在第七章中讨论它们，*包和可访问性（可见性）*。
+
+所有 Java 对象都继承了它的所有方法。共有十个：
+
++   `public boolean equals (Object obj)`
+
++   `public int hashCode()`
+
++   `public Class getClass()`
+
++   `public String toString()`
+
++   `protected Object clone()`
+
++   `public void wait()`
+
++   `public void wait(long timeout)`
+
++   `public void wait(long timeout, int nanos)`
+
++   `public void notify()`
+
++   `public void notifyAll()`
+
+让我们简要地访问每个方法。
+
+在我们这样做之前，我们想提一下，你可以在你的类中重写它们的默认行为，并以任何你需要的方式重新实现它们，程序员经常这样做。我们将在第六章中解释如何做到这一点，*接口、类和对象构造*。
+
+# equals()方法
+
+`java.lang.Object`类的`equals()`方法看起来是这样的：
+
+```java
+
+public boolean equals(Object obj) {
+
+//比较当前对象的引用
+
+//和引用对象
+
+}
+
+```
+
+这是它的使用示例：
+
+```java
+
+Car car1 = new CarImpl();
+
+Car car2 = car1;
+
+Car car3 = new CarImpl();
+
+car1.equals(car2);    //返回 true
+
+car1.equals(car3);    //返回 false
+
+```
+
+从前面的例子中可以看出，默认方法`equals()`的实现只比较指向存储对象的地址的内存引用。这就是为什么引用`car1`和`car2`是相等的——因为它们指向同一个对象（内存的相同区域，相同的地址），而`car3`引用指向另一个对象。
+
+`equals()`方法的典型重新实现使用对象的状态进行比较。我们将在第六章中解释如何做到这一点，*接口、类和对象构造*。
+
+# `hashCode()`方法
+
+`java.lang.Object`类的`hashCode()`方法看起来是这样的：
+
+```java
+
+public int hashCode(){
+
+//返回对象的哈希码值
+
+//基于内存地址的整数表示
+
+}
+
+```
+
+Oracle 文档指出，如果两个方法根据`equals()`方法的默认行为是相同的，那么它们具有相同的`hashCode()`返回值。这很棒！但不幸的是，同一份文档指出，根据`equals()`方法，两个不同的对象可能具有相同的`hasCode()`返回值。这就是为什么程序员更喜欢重新实现`hashCode()`方法，并在重新实现`equals()`方法时使用它，而不是使用对象状态。尽管这种需要并不经常出现，我们不会详细介绍这种实现的细节。如果感兴趣，你可以在互联网上找到很好的文章。
+
+# `getClass()`方法
+
+`java.lang.Object`类的`getClass()`方法看起来是这样的：
+
+```java
+
+public Class getClass(){
+
+//返回具有的 Class 类的对象
+
+//提供有用信息的许多方法
+
+}
+
+```
+
+从这个方法中最常用的信息是作为当前对象模板的类的名称。我们将在第六章中讨论为什么可能需要它，*接口、类和对象构造**.*可以通过这个方法返回的`Class`类的对象来访问类的名称。
+
+# `toString()`方法
+
+`java.lang.Object`类的`toString()`方法看起来像这样：
+
+```java
+
+public String toString(){
+
+//返回对象的字符串表示
+
+}
+
+```
+
+这个方法通常用于打印对象的内容。它的默认实现看起来像这样：
+
+```java
+
+public String toString() {
+
+return getClass().getName()+"@"+Integer.toHexString(hashCode());
+
+}
+
+```
+
+正如你所看到的，它并不是非常具有信息性，所以程序员们会在他们的类中重新实现它。这是类`Object`中最常重新实现的方法。程序员们几乎为他们的每个类都这样做。我们将在第九章中更详细地解释`String`类及其方法，*运算符、表达式和语句*。
+
+# `clone()`方法
+
+`java.lang.Object`类的`clone()`方法看起来像这样：
+
+```java
+
+protected Object clone(){
+
+//创建对象的副本
+
+}
+
+```
+
+这个方法的默认结果返回对象字段的副本，这是可以接受的，如果值不是对象引用。这样的值被称为**原始类型**，我们将在第五章中精确定义，*Java 语言元素和类型*。但是，如果对象字段持有对另一个对象的引用，那么只有引用本身会被复制，而不是引用的对象本身。这就是为什么这样的副本被称为浅层副本。要获得深层副本，必须重新实现`clone()`方法，并遵循可能相当广泛的对象树的所有引用。幸运的是，`clone()`方法并不经常使用。事实上，你可能永远不会遇到需要使用它的情况。
+
+在阅读本文时，你可能会想知道，当对象被用作方法参数时会发生什么。它是使用`clone()`方法作为副本传递到方法中的吗？如果是，它是作为浅层副本还是深层副本传递的？答案是，都不是。只有对象的引用作为参数值传递进来，所以所有接收相同对象引用的方法都可以访问存储对象状态的内存区域。
+
+这为意外数据修改和随后的数据损坏带来了潜在风险，将它们带入不一致的状态。这就是为什么，在传递对象时，程序员必须始终意识到他们正在访问可能在其他方法和类之间共享的值。我们将在第五章中更详细地讨论这一点，并在第十一章中扩展这一点，*JVM 进程和垃圾回收*，在讨论线程和并发处理时。
+
+# The wait() and notify() methods
+
+`wait()`和`notify()`方法及其重载版本用于线程之间的通信——轻量级的并发处理进程。程序员们不会重新实现这些方法。他们只是用它们来增加应用程序的吞吐量和性能。我们将在第十一章中更详细地讨论`wait()`和`notify()`方法，*JVM 进程和垃圾回收*。
+
+现在，恭喜你。你已经踏上了 Java 基础复杂性的高峰，现在将继续水平前行，添加细节并练习所学知识。在阅读前两章的过程中，你已经在脑海中构建了 Java 知识的框架。如果有些东西不清楚或者忘记了，不要感到沮丧。继续阅读，你将有很多机会来刷新你的知识，扩展它，并保持更长时间。这将是一段有趣的旅程，最终会有一个不错的奖励。
+
+# 面向对象编程概念
+
+现在，我们可以谈论一些对你来说更有意义的概念，与在你学习主要术语并看到代码示例之前相比。这些概念包括：
+
++   对象/类：它将状态和行为保持在一起
+
++   封装：它隐藏了状态和实现的细节
+
++   继承：它将行为/签名传播到类/接口扩展链中
+
++   接口：它将签名与实现隔离开来
+
++   多态：这允许一个对象由多个实现的接口和任何基类表示，包括`java.lang.Object`。
+
+到目前为止，你已经熟悉了上述所有内容，因此这将主要是一个总结，只添加一些细节。这就是我们学习的方式——观察特定事实，构建更大的图景，并随着新的观察不断改进这个图景。我们一直在做这件事，不是吗？
+
+# 对象/类
+
+一个 Java 程序和整个应用程序可以在不创建一个对象的情况下编写。只需在你创建的每个类的每个方法和每个字段前面使用`static`关键字，并从静态的`main()`方法中调用它们。你的编程能力将受到限制。你将无法创建一支可以并行工作的对象军队，他们可以在自己的数据副本上做类似的工作。但你的应用程序仍然可以工作。
+
+此外，在 Java 8 中，添加了函数式编程特性，允许我们像传递对象一样传递函数。因此，你的无对象应用程序可能会非常强大。而且，一些没有对象创建能力的语言被使用得非常有效。然而，在面向对象的语言被证明有用并变得流行之后，第一个是 Smalltalk，一些传统的过程式语言，如 PHP、Perl、Visual Basic、COBOL 2002、Fortran 2003 和 Pascal 等，都添加了面向对象的能力。
+
+正如我们刚才提到的，Java 还将其功能扩展到覆盖函数式编程，从而模糊了过程式、面向对象和函数式语言之间的界限。然而，类的存在和使用它们来创建对象的能力是编程语言必须支持的第一个概念，才能被归类为面向对象。
+
+# 封装
+
+封装——使数据和函数（方法）无法从外部访问或者有受控的访问——是创建面向对象语言的主要驱动因素之一。Smalltalk 是基于对象之间的消息传递的想法创建的，当一个对象调用另一个对象的方法时，这在 Smalltalk 和 Java 中都是这样做的。
+
+封装允许调用对象的服务，而不知道这些服务是如何实现的。它减少了软件系统的复杂性，增加了可维护性。每个对象都可以独立地完成其工作，而无需与其客户端协调实现的更改，只要它不违反接口中捕获的合同。
+
+我们将在第七章中进一步详细讨论封装，*包和可访问性（可见性）*。
+
+# 继承
+
+继承是另一个面向对象编程概念，受到每种面向对象语言的支持。通常被描述为能够重用代码的能力，这是一个真实但经常被误解的说法。一些程序员认为继承能够在应用程序之间实现代码的重用。根据我们的经验，应用程序之间的代码重用可以在没有继承的情况下实现，并且更多地依赖于应用程序之间的功能相似性，而不是特定的编程语言特性。这更多地与将通用代码提取到共享可重用库中的技能有关。
+
+在 Java 或任何其他面向对象的语言中，继承允许在基类中实现的公共功能*在其子类中重用*。它可以用于通过将基类组装到一个共享的库中，实现模块化并提高代码的可重用性。但在实践中，这种方法很少被使用，因为每个应用程序通常具有特定的要求，一个共同的基类要么太简单而实际上无用，要么包含许多特定于每个应用程序的方法。此外，在第六章《接口、类和对象构造》中，我们将展示，使用聚合更容易实现可重用性，这是基于使用独立对象而不是继承。
+
+与接口一起，继承使多态成为可能。
+
+# 接口（抽象）
+
+有时，接口的面向对象编程概念也被称为抽象，因为接口总结（抽象）了对象行为的公共描述，隐藏了其实现的细节。接口是封装和多态的一个组成部分，但足够重要，以至于被作为一个单独的概念来阐述。其重要性将在第八章《面向对象设计（OOD）原则》中变得特别明显，当我们讨论从项目想法和愿景到具体编程解决方案的过渡时。
+
+接口和继承为多态提供了基础。
+
+# 多态
+
+从我们提供的代码示例中，您可能已经意识到，一个对象具有所有实现的接口中列出的方法和其基类的所有非私有非静态方法，包括`java.lang.Object`。就像一个拥有多重国籍的人一样，它可以被视为其基类或实现的接口的对象。这种语言能力被称为多态（来自*poly* - 许多和*morphos* - 形式）。
+
+请注意，广义上讲，方法重载——当具有相同名称的方法根据其签名可以具有不同行为时——也表现出多态行为。
+
+# 练习-接口与抽象类
+
+接口和抽象类之间有什么区别？我们没有讨论过，所以您需要进行一些研究。
+
+在 Java 8 中引入接口的默认方法后，差异显著缩小，在许多情况下可以忽略不计。
 
 # 答案
 
-以下是安装在 Java 10.0.1 中的所有可执行文件的列表：
+抽象类可以有构造函数，而接口不能。
 
-![](img/39770b16-82b4-4a03-ba59-841621ebbb14.png)
+抽象类可以有状态，而接口不能。抽象类的字段可以是私有的和受保护的，而在接口中，字段是公共的、静态的和最终的。
 
-找到这个目录的一种方法是查看环境变量`PATH`的值。例如，在 Mac 电脑上，Java 安装在目录`/Library/Java/JavaVirtualMachines/jdk-10.jdk/Contents/Home/bin`中。
+抽象类可以具有任何访问修饰符的方法实现，而接口中实现的默认方法只能是 public。
 
-描述 JVM 安装位置的 Oracle 文档可以在[`www.java.com/en/download/help/version_manual.xml`](https://www.java.com/en/download/help/version_manual.xml)找到。
+如果您想要修改的类已经扩展到另一个类，您就不能使用抽象类，但是您可以实现一个接口，因为一个类只能扩展到另一个类，但可以实现多个接口。
 
 # 总结
 
-在本章中，您已经学习了最重要的与 Java 相关的术语——JVM、JDK、SDK、Java 平台等，涵盖了 Java 程序生命周期的主要阶段，从源代码到字节码再到执行。您还了解了 Java 的历史、创建背后的动机、版本和版本。提供的实际步骤和建议帮助您在计算机上安装 Java 并运行其主要命令`java`、`javac`和`jcmd`。有关更多详细信息，您被引用到官方的 Oracle 文档。找到并理解这些文档的能力是成为 Java 程序员成功的先决条件，因此我们建议您跟随所有提供的链接，并在互联网上进行一些相关搜索，以便您能够轻松找到良好的信息来源。
+在本章中，您已经学习了 Java 和任何面向对象编程语言的基本概念。您现在了解了类和对象作为 Java 的基本构建模块，知道了静态和实例成员是什么，以及了解了接口、实现和继承。这是本初学者章节中最复杂和具有挑战性的练习，将读者带到了 Java 语言的核心，介绍了我们将在本书的其余部分中使用的语言框架。这个练习让读者接触到了关于接口和抽象类之间差异的讨论，这在 Java 8 发布后变得更加狭窄。
 
-在下一章中，我们将深入探讨 Java 作为一种编程语言，并涵盖基础知识。这将成为接下来章节的基础（或者说是一个跳板）。如果您是 Java 的新手，我们建议您继续阅读而不要跳过，因为每一章都建立在前一章的知识基础上。即使您对 Java 有一些了解，重新复习基础知识也总是有帮助的。拉丁谚语说：“Repetitio est mater studiorum”（重复是学习之母）。
+在下一章中，我们将转向编程的实际问题。读者将被引导完成在他们的计算机上安装必要工具和配置开发环境的具体步骤。之后，所有新的想法和软件解决方案将被演示，包括具体的代码示例。

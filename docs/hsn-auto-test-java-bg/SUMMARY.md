@@ -1,3 +1,4 @@
++   [Java 自动化测试初学者实用指南](README.md)
 +   [前言](hsn-auto-test-java-bg_00.md)
 +   [第一章：Java 中的第一步编程](hsn-auto-test-java-bg_01.md)
 +   [第二章：理解 Java 中的类、对象及其用法](hsn-auto-test-java-bg_02.md)

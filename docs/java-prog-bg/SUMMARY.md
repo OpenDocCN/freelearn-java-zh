@@ -1,3 +1,4 @@
++   [面向初学者的 Java 编程](README.md)
 +   [前言](java-prog-bg_00.md)
 +   [第一章：开始使用 Java](java-prog-bg_01.md)
 +   [第二章：理解有类型的变量](java-prog-bg_02.md)

@@ -1,908 +1,200 @@
-# 第七章：接口，类和对象构造
+# 第八章：包和可访问性（可见性）
 
-本章向读者解释了 Java 编程的最重要方面：应用程序编程接口（API），对象工厂，方法重写，隐藏和重载。接着是聚合（而不是继承）的设计优势的解释，开始讨论软件系统设计。本章最后概述了 Java 数据结构。
+到目前为止，您已经对包非常熟悉。在本章中，我们将完成其描述，然后讨论类和类成员（方法和字段）的不同可访问性级别（也称为可见性）。这一切都将归结为面向对象编程的关键概念——封装——并为我们讨论面向对象设计原则奠定基础。
 
 在本章中，我们将涵盖以下主题：
 
-+   什么是 API？
++   什么是导入？
 
-+   接口和对象工厂作为 API
++   静态导入
 
-+   重写，隐藏和重载
++   接口访问修饰符
 
-+   `this`和`super`关键字
++   类访问修饰符
 
-+   构造函数和构造函数重载
++   方法访问修饰符
 
-+   最终变量，最终方法和最终类
++   属性访问修饰符
 
-+   对象关联（聚合）
++   封装
 
-+   练习-将类实例化限制为单个共享实例
++   练习-遮蔽
 
-# API 是什么？
+# 什么是导入？
 
-术语**应用程序编程接口**（API）是程序员用来实现所需功能的协议，程序和服务的规范。API 可以代表基于 Web 的系统，操作系统，数据库系统，计算机硬件或软件库。
-
-除此之外，在日常生活中，术语 API 经常用于实现规范的系统。例如，您可能熟悉 Twitter APIs（[`developer.twitter.com/en/docs`](https://developer.twitter.com/en/docs)）或 Amazon APIs（[`developer.amazon.com/services-and-apis`](https://developer.amazon.com/services-and-apis)），或者您可能已经使用能够通过提供数据（测量结果）来响应请求的设备（传感器）。因此，当程序员说*我们可以使用 Amazon API*时，他们不仅指提供的程序描述，还指服务本身。
-
-在 Java 中，我们还有一些关于*API 使用*的术语变体，我们希望在以下小节中进行识别和描述。
-
-# Java API
-
-Java API 包括两大类 API 和实现它们的库：
-
-+   Java 核心包（[`www.oracle.com/technetwork/java/api-141528.html`](http://www.oracle.com/technetwork/java/api-141528.html)）随 Java 安装提供并包含在 JDK 中
-
-+   其他可以单独下载的框架和库，例如 Apache Commons APIs（[`commons.apache.org`](https://commons.apache.org)），或者我们已经在 Maven 的`pom.xml`文件中包含为依赖项的三个库。其中绝大多数可以在 Maven 仓库（[`mvnrepository.com`](https://mvnrepository.com)）中找到，但也可以在其他地方找到各种新的和实验性的库和框架。
-
-# 命令行 API
-
-命令行 API 描述了命令格式及其可能的选项，可用于执行应用程序（工具）。我们在第一章中讨论使用`java`和`javac`工具（应用程序）时看到了这样的例子，*您的计算机上的 Java 虚拟机（JVM）*。我们甚至在第四章中构建了自己的应用程序，定义了其 API，并描述了其命令行 API，接受整数作为参数。
-
-# 基于 HTTP 的 API
-
-基于 Web 的应用程序通常使用各种协议（[`en.wikipedia.org/wiki/List_of_web_service_protocols`](https://en.wikipedia.org/wiki/List_of_web_service_protocols)）提供基于 HTTP 的 API，允许通过互联网访问应用程序功能。HTTP 代表超文本传输协议，是分布式信息系统的应用协议，是**万维网**（**WWW**）数据通信的基础。
-
-最流行的两种 Web 服务协议是：
-
-+   基于 XML 的**SOAP**（Simple Object Access Protocol）协议
-
-+   基于 JSON 的 REST 或 RESTful（**REpresentational State Transfer**）风格的 HTTP 协议
-
-两者都描述了如何访问功能（服务）并将其合并到应用程序中。我们在本书中不描述 Web 服务。
-
-# 软件组件 API
-
-软件组件可以是一个库，一个应用子系统，一个应用层，甚至是一个单独的类——可以通过调用其方法直接从 Java 代码中使用的东西。软件组件的 API 看起来像描述方法签名的接口，可以在实现接口的类的对象上调用这些方法。如果组件有公共静态方法（不需要对象，只能使用类调用），这些方法也必须包含在 API 描述中。但是，对于组件 API 的完整描述，正如我们在第二章中已经提到的那样，关于如何创建组件的对象的信息也应该是 API 描述的一部分。
-
-在本书中，我们不会超越应用程序边界，并且只会在先前描述的软件组件 API 的意义上使用术语 API。而且，我们将按其名称称呼实现 API 的实体（API 描述的服务）：应用子系统，应用层，库，类，接口和方法。
-
-这就是为什么我们开始了一个关于接口和对象工厂的 API 相关讨论，它们相互补充，并且与静态方法一起组成了软件组件 API 的完整描述。
-
-# 接口和对象工厂作为 API
-
-名词抽象意味着书籍、文章或正式演讲的内容摘要。形容词抽象意味着存在于思想中或作为一个想法，但没有具体的或实体的存在。动词抽象意味着从理论上或与其他事物分开考虑（某事）。
-
-这就是为什么接口被称为抽象——因为它只捕捉方法签名，不描述如何实现结果。相同接口的各种实现——不同的类——可能行为完全不同，即使它们接收相同的参数并返回相同的结果。最后一句是一个有深意的陈述，因为我们还没有定义行为这个术语。现在让我们来做。
-
-类或其对象的行为由其方法执行的操作和它们返回的结果定义。如果一个方法不返回任何东西（`void`），则称这样的方法仅用于其副作用。
-
-这种观点意味着返回值的方法具有直接（而不是副作用）的效果。然而，它也可能具有副作用，例如向另一个应用程序发送消息，或者在数据库中存储数据。理想情况下，应该尝试在方法名称中捕捉副作用。如果这不容易，因为方法做了很多事情，这可能表明需要将这样的方法分解为几个更好聚焦的方法。
-
-同一方法签名的两个实现可能具有不同的行为的说法只有在方法名称没有捕捉到所有副作用，或者实现的作者没有遵守方法名称的含义时才有意义。但即使不同实现的行为相同，代码本身、它使用的库以及其有效性可能是不同的。
-
-为什么隐藏实现细节很重要，我们将在第八章中解释，*面向对象设计（OOD）原则*。现在，我们只是提到客户端与实现的隔离允许系统更灵活地采用相同实现的新版本或完全切换到另一个实现。
-
-# 接口
-
-我们在第二章中讨论了接口，现在我们只看一些例子。让我们创建一个新的包，`com.packt.javapath.ch06demo.api`。然后，我们可以右键单击`com.packt.javapath.ch06demo.api`，打开 New | Java Class，选择 Interface，输入`Calculator`，然后单击 OK 按钮。我们已经创建了一个接口，并且可以向其添加一个方法签名，`int multiplyByTwo(int i)`，结果如下：
-
-![](img/3bf0e6a7-cecc-4cfe-bc2b-3337a3a24d78.png)
-
-这将是实现此接口的每个类的公共接口。在现实生活中，我们不会使用包名称`api`，而是使用`calculator`，因为它更具体和描述性。但是我们正在讨论术语“API”，这就是我们决定以这种方式命名包的原因。
-
-让我们创建另一个包，`com.packt.javapath.ch06demo.api.impl`，其中将保存所有`Calculator`的实现和我们将添加到`com.packt.javapath.ch06demo.api`包中的其他接口。第一个实现是`CalulatorImpl`类。到目前为止，您应该已经知道如何在其中创建`com.packt.javapath.ch06demo.api.impl`包和`CalulatorImpl`类。结果应该如下所示：
-
-![](img/d6e713bb-a6b6-40d0-8fe0-7be774bf7f0d.png)
-
-我们将实现放在了比`api`更深一级的包中，这表明这些细节不应该暴露给我们创建的 API 的用户。
-
-此外，我们需要编写一个测试并使用它来确保我们的功能对用户来说是正确和方便的。同样，我们假设您现在知道如何做到这一点。结果应该如下所示：
-
-![](img/8199defb-2557-47f7-97e8-35febe1cb351.png)
-
-然后，我们添加缺失的测试主体和注释，如下所示：
+导入允许我们在`.java`文件的开头只指定一次完全限定的类或接口名称，然后是类或接口声明。导入语句的格式如下：
 
 ```java
 
-@DisplayName("API Calculator tests")
-
-public class CalculatorTest {
-
-@Test
-
-@DisplayName("Happy multiplyByTwo()")
-
-void multiplyByTwo(){
-
-CalculatorImpl calculator = new CalculatorImpl();
-
-int i = 2;
-
-int result = calculator.multiplyByTwo(i);
-
-assertEquals(4, result);
-
-}
-
-}
+import <package>.<class or interface name>;
 
 ```
 
-这段代码不仅作为功能测试，还可以被视为 API 用户编写的客户端代码的示例。因此，测试帮助我们从客户端的角度看待我们的 API。通过观察这段代码，我们意识到我们无法完全隐藏实现细节。即使我们将创建对象的行更改为以下内容：
+例如，看下面的例子：
 
 ```java
 
-Calculator calculator = new CalculatorImpl();
+import com.packt.javapath.ch04demo.MyApplication;
 
 ```
 
-这意味着，如果我们更改`CalculatorImpl`构造函数的签名或切换到同一接口的另一个实现（称为`AnotherCalculatorImpl`），客户端代码也必须更改。为了避免这种情况，程序员使用称为对象工厂的类。
-
-# Object factory
-
-对象工厂的目的是隐藏对象创建的细节，以便客户端在实现更改时无需更改代码。让我们创建一个生产`Calculator`对象的工厂。我们将把它放在与`Calculator`接口的实现位于同一包`com.packt.javapath.ch06demo.api.impl`中：
-
-![](img/525f9e16-73db-40de-ae66-c526bd1ab207.png)
-
-我们可以更改测试（客户端代码）以使用此工厂：
+从现在开始，这个类只能在代码中通过它的名字`MyApplication`来引用。还可以使用通配符字符(`*`)导入包的所有类或接口：
 
 ```java
 
-@DisplayName("API Calculator tests")
-
-public class CalculatorTest {
-
-@Test
-
-@DisplayName("Happy multiplyByTwo()")
-
-void multiplyByTwo(){
-
-Calculator calculator = CalculatorFactory.createInstance();
-
-int i = 2;
-
-int result = calculator.multiplyByTwo(i);
-
-断言（4，结果）;
-
-}
-
-}
+import com.packt.javapath.ch04demo.*;
 
 ```
 
-通过这样做，我们已经实现了我们的目标：客户端代码不会对实现`Calculator`接口的类有任何概念。例如，我们可以更改工厂，以便它创建另一个类的对象：
+注意，前面的导入语句导入了`com.packt.javapath.ch04demo`包的子包的类和接口。如果需要，每个子包都必须单独导入。
+
+但在我们继续之前，让我们谈谈`.java`文件的结构和包。
+
+# .java 文件和包的结构
+
+正如您已经知道的那样，包名反映了目录结构，从包含`.java`文件的项目目录开始。每个`.java`文件的名称必须与其中定义的公共类的名称相同。`.java`文件的第一行是以`package`关键字开头的包语句，后面是实际的包名称——此文件的目录路径，其中斜杠用点替换。让我们看一些例子。我们将主要关注包含类定义的`.java`文件，但我们还将查看包含接口和`enum`类定义的文件，因为有一种特殊的导入（称为静态导入）主要用于接口和`enum`。
+
+我们假设`src/main/java` (for Linux)或`src\main\java` (for Windows)项目目录包含所有`.java`文件，并且`MyClass`和`MyEnum`类以及`MyInterface`接口的定义来自`com.packt.javapath`包存储在以下文件中：
 
 ```java
 
-public static Calculator create(){
+src/main/java/com/packt/javapath/MyClass.java (for Linux)
 
-return AnotherCalculatorImpl();
+src/main/java/com/packt/javapath/MyEnum.java
 
-}
+src/main/java/com/packt/javapath/MyInterface.java
 
 ```
 
-`AnotherCalculatorImpl`类可能如下所示：
+或（对于 Windows）
 
 ```java
 
-class AnotherCalculatorImpl  implements Calculator {
+src\main\java\com\packt\javapath\MyClass.java (for Windows)
 
-public int multiplyByTwo(int i){
+src\main\java\com\packt\javapath\MyEnum.java
 
-System.out.println(AnotherCalculatorImpl.class.getName());
-
-return i + i;
-
-}
-
-}
+src\main\java\com\packt\javapath\MyInterface.java
 
 ```
 
-这个`multiplyByTwo()`方法是将两个值相加，而不是将输入参数乘以 2。
-
-我们还可以使工厂读取配置文件，并根据配置文件的值实例化实现：
+这些文件的每一行的第一行如下：
 
 ```java
 
-public class CalculatorFactory {
-
-public static Calculator create(){
-
-String whichImpl =
-
-Utils.getStringValueFromConfig("calculator.conf", "which.impl");
-
-if(whichImpl.equals("multiplies")){
-
-return new CalculatorImpl();
-
-} else if (whichImpl.equals("adds")){
-
-返回一个新的 AnotherCalculatorImpl();
-
-} else {
-
-throw new RuntimeException("休斯顿，我们有问题。" +
-
-"未知的键 which.impl 值" + whichImpl + "在配置中。");
-
-}
-
-}
-
-}
+package com.packt.javapath;
 
 ```
 
-我们还没有讨论`if...else`结构或`RuntimeException`类（参见第十章，*控制流语句*）。我们很快会讨论`Utils.getStringValueFromConfig()`方法。但是，我们希望你理解这段代码的作用：
+如果我们没有导入任何内容，那么每个文件的下一行就是一个类或接口声明。
 
-+   读取配置文件
-
-+   根据`which.impl`键的值实例化类
-
-+   如果没有与`which.impl`键的值对应的类，则通过抛出异常退出方法（因此通知客户端存在必须解决的问题）
-
-这是配置文件`calculator.conf`可能的样子：
+`MyClass`类的声明如下：
 
 ```java
 
-{
+public class MyClass extends SomeClass
 
-"which.impl": "multiplies"
-
-}
+implements Interface1, Interface2, ... {...}
 
 ```
 
-这称为**JavaScript 对象表示**（**JSON**）格式，它基于由冒号（`:`）分隔的键值对。您可以在[`www.json.org/`](http://www.json.org/)上了解更多关于 JSON 的信息。
+它包括以下内容：
 
-`calculator.conf`文件位于`resources`目录（`main`目录的子目录）中。默认情况下，Maven 将此目录的内容放在类路径上，因此应用程序可以找到它。
++   访问修饰符；文件中的一个类必须是`public`
 
-要告诉工厂使用另一个`Calculator`实现，我们只需要做以下事情：
++   `class`关键字
 
-+   更改文件`calculator.conf`中键`which.impl`的值
++   以大写字母开头的类名（标识符）
 
-+   更改工厂的`create()`方法以根据这个新值实例化新的实现
++   如果类是另一个类的子类，则使用`extends`关键字和父类的名称
 
-重要的是要注意，当我们切换`Calculator`实现时，客户端代码（`CalculatorTest`类）不受影响。这是使用接口和对象工厂类隐藏实现细节对客户端代码的优势。
++   如果类实现了一个或多个接口，使用`implements`关键字后跟随逗号分隔的接口列表
 
-现在，让我们看看`Utils`类及其`getStringValueFromConfig()`方法的内部。
++   类的主体（定义字段和方法的地方）由大括号`{}`括起来
 
-# 读取配置文件
-
-通过查看`getStringValueFromConfig()`方法的真实实现，我们超前于你对 Java 和 Java 库的了解。因此，我们不希望你理解所有的细节，但我们希望这种暴露会让你了解事情是如何做的，我们的课程目标是什么。
-
-# 使用 json-simple 库
-
-`getStringValueFromConfig()`方法位于`Utils`类中，我们已经创建了这个类来从`.conf`文件中读取值。这个类有以下代码：
+`MyEnum`类的声明如下：
 
 ```java
 
-import org.json.simple.JSONObject;
-
-import org.json.simple.parser.JSONParser;
-
-import org.json.simple.parser.ParseException;
-
-public class Utils {
-
-private static JSONObject config = null;
-
-public static String getStringValueFromConfig(String configFileName,
-
-String key){
-
-if(config == null){
-
-ClassLoader classLoader = Utils.class.getClassLoader();
-
-File file =
-
-new File(classLoader.getResource(configFileName).getFile());
-
-try(FileReader fr = new FileReader(file)){
-
-JSONParser parser = new JSONParser();
-
-config = (JSONObject) parser.parse(fr);
-
-} catch (ParseException | IOException ex){
-
-ex.printStackTrace();
-
-return "Problem reading config file.";
-
-}
-
-}
-
-return config.get(key) == null ? "unknown" : (String)config.get(key);
-
-}
-
-}
+public enum MyEnum implements Interface1, Interface2, ... {...}
 
 ```
 
-首先，请注意称为缓存的技术。我们首先检查`config`静态类字段的值。如果它不是`null`，我们就使用它。否则，我们使用相同的类加载器在类路径上找到`config`文件，该类加载器用于加载我们传递的已知类。我们解析配置文件，这意味着将其分解为键值对。结果是我们分配给`config`字段的`JSONObject`类的生成对象的引用（缓存它，以便下次可以使用）。
+它包括以下内容：
 
-这是缓存技术，用于避免浪费时间和其他资源。这种解决方案的缺点是，对配置文件的任何更改都需要重新启动应用程序，以便重新读取文件。在我们的情况下，我们假设这是可以接受的。但在其他情况下，我们可以添加一个定时器，并在定义的时间段过后刷新缓存数据，或者做类似的事情。
++   一个访问修饰符；如果它是文件中唯一定义的类，则必须是`public`
 
-为了读取配置文件，我们使用 Apache Commons 库中的`FileReader`类（[`commons.apache.org/proper/commons-io`](https://commons.apache.org/proper/commons-io)）。为了让 Maven 知道我们需要这个库，我们已经将以下依赖项添加到`pom.xml`文件中：
++   `enum`关键字
+
++   以大写字母开头的类名（标识符）按照约定
+
++   没有`extends`关键字，因为枚举类型隐式地扩展了`java.lang.Enum`类，在 Java 中，一个类只能有一个父类
+
++   如果类实现了一个或多个接口，则使用`implements`关键字后跟逗号分隔的接口列表
+
++   类的主体（常量和方法的定义）由大括号`{}`括起来
+
+`MyInterface`接口的声明如下：
 
 ```java
 
-<dependency>
-
-<groupId>commons-io</groupId>
-
-<artifactId>commons-io</artifactId>
-
-<version>2.5</version>
-
-</dependency>
+public interface MyInterface extends Interface1, Interface2, ... {...}
 
 ```
 
-要处理 JSON 格式的数据，我们使用 JSON.simple 库（也是根据 Apache 许可发布的），并将以下依赖项添加到`pom.xml`中：
+它包括以下内容：
+
++   一个访问修饰符；文件中的一个接口必须是`public`
+
++   `interface`关键字
+
++   按照约定以大写字母开头的接口名称（标识符）
+
++   如果接口是一个或多个接口的子接口，则使用`extends`关键字后跟父接口的逗号分隔列表
+
++   接口的主体（字段和方法的定义）由大括号`{}`括起来
+
+如果不导入，我们需要通过完全限定的名称引用我们使用的每个类或接口，其中包括包名和类或接口名。例如，`MyClass`类的声明将如下所示：
 
 ```java
 
-<dependency>
+我的类
 
-<groupId>com.googlecode.json-simple</groupId>
+extends com.packt.javapath.something.AnotherMyClass
 
-<artifactId>json-simple</artifactId>
+implements com.packt.javapath.something2.Interface1,
 
-<version>1.1</version>
-
-</dependency>
+com.packt.javapath.something3.Interface2
 
 ```
 
-`JSONObject`类以 JSON 格式存储键值对。如果传入的键在文件中不存在，`JSONObject`类的对象返回值为`null`。在这种情况下，我们的`getStringValueFromConfig()`方法返回一个`String`字面量 unknown。否则，它将返回值转换为`String`。我们可以这样做，因为我们知道该值可以赋给`String`类型的变量。
-
-`<condition>? <option1> : <option2>`构造被称为三元运算符。当条件为真时，它返回`option1`，否则返回`option2`。我们将在第九章中更多地讨论它，*运算符、表达式和语句*。
-
-# 使用 json-api 库
-
-或者，我们可以使用另一个 JSON 处理 API 及其实现：
+或者，假设我们想要实例化`com.packt.javapath.something`包中的`SomeClass`类。该类的完全限定名称将是`com.packt.javapath.something.SomeClass`，其对象创建语句如下所示：
 
 ```java
 
-<dependency>
+com.packt.javapath.something.SomeClass someClass =
 
-<groupId>javax.json</groupId>
-
-<artifactId>javax.json-api</artifactId>
-
-<version>1.1.2</version>
-
-</dependency>
-
-<dependency>
-
-<groupId>org.glassfish</groupId>
-
-<artifactId>javax.json</artifactId>
-
-<version>1.1.2</version>
-
-</dependency>
+new com.packt.javapath.something.SomeClass();
 
 ```
 
-然后`getStringValueFromConfig()`方法的代码看起来会有些不同：
+太啰嗦了，不是吗？这就是包导入发挥作用的地方。
+
+# 单个类导入
+
+为了避免在代码中使用完全限定的类或接口名称，我们可以在包声明和类或接口声明之间的空间中添加一个导入语句：
 
 ```java
 
-import javax.json.Json;
+package com.packt.javapath;
 
-import javax.json.JsonObject;
+import com.packt.javapath.something.SomeClass;
 
-import javax.json.JsonReader;
-
-public class Utils {
-
-private static JsonObject config = null;
-
-public static String getStringValueFromConfig(String FileName,
-
-String key){
-
-if(config == null){
-
-ClassLoader classLoader = Utils.class.getClassLoader();
-
-File file = new File(classLoader.getResource(fileName).getFile());
-
-try(FileInputStream fis = new FileInputStream(file)){
-
-JsonReader reader = Json.createReader(fis);
-
-config = reader.readObject();
-
-} catch (IOException ex){
-
-ex.printStackTrace();
-
-return "Problem reading config file.";
-
-}
-
-}
-
-return config.get(key) == null ? "unknown" : config.getString(key);
-
-}
-
-}
-
-```
-
-这个第二个实现需要的代码稍微少一些，并且使用了更一致的驼峰命名风格（`JsonObject`与`JSONObject`）。但是，由于它们的性能并没有太大的不同，使用哪个库在很大程度上取决于个人偏好。
-
-# 单元测试
-
-让我们创建一个单元测试，证明该方法按预期工作。到目前为止，你应该能够在`test/java/com/packt/javapath/ch06demo`目录（或在 Windows 的`test\java\com\packt\javapath\ch06demo`目录）中创建一个`UtilsTest`类。测试应该如下所示:
-
-```java
-
-@DisplayName("Utils 测试")
-
-公共类 UtilsTest{
-
-@Test
-
-@DisplayName("按键从配置文件中读取值的测试")
-
-void getStringValueFromConfig(){
-
-//我们将在这里编写测试主体
-
-}
-
-}
-
-```
-
-接下来，我们添加`test/resources/utilstest.conf`文件（对于 Windows 是`test\resources\utilstest.conf`）:
-
-```java
-
-{
-
-"unknown": "some value"
-
-}
-
-```
-
-它将扮演`config`文件的角色。有了这个，测试代码看起来如下:
-
-```java
-
-@Test
-
-@DisplayName("按键从配置文件中读取值的测试")
-
-void getStringValueFromConfig(){
-
-String fileName = "utilstest.conf";
-
-String value = Utils.getStringValueFromConfig(fileName, "some value");
-
-assertEquals("some value", value);
-
-value = Utils.getStringValueFromConfig(fileName, "some value");
-
-assertEquals("unknown", value);
-
-}
-
-```
-
-我们测试两种情况:
-
-+   返回的值应该在第一种情况下等于`some value`
-
-+   如果在配置文件中键不存在，则值应该返回为`unknown`
-
-我们运行这个测试并观察成功。为了确保，我们还可以将`utilstest.conf`文件的设置更改为以下内容:
-
-```java
-
-{
-
-"unknown": "another value"
-
-}
-
-```
-
-这应该导致测试在第一种情况下失败。
-
-让我们重新审视一下 Calculator API。
-
-# 计算器 API
-
-根据前面的讨论，我们可以在`Calculator`接口中描述 Calculator API 如下:
-
-```java
-
-公共接口计算器{
-
-int multiplyByTwo(int i);
-
-}
-
-static Calculator createInstance(){
-
-return CalculatorFactory.create();
-
-}
-
-```
-
-如果`Calculator`实现的构造函数需要参数，我们将把它们添加到接口的`create()`工厂方法和`createInstance()`静态方法中。
-
-当`Calculator`接口只存在一个实现时，前面的 API 声明就足够了。但是当你给客户端提供两个或更多的实现选择时，就像我们之前描述的那样，API 还应该包括`calculator.conf`配置文件的描述。
-
-`配置描述`将不得不列出`which.impl`键的所有可能值（在我们的例子中是`multiplies`和`adds`）。我们还需要解释实现之间的差异，以便使用我们的计算器的程序员能够做出知情的选择。
-
-如果这听起来太多了，那么你可能需要退一步重新审视你的 API 设计，因为它可能没有很好地聚焦，试图涵盖太多东西。考虑将这样的 API 分解为几个更简单的 API。描述每个较小的 API 更容易编写和理解。
-
-例如，这是如何在我们的情况下将配置描述添加到接口中的:
-
-```java
-
-公共接口计算器{
-
-int multiplyByTwo(int i);
-
-static Calculator createInstance(){
-
-return  CalculatorFactory.create();
-
-}
-
-String CONF_NAME = "calculator.conf";
-
-String CONF_WHICH_IMPL = "which.impl";
-
-enum WhichImpl{
-
-multiplies, //使用乘法运算
-
-adds        //使用加法运算
-
-}
-
-}
-
-```
-
-正如你所看到的，我们在常量中捕获了配置文件名，以及配置键名。我们还为键的所有可能值创建了一个`enum`。我们还添加了实现之间差异的解释作为注释。如果解释太长，注释可以提供对文档、网站名称或 URL 的引用，例如。
-
-Since there are two implementations and two possible values in the configuration file, we need to run our unit test `CalculatorTest` twice—for each possible value of the configuration—to make sure that both implementations work as expected. But we do not want to change the configuration inside the deliverable software component itself.
-
-That is when the `test/resources` directory (`test\resources` for Windows) comes into play again. Let's create a `calculator.conf` file in it and add the following lines to the `CalculatorTest` test, which will print the current settings in that file:
-
-```java
-
-String whichImpl =
-
-Utils.getStringValueFromConfig(Calculator.CONF_NAME,
-
-Calculator.CONF_WHICH_IMPL);
-
-System.out.println(Calculator.CONF_WHICH_IMPL + "=" + whichImpl);
-
-```
-
-The `CalculatorTest` code should look as follows:
-
-```java
-
-void multiplyByTwo() {
-
-WhichImpl whichImpl =
-
-Utils.getWhichImplValueFromConfig(Calculator.CONF_NAME,
-
-Calculator.CONF_WHICH_IMPL);
-
-System.out.println("\n" + Calculator.CONF_WHICH_IMPL +
-
-"=" + whichImpl);
-
-Calculator calculator = Calculator.createInstance();
-
-int i = 2;
-
-int result = calculator.multiplyByTwo(i);
-
-assertEquals(4, result);
-
-}
-
-```
-
-Let's also add a line that prints out the class name of each implementation:
-
-```java
-
-public class CalculatorImpl implements Calculator {
-
-public int multiplyByTwo(int i){
-
-System.out.println(CalculatorImpl.class.getClass().getName());
-
-return i * 2;
-
-}
-
-}
-
-public class AnotherCalculatorImpl implements Calculator {
-
-public int multiplyByTwo(int i){
-
-System.out.println(AnotherCalculatorImpl.class.getClass().getName());
-
-return i + i;
-
-}
-
-}
-
-```
-
-If we set the value of `which.impl` (in the `calculator.conf` file in the `test` directory) to `adds`, it will look like this:
-
-![](img/a123ab51-0369-4fe3-ac54-a73a829b2d6a.png)
-
-And the result of the `CalculatorTest` test will be:
-
-![](img/4af08c61-2654-40bc-89c4-a10f08681e58.png)
-
-The output tells us three things:
-
-+   The value of `which.impl` in `calculator.conf` was set to `adds`
-
-+   The corresponding implementation of `AnotherCalculatorImpl` was used
-
-+   The invoked implementation worked as expected
-
-Similarly, we can run our unit test for the `calculator.conf` file set to `multiplies`.
-
-The result looks very good, but we still can improve the code and make it less susceptible to error, if sometime in the future somebody decides to enhance the functionality by adding a new implementation or something similar. We can take advantage of the constants added to the `Calculator` interface and make the `create()`  factory method more protected from a human mistake:
-
-```java
-
-public static Calculator create(){
-
-String whichImpl = Utils.getStringValueFromConfig(Calculator.CONF_NAME,
-
-Calculator.CONF_WHICH_IMPL);
-
-if(whichImpl.equals(Calculator.WhichImpl.multiplies.name())){
-
-return new CalculatorImpl();
-
-} else if (whichImpl.equals(Calculator.WhichImpl.adds.name())){
-
-return new AnotherCalculatorImpl();
-
-} else {
-
-throw new RuntimeException("Houston, we have a problem. " +
-
-"Unknown key " + Calculator.CONF_WHICH_IMPL +
-
-" value " + whichImpl + " is in config.");
-
-}
-
-}
-
-```
-
-Just to make sure that the test doing its job, we change the value in the `calculator.conf` file in the test directory to `add` (instead of `adds`) and run the test again. The output will be as follows:
-
-![](img/252fb2df-1745-4fa7-8b42-92fae0a4f19d.png)
-
-The test failed, as was expected. It gives us a level of confidence that the code works and doesn't just always show success.
-
-Yet, the code can be improved to become more readable, more testable, and less susceptible to human errors when it is modified or expanded. Using the knowledge of the `enum` functionality, we can write a method that converts the value of the key `which.impl` in the `calculator.conf` file to one of the constants (instances) of the class `enum WhichImpl`. To do it, we add this new method to the class `Utils`:
-
-```java
-
-WhichImpl getWhichImplValueFromConfig(String configFileName, String key){
-
-String whichImpl = getStringValueFromConfig(configFileName, key);
-
-try{
-
-return Enum.valueOf(WhichImpl.class, whichImpl);
-
-} catch (IllegalArgumentException ex){
-
-throw new RuntimeException("Houston, we have a problem. " +
-
-"Unknown key " + Calculator.CONF_WHICH_IMPL +
-
-" value " + whichImpl + " is in config.");
-
-}
-
-}
-
-```
-
-这段代码基于`getStringValueFromConfig()`方法的使用，我们已经测试过并知道它按预期工作。`try...catch`结构允许我们捕获和处理一些代码（在这种情况下是`Enum.valueOf()`方法）遇到无法解决的条件并抛出异常的情况（我们将在第十章中学到更多关于这个的知识，*控制流语句*）。人们必须阅读 Java API 文档，才能知道`Enum.valueOf()`方法可能会抛出异常。例如，这是关于`Enum.valueOf()`方法的文档中的一句引用：
-
-"Throws: IllegalArgumentException - 如果指定的枚举类型没有具有指定名称的常量，或者指定的类对象不表示枚举类型"
-
-阅读即将使用的任何第三方类的 API 文档是一个好主意。在我们的代码中，我们捕获它并以一致的方式用我们自己的措辞抛出一个新的异常。
-
-正如你所期望的，我们还为`getWhichImplValueFromConfig()`方法编写了一个单元测试，并将其添加到`UtilsTest`中：
-
-```java
-
-@Test
-
-@DisplayName("Test matching config value to enum WhichImpl")
-
-void getWhichImpValueFromConfig(){
-
-String confifFileName = "utilstest.conf";
-
-for(int i = 1; i <= WhichImpl.values().length; i++){
-
-String key = String.valueOf(i);
-
-WhichImpl whichImpl =
-
-Utils.getWhichImplValueFromConfig(confifFileName, key);
-
-System.out.println(key + "=" + whichImpl);
-
-}
-
-try {
-
-WhichImpl whichImpl =
-
-Utils.getWhichImplValueFromConfig(confifFileName, "unknown");
-
-fail("Should not get here! whichImpl = " + whichImpl);
-
-} catch (RuntimeException ex){
-
-assertEquals("Houston, we have a problem. " +
-
-"Unknown key which.impl value unknown is in config.",
-
-ex.getMessage());
-
-}
-
-try {
-
-WhichImpl whichImpl =
-
-Utils.getWhichImplValueFromConfig(confifFileName, "some value");
-
-fail("Should not get here! whichImpl = " + whichImpl);
-
-} catch (RuntimeException ex){
-
-assertEquals("Houston, we have a problem. " +
-
-"Unknown key which.impl value unknown is in config.",
-
-ex.getMessage());
-
-}
-
-}
-
-```
-
-为了支持这个测试，我们还在`utilstest.conf`文件中添加了两个条目：
-
-```java
-
-{
-
-"1": "multiplies",
-
-"2": "adds",
-
-"unknown": "unknown"
-
-}
-
-```
-
-这个测试涵盖了三种情况：
-
-+   如果`enum WhichImpl`中的所有常量都存在于配置文件中，那么`getWhichImplValueFromConfig()`方法就可以正常工作——它会找到它们中的每一个，不会抛出异常
-
-+   如果传递给`getWhichImplValueFromConfig()`方法的键不是来自`enum WhichImpl`，则该方法会抛出一个异常，其中包含消息`Houston, we have a problem. Unknown key which.impl value unknown is in config`
-
-+   如果传递给`getWhichImplValueFromConfig()`方法的键在配置文件中不存在，则该方法会抛出一个异常，其中包含消息`Houston, we have a problem. Unknown key which.impl value unknown is in config`
-
-当我们确信这个方法按预期工作时，我们可以重写`create()`工厂方法如下：
-
-```java
-
-public static Calculator create(){
-
-WhichImpl whichImpl =
-
-Utils.getWhichImplValueFromConfig(Calculator.CONF_NAME,
-
-Calculator.CONF_WHICH_IMPL);
-
-switch (whichImpl){
-
-case multiplies:
-
-return new CalculatorImpl();
-
-case adds:
-
-return new AnotherCalculatorImpl();
-
-default:
-
-throw new RuntimeException("Houston, we have another " +
-
-"problem. We do not have implementation for the key " +
-
-Calculator.CONF_WHICH_IMPL + " value " + whichImpl);
-
-}
-
-}
-
-```
-
-`switch()`结构非常简单：它将执行线程定向到与匹配相应值的 case 下的代码块（更多信息请参阅第十章，*控制流语句*）。
-
-The benefit of creating and using the method `getWhichImplValueFromConfig()` is that the `create()` method became much cleaner and focused on one task only: creating the right object. We will talk about the *Single Responsibility Principle* in section *So many OOD principles and so little time* of Chapter 8, *Object-Oriented Design (OOD) Principles*.
-
-We have captured the Calculator API in one place—the interface `Calculator` —and we have tested it and proved that it works as designed. But there is another possible API aspect—the last one—we have not covered, yet.
-
-# Adding static methods to API
-
-Each of the classes that implement the `Calculator` interface may have static methods in addition to the instance methods defined in the interface. If such static methods could be helpful to the API's users, we should be able to document them in the `Calculator` interface, too, and that is what we are going to do now.
-
-Let's assume that each of the implementations of the `Calculator` interface has a static method, `addOneAndConvertToString()`:
-
-```java
-
-public class CalculatorImpl implements Calculator {
-
-public static String addOneAndConvertToString(double d){
-
-System.out.println(CalculatorImpl.class.getName());
-
-return Double.toString(d + 1);
-
-}
+public class MyClass {
 
 //...
 
-}
-
-public class AnotherCalculatorImpl implements Calculator {
-
-public static String addOneAndConvertToString(double d){
-
-System.out.println(AnotherCalculatorImpl.class.getName());
-
-return String.format("%.2f", d + 1);
-
-}
+SomeClass someClass = new SomeClass();
 
 //...
 
@@ -910,1917 +202,107 @@ return String.format("%.2f", d + 1);
 
 ```
 
-Notice that the methods have the same signature but slightly different implementations. The method in `CalculatorImpl` returns the result as is, while the method in `AnotherCalculatorImpl` returns the formatted value with two decimal places (we will show the result shortly).
+正如你所看到的，import 语句允许避免使用完全限定的类名，这样使得代码更容易阅读。
 
-Usually, static methods are called via a dot-operator applied to a class:
+# 多个类导入
 
-```java
+如果从同一包中导入了多个类或接口，则可以使用星号（`*`）通配符字符导入所有包成员。
 
-String s1 = CalculatorImpl.addOneAndConvertToString(42d);
-
-String s2 = AnotherCalculatorImpl.addOneAndConvertToString(42d);
-
-```
-
-But, we would like to hide (encapsulate) from an API client the implementation details so that the client code continues to use only the interface `Calculator`. To accomplish that goal, we will use the class `CalculatorFactory` again and add to it the following method:
+如果`SomeClass`和`SomeOtherClass`属于同一个包，则导入语句可能如下所示：
 
 ```java
 
-public static String addOneAndConvertToString(double d){
+package com.packt.javapath;
 
-WhichImpl whichImpl =
+import com.packt.javapath.something.*;
 
-Utils.getWhichImplValueFromConfig(Calculator.CONF_NAME,
+public class MyClass {
 
-Calculator.CONF_WHICH_IMPL);
+//...
 
-switch (whichImpl){
+SomeClass someClass = new SomeClass();
 
-case multiplies:
+SomeOtherClass someClass1 = new SomeOtherClass();
 
-return CalculatorImpl.addOneAndConvertToString(d);
-
-case adds:
-
-return AnotherCalculatorImpl.addOneAndConvertToString(d);
-
-default:
-
-throw new RuntimeException("Houston, we have another " +
-
-"problem. We do not have implementation for the key " +
-
-Calculator.CONF_WHICH_IMPL + " value " + whichImpl);
-
-}
+//...
 
 }
 
 ```
 
-As you may have noticed, it looks very similar to the factory method `create()`. We also used the same values of the `which.impl` property—`multiplies` and `adds`—as identification of the class. With that, we can add the following static method to the `Calculator` interface:
+使用星号的优点是更短的导入语句列表，但这种样式隐藏了导入的类和接口的名称。因此，程序员可能不知道它们确切来自哪里。此外，当两个或更多个包包含具有相同名称的成员时，您只需将它们作为单个类导入显式导入。否则，编译器将生成错误。
+
+另一方面，喜欢通配符导入的程序员认为，这有助于防止意外地创建一个与导入包中已存在的名称相同的类。因此，当涉及到样式和配置 IDE 使用或不使用通配符导入时，你必须自己做出选择。
+
+在 IntelliJ IDEA 中，默认的导入样式是使用通配符。如果你想切换到单个类导入，点击文件|其他设置|默认设置，如下截图所示：
+
+![](img/15e4c441-99b0-4266-b669-26820d240037.png)
+
+在打开的屏幕上，选择编辑器|Java，并选中使用单个类导入复选框：
+
+![](img/7dbd6160-11da-4075-afe8-394c3b78582c.png)
+
+这个页面上还有其他一些你可能会发现有用的设置，所以试着记住如何访问它。
+
+# 静态导入
+
+静态导入允许单独导入一个类或接口，以及它的公共成员——字段和方法。如果你查看我们的一个测试类，你会看到以下静态导入语句：
 
 ```java
 
-static String addOneAndConvertToString(double d){
-
-return CalculatorFactory.addOneAndConvertToString(d);
-
-}
+import static org.junit.jupiter.api.Assertions.*;
 
 ```
 
-As you can see, this way we were able to hide the names of the classes that implemented the interface `Calculator` and the static method `addOneAndConvertToString ()`, too.
-
-To test this new addition, we have expanded code in `CalculatorTest` by adding these lines:
+这个语句允许我们编写以下内容：
 
 ```java
-
-double d = 2.12345678;
-
-String mString = "3.12345678";
-
-String aString = "3.12";
-
-String s = Calculator.addOneAndConvertToString(d);
-
-if(whichImpl.equals(Calculator.WhichImpl.multiplies)){
-
-assertEquals(mString, s);
-
-} else {
-
-assertNotEquals(mString, s);
-
-}
-
-if(whichImpl.equals(Calculator.WhichImpl.adds)){
-
-assertEquals(aString, s);
-
-} else {
-
-assertNotEquals(aString, s);
-
-}
-
-```
-
-在测试中，我们期望`String`类型的一个值，在`WhichImpl.multiplies`的情况下是相同的值，而在`WhichImpl.adds`的情况下是不同格式的值（只有两位小数）。让我们在`calculator.conf`中使用以下设置运行`CalculatorTest`：
-
-```java
-
-{
-
-"which.impl": "adds"
-
-}
-
-```
-
-结果是：
-
-![](img/d70771b8-dd6c-442b-a6cd-8ea6393c6e3d.png)
-
-当我们将`calculator.conf`设置为值`multiplies`时，结果如下：
-
-![](img/bbaa099b-1060-4191-8a6e-87d12be01e1f.png)
-
-有了这个，我们完成了对计算器 API 的讨论。
-
-# API 已完成
-
-我们的 API 的最终版本如下：
-
-```java
-
-public interface Calculator {
-
-int multiplyByTwo(int i);
-
-静态计算器 createInstance(){
-
-return  CalculatorFactory.create();
-
-}
-
-static String addOneAndConvertToString(double d){
-
-return  CalculatorFactory.addOneAndConvertToString(d);
-
-}
-
-String CONF_NAME = "calculator.conf";  //文件名
-
-String CONF_WHICH_IMPL = "which.impl"; // .conf 文件中的键
-
-枚举 WhichImpl{
-
-multiplies, //使用乘法运算
-
-// 并返回 addOneAndConvertToString()
-
-// 无格式的结果
-
-adds    //使用加法运算
-
-// 并返回 addOneAndConvertToString()
-
-// 仅显示两位小数的结果
-
-}
-
-}
-
-```
-
-这样，我们保持了单一的记录源——捕获所有 API 细节的接口。如果需要更多细节，注释可以引用一些外部 URL，其中包含描述每个`Calculator`实现的完整文档。并且，重复我们在本节开头已经说过的，方法名称应该描述方法产生的所有副作用。
-
-实际上，程序员试图编写小巧、重点突出的方法，并在方法名称中捕获方法的所有内容，但他们很少在接口中添加更多的抽象签名。当他们谈论 API 时，他们通常只指的是抽象签名，这是 API 最重要的方面。但我们认为在一个地方记录所有其他 API 方面也是一个好主意。
-
-# 重载、重写和隐藏
-
-我们已经提到了方法重写，并在第二章中解释了它，*Java 语言基础*。方法重写是用子类（或实现接口的类中的默认方法）的方法替换父类中实现的方法，这些方法具有相同的签名（或在实现接口的类中，或在相应的子接口中）。方法重载是在同一个类或接口中创建几个具有相同名称和不同参数（因此，不同签名）的方法。在本节中，我们将更详细地讨论接口、类和类实例的重写和重载成员，并解释隐藏是什么。我们从一个接口开始。
-
-# 接口方法重载
-
-我们在第二章，*Java 语言基础*中已经说过，除了抽象方法，接口还可以有默认方法和静态成员——常量、方法和类。
-
-如果接口中已经存在抽象、默认或静态方法`m()`，就不能添加另一个具有相同签名（方法名称和参数类型列表）的方法`m()`。因此，以下示例生成编译错误，因为每对方法具有相同的签名，而访问修饰符（`private`、`public`）、`static`或`default`关键字、返回值类型和实现不是签名的一部分：
-
-```java
-
-接口 A {
-
-int m(String s);
-
-双重 m(String s);
-
-}
-
-接口 B {
-
-int m(int s);
-
-static int m(int i) { return 42; }
-
-}
-
-接口 C {
-
-int m(double i);
-
-private double m(double s) { return 42d; }
-
-}
-
-接口 D {
-
-int m(String s);
-
-default int m(String s) { return 42; }
-
-}
-
-接口 E {
-
-private int m(int s) { return 1; };
-
-default double m(int i) { return 42d; }
-
-}
-
-接口 F {
-
-default int m(String s) { return 1; };
-
-static int m(String s) { return 42; }
-
-}
-
-接口 G {
-
-private int m(double d) { return 1; };
-
-static int m(double s) { return 42; }
-
-}
-
-接口 H {
-
-default int m(int i) { return 1; };
-
-default double m(int s) { return 42d; }
-
-}
-
-```
-
-要创建不同的签名，要么更改方法名称，要么更改参数类型列表。具有相同方法名称和不同参数类型的两个或多个方法构成方法重载。以下是接口中合法的方法重载示例：
-
-```java
-
-接口 A {
-
-int m(String s);
-
-int m(String s, double d);
-
-int m(double d, String s);
-
-String m(int i);
-
-private double m(double d) { return 42d; }
-
-private int m(int i, String s) { return 1; }
-
-default int m(String s, int i) { return 1; }
-
-}
-
-接口 B {
-
-static int m(String s, int i) { return 42; }
-
-static int m(String s) { return 42; }
-
-}
-
-```
-
-重载也适用于继承的方法，这意味着以下非静态方法的重载与前面的示例没有区别：
-
-```java
-
-接口 D {
-
-default int m(int i, String s) { return 1; }
-
-default int m(String s, int i) { return 1; }
-
-}
-
-接口 C {
-
-default double m(double d) { return 42d; }
-
-}
-
-接口 B 扩展自 C, D {
-
-int m(double d, String s);
-
-String m(int i);
-
-}
-
-接口 A 扩展自 B {
-
-int m(String s);
-
-int m(String s, double d);
-
-}
-
-```
-
-您可能已经注意到我们在上一个代码中将`private`方法更改为`default`。我们这样做是因为`private`访问修饰符会使方法对子接口不可访问，因此无法在子接口中重载。
-
-至于静态方法，以下组合的静态和非静态方法虽然允许，但不构成重载：
-
-```java
-
-接口 A {
-
-int m(String s);
-
-static int m(String s, double d) { return 1 }
-
-}
-
-接口 B {
-
-int m(String s, int i);
-
-static int m(String s) { return 42; }
-
-}
-
-接口 D {
-
-default int m(String s, int s) { return 1; }
-
-static int m(String s, double s) { return 42; }
-
-}
-
-接口 E {
-
-private int m() { return 1; }
-
-static int m(String s) { return 42; }
-
-}
-
-```
-
-静态方法属于类（因此在应用程序中是唯一的），而非静态方法与实例相关（每个对象都会创建一个方法副本）。
-
-出于同样的原因，不同接口的静态方法不会相互重载，即使这些接口存在父子关系：
-
-```java
-
-接口 G {
-
-static int m(String s) { return 42; }
-
-}
-
-接口 F 扩展自 G {
-
-static int m(String s, int i) { return 42; }
-
-}
-
-```
-
-只有属于同一接口的静态方法才能相互重载，而非静态接口方法即使属于不同接口也可以重载，前提是它们具有父子关系。
-
-# 接口方法重写
-
-与重载相比，重写只发生在非静态方法，并且只有当它们具有完全相同的签名时才会发生。
-
-另一个区别是，重写方法位于子接口中，而被重写的方法属于父接口。以下是方法重写的示例：
-
-```java
-
-接口 D {
-
-default int m(String s) { // 不重写任何内容
-
-返回 1;
-
-}
-
-}
-
-接口 C 扩展自 D {
-
-default int m(String d) { // 重写 D 的方法
-
-return 42;
-
-}
-
-}
-
-```
-
-直接实现接口`C`的类，如果没有实现方法`m()`，将从接口`C`获取该方法的实现，而不会从接口`D`获取该方法的实现。只有直接实现接口`D`的类，如果没有实现方法`m()`，将从接口`D`获取该方法的实现。
-
-注意我们使用了直接这个词。通过说类`X`直接实现接口`C`，我们的意思是类`X`定义如下：`class X implements C`。如果接口`C`扩展 D，则类`X`也实现接口`D`，但不是直接实现。这是一个重要的区别，因为在这种情况下，接口`C`的方法可以覆盖具有相同签名的接口`D`的方法，从而使它们对类`X`不可访问。
-
-在编写依赖于覆盖的代码时，一个好的做法是使用注解`@Override`来表达程序员的意图。然后，Java 编译器和使用它的 IDE 将检查覆盖是否发生，并在带有此注解的方法没有覆盖任何内容时生成错误。以下是一些例子：
-
-```java
-
-接口 B {
-
-int m(String s);
-
-}
-
-接口 A 扩展 B {
-
-@Override             //no error
-
-int m(String s);
-
-}
-
-接口 D {
-
-默认 int m1(String s) { return 1; }
-
-}
-
-接口 C 扩展 D {
-
-@Override            //error
-
-默认 int m(String d) { return 42; }
-
-}
-
-```
-
-错误将帮助您注意到父接口中的方法拼写不同（`m1()`与`m()`）。以下是另一个例子：
-
-```java
-
-接口 D {
-
-静态 int m(String s) { return 1; }
-
-}
-
-接口 C 扩展 D {
-
-@Override                  //error
-
-默认 int m(String d) { return 42; }
-
-}
-
-```
-
-这个例子会生成一个错误，因为实例方法不能覆盖静态方法，反之亦然。此外，静态方法不能覆盖父接口的静态方法，因为接口的每个静态方法都与接口本身相关联，而不是与类实例相关联：
-
-```java
-
-接口 D {
-
-静态 int m(String s) { return 1; }
-
-}
-
-接口 C 扩展 D{
-
-@Override               //error
-
-静态 int m(String d) { return 42; }
-
-}
-
-```
-
-但是子接口中的静态方法可以隐藏父接口中具有相同签名的静态方法。实际上，任何静态成员——字段、方法或类——都可以隐藏父接口的相应静态成员，无论是直接父接口还是间接父接口。我们将在下一节讨论隐藏。
-
-# 接口静态成员隐藏
-
-让我们看一下以下两个接口：
-
-```java
-
-接口 B {
-
-String NAME = "B";
-
-静态 int m(String d) { return 1; }
-
-类 Clazz{
-
-String m(){ return "B";}
-
-}
-
-}
-
-接口 A 扩展 B {
-
-String NAME = "A";
-
-静态 int m(String d) { return 42; }
-
-类 Clazz{
-
-String m(){ return "A";}
-
-}
-
-}
-
-```
-
-接口`B`是接口`A`的父接口（也称为超接口或基接口），接口的所有成员默认都是`public`。接口字段和类也默认都是`static`。因此，接口`A`和`B`的所有成员都是`public`和`static`。让我们运行以下代码：
-
-```java
-
-public static void main(String[] args) {
-
-System.out.println(B.NAME);
-
-System.out.println(B.m(""));
-
-System.out.println(new B.Clazz().m());
-
-}
-
-```
-
-结果将如下所示：
-
-![](img/de04757c-fb2d-4658-a5be-bad01309bd8c.png)
-
-正如您所看到的，效果看起来像是覆盖，但产生它的机制是隐藏。在类成员隐藏的情况下，差异更为显著，我们将在下一节讨论。
-
-# 类成员隐藏
-
-让我们看看这两个类：
-
-```java
-
-类 ClassC {
-
-public static String field = "static field C";
-
-public static String m(String s){
-
-return "static method C";
-
-}
-
-}
-
-类 ClassD 扩展 ClassC {
-
-public static String field = "static field D";
-
-public static String m(String s){
-
-return "static method D";
-
-```
-
-}
-
-```
-
-它们每个都有两个静态成员——一个字段和一个方法。有了这个，看看以下代码：
-
-```java
-
-System.out.println(ClassD.field);
-
-System.out.println(ClassD.m(""));
-
-System.out.println(new ClassD().field);
-
-System.out.println(new ClassD().m(""));
-
-ClassC 对象 = new ClassD();
-
-System.out.println(object.field);
-
-System.out.println(object.m(""));
-
-```
-
-停止阅读并尝试猜测输出将是什么。
-
-以下是相同的代码，带有行号和输出（在注释中捕获）：
-
-```java
-
-1 System.out.println(ClassD.field); //静态字段 D
-
-2 System.out.println(ClassD.m("")); //静态方法 D
-
-3 System.out.println(new ClassD().field); //静态字段 D
-
-4 System.out.println(new ClassD().m("")); //静态方法 D
-
-5 ClassC object = new ClassD();
-
-6 System.out.println(object.field); //静态字段 C
-
-7 System.out.println(object.m("")); //静态方法 C
-
-```
-
-前两行的输出可能是预期的。第 3 行和第 4 行不太直观，但可能也是有道理的。类的任何对象都应该能够访问类成员。然而，不建议通过对象访问静态成员，因为这样的代码隐藏了所访问的成员是静态的事实，这使得代码不太可读，并可能导致不必要的对象创建。同样适用于第 6 行和第 7 行。并且，正如我们在第二章中讨论的那样，*Java 语言基础*，第 5、6 和 7 行表明我们能够将`ClassD`的对象分配给`ClassC`类型的引用，因为`ClassC`是父类，所有子类（所有世代的）都与父类具有相同的类型。这意味着子类可以从所有父类（直接和间接的）继承许多类型。这看起来像是遗传继承，不是吗？
-
-因此，您可以看到子类的静态成员（也称为派生类、扩展类、子类或子类型）可以隐藏其父类的静态成员（也称为基类或超类）。
-
-隐藏字段和隐藏方法之间有两个区别。一个静态字段：
-
-+   隐藏实例变量
-
-+   甚至隐藏一个具有相同名称但不同类型的字段
-
-这里是隐藏的允许情况，之前描述过：
-
-```java
-
-类 ClassC {
-
-public static String field1 = "实例字段 C";
-
-public String m1(String s){
-
-返回"实例方法 C";
-
-}
-
-}
-
-类 ClassD 扩展自 ClassC {
-
-public String field1 = "实例字段 D";
-
-public String m1(String s){
-
-返回"实例方法 D";
-
-}
-
-}
-
-```
-
-为了证明这一点，我们可以运行以下代码：
-
-```java
-
-System.out.println(new ClassD().field1);
-
-System.out.println(new ClassD().m1(""));
-
-ClassC object1 = new ClassD();
-
-System.out.println(object1.m1(""));
-
-System.out.println(object1.field1);
-
-System.out.println(((ClassD)object1).field1);
-
-```
-
-再次，你现在可以停止阅读并猜测输出将是什么。
-
-这里是结果：
-
-```java
-
-1 System.out.println(new ClassD().field1); //实例字段 D
-
-2 System.out.println(new ClassD().m1("")); //实例方法 D
-
-3 ClassC object1 = new ClassD();
-
-4 System.out.println(object1.m1("")); //实例方法 D
-
-5 System.out.println(object1.field1); //实例字段 C
-
-6 System.out.println(((ClassD)object1).field1); //实例字段 D
-
-```
-
-正如你所看到的，第 5 行输出了静态变量`ClassC.field1`的值，尽管`ClassD`中也存在同名的字段`field1`。即使我们将`ClassC`中的`field1`更改为非静态，也会显示相同的结果：第 5 行打印出使用引用`object1`的声明类型的字段的值，而不是分配给它的对象的实际类型。更让事情变得更加复杂的是，正如我们之前所述，`ClassC`中`field1`的类型可能与`ClassD`中同名字段的类型不同，而公共字段隐藏的效果仍然是相同的。
-
-为了避免混淆，始终遵循这两个最佳实践：
-
-+   将静态变量的标识符写成大写字符，而实例变量的标识符应该是小写的
-
-+   尝试永远不要公开访问实例字段；将它们设为私有，并通过 getter 和 setter 访问它们的值：
-
-```java
-
-类 ClassC {
-
-私有字符串字段 1 = "实例字段 C";
-
-public String getField(){ return field1; }
-
-public void setField(String s){ field1 = s; }
-
-public String m1(String s){
-
-return "实例类 C";
-
-}
-
-}
-
-class ClassD extends ClassC {
-
-private String field1 = "实例字段 D";
-
-public String getField(){ return field1; }
-
-public void setField(String s){ field1 = s; }
-
-public String m1(String s){
-
-return "实例类 D";
-
-}
-
-}
-
-```
-
-这样，在覆盖或隐藏的情况下，您将只有一组与方法相关的规则。这更简单，更直接。此外，您可以更好地控制私有字段的值。例如，您可以向 setter 添加代码，以确保字段永远不会被赋予`null`或其他不良值。
-
-# 实例方法覆盖
-
-因此，正如我们在前一节中所看到的，类（或静态）成员不能相互覆盖，而只能隐藏，我们只能谈论覆盖实例成员。我们也已经确定实例字段相互隐藏，字段隐藏的规则与方法覆盖的规则相当不同，因此最佳实践是不公开实例字段，只通过 getter 和 setter 访问它们的值。这样，实例成员覆盖就减少到实例方法覆盖，这就是我们将在本节中描述的内容。
-
-实例方法覆盖的规则与接口默认方法覆盖的规则没有不同：子类中的方法覆盖具有相同签名的父类中的方法。如果签名不同，但方法名称相同，则该方法是重载而不是覆盖。因此，如果您想要覆盖一个方法，最好始终向方法添加`@Override`注释，以确保它不仅仅是静默地重载。
-
-正如我们之前所确定的，子类中的静态方法不能覆盖父类中的实例方法。这使得类实例覆盖规则比接口覆盖规则简单得多。
-
-一个重要的特点要注意的是，尽管构造函数看起来像方法，但它们不是类的方法甚至不是类的成员。构造函数没有返回类型，并且与类具有相同的名称。因此，构造函数不能被覆盖，但可以被重载。它的唯一目的是在创建类（对象）的新实例时被调用。
-
-有了这个，我们就转到了*重载、覆盖和隐藏*部分的最后一个小节：实例方法重载。
-
-# 实例方法重载
-
-对于实例方法重载，只有两个语句来描述它：
-
-+   要使非静态方法重载，它必须与同一类或具有父子关系的类中的另一个非静态方法具有相同的名称和不同的参数类型集。
-
-+   私有非静态方法只能由同一类的非静态方法重载。
-
-因此，这是一个方法重载的示例：
-
-```java
-
-void m() {
-
-// 一些代码
-
-}
-
-int m(String s){
-
-// 一些代码
-
-return 1;
-
-}
-
-void m(int i){
-
-// 一些代码
-
-}
-
-int m(String s, double d){
-
-// 一些代码
-
-return 1;
-
-}
-
-int m(double d, String s){
-
-// 一些代码
-
-return 1;
-
-}
-
-```
-
-正如您所看到的，重载方法的名称保持不变，但参数的数量、它们的类型或参数类型的顺序必须不同。否则，它不是重载，编译器将生成错误。返回类型在重载中不起任何作用。它可以相同也可以不同。
-
-从另一个角度来看，所有重载的方法都被认为是不同的。在前面的例子中，我们可以为每个方法赋予不同的名称，并且具有完全相同的代码行为。因此，当您有几个具有相同功能的方法（这就是为什么您不想更改方法名称）但具有不同的参数或不同的参数类型时，重载是有用的。
-
-Here is one possible case of overloading use. You might remember one of the first classes we created was called `SimpleMath`:
-
-```java
-
-public class SimpleMath {
-
-public int multiplyByTwo(int i){
-
-return i * 2;
-
-}
-
-}
-
-```
-
-Then, we might want to add to it another method that, for user convenience, will accept a number as a `String` type: `multiplyByTwo(String s)`. We could do it the following way:
-
-```java
-
-public class SimpleMath {
-
-public int multiplyByTwo(int i){
-
-return 2 * i;
-
-}
-
-public int multiplyByTwo(String s){
-
-int i = Integer.parseInt(s);
-
-return 2 * i;
-
-}
-
-}
-
-```
-
-Or, if we would like to keep the complicated code of multiplying by two in one place (so we can change it in one place only if there is a need to modify it), we could write the following:
-
-```java
-
-public class SimpleMath {
-
-public int multiplyByTwo(int i){
-
-return 2 * i;
-
-}
-
-public int multiplyByTwo(String s){
-
-int i = Integer.parseInt(s);
-
-return multiplyByTwo(i);
-
-}
-
-}
-
-```
-
-A constructor cannot be overloaded in the same manner:
-
-```java
-
-public class SimpleMath {
-
-private int i;
-
-private String s;
-
-public SimpleMath() {
-
-}
-
-public SimpleMath(int i) {
-
-this.i = i;
-
-}
-
-public SimpleMath(String s) {
-
-this.s = s;
-
-}
-
-// Other methods that use values of the fields i and s
-
-// go here
-
-}
-
-```
-
-With that, we conclude the topic of overloading, overriding, and hiding. It is time to explain in more detail the use of the keywords `this` (used earlier) and `super` (not used yet), and talk more about constructors.
-
-# This, super, and constructors
-
-The keyword `this` provides a reference to the current object. The keyword `super` refers to the parent class object. A constructor is used to initialize the object state (values of the instance fields). It can be accessed using the keywords `new`, `this`, or `super`.
-
-# Keyword this and its usage
-
-We saw several examples of its usage in a constructor similar to the following:
-
-```java
-
-public SimpleMath(int i) {
-
-this.i = i;
-
-}
-
-```
-
-It allows us to clearly distinguish between the object property and local variable, especially when they have the same name.
-
-Another use of the keyword `this` can be demonstrated in the implementation of the method `equals()` in the following `Person` class:
-
-```java
-
-public class Person {
-
-private String firstName;
-
-private String lastName;
-
-private LocalDate dob;
-
-public Person(String firstName, String lastName, LocalDate dob) {
-
-this.firstName = firstName;
-
-this.lastName = lastName;
-
-this.dob = dob;
-
-}
-
-public String getFirstName() { return firstName; }
-
-public String getLastName() { return lastName; }
-
-public LocalDate getDob() { return dob; }
-
-@Override
-
-public boolean equals(Object other){
-
-if (other == null) return false;
-
-if (this == other) return true;
-
-if (!(other instanceof Person)) return false;
-
-final Person that = (Person) other;
-
-return this.getFirstName().equals(that.getFirstName()) &&
-
-this.getLastName().equals(that.getLastName()) &&
-
-this.getDob().equals(that.getDob());
-
-}
-
-}
-
-```
-
-The reason we need to override the `equals()` method in the parent class `java.lang.Object` (which is the default parent class for all Java classes) is that we would like two objects of the class `Person` to be equal not only when they are actually the same object, but also when the value of each property of one object is the same as the value of the corresponding property of another object. As you can see, we have added an annotation `@Override` to make sure that this method does override the method `equals()` in the parent class `java.lang.Object`. Otherwise, if we make a mistake in the method signature, it may just overload the method `equals()` in the class `java.lang.Object` or, if we make mistake in the method name, be added as just another unrelated to the `equals()` method and we never know about it or would struggle to understand why two different objects of class `Person` are not equal, although all their property values are the same.
-
-第一行检查传入的引用值是否为`null`。如果是，返回的值是`false`，因为显然当前（`this`）对象不是`null`。
-
-我们的`equals()`方法的第二行检查引用的相等性，并且如果它们引用相同的对象，则返回`true`。这与父类`Object`中的默认`equals()`方法的工作方式相同。
-
-我们的`equals()`方法的第三行检查对象`other`是否是类`Person`的实例。我们需要这一行，因为在下一行中，我们将对象`other`转换为类型`Person`，以便能够访问`Person`的 getter。如果对象`other`不能转换为类型`Person`（这意味着引用`other`不引用具有类`Person`作为直接或间接父类的对象），第四行将抛出异常并中断执行流程（JVM 将以错误退出）。因此，我们检查并确保对象`other`在其祖先中具有类`Person`，并且在转换期间不会中断执行流程。
-
-我们新方法`equals()`的最后一行是一个布尔表达式（我们将在第九章中讨论这样的表达式，*运算符、表达式和语句*），它比较当前对象的三个属性的值与另一个对象的相应值，并且仅当两个对象的每个字段都具有相同的值时才返回`true`。
-
-让我们为我们的新方法`equals()`创建一个单元测试：
-
-```java
-
-public class PersonTest {
-
-@Test
-
-void equals() {
-
-LocalDate dob = LocalDate.of(2001, 01, 20);
-
-LocalDate dob1 = LocalDate.of(2001, 01, 21);
 
 Person p = new Person("Joe", "Blow", dob);
 
 assertTrue(p.equals(p));
 
-assertTrue(p.equals(new Person("Joe", "Blow", dob)));
-
-assertFalse(p.equals(new Person("Joe1", "Blow", dob)));
-
-assertFalse(p.equals(new Person("Joe", "Blow1", dob)));
-
-assertFalse(p.equals(new Person("Joe", "Blow", dob1)));
-
-assertFalse(p.equals( new Person("Joe1", "Blow1", dob1)));
-
-}
-
-}
-
 ```
 
-正如你所看到的，我们已经为不同出生日期创建了两个对象。然后，我们创建一个`Person`对象并进行比较：
-
-+   对于自身-应该相等
-
-+   对于具有相同状态（属性值）的另一个对象-应该相等
-
-+   对于只有名字不同的另一个对象-不应该相等
-
-+   对于只有姓氏不同的另一个对象-不应该相等
-
-+   对于出生日期不同的另一个对象-不应该相等
-
-+   对于所有属性值都不同的另一个对象-不应该相等
-
-我们运行这个测试并得到了绿色的成功。
-
-但是然后，我们决定测试如果一个或所有的值都是`null`会发生什么，并将以下行添加到测试中：
+这样写：
 
 ```java
 
-assertFalse(p.equals(null));
+Person p = new Person("Joe", "Blow", dob);
 
-assertFalse(p.equals(new Person(null, "Blow", dob)));
-
-assertFalse(p.equals(new Person("Joe", null, dob)));
-
-assertFalse(p.equals(new Person(null, null, dob)));
-
-assertFalse(p.equals(new Person(null, null, null)));
-
-assertTrue(new Person(null, "Blow", dob)
-
-.equals(new Person(null, "Blow", dob)));
-
-assertTrue(new Person("Joe", null, dob)
-
-.equals(new Person("Joe", null, dob)));
-
-assertTrue(new Person("Joe", "Blow", null)
-
-.equals(new Person("Joe", "Blow", null)));
-
-assertTrue(new Person(null, null, null)
-
-.equals(new Person(null, null, null)));
+Assertions.assertTrue(p.equals(p));
 
 ```
 
-首先，我们比较现有对象和所有属性不为`null`的新对象，或者所有属性设置为`null`的新对象。我们期望前四个比较告诉我们这些对象不相等。然后，我们比较两个状态相同的对象，其中一个或所有值设置为`null`。我们期望所有这些对都被报告为相等。
-
-如果我们运行测试，我们会得到以下结果：
-
-![](img/afc4e8bc-30cb-4dac-9b07-8ceb89e62803.png)
-
-错误（`NullPointerExceptions`）表明我们正在尝试在一个尚未分配的引用（具有`null`值）上调用方法，在类`Person`的第 57 行。以下是该行：
+这是静态导入用法的一个普遍情况。另一个常见情况是静态导入接口或`enum`的常量。例如，如果我们有一个如下的接口：
 
 ```java
 
-return this.getFirstName().equals(that.getFirstName()) &&
+package com.packt.javapath.api;
 
-this.getLastName().equals(that.getLastName()) &&
+public interface Constants {
 
-this.getDob().equals(that.getDob());
+String NAME = "name";
 
-```
-
-我们意识到，当我们在`equals()`方法上调用所有的 getter 时，它们都会返回`null`值，这是`NullPointerException`的源头。我们需要改变`equals()`方法的实现（考虑到`null`值的可能性），或者改变构造函数的实现（不允许传入的值为`null`）。通常，决定可以基于业务需求。例如，在我们要处理的数据中，是否可能存在没有名字、姓氏、出生日期，甚至这些值中的任何一个的人？最后一个——没有任何属性的人——可能不现实。然而，真实的数据经常出现错误，我们可能会问我们的业务人员（也称为领域专家）代码应该如何处理这种情况。然后，我们改变代码以反映新的需求。
-
-假设他们告诉我们，一个或甚至两个属性可以是`null`，我们应该处理这种情况，就好像它们不是`null`一样。但是，他们说，我们不应该处理所有属性都是`null`的情况。
-
-在审查新的需求后，我们再次去找领域专家，并建议，例如，我们将`String`类型的`null`值转换为空字符串`""`，将`LocalDate`类型转换为零年一月一日的日期，但只有当不是所有值都是`null`时。在添加相应的记录到日志文件后，我们跳过这个人的数据。他们建议我们允许名字和姓氏为空，并将它们转换为空字符串类型的`""`，但不处理没有出生日期的人，并在日志文件中记录这种情况。因此，我们将构造函数更改如下：
+}
 
 ```java
 
-public Person(String firstName, String lastName, LocalDate dob) {
-
-this.firstName = firstName == null ? "" : firstName;
-
-this.lastName = lastName == null ? "" : lastName;
-
-this.dob = dob;
-
-if(dob == null){
-
-throw new RuntimeException("Date of birth is null");
-
-}
-
-}
-
-```
-
-处理空值的测试部分现在变成了以下内容：
+然后，要使用它的常量，可以静态导入它们：
 
 ```java
 
-assertFalse(p.equals(null));
+package com.packt.javapath;
 
-assertFalse(p.equals(new Person(null, "Blow", dob)));
+import static com.packt.javapath.api.Constants.*;
 
-assertFalse(p.equals(new Person("Joe", null, dob)));
+public class MyClass {
 
-assertFalse(p.equals(new Person(null, null, dob)));
+//...
 
-try {
+String s = "My " + NAME + " is Joe";
 
-new Person("Joe", "Blow", null);
-
-} catch (RuntimeException ex){
-
-assertNotNull(ex.getMessage());
-
-//在这里将记录 ex.getMessage()添加到日志
-
-}
-
-assertTrue(new Person(null, "Blow", dob)
-
-.equals(new Person(null, "Blow", dob)));
-
-assertTrue(new Person("Joe", null, dob)
-
-.equals(new Person("Joe", null, dob)));
-
-assertTrue(new Person(null, null, dob)
-
-.equals(new Person(null, null, dob)));
-
-```
-
-我们运行它，得到了绿色的成功颜色。
-
-这是关键字`this`的一个例子。我们将在*构造函数*部分展示另一个例子。在*最终变量*部分的末尾，还有一个非常重要的关键字`this`的用法。你不想错过它！否则，它可能是一个非常难以找到的错误的源头。
-
-现在，我们将解释关键字`super`的用法。
-
-# 关键字 super 及其用法
-
-关键字`super`代表父类对象。为了演示它的用法，让我们创建一个车辆、一辆卡车和一辆汽车的编程模型。让我们从车辆开始。模拟车辆的类计算车辆在指定时间段内（以秒为单位）可以达到的速度。它看起来是这样的：
-
-```java
-
-public class Vehicle {
-
-private int weightPounds, horsePower;
-
-public Vehicle(int weightPounds, int horsePower) {
-
-this.weightPounds = weightPounds;
-
-this.horsePower = horsePower;
-
-}
-
-protected int getWeightPounds(){ return this.weightPounds; }
-
-protected double getSpeedMph(double timeSec, int weightPounds){
-
-double v =
-
-2.0 * this.horsePower * 746 * timeSec * 32.174 / weightPounds;
-
-返回 Math.round（Math.sqrt（v）* 0.68）;
-
-}
-
-}
-
-```
-
-该类由构造函数设置了两个属性和两个受保护的方法。受保护是一种访问修饰符，表示该方法只能被此类的子类访问。我们将在第七章中更多地讨论访问修饰符，*包和可访问性（可见性）*。
-
-`Car`和`Truck`类（模拟汽车和卡车）可以扩展此类并继承两个受保护的方法，因此它们可用于计算汽车和卡车的速度。还有其他可能的代码组织方式。通常，使用聚合（将`Vehicle`对象设置为`Car`和`Truck`类的字段值）是首选的，除非有理由具有共同的父级（我们将在第八章中讨论这一点，*面向对象设计（OOD）原则*）。但是现在，让我们假设我们有充分的理由使用继承，以便演示关键字`super`的使用。总的来说，这是有道理的：汽车和卡车都是车辆，不是吗？
-
-因此，这就是`Truck`类的外观：
-
-```java
-
-public class Truck extends Vehicle {
-
-private int payloadPounds;
-
-public Truck（int payloadPounds，int weightPounds，int horsePower）{
-
-super（weightPounds，horsePower）;
-
-this.payloadPounds = payloadPounds;
-
-}
-
-public void setPayloadPounds（int payloadPounds）{
-
-this.payloadPounds = payloadPounds;
-
-}
-
-protected int getWeightPounds（）{
-
-返回 this.payloadPounds + getWeightPounds（）;
-
-}
-
-public double getSpeedMph（double timeSec）{
-
-返回以英里/小时为单位的速度（timeSec，getWeightPounds（））。
-
-}
-
-}
-
-```
-
-该类具有一个属性：卡车当前的有效载荷重量。它考虑了速度计算。有效载荷越重，卡车达到相同速度所需的时间就越长。由于有效载荷重量可能在对象创建后随时更改，因此提供了有效载荷重量的 setter，并且受保护的方法`getWeightPounds（）`返回车辆及其有效载荷的总重量。所有建模的主要方法和目的是方法`getSpeedMph（）`，它返回卡车在启动后`timeSec`秒内可以达到的速度（以每小时英里为单位）。
-
-但是，我们现在讨论关键字`super`的使用。您可能已经注意到它已经包含在构造函数中。您可以猜到，它代表父类的构造函数。在这种情况下，关键字`super`必须是子类构造函数的第一行。我们将在下一节*构造函数*中讨论它。
-
-以下是模拟汽车速度的类：
-
-```java
-
-public class Car extends Vehicle {
-
-private int passengersCount;
-
-public Car（int passengersCount，int weightPounds，int horsePower）{
-
-super（weightPounds，horsePower）;
-
-this.passengersCount = passengersCount;
-
-}
-
-public void setPassengersCount（int passengersCount）{
-
-this.passengersCount = passengersCount;
-
-}
-
-protected int getWeightPounds（）{
-
-返回 this.passengersCount * 200 + getWeightPounds（）;}
-
-public double getSpeedMph（double timeSec）{
-
-返回以英里/小时为单位的速度（timeSec，getWeightPounds（））;
-
-}
-
-}
-
-```
-
-它看起来与`Truck`类非常相似。唯一的区别是计算有效载荷的方式。假设每位乘客重量为`200`磅。因此，当设置乘客数时，有效载荷被计算为乘客数量乘以`200`。
-
-`Car`和`Truck`两个类都有一个缺陷（也称为错误或错误）。为了发现它，让我们尝试通过运行以下代码来计算卡车在开始时间后 10 秒的速度：
-
-```java
-
-Truck truck = new Truck（500，2000，300）;
-
-System.out.println（truck.getSpeedMph（10））;
-
-```
-
-如果我们这样做，结果将是`StackOverflowError`错误：
-
-！[]（img/926fdbd6-6ee7-4eef-90c4-096d1d553e6b.png）
-
-堆栈是 JVM 内存区域，用于存储方法调用链。最后调用的方法名称存储在顶部。当完成最后调用的方法时，其名称将从顶部移除，并执行下一个方法，依此类推，直到堆栈为空，即当 `main()` 方法完成时，应用程序完成其执行（JVM 退出）。
-
-在我们的案例中，堆栈不受控制地增长，并最终溢出。 JVM 无法在堆栈顶部添加另一个方法名称，并带有错误退出。这种情况的原因是我们的代码在这一行请求了一个递归调用：
-
-```java
-
-protected int getWeightPounds(){
-
-return this.payloadPounds + getWeightPounds();
-
-}
-
-```
-
-我们希望将卡车的有效载荷添加到父类中存储的车辆自身的重量中，但却告诉 JVM 调用相同的方法，因为这个方法被覆盖并且在子类中具有相同的名称，从而递归调用自身。这就是关键字 `super` 发挥作用的地方。通过在方法 `getWeightPounds()` 前面添加它，我们告诉 JVM 不要调用子类的方法，而是调用父类的方法：
-
-```java
-
-protected int getWeightPounds(){
-
-return this.payloadPounds + super.getWeightPounds();
-
-}
-
-```
-
-如果我们再次运行相同的代码，我们将得到预期的结果：
-
-![](img/3425b1a1-e668-4157-bc08-a22eff82094d.png)
-
-嗯，我们的速度计算公式似乎过于乐观了。但谁知道呢？也许到书印刷时，电动卡车将接近这个速度，或者超级环路交通将到达那里。
-
-另外，请注意，我们在计算速度的代码中没有在相同的方法前面添加 `super`：
-
-```java
-
-public double getSpeedMph(double timeSec){
-
-return getSpeedMph(timeSec, getWeightPounds());
-
-}
-
-```
-
-这是因为我们不想调用父类的方法。相反，我们想从子类中覆盖的版本中获取重量。为了确保，并通过使代码更易于阅读来避免混淆，我们可以在其前面添加关键字 `this`：
-
-```java
-
-public double getSpeedMph(double timeSec){
-
-return getSpeedMph(timeSec, this.getWeightPounds());
-
-}
-
-```
-
-实际上，这是我们建议始终遵循的最佳实践之一。
-
-这就结束了关键字 `super` 的用法讨论。我们将在 *构造函数* 部分再次看到它，以及关键字 `this`，在那里我们将解释构造函数是如何工作的，以及默认构造函数是什么。
-
-# 构造函数
-
-对象是作为对象创建模板使用的类的实例。每个对象由其状态和行为定义。对象的状态由其字段的值（也称为属性）定义，对象的行为由其方法定义。由于所有 Java 对象都是 `java.lang.Object` 的后代，因此不可能有没有状态和行为的对象，因为每个对象都继承自 `java.lang.Object` 的方法和一些基本状态。但是，当我们谈论应用程序代码、类和此代码创建的对象时，我们指的是我们定义的方法和状态，以便构建所需的功能。在这种意义上，可能有没有方法的对象。这种对象通常称为数据对象、数据结构或数据传输对象。也可能有没有状态，只有方法的对象。这种对象通常称为实用程序。
-
-如果对象可以有状态，则在对象创建期间必须初始化状态。这意味着必须为表示对象字段的变量分配一些值。这种初始赋值可以通过使用赋值运算符`=`显式地完成，也可以通过让 JVM 将默认值分配给对象的字段来完成。这些默认值取决于字段类型。我们已经在第五章中讨论了每种类型的默认值，*Java 语言元素和类型*。原始数值类型的默认类型为零，布尔类型为`false`，引用类型为`null`。
-
-使用运算符`new`创建对象。此运算符需要指定用于对象创建的构造函数。构造函数的主要职责是初始化对象状态。但是，有三种情况下，不需要在类中显式定义构造函数：
-
-+   当对象或其任何父对象都不能有状态（未定义字段）
-
-+   当在类型声明中为每个字段分配初始值时（`int x = 42;`）
-
-+   当默认值足够好时（例如，默认情况下将字段`int x;`初始化为零的值）
-
-那么如何创建对象呢？运算符`new`期望构造函数。答案是，在这种情况下——当类中没有显式定义构造函数时——编译器会为类生成默认构造函数。此默认构造函数如下所示：
-
-```java
-
-public ClassName(){
-
-super();
-
-}
-
-```
-
-正如您所看到的，它只做了一件事：使用关键字`super`调用父类的构造函数（没有参数的构造函数）。这个没有参数的父构造函数也可能是默认的，也可能是显式创建的。这里存在一个可能的混淆源：如果一个类有一个显式定义的构造函数，则默认的构造函数（无参数）不会自动生成。这种限制的原因是它让程序员掌握控制，并让类的作者决定是否向类添加一个没有参数的构造函数。否则，想象一下，您已经创建了一个类`Person`，并且不想允许在没有填充某些字段的情况下创建此类的实例。您也不希望这些值是默认值，而是希望强制客户端代码在每次创建新的`Person`对象时都显式填充它们。这就是为什么只要在类中定义了一个构造函数（带或不带参数），就不会在幕后自动生成构造函数。让我们测试一下这种行为。以下是两个没有显式定义构造函数（或任何代码）的类：
-
-```java
-
-public class Parent {
-
-}
-
-public class Child extends Parent{
-
-}
-
-```
-
-我们可以很好地运行以下代码：
-
-```java
-
-new Child();
-
-```
-
-它什么也不做，但这不是重点。让我们在父类中添加一个带参数的构造函数：
-
-```java
-
-public class Parent {
-
-public Parent(int i) {
-
-}
-
-}
-
-```
-
-如果我们再次尝试创建类`Child`的对象，我们将会得到一个错误：
-
-![](img/98593acd-b710-4f3a-92f1-02e2f4603e30.png)
-
-点击红线以在 IntelliJ 中查看此错误消息，因为编译器错误消息不够有用：
-
-![](img/f59184e5-c542-45ae-b001-196162ea43f0.png)
-
-它将显式定义的构造函数（带有`int`类型的参数）标识为必需的，并将其参数列表标识为形式参数列表。同时，类`Child`的默认构造函数尝试（如前所述）调用类`Parent`的无参数构造函数，并找不到。错误措辞在这一点上并不是很清楚。
-
-所以，让我们在类`Parent`中添加一个没有参数的构造函数：
-
-```java
-
-public class Parent {
-
-public Parent() {
-
-}
-
-public Parent(int i) {
-
-}
-
-}
-
-```
-
-现在可以创建一个`Child`类的对象而不会出现任何问题。这就是类作者如何控制对象创建过程的方式。
-
-如果你决定只能使用带参数的构造函数来创建`Parent`对象，你可以再次从中删除无参数的构造函数，并向`Child`类添加一个调用带参数的`Parent`构造函数的构造函数：
-
-```java
-
-public class Child extends Parent{
-
-public Child() {
-
-super(10);
-
-}
-
-}
-
-```
-
-或者，你可以向子类添加一个带参数的构造函数：
-
-```java
-
-子类继承父类
-
-public Child(int i) {
-
-super(i);
-
-}
-
-}
-
-```
-
-这些都可以正常工作。
-
-从这个演示中，你可能已经意识到，为了创建一个子类的对象，必须首先创建所有的父对象（并初始化它们的状态）。而且必须从最古老的祖先开始。让我们看看下面的例子：
-
-```java
-
-public class GrandDad{
-
-private String name = "GrandDad";
-
-public GrandDad() {
-
-System.out.println(name);
-
-}
-
-}
-
-public class Parent extends GrandDad{
-
-private String name = "Parent";
-
-public Parent() {
-
-System.out.println(name);
-
-}
-
-}
-
-public class Child extends Parent{
-
-private String name = "Child";
-
-public Child() {
-
-System.out.println(name);
-
-}
-
-}
-
-```
-
-你能猜到我们尝试创建子类`new Child()`时的输出吗？如果你猜到`GrandDad`构造函数首先完成，然后是`Parent`，然后是`Child`，那么你是正确的。这是结果：
-
-![](img/e65391e6-3a1e-406c-a12f-7d5f588b3abc.png)
-
-`Child`构造函数调用`Parent`构造函数，然后调用`GrandDad`构造函数，然后调用`java.lang.Object`构造函数。只有在创建了父对象（并且其构造函数已经完成了其任务）之后，子类构造函数才会执行，依此类推，直到父子关系链的末端。
-
-经过一番思考，我们决定从类名中派生字段`name`的值。每个 Java 对象都有一个基类`java.lang.Object`，它通过方法`getClass()`提供对类信息的访问。此方法返回一个`java.lang.Class`类的对象，其中包含有关作为对象模板的类的所有信息，包括其名称。当然，我们首先考虑在`Child`，`Parent`和`GrandDad`中使用`this.getClass().getName()`来获取类名。但是，如果我们通过调用`new Child()`（就像我们的示例中所做的那样）来启动调用链，那么构造`this.getClass().getName()`总是返回类`Child`的名称，即使我们在`GrandDad`中使用该构造。
-
-原因是，尽管关键字`this`表示当前对象（例如，如果在`GrandDad`中使用`this`，则表示`GrandDad`对象），但方法`getClass()`返回的是关于*当前对象*的信息，而不是关于*运行时*对象的信息（由`new`操作符创建的对象），在这种情况下是`Child`的实例。这就是为什么在我们的示例中，构造`this.getClass().getName()`总是返回类`Child`的名称，无论此构造是在`Child`，`Parent`还是`GrandDad`中使用。
-
-但是，还有另一种更适合我们需求的访问类信息的方法。我们可以显式使用类名，为其添加扩展名`.class`，然后再获取类名。这是一个例子：
-
-```java
-
-GrandDad.class.getSimpleName(); //总是返回"GrandDad"
-
-```
-
-看起来与我们之前使用的`String`字面量没有太大区别，是吗？然而，这是一个改进，因为如果类的名称更改，变量`NAME`的值也会更改，而在`String`字面量的情况下，其值不会自动绑定到类的名称。
-
-因此，我们为我们的三个类中的每一个添加了一个带初始化的静态字段`NAME`：
-
-```java
-
-public class GrandDad{
-
-private static String NAME = GrandDad.class.getSimpleName();
-
-public GrandDad() {
-
-System.out.println（NAME）;
-
-}
-
-}
-
-public class Parent extends GrandDad{
-
-私有静态字符串名称= Parent.class.getSimpleName（）;
-
-public Parent（）{
-
-System.out.println（NAME）;
-
-}
-
-}
-
-public class Child extends Parent{
-
-私有静态字符串名称= Child.class.getSimpleName（）;
-
-public Child（）{
-
-System.out.println（NAME）;
-
-}
-
-}
-
-```
-
-请注意，我们遵循了仅使用大写字母编写静态变量标识符的约定。
-
-如果我们调用`new Child()`，结果将如下所示：
-
-！[]（img / 32346bc4-8430-4745-b9c5-f076a9180520.png）
-
-如果我们添加一个带参数的构造函数，代码将如下所示：
-
-```java
-
-public class GrandDad{
-
-私有静态字符串名称= GrandDad.class.getSimpleName（）
-
-public GrandDad（）{
-
-System.out.println（NAME）;
-
-}
-
-public GrandDad（String familyName）{
-
-System.out.println（familyName +“：”+ NAME）;
-
-}
-
-}
-
-public class Parent extends GrandDad{
-
-私有静态字符串名称= Parent.class.getSimpleName（）
-
-public Parent（）{
-
-System.out.println（NAME）;
-
-}
-
-public Parent（String familyName）{
-
-System.out.println（familyName +“：”+ NAME）;
-
-}
-
-}
-
-public class Child extends Parent{
-
-私有静态字符串名称= Child.class.getSimpleName（）
-
-public Child（）{
-
-System.out.println（NAME）;
-
-}
-
-public Child（String familyName）{
-
-System.out.println（familyName +“：”+ NAME）;
-
-}
-
-}
-
-```
-
-执行行`new Child（“The Blows”）`现在将仅更改子项的输出：
-
-！[]（img / b5431dce-b244-456c-b391-1cacaff45e5c.png）
-
-这是因为新的子构造函数继续默认调用父构造函数而不带参数。要调用新父构造函数，我们需要显式地这样做，使用关键字`super`（我们只在这里显示构造函数）：
-
-```java
-
-public GrandDad（String familyName）{
-
-System.out.println（familyName +“：”+ NAME）;
-
-}
-
-public Parent（String familyName）{
-
-super（familyName）;
-
-System.out.println（familyName +“：”+ NAME）;
-
-}
-
-public Child（String familyName）{
-
-super（familyName）;
-
-System.out.println（familyName +“：”+ NAME）;
-
-}
-
-```
-
-通过执行相同的行`new Child（“The Blows”）`，我们得到了期望的结果：
-
-！[]（img / 4d82cd27-f808-4711-8a56-be19b801524a.png）
-
-请注意，关键字`super`必须是构造函数的第一行。如果您尝试将它放在其他任何地方，将生成错误。这是因为所有构造函数必须在调用任何其他代码之前完全执行。父子链中的所有对象必须首先创建并初始化它们的状态，从最顶层的基类开始。
-
-我们想在这里提到的最后一个与构造函数相关的特性是：一个构造函数可以使用关键字`this`调用同一类的另一个构造函数。例如，假设我们不希望家庭没有家庭名称存在，但客户端代码可能永远无法提供一个。因此，我们决定在没有参数的构造函数中添加默认的家庭名称：
-
-```java
-
-public class Child extends Parent{
-
-私有静态字符串名称= Child.class.getSimpleName（）
-
-public Child（）{
-
-this（“The Defaults”）;
-
-}
-
-public Child（String familyName）{
-
-super（familyName）;
-
-System.out.println（familyName +“：”+ NAME）;
-
-}
-
-}
-
-```
-
-如果我们再次执行行`new Child（）`，我们将得到以下结果：
-
-！[]（img / 4ef79cfa-e0bf-4034-9227-629400f76540.png）
-
-正如您所看到的，相同类的构造函数可以被重载并且可以像方法一样相互调用。但是构造函数不会被继承，因此不能被隐藏或覆盖。这是不可能的。
-
-对于任何其他方法，如果不是私有或最终的，它可以被覆盖。私有是什么；您可能已经有一个想法。我们将在第七章中更详细地讨论它，*包和可访问性（可见性）*。我们将在下一节中讨论*最终变量*。
-
-# 最终变量，最终方法或最终类
-
-关键字`final`的使用及其影响取决于上下文。它可以使变量值不可更改，方法不可覆盖，或类不可扩展。我们将简要讨论每种情况。
-
-# 最终变量
-
-如果在变量声明前面放置关键字`final`，则一旦分配了此变量的值（初始化了变量），则无法更改此变量的值。变量可以初始化的方式取决于变量的使用方式。有三种变量使用方式，每种方式都有不同的初始化规则：
-
-+   局部变量是在代码块中声明的变量；可以使用相同语句中的赋值进行初始化，或者稍后进行初始化，但只能进行一次；这里有一些例子：
-
-```java
-
-类 SomeClass {
-
-私有字符串 someValue =“初始值”;
-
-public void setSomeValue（String someValue）{
-
-this.someValue = someValue;
-
-}
-
-public String getSomeValue（）{
-
-返回 someValue;
-
-}
-
-}
-
-公共类 FinalDemo {
-
-public static void main（String ... args）{
-
-最终 SomeClass o = new SomeClass（）;
-
-System.out.println（o.getSomeValue（））; //初始值
-
-o.setSomeValue（“另一个值”）;
-
-System.out.println（o.getSomeValue（））; //另一个值
-
-o.setSomeValue（“另一个值”）;
-
-System.out.println（o.getSomeValue（））; //另一个值
-
-最终字符串 s1，s2;
-
-最终 int x，y;
-
-y = 2;
-
-int v = y + 2;
-
-x = v-4;
-
-System.out.println（“x =”+ x）; // x = 0
-
-s1 =“1”;
-
-s2 = s1 +“和 2”;
-
-System.out.println（s2）; // 1 和 2
-
-// o = new SomeClass（）; //错误
-
-// s2 =“3”; //错误
-
-// x = 5; //错误
-
-// y = 6; //错误
-
-}
-
-}
-
-```
-
-基本类型的最终变量-初始化后第一次-变成常量，不能更改（请参见最后两行，已注释为错误）。同样，引用类型`String`类型的最终变量也不能更改，因为在[第五章]（ddf91055-8610-4b8c-acc5-453cfa981760.xhtml）中讨论的`String`类型不可变性。 * Java 语言元素和类型*。但是，其他引用类型对象（包括数组）只是由最终变量引用。因此，引用本身也不能更改（或重新分配），也保持不变。但是，所引用对象的状态可以更改，如前面使用`SomeClass`对象演示的那样。
-
-+   可以使用相同语句的赋值进行初始化实例变量（与局部变量相同），使用实例初始化块或构造函数：
-
-```java
-
-公共类 FinalDemo {
-
-最终 SomeClass o = new SomeClass（）;
-
-最终字符串 s1 =“初始值”;
-
-最终 s2;
-
-最终字符串 s3;
-
-最终 int i = 1;
-
-最终 int j; 
-
-最终 k;
-
-{
-
-j = 2;
-
-s2 =“新值”;
-
-}
-
-公共 FinalDemo（）{
-
-k = 3;
-
-s3 =“新值”;
-
-}
-
-public void method（）{
-
-// this.i = 4; //错误
-
-// this.j = 4; //错误
-
-// this.k = 4; //错误
-
-// this.s3 =“”; //错误
-
-this.o.setSomeValue（“新值”）;
-
-}
-
-}
-
-```
-
-但是，在初始化之后，无法更改最终实例变量的基本类型和`String`值，而对象的属性（或数组的组件）可以更改，类似于最终局部变量。
-
-+   （静态）类最终变量可以使用相同语句的赋值进行初始化（与局部或实例变量相同），或者使用静态初始化块：
-
-```java
-
-公共类 FinalDemo {
-
-最终静态 SomeClass OBJ = new SomeClass（）;
-
-最终静态字符串 S1 =“初始值”;
-
-最终静态字符串 S2;
-
-最终静态 int INT1 = 1;
-
-最终静态 int INT2;
-
-静态{
-
-INT2 = 2;
-
-S2 =“新值”;
-
-}
-
-void method2（）{
-
-OBJ.setSomeValue（“新值”）;
-
-// OBJ = new SomeClass（）;
-
-// S1 =“”;
-
-// S2 =“”;
-
-// INT1 = 0;
-
-// INT2 = 0;
-
-}
-
-}
-
-```
-
-与局部和实例 final 变量一样，原始类型和`String`的静态 final 变量在第一次赋值后变为常量，而对象的属性（或数组的组件）可以在以后多次更改。
-
-如果你认为在本节之前从未见过 final 变量，请注意接口字段隐式地是 final 的。一旦赋值，就不能更改。还有另外两种隐式 final 的变量：作为`try...with...resources`语句的资源声明的变量（我们将在第十六章中看到示例，*数据库编程*）和多重捕获子句的异常参数（我们将在第十章中讨论它们，*控制流语句*）。
-
-final 变量对于安全性很重要，但我们不打算在本书中讨论安全性。相反，我们将在第十七章中讨论 Java 函数式编程时看到 final 变量的许多用途，*Lambda 表达式和函数式编程*。
-
-在阅读其他人的代码时，你可能会注意到方法参数被声明为 final：
-
-```java
-
-void someMethod(final int i, final String s, final SomeClass o){
+System.out.println(s);        //打印：My name is Joe
 
 //...
 
@@ -2828,33 +310,85 @@ void someMethod(final int i, final String s, final SomeClass o){
 
 ```
 
-这通常是为了防止在方法外更改值的副作用。但我们已经在第五章中展示了，原始类型的副本被传递，它们的重新赋值只会更改副本，而不会更改原始值。对于引用类型`String`，我们在同一章节中也展示了它的值是不可变的，因为对于每个`String`变量的重新赋值，都会创建一个新的值的副本，原始值不受影响。至于其他引用类型，使引用本身为 final 只能防止分配新对象。但如果不是这种情况，引用本身为 final 并不能防止在方法外更改原始对象的属性。
-
-因此，除非真的有必要（例如匿名类等情况——编译器和 IDE 会告诉你），将这些变量设为`final`只能防止在方法内部重新分配新值，并不能帮助避免方法外的副作用。
-
-有些程序员也认为，尽可能在声明变量时使用 final 关键字可以使代码作者的意图更容易理解。这是正确的，但前提是必须一致地遵循这种约定，并且所有可以声明为`final`的变量都声明为 final。否则，如果有些变量声明为 final，有些没有（尽管它们可以），代码可能会误导。有人可能会认为，没有`final`关键字的变量是有意这样声明的，因为它们在其他地方被重新赋值为不同的值。如果你不是代码的作者（甚至是代码的作者，但是在一段时间后再看代码），你可以合理地假设可能存在一些逻辑分支利用了某个变量不是 final。你不愿意将`final`添加到现有的变量中，因为你不确定这是有意遗漏还是故意省略，这意味着代码不够清晰，更易读的代码的想法就会破灭。
-
-公平地说，如果一个人能够在任何地方应用关键字`final`，就可以轻松避免一类难以发现的错误。请看这个例子：
+顺便说一句，通过非静态导入`Constants`接口并让类实现它也可以达到同样的效果：
 
 ```java
 
-class FinalVariable{
+package com.packt.javapath;
 
-private int i;
+import com.packt.javapath.api.Constants;
 
-public FinalVariable() { this.i = 1; }
+public class MyClass implements Constants {
 
-public void setInt(int i){
+//...
 
-this.i = 100;
+String s = "My " + NAME + " is Joe";
 
-i = i;
+System.out.println(s);        //打印：My name is Joe
+
+//...
 
 }
 
-public int getInt(){
+```
 
-return this.i;
+这种实现接口以使用它们的常量的方式在 Java 程序员中相当流行。
+
+使用静态导入来使用`enum`常量的示例看起来很相似：
+
+```java
+
+import static java.time.DayOfWeek.*;
+
+```
+
+它允许代码将`DayOfWeek`常量用作`MONDAY`，而不是`DayOfWeek.MONDAY`。
+
+# 访问修饰符
+
+有三种显式访问修饰符——public、private 和 protected——以及一种隐式（默认）访问修饰符，当没有设置访问修饰符时会被隐含。它们可以应用于顶级类或接口、它们的成员和构造函数。*顶级*类或接口可以包括*成员*类或接口。类或接口的其他*成员*是字段和方法。类还有*构造函数*。
+
+为了演示可访问性，让我们创建一个`com.packt.javapath.Ch07demo.pack01`包，其中包含两个类和两个接口：
+
+```java
+
+public class PublicClass01 {
+
+public static void main(String[] args){
+
+//我们将在这里编写代码
+
+}
+
+}
+
+类 DefaultAccessClass01 {
+
+}
+
+public interface PublicInterface01 {
+
+String name = "PublicInterface01";
+
+}
+
+接口 DefaultAccessInterface01 {
+
+String name = "DefaultAccessInterface01";
+
+}
+
+```
+
+我们还将创建另一个`com.packt.javapath.Ch07demo.pack02`包，并在其中创建一个类：
+
+```java
+
+public class PublicClass02 {
+
+public static void main(String[] args){
+
+//我们将在这里编写代码
 
 }
 
@@ -2862,83 +396,503 @@ return this.i;
 
 ```
 
-这个类有一个字段`i`，在构造函数中初始化为值`1`。该类还有一个用于该字段的 getter 和 setter。在 setter 中，程序员犯了一个错误。你能发现吗？让我们运行以下代码：
+前面的每个类和接口都在自己的文件中：
+
+![](img/eac9098f-e718-4bd2-ab43-b02aac7aa66e.png)
+
+现在我们准备探索类、接口、它们的成员和构造函数的可访问性。
+
+# 顶级类或接口的可访问性
+
+公共类或接口可以从任何地方访问。我们可以导入它们并从另一个包中访问它们：
 
 ```java
 
-FinalVariable finalVar = new FinalVariable();
+import com.packt.javapath.Ch07demo.pack01.PublicClass01;
 
-System.out.println("初始设置：finalVar.getInt()=" +
+import com.packt.javapath.Ch07demo.pack01.PublicInterface01;
 
-finalVar.getInt());
+//import com.packt.javapath.Ch07demo.pack01.DefaultAccessClass01;
 
-finalVar.setInt(5);
+//import com.packt.javapath.Ch07demo.pack01.DefaultAccessInterface01;
 
-System.out.println("设置为 5 后：finalVar.getInt()=" +
+public class PublicClass02 {
 
-finalVar.getInt());
+public static void main(String[] args){
 
-```
+System.out.println(PublicInterface01.name);
 
-在代码中，我们创建了一个`FinalVariable`类的对象。构造函数为其赋值`1`，我们使用 getter 确认了这一点。然后，我们尝试为其赋值`5`，并期望 getter 返回此值。相反，我们得到了以下输出：
+PublicClass01 o = new PublicClass01();
 
-![](img/eab4c3b7-7a1c-4f4c-b2f8-51d8a0c086e8.png)
-
-让我们看看如果声明参数`final`会发生什么，如下所示：
-
-```java
-
-public void setInt(final int i){
-
-this.i = 100;
-
-i = i;
+}
 
 }
 
 ```
 
-编译器和 IDE 会警告我们，我们试图将变量`i`赋给另一个值。我们会看到问题并进行修复，就像这样：
+在上述代码中，两个导入语句被注释掉，因为它们会生成错误。这是因为在`DefaultAccessClass01`类和`DefaultAccessClass01`接口中，我们没有使用访问修饰符，这使它们只能被同一包的成员访问。
+
+没有访问修饰符的顶层类或接口只能被同一包的成员访问。
+
+在顶层类或接口的声明中使用`private`访问修饰符会使它们无法访问，因此在顶层类或接口中使用`private`访问修饰符是没有意义的。
+
+`protected`关键字不能应用于顶层。这个限制并不那么明显。我们将在下一节中看到`protected`意味着它对包成员和子类是可访问的。因此，有人可能会认为`protected`访问也适用于顶层类或接口。然而，Java 的作者决定不这样做，如果您尝试将顶层类或接口设置为`protected`，编译器将生成异常。
+
+然而，`private`和`protected`访问修饰符可以应用于内部类或接口-顶层类或接口的成员。
+
+# 访问类或接口成员
+
+即使类或接口成员被声明为公共，如果封闭类或接口是不可访问的，它们也无法被访问。因此，以下所有讨论都将在类或接口是可访问的假设下进行。
+
+类或接口的成员可以访问同一类或接口的其他成员，无论它们有什么访问修饰符。这是有道理的，不是吗？这一切都发生在同一个封闭类或接口内。
+
+默认情况下，接口成员是公共的。因此，如果可以访问接口本身，则其没有访问修饰符的成员也可以被访问。而且，只是提醒一下，接口字段默认是静态和最终的（常量）。
+
+另一方面，没有访问修饰符的类成员只能被包成员访问。因此，类或接口可能是公共的，但它们的成员是不太可访问的，除非明确设置为公共。
+
+私有类或接口成员只能被同一类或接口的其他成员访问。这是可能的最受限制的访问。甚至类的子类也不能访问其父类的私有成员。
+
+受保护的包成员对于同一包中的其他成员和类或接口的子类是可访问的，这意味着受保护的成员可以被覆盖。程序员经常使用这种方式来表达意图：他们将那些他们期望被覆盖的成员设置为受保护。否则，他们将它们设置为私有或公共。默认-没有访问修饰符-访问很少被使用。
+
+**私有**：仅允许从相同的类（或接口）访问
+
+**无修饰符（默认）**：允许从相同的类（或接口）和相同的包中访问
+
+**受保护的**：允许从相同的类（或接口）、相同的包和任何子类访问
+
+**公共**：允许从任何地方访问
+
+相同的可访问性规则也适用于内部类和接口。这是一个包含内部类和接口的类的示例：
 
 ```java
 
-public void setInt(final int i){
+public class PublicClass01 {
 
-this.i = 100;
+public static void main(String[] args){
 
-this.i = i;
+System.out.println(DefaultAccessInterface01.name);
+
+DefaultAccessClass01 o = new DefaultAccessClass01();
+
+}
+
+class DefaultAccessClass{
+
+}
+
+受保护的类 ProtectedClass{
+
+}
+
+private class PrivateClass{
+
+}
+
+默认访问接口{
+
+}
+
+protected class ProtectedInterface{
+
+}
+
+private class PrivateInterface{
+
+}
 
 }
 
 ```
 
-然后代码将开始按我们的预期行为：
+这是一个带有内部类和接口的接口：
 
-![](img/b909084a-8295-4ad3-8470-576f6d6ee355.png)
+```java
 
-但这样的情况并不多，很快你就会学会如何避免这样的陷阱，并开始自动在实例变量前添加`this`。因此，在我们看来，广泛使用关键字`final`来提高代码质量是不合理的，但一些程序员仍然喜欢这样做，因此我们将其作为编程风格问题留下。
+public interface PublicInterface01 {
 
-顺便说一句，据报道，在某些特殊情况下，添加关键字`final`作为提高应用程序性能的一种方法是有用的，但我们自己并没有遇到这些情况，因此将其留给那些能够证明这种情况的人。
+String name = "PublicInterface01";
 
-# Final method
+类 DefaultAccessClass{
 
-在方法前面加上关键字`final`会使得在子类实例中无法覆盖它，如果方法是静态的，则无法隐藏它。它确保了方法功能不能通过覆盖进行更改。例如，类`java.lang.Object`有许多方法是 final 的。
+}
 
-但是，如果一个 final 方法使用非 final 方法，这可能会导致不良更改的后门引入。当然，这些考虑对于安全性非常重要。
+接口 DefaultAccessInterface {
 
-有时，人们会说将方法设置为 final 可以提高代码性能。这可能是事实，但在一些非常特殊的情况下，并不似乎在主流编程中有很大帮助。对于性能改进，通常有更好的机会可用，包括经过验证的面向对象设计原则（参见第八章，*面向对象设计（OOD）原则*）。
+}
 
-所有私有方法和最终类的方法（不会被继承）实际上都是 final 的，因为不能对其进行覆盖。
+}
 
-# Final class
+```
 
-声明为 final 的类不能被扩展。也就是说，它不能有子类，这使得类的所有方法实际上都是 final 的。
+正如你所看到的，接口的内部类和接口只允许默认（公共）访问。
 
-这个特性被广泛用于安全性或者当程序员希望确保类功能不能被覆盖、重载或隐藏时。
+而且，为了重复我们已经讨论过的内容，我们将简要提及一些与成员可访问性相关的其他方面：
 
-# 练习-将类实例化限制为单个共享实例
++   静态嵌套类（在静态类的情况下被称为嵌套类，但按照惯例）不能访问同一类的非静态成员，而它们可以访问它
 
-编写一个类，确保只能创建一个对象。
++   作为某个顶级类的成员，静态嵌套类可以是公共的、受保护的、包访问（默认）的或私有的
+
++   类的公共、受保护和包访问成员都会被子类继承
+
+# 构造函数的可访问性与任何类成员相同
+
+正如本节标题所述，这就是我们对构造函数可访问性能说的一切。当然，当我们谈论构造函数时，我们只谈论类。
+
+构造函数的有趣之处在于它们只能具有私有访问权限。这意味着一个类可以提供自己的工厂方法（参见第六章，*接口、类和对象构造*），控制每个对象的构造方式，甚至控制可以将多少个对象放入流通中。在每个对象都需要访问某个资源（文件或另一个数据库）的情况下，最后一个特性尤为有价值，因为这些资源对并发访问的支持有限。以下是一个具有有限创建对象数量的最简单版本的工厂方法的样子：
+
+```java
+
+私有 String field;
+
+私有静态 int count;
+
+私有 PublicClass02(String s){
+
+this.field = s;
+
+}
+
+public static PublicClass02 getInstance(String s){
+
+if(count > 5){
+
+返回 null;
+
+} else {
+
+count++;
+
+返回新的 PublicClass02(s);
+
+}
+
+}
+
+```
+
+这段代码的用处并不大，我们只是为了演示私有可访问的构造函数如何被使用。这是可能的，因为每个类成员都可以访问所有其他类成员，无论它们的访问修饰符是什么。
+
+除非可访问性相关的特性带来了一些优势，否则它们是不需要的。这就是我们将在下一节讨论的内容——面向对象编程的中心概念封装的优势。
+
+# 封装
+
+面向对象编程的概念诞生于管理软件系统日益增长的复杂性的努力中。将数据和程序捆绑在一个对象中，并对它们进行受控访问（称为封装）的概念允许更好地组织数据和程序在层中，其中一些被隐藏，其他则暴露给外部访问。前面章节中描述的可访问性控制是其中的重要部分。连同继承、接口（也称为抽象）和多态性，封装成为面向对象编程的中心概念之一。
+
+通常很难清晰地将一个面向对象的概念与另一个分开。接口也有助于隐藏（封装）实现细节。继承具有覆盖和隐藏父类方法的能力，为可访问性增加了动态方面。所有这三个概念使得多态的概念成为可能——同一个对象可以根据上下文（基于继承或实现的接口）呈现为不同类型，或者根据数据可用性改变其行为（使用组合——我们将在第八章中讨论，*面向对象设计（OOD）原则*，或者方法重载、隐藏和覆盖）。
+
+但没有封装，这些概念都是不可能的。这就是为什么它是面向对象编程的四个概念中最基本的。很有可能，你会经常听到它被提到，所以我们决定专门为这一部分介绍在封装的背景下经常使用的术语，基于它提供的优势：
+
++   数据隐藏和解耦
+
++   灵活性，可维护性，重构
+
++   可重用性
+
++   可测试性
+
+# 数据隐藏和解耦
+
+当我们使对象状态（字段的值）和一些方法私有或对内部对象数据施加一些其他限制访问的措施时，我们参与了*数据隐藏*。对象功能的用户只能根据其可访问性调用特定的方法，并且不能直接操纵对象的内部状态。对象的用户可能不知道功能的具体实现方式和数据的存储方式。他们将所需的输入数据传递给可访问的方法，并获得结果。这样我们就*解耦*了内部状态和其使用，以及 API 中的实现细节。
+
+将相关方法和数据放在同一个类中也增加了*解耦*，这次是在不同功能区域之间。
+
+你可能会听到*紧耦合*这个术语，只有在无法避免的情况下才应该允许，因为它通常意味着一个部分的任何更改都需要相应地更改另一个部分。即使在日常生活中，我们也更喜欢处理模块化系统，允许仅替换一个模块而不更改其余系统的任何其他组件。
+
+因此，*松耦合*通常是程序员喜欢的东西，尽管它经常以不确定系统在所有可能的执行路径中测试之前是否会出现意外惊喜的代价。一个经过深思熟虑的测试系统，覆盖了基本用例，通常有助于减少生产中缺陷传播的机会。
+
+# 灵活性，可维护性和重构
+
+当我们在上一节中谈到解耦时，灵活性和可维护性的概念可能会因为联想而浮现。松耦合的系统更灵活，更易于维护。
+
+例如，在第六章中，*接口、类和对象构造*，我们演示了一种灵活的解决方案，用于实现对象工厂：
+
+```java
+
+public static Calculator createInstance(){
+
+WhichImpl whichImpl =
+
+Utils.getWhichImplValueFromConfig(Utils.class,
+
+Calculator.CONF_NAME, Calculator.CONF_WHICH_IMPL);
+
+switch (whichImpl){
+
+案例乘法：
+
+return new CalculatorImpl();
+
+案例添加：
+
+返回新的 AnotherCalculatorImpl();
+
+default:
+
+抛出新的 RuntimeException("休斯顿，我们又有问题了。"+
+
+"我们没有关键的实现" +
+
+Calculator.CONF_WHICH_IMPL + "值" + whichImpl);
+
+}
+
+```
+
+```
+
+它与其`Calculator`接口（其 API）紧密耦合，但这是不可避免的，因为这是实现必须遵守的合同。至于工厂内部的实现，只要遵守合同，就可以更自由地进行任何限制。
+
+我们只能创建每个实现的一个实例，并且只返回该实例（使每个类成为单例）。以下是`CalculatorImpl`作为单例的示例：
+
+```java
+
+private static Calculator calculator = null;
+
+public static Calculator createInstance(){
+
+WhichImpl whichImpl =
+
+Utils.getWhichImplValueFromConfig(Utils.class,
+
+Calculator.CONF_NAME, Calculator.CONF_WHICH_IMPL);
+
+switch (whichImpl){
+
+案例乘法：
+
+if(calculator == null){
+
+calculator = new CalculatorImpl();
+
+}
+
+返回计算器；
+
+案例添加：
+
+返回新的 AnotherCalculatorImpl();
+
+default:
+
+抛出新的 RuntimeException("休斯顿，我们又有问题了。"+
+
+"我们没有关键的实现" +
+
+Calculator.CONF_WHICH_IMPL + "值" + whichImpl);
+
+```
+
+}
+
+```
+
+或者我们可以将另一个`Calculator`实现作为嵌套类添加到工厂中，并使用它来代替`CalculatorImpl`：
+
+```java
+
+public static Calculator createInstance(){
+
+String whichImpl = Utils.getStringValueFromConfig(CalculatorFactory.class,
+
+"calculator.conf", "which.impl");
+
+如果(whichImpl.equals("multiplies")){
+
+return new Whatever();
+
+} else if (whichImpl.equals("adds")){
+
+return new AnotherCalculatorImpl();
+
+} else {
+
+throw new RuntimeException("休斯顿，我们有问题。" +
+
+"未知的键 which.impl 值 " + whichImpl +
+
+" is in config.");
+
+}
+
+}
+
+static class Whatever implements Calculator {
+
+public static String addOneAndConvertToString(double d){
+
+System.out.println(Whatever.class.getName());
+
+return Double.toString(d + 1);
+
+}
+
+public int multiplyByTwo(int i){
+
+System.out.println(Whatever.class.getName());
+
+return i * 2;
+
+}
+
+}
+
+```
+
+而这个工厂的客户端代码永远不会知道这种区别，除非它通过对从工厂返回的对象使用`getClass()`方法打印类的信息。但这是另一回事。从功能上讲，我们的`Whatever`的新实现将像旧的一样工作。
+
+这实际上是一个常见的做法——从一个版本到另一个版本改变内部实现。当然有 bug 修复，还有新功能添加。随着实现代码的演变，程序员们不断地关注重构的可能性。在计算机科学中，factoring 是 decomposition 的同义词，它是将复杂的代码分解成更简单的部分，目的是使代码更易读和易维护。例如，假设我们被要求编写一个方法，接受两个`String`类型的参数（每个表示一个整数），并将它们的和作为整数返回。思考了一会儿后，我们决定这样做：
+
+```java
+
+public long sum(String s1, String s2){
+
+int i1 = Integer.parseInt(s1);
+
+int i2 = Integer.parseInt(s1);
+
+return i1 + i2;
+
+}
+
+```
+
+但后来我们要求提供可能输入值的样本，这样我们就可以在接近生产条件的情况下测试我们的代码。结果发现，一些值可能高达 10,000,000,000，这超过了 2,147,483,647（Java 允许的最大`Integer.MAX_VALUE` int 值）。因此，我们将我们的代码更改为以下内容：
+
+```java
+
+public long sum(String s1, String s2){
+
+long l1 = Long.parseLong(s1);
+
+long l2 = Long.parseLong(s2);
+
+return l1 + l2;
+
+}
+
+```
+
+现在我们的代码可以处理高达 9,223,372,036,854,775,807 的值（即`Long.MAX_VALUE`）。我们将代码部署到生产环境，它在几个月内都运行良好，被一个处理统计数据的大型软件系统使用。然后系统切换到了新的数据源，代码开始出现问题。我们调查后发现，新的数据源产生的值可能包含字母和其他一些字符。我们已经为这种情况测试了我们的代码，并发现以下行会抛出`NumberFormatException`：
+
+```java
+
+long l1 = Long.parseLong(s1);
+
+```
+
+我们与领域专家讨论了这种情况，他们建议我们记录不是整数的值，跳过它们，并继续进行求和计算。因此，我们已经修复了我们的代码，如下所示：
+
+```java
+
+public long sum(String s1, String s2){
+
+long l1 = 0;
+
+尝试{
+
+l1 = Long.parseLong(s1);
+
+} catch (NumberFormatException ex){
+
+//记录日志
+
+}
+
+long l2 = 0;
+
+尝试{
+
+l2 = Long.parseLong(s2);
+
+} catch (NumberFormatException ex){
+
+//记录日志
+
+}
+
+返回 l1 + l2;
+
+}
+
+```
+
+我们迅速将代码发布到生产环境，但在下一个版本中得到了新的要求：输入的`String`值可以包含小数。因此，我们已经改变了处理输入`String`值的方式，假设它们包含小数值（也包括整数值），并重构了代码，如下所示：
+
+```java
+
+private long getLong(String s){
+
+double d = 0;
+
+尝试{
+
+d = Double.parseDouble(s);
+
+} catch (NumberFormatException ex){
+
+//记录日志
+
+}
+
+返回 Math.round(d);
+
+}
+
+public long sum(String s1, String s2){
+
+返回 getLong(s1) + getLong(s2);
+
+}
+
+```
+
+这就是重构的作用。它重新构造代码而不改变其 API。随着新的需求不断出现，我们可以改变`getLong()`方法，甚至不用触及`sum()`方法。我们还可以在其他地方重用`getLong()`方法，这将是下一节的主题。
+
+# 可重用性
+
+封装绝对使得实现可重用性更容易，因为它隐藏了实现细节。例如，我们在上一节中编写的`getLong()`方法可以被同一类的另一个方法重用：
+
+```java
+
+public long sum(int i, String s2){
+
+返回 i + getLong(s2);
+
+}
+
+```
+
+它甚至可以被设为公共的并被其他类使用，就像以下行一样：
+
+```java
+
+int i = new Ch07DemoApp().getLong("23", "45.6");
+
+```
+
+这将是一个组合的例子，当某些功能是使用不相关的类的方法构建（组合）时。而且，由于它不依赖于对象状态（这样的方法称为无状态），它可以被设为静态：
+
+```java
+
+int i = Ch07DemoApp.getLong("23", "45.6");
+
+```
+
+嗯，如果该方法在运行时被几个其他方法同时使用，即使是这样一个简单的代码也可能需要受到保护（同步）以防并行使用。但这些考虑超出了本书的范围。现在，如果有疑问，不要将方法设为静态。
+
+如果你了解面向对象编程的历史，你会发现继承最初的任务之一是成为代码重用的主要机制。它做到了。子类继承（重用）其父类的所有方法，并且只覆盖那些需要为子类专门化的方法。
+
+但实际上，实践中似乎更受欢迎的是其他可重用性技术，尤其是对于重用方法是无状态的情况。我们将在第八章中更多地讨论这些原因，*面向对象设计（OOD）原则*。
+
+# 可测试性
+
+代码可测试性是另一个封装有所帮助的领域。如果实现细节没有被隐藏，我们将需要测试每一行代码，并且每次改变实现的任何一行时都需要改变测试。但是将细节隐藏在 API 的外观后面，使我们只需要专注于所需的测试用例，并且受到可能的输入数据（参数值）的限制。
+
+此外，还有一些框架允许我们创建一个对象，根据输入参数的某个值返回某个结果。Mockito 是一个流行的框架，它可以做到这一点（[`site.mockito.org`](http://site.mockito.org)）。这样的对象被称为模拟对象。当你需要从一个对象的方法中获得某些结果来测试其他方法时，它们尤其有帮助，但你不能运行你用作数据源的方法的实际实现，因为你没有数据库中需要的数据，或者它需要一些复杂的设置。为了解决这个问题，你可以用返回你需要的数据的方法替换某些方法的实际实现-模拟它们-无条件地或者响应于某些输入数据。没有封装，这样模拟方法行为可能是不可能的，因为客户端代码将与特定实现绑定，你将无法在不改变客户端代码的情况下进行更改。
+
+# 练习-阴影
+
+编写演示变量阴影的代码。我们还没有讨论过它，所以你需要做一些研究。
 
 # 答案
 
@@ -2946,36 +900,50 @@ this.i = i;
 
 ```java
 
-public class SingletonClassExample {
+公共类 ShadowingDemo {
 
-private static SingletonClassExample OBJECT = null;
+私有字符串 x = "x";
 
-private SingletonClassExample(){}
+public void printX(){
 
-public final SingletonClassExample getInstance() {
+System.out.println(x);
 
-if(OBJECT == null){
+字符串 x = "y";
 
-OBJECT = new SingletonClassExample();
-
-}
-
-return OBJECT;
+System.out.println(x);
 
 }
-
-//... 其他类功能
 
 }
 
 ```
 
-另一种解决方案可能是将类私有化到工厂类中，并将其存储在工厂字段中，类似于以前的代码。
+如果您运行`new ShadowingDemo().printX();`，它将首先打印`x`，然后打印`y`，因为以下行中的局部变量`x`遮蔽了`x`实例变量：
 
-但要注意，如果这样一个单一对象具有正在改变的状态，就必须确保可以同时修改状态并依赖于它，因为这个对象可能会被不同的方法同时使用。
+```java
+
+String x = "y";
+
+```
+
+请注意，遮蔽可能是程序的缺陷来源，也可以用于程序的利益。如果没有它，您将无法使用已经被实例变量使用的局部变量标识符。这里是另一个变量遮蔽有帮助的情况的例子：
+
+```java
+
+private String x = "x";
+
+public void setX(String x) {`;
+
+this.x = x;
+
+}
+
+```
+
+`x`局部变量（参数）遮蔽了`x`实例变量。它允许使用相同的标识符作为已经用于实例变量名称的局部变量名称。为了避免可能的混淆，建议使用关键字`this`来引用实例变量，就像我们在上面的示例中所做的那样。
 
 # 总结
 
-本章还对最常用的术语 API 进行了详细讨论，以及相关主题的对象工厂、重写、隐藏和重载。此外，还详细探讨了关键字`this`和`super`的使用，并在构造函数的解释过程中进行了演示。本章以关键字`final`及其在局部变量、字段、方法和类中的使用进行了概述。
+在本章中，您了解了面向对象语言的基本特性之一 - 类、接口、成员和构造函数的可访问性规则。现在您可以从其他包中导入类和接口，并避免使用它们的完全限定名称。所有这些讨论使我们能够介绍面向对象编程的核心概念 - 封装。有了这个，我们可以开始对面向对象设计（OOD）原则进行有根据的讨论。
 
-在下一章中，我们将描述包和类成员的可访问性（也称为可见性），这将帮助我们扩展面向对象编程的一个关键概念，封装。这将为我们讨论面向对象设计原则奠定基础。
+下一章介绍了 Java 编程的更高层次视图。它讨论了良好设计的标准，并提供了经过验证的 OOD 原则指南。每个设计原则都有详细描述，并使用相应的代码示例进行说明。

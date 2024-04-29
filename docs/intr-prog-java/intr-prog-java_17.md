@@ -1,656 +1,382 @@
-# 第十七章：数据库编程
+# 第十八章：Lambda 表达式和函数式编程
 
-本章介绍如何编写 Java 代码，可以操作数据库中的数据——插入、读取、更新、删除。它还提供了 SQL 语言和基本数据库操作的简要介绍。
+本章解释了函数式编程的概念。它概述了 JDK 提供的函数式接口，解释了如何在 Lambda 表达式中使用它们，以及如何以最简洁的方式编写 Lambda 表达式。
 
 在本章中，我们将涵盖以下主题：
 
-+   什么是**Java 数据库连接**（**JDBC**）？
++   函数式编程
 
-+   如何创建/删除数据库
++   函数式接口
 
-+   **结构化查询语言**（**SQL**）简要概述
++   Lambda 表达式
 
-+   如何创建/删除/修改数据库表
++   方法引用
 
-+   **创建、读取、更新和删除**（**CRUD**）数据库数据
++   练习-使用方法引用创建一个新对象
 
-+   练习-选择唯一的名字
+# 函数式编程
 
-# 什么是 Java 数据库连接（JDBC）？
+函数式编程允许我们将一块代码（一个函数）视为对象，将其作为参数或方法的返回值。这个特性存在于许多编程语言中。它不要求我们管理对象状态。函数是无状态的。它的结果只取决于输入数据，无论调用多少次。这种风格使结果更可预测，这是函数式编程最吸引人的方面。
 
-**Java 数据库连接**（**JDBC**）是 Java 功能，允许我们访问和修改数据库中的数据。它由 JDBC API（`java.sql`、`javax.sql`和`java.transaction.xa`包）和数据库特定的接口实现（称为数据库驱动程序）支持，每个数据库供应商都提供了与数据库访问的接口。
+没有函数式编程，将功能作为参数传递的唯一方法是通过编写实现接口的类，创建其对象，然后将其作为参数传递。但即使是最不涉及的样式-使用匿名类-也需要编写太多的样板代码。使用函数式接口和 Lambda 表达式使代码更短，更清晰，更具表现力。
 
-当人们说他们正在使用 JDBC 时，这意味着他们编写代码，使用 JDBC API 的接口和类以及知道如何将应用程序与特定数据库连接的数据库特定驱动程序来管理数据库中的数据。使用此连接，应用程序可以发出用**结构化查询语言**（**SQL**）编写的请求。当然，我们这里只谈论了理解 SQL 的数据库。它们被称为关系（或表格）数据库，并且占当前使用的数据库的绝大多数，尽管也使用一些替代方案——如导航数据库和 NoSql。
+将其添加到 Java 中可以通过将并行编程能力从客户端代码转移到库来增加。在此之前，为了处理 Java 集合的元素，客户端代码必须迭代集合并组织处理。在 Java 8 中，添加了接受函数（函数式接口的实现）作为参数然后将其应用于集合的每个元素的新（默认）方法，具体取决于内部处理算法是并行还是串行。因此，组织并行处理是库的责任。
 
-`java.sql`和`javax.sql`包包含在 Java 平台标准版（Java SE）中。从历史上看，`java.sql`包属于 Java 核心，而`javax.sql`包被认为是核心扩展。但后来，`javax.sql`包也被包含在核心中，名称没有更改，以避免破坏使用它的现有应用程序。`javax.sql`包包含支持语句池、分布式事务和行集的`DataSource`接口。我们将在本章的后续部分更详细地讨论这些功能。
+在本章中，我们将定义和解释这些 Java 特性-函数式接口和 Lambda 表达式-并演示它们在代码示例中的适用性。它们使函数成为语言中与对象同等重要的一等公民。
 
-与数据库一起工作包括八个步骤：
+# 什么是函数式接口？
 
-1.  按照供应商的说明安装数据库。
+实际上，您已经在我们的演示代码中看到了函数式编程的元素。一个例子是`forEach(Consumer consumer)`方法，对每个`Iterable`都可用，其中`Consumer`是一个函数式接口。另一个例子是`removeIf(Predicate predicate)`方法，对每个`Collection`对象都可用。传入的`Predicate`对象是一个函数-函数式接口的实现。类似地，`List`接口中的`sort(Comparator comparator)`和`replaceAll(UnaryOperator uo)`方法以及`Map`中的几个`compute()`方法都是函数式编程的例子。
 
-1.  创建数据库用户、数据库和数据库模式——表、视图、存储过程等。
+函数式接口是一个只有一个抽象方法的接口，包括从父接口继承的方法。
 
-1.  在应用程序上添加对`.jar`的依赖项，其中包含特定于数据库的驱动程序。
-
-1.  从应用程序连接到数据库。
-
-1.  构造 SQL 语句。
-
-1.  执行 SQL 语句。
-
-1.  使用执行结果。
-
-1.  释放（关闭）在过程中打开的数据库连接和其他资源。
-
-步骤 1-3 只在应用程序运行之前的数据库设置时执行一次。步骤 4-8 根据需要由应用程序重复执行。步骤 5-7 可以重复多次使用相同的数据库连接。
-
-# 连接到数据库
-
-以下是连接到数据库的代码片段：
+为了避免运行时错误，Java 8 引入了`@FunctionalInterface`注解，告诉编译器意图，因此编译器可以检查注解接口中是否真的只有一个抽象方法。让我们回顾一下相同继承线的以下接口：
 
 ```java
 
-String URL = "jdbc:postgresql://localhost/javaintro";
+@FunctionalInterface
 
-属性 prop = new Properties（）;
+接口 A {
 
-//prop.put（"user"，“java”）;
+void method1();
 
-//prop.put（"password"，“secretPass123”）;
+default void method2(){}
 
-尝试{
+static void method3(){}
 
-Connection conn = DriverManager.getConnection（URL，prop）;
+}
 
-} catch（SQLException ex）{
+@FunctionalInterface
 
-ex.printStackTrace（）;
+接口 B 扩展自 A {
+
+default void method4(){}
+
+}
+
+@FunctionalInterface
+
+接口 C 扩展自 B {
+
+void method1();
+
+}
+
+//@FunctionalInterface  //编译错误
+
+接口 D 扩展自 C {
+
+void method5();
 
 }
 
 ```
 
-注释行显示了如何使用`java.util.Properties`类为连接设置用户和密码。上述只是一个示例，说明如何直接使用`DriverManger`类获取连接。传入属性的许多键对于所有主要数据库都是相同的，但其中一些是特定于数据库的。因此，请阅读您的数据库供应商文档以获取此类详细信息。
+接口`A`是一个功能接口，因为它只有一个抽象方法：`method1()`。接口`B`也是一个功能接口，因为它也只有一个抽象方法-与从接口`A`继承的相同的`method1()`。接口`C`是一个功能接口，因为它只有一个抽象方法，`method1()`，它覆盖了父接口`A`的抽象`method1()`方法。接口`D`不能是一个功能接口，因为它有两个抽象方法-从父接口`A`继承的`method1()`和`method5()`。
 
-或者，仅传递用户和密码，我们可以使用重载版本`DriverManager.getConnection（String url，String user，String password）`。
+当使用`@FunctionalInterface`注释时，它告诉编译器仅检查一个抽象方法的存在，并警告程序员，读取代码时，此接口只有一个抽象方法是有意的。否则，程序员可能会浪费时间增强接口，只是后来发现无法完成。
 
-保持密码加密是一个好的做法。我们不会告诉你如何做，但是互联网上有很多指南可用。
-
-另一种连接到数据库的方法是使用`DataSource`接口。它的实现包含在与数据库驱动程序相同的`.jar`中。在 PostgreSQL 的情况下，有两个实现了`DataSource`接口的类：`org.postgresql.ds.PGSimpleDataSource`和`org.postgresql.ds.PGConnectionPoolDataSource`。我们可以使用它们来代替`DriverManager`。以下是使用`org.postgresql.ds.PGSimpleDataSource`类创建数据库连接的示例：
+出于同样的原因，自 Java 早期版本以来就存在的`Runnable`和`Callable`接口在 Java 8 中被注释为`@FunctionalInterface`。它使这种区别变得明确，并提醒其用户和那些可能尝试添加另一个抽象方法的人：
 
 ```java
 
-PGSimpleDataSource source = new PGSimpleDataSource();
+@FunctionalInterface
 
-source.setServerName("localhost");
+接口 Runnable {
 
-source.setDatabaseName("javaintro");
-
-source.setLoginTimeout(10);
-
-Connection conn = source.getConnection();
-
-```
-
-要使用`org.postgresql.ds.PGConnectionPoolDataSource`类连接到数据库，我们只需要用以下内容替换前面代码中的第一行：
-
-```java
-
-PGConnectionPoolDataSource source = new PGConnectionPoolDataSource();
-
-```
-
-使用`PGConnectionPoolDataSource`类允许我们在内存中创建一个`Connection`对象池。这是一种首选的方式，因为创建`Connection`对象需要时间。池化允许我们提前完成这个过程，然后根据需要重复使用已经创建的对象。池的大小和其他参数可以在`postgresql.conf`文件中设置。
-
-但无论使用何种方法创建数据库连接，我们都将把它隐藏在`getConnection()`方法中，并在所有的代码示例中以相同的方式使用它。
-
-有了`Connection`类的对象，我们现在可以访问数据库来添加、读取、删除或修改存储的数据。
-
-# 关闭数据库连接
-
-保持数据库连接活动需要大量的资源内存和 CPU-因此关闭连接并释放分配的资源是一个好主意，一旦你不再需要它们。在池化的情况下，`Connection`对象在关闭时会返回到池中，消耗更少的资源。
-
-在 Java 7 之前，关闭连接的方法是通过在`finally`块中调用`close()`方法，无论是否有 catch 块：
-
-```java
-
-Connection conn = getConnection();
-
-尝试 {
-
-//在这里使用 conn 对象
-
-} 最后 {
-
-if(conn != null){
-
-conn.close();
+void run();
 
 }
+
+@FunctionalInterface
+
+接口 Callable<V> {
+
+V call() throws Exception;
 
 }
 
 ```
 
-`finally`块中的代码总是会被执行，无论 try 块中的异常是否被抛出。但自 Java 7 以来，`try...with...resources`结构可以很好地处理实现了`java.lang.AutoCloseable`或`java.io.Closeable`接口的任何对象。由于`java.sql.Connection`对象实现了`AutoCloseable`，我们可以将上一个代码片段重写如下：
+如您所见，创建功能接口很容易。但在这之前，考虑使用`java.util.function`包中提供的 43 个功能接口之一。
+
+# 标准功能接口即用即用
+
+`java.util.function`包中提供的大多数接口都是以下四个接口的特殊化：`Function`、`Consumer`、`Supplier`和`Predicate`。让我们先来回顾一下它们，然后简要概述其他 39 个标准功能接口。
+
+# Function<T, R>
+
+此及其他功能`<indexentry content="standard functional interfaces:function">`接口的表示法包括输入数据（`T`）和返回数据（`R`）类型的列表。因此，`Function<T, R>`表示此接口的唯一抽象方法接受`T`类型的参数并产生`R`类型的结果。您可以通过阅读在线文档找到该抽象方法的名称。在`Function<T, R>`接口的情况下，其方法是`R apply(T)`。
+
+学习了所有这些之后，我们可以使用匿名类创建此接口的实现：
 
 ```java
 
-尝试 (Connection conn = getConnection()) {
+Function<Integer, Double> multiplyByTen = new Function<Integer, Double>(){
 
-//在这里使用 conn 对象
+public Double apply(Integer i){
+
+return i * 10.0;
 
 }
 
-捕获(SQLException ex) {
+};
 
-ex.printStackTrace();
+```
+
+由程序员决定`T`（输入参数）将是哪种实际类型，`R`（返回值）将是哪种类型。在我们的例子中，我们已经决定输入参数将是`Integer`类型，结果将是`Double`类型。正如您现在可能已经意识到的那样，类型只能是引用类型，并且原始类型的装箱和拆箱是自动执行的。
+
+现在我们可以根据需要使用我们的新`Function<Integer, Double> multiplyByTen`函数。我们可以直接使用它，如下所示：
+
+```java
+
+System.out.println(multiplyByTen.apply(1)); //prints: 10.0
+
+```
+
+或者我们可以创建一个接受此函数作为参数的方法：
+
+```java
+
+void useFunc(Function<Integer, Double> processingFunc, int input){
+
+System.out.println(processingFunc.apply(input));
 
 }
 
 ```
 
-捕获子句是必要的，因为可自动关闭的资源会抛出`java.sql.SQLException`。有人可能会说，这样做并没有节省多少输入。但是`Connection`类的`close()`方法也可能会抛出`SQLException`，所以带有`finally`块的代码应该更加谨慎地编写：
+然后我们可以将我们的函数传递到这个方法中，并让方法使用它：
 
 ```java
 
-Connection conn = getConnection();
-
-尝试 {
-
-//在这里使用 conn 对象
-
-} 最后 {
-
-if(conn != null){
-
-尝试 {
-
-conn.close();
-
-} 捕获(SQLException ex){
-
-//在这里做必须要做的事情
-
-}
-
-}
-
-}
+useFunc(multiplyByTen, 10);     //prints: 100.00
 
 ```
 
-前面的代码块看起来确实像是更多的样板代码。更重要的是，如果考虑到通常在`try`块内，一些其他代码也可能抛出`SQLException`，那么前面的代码应该如下所示：
+我们还可以创建一个方法，每当需要时就会生成一个函数：
 
 ```java
 
-Connection conn = getConnection();
+Function<Integer, Double> createMultiplyBy(double num){
 
-尝试 {
+Function<Integer, Double> func = new Function<Integer, Double>(){
 
-//在这里使用 conn 对象
+public Double apply(Integer i){
 
-} 捕获(SQLException ex) {
-
-ex.printStackTrace();
-
-} 最后 {
-
-if(conn != null){
-
-尝试 {
-
-conn.close();
-
-} 捕获(SQLException ex){
-
-//在这里做必须要做的事情
+return i * num;
 
 }
 
-}
+};
+
+return func;
 
 }
 
 ```
 
-样板代码增加了，不是吗？这还不是故事的结束。在接下来的章节中，您将了解到，要发送数据库请求，还需要创建一个`java.sql.Statement`，它会抛出`SQLException`，也必须关闭。然后前面的代码会变得更多：
+使用上述方法，我们可以编写以下代码：
 
 ```java
 
-Connection conn = getConnection（）;
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
 
-尝试{
+System.out.println(multiplyByFive.apply(1)); //prints: 5.0
 
-Statement statement = conn.createStatement（）;
-
-尝试{
-
-//在这里使用语句
-
-} catch(SQLException ex){
-
-//这里有一些代码
-
-} finally {
-
-if(statement != null){
-
-尝试{
-
-} catch (SQLException ex){
-
-//这里有一些代码
-
-}
-
-}
-
-}
-
-} catch(SQLException ex) {
-
-ex.printStackTrace（）;
-
-} finally {
-
-if(conn != null){
-
-尝试{
-
-conn.close（）;
-
-} catch(SQLException ex){
-
-//在这里做必须做的事情
-
-}
-
-}
-
-}
+useFunc(multiplyByFive, 10);                 //prints: 50.0
 
 ```
 
-现在我们可以充分欣赏`try...with...resources`结构的优势，特别是考虑到它允许我们在同一个子句中包含多个可自动关闭的资源：
+在下一节中，我们将介绍 lambda 表达式，并展示它们如何用更少的代码来表达函数接口的实现。
+
+# 消费者<T>
+
+通过查看`Consumer<T>`接口的定义，你已经猜到这个接口有一个接受`T`类型参数的抽象方法，并且不返回任何东西。从`Consumer<T>`接口的文档中，我们了解到它的抽象方法是`void accept(T)`，这意味着，例如，我们可以这样实现它：
 
 ```java
 
-尝试（Connection conn = getConnection（）;
+Consumer<Double> printResult = new Consumer<Double>() {
 
-Statement statement = conn.createStatement（）{
+public void accept(Double d) {
 
-//在这里使用语句
+System.out.println("Result=" + d);
 
-} catch(SQLException ex) {
+}
 
-ex.printStackTrace（）;
+};
+
+printResult.accept(10.0);         //prints: Result=10.0
+
+```
+
+或者我们可以创建一个生成函数的方法：
+
+```java
+
+消费者<Double> createPrintingFunc(String prefix, String postfix){
+
+Consumer<Double> func = new Consumer<Double>() {
+
+public void accept(Double d) {
+
+System.out.println(prefix + d + postfix);
+
+}
+
+};
+
+return func;
 
 }
 
 ```
 
-自 Java 9 以来，我们甚至可以使其更简单：
+现在我们可以这样使用它：
 
 ```java
 
-Connection conn = getConnection（）;
+消费者<Double> printResult = createPrintingFunc("Result=", " Great!");
 
-尝试（conn; Statement statement = conn.createStatement（））{
+printResult.accept(10.0);    //prints: Result=10.0 Great!
 
-//在这里使用语句
+```
 
-} catch(SQLException ex) {
+我们还可以创建一个新的方法，不仅接受处理函数作为参数，还接受打印函数：
 
-ex.printStackTrace（）;
+```java
+
+void processAndConsume(int input,
+
+功能<Integer, Double> processingFunc,
+
+Consumer<Double> consumer){
+
+consumer.accept(processingFunc.apply(input));
 
 }
 
 ```
 
-现在很明显，`try...with...resources`结构是一个无可争议的赢家。
-
-# 结构化查询语言（SQL）
-
-SQL 是一种丰富的语言，我们没有足够的空间来涵盖其所有特性。我们只想列举一些最受欢迎的特性，以便您了解它们的存在，并在需要时查找它们。
-
-与 Java 语句类似，SQL 语句表达了像英语句子一样的数据库请求。每个语句都可以在数据库控制台中执行，也可以通过使用 JDBC 连接在 Java 代码中执行。程序员通常在控制台中测试 SQL 语句，然后再在 Java 代码中使用它，因为在控制台中的反馈速度要快得多。在使用控制台时，无需编译和执行程序。
-
-有 SQL 语句可以创建和删除用户和数据库。我们将在下一节中看到此类语句的示例。还有其他与整个数据库相关的语句，超出了本书的范围。
-
-创建数据库后，以下三个 SQL 语句允许我们构建和更改数据库结构 - 表、函数、约束或其他数据库实体：
-
-+   `CREATE`：此语句创建数据库实体
-
-+   `ALTER`：此语句更改数据库实体
-
-+   `DROP`：此语句删除数据库实体
-
-还有各种 SQL 语句，允许我们查询每个数据库实体的信息，这也超出了本书的范围。
-
-并且有四种 SQL 语句可以操作数据库中的数据：
-
-+   `INSERT`：此语句向数据库添加数据
-
-+   `SELECT`：此语句从数据库中读取数据
-
-+   `UPDATE`：此语句更改数据库中的数据
-
-+   `DELETE`：此语句从数据库中删除数据
-
-可以向前述语句添加一个或多个不同的子句，用于标识请求的数据（`WHERE`-子句）、结果返回的顺序（`ORDER`-子句）等。
-
-JDBC 连接允许将前述 SQL 语句中的一个或多个组合包装在提供数据库端不同功能的三个类中：
-
-+   `java.sql.Statement`：只是将语句发送到数据库服务器以执行
-
-+   `java.sql.PreparedStatement`：在数据库服务器上的某个执行路径中缓存语句，允许以高效的方式多次执行具有不同参数的语句
-
-+   `java.sql.CallableStatement`：在数据库中执行存储过程
-
-我们将从创建和删除数据库及其用户的语句开始我们的演示。
-
-# 创建数据库及其结构
-
-查找如何下载和安装您喜欢的数据库服务器。数据库服务器是一个维护和管理数据库的软件系统。对于我们的演示，我们将使用 PostgreSQL，一个免费的开源数据库服务器。
-
-安装数据库服务器后，我们将使用其控制台来创建数据库及其用户，并赋予相应的权限。有许多方法可以构建数据存储和具有不同访问级别的用户系统。在本书中，我们只介绍基本方法，这使我们能够演示主要的 JDBC 功能。
-
-# 创建和删除数据库及其用户
-
-阅读数据库说明，并首先创建一个`java`用户和一个`javaintro`数据库（或选择任何其他您喜欢的名称，并在提供的代码示例中使用它们）。以下是我们在 PostgreSQL 中的操作方式：
+然后我们可以写下面的代码：
 
 ```java
 
-CREATE USER java SUPERUSER;
+功能<Integer, Double> multiplyByFive = createMultiplyBy(5);
 
-CREATE DATABASE javaintro OWNER java;
+消费者<Double> printResult = createPrintingFunc("Result=", " Great!");
+
+processAndConsume(10, multiplyByFive, printResult); //Result=50.0 Great!
 
 ```
 
-如果您犯了一个错误并决定重新开始，您可以使用以下语句删除创建的用户和数据库：
+正如我们之前提到的，在下一节中，我们将介绍 lambda 表达式，并展示它们如何用更少的代码来表达函数接口的实现。
+
+# 供应商<T>
+
+这是一个技巧问题：猜猜`Supplier<T>`接口的抽象方法的输入和输出类型是什么。答案是：它不接受任何参数，返回`T`类型。现在你明白了，区别在于接口本身的名称。它应该给你一个提示：消费者只消费而不返回任何东西，而供应商只提供而不需要任何输入。`Supplier<T>`接口的抽象方法是`T get()`。
+
+与之前的函数类似，我们可以编写生成供应商的方法：
 
 ```java
 
-DROP USER java;
+供应商<Integer> createSuppplier(int num){
 
-DROP DATABASE javaintro;
+供应商<Integer> func = new 供应商<Integer>() {
 
-```
+public Integer get() { return num; }
 
-我们为我们的用户选择了`SUPERUSER`角色，但是良好的安全实践建议只将这样一个强大的角色分配给管理员。对于应用程序，建议创建一个用户，该用户不能创建或更改数据库本身——其表和约束——但只能管理数据。此外，创建另一个逻辑层，称为**模式**，该模式可以具有自己的一组用户和权限，也是一个良好的实践。这样，同一数据库中的几个模式可以被隔离，每个用户（其中一个是您的应用程序）只能访问特定的模式。在企业级别上，通常的做法是为数据库模式创建同义词，以便没有应用程序可以直接访问原始结构。
+};
 
-但是，正如我们已经提到的，对于本书的目的，这是不需要的，所以我们把它留给数据库管理员，他们为每个企业的特定工作条件建立规则和指导方针。
-
-现在我们可以将我们的应用程序连接到数据库。
-
-# 创建、修改和删除表
-
-表的标准 SQL 语句如下：
-
-```java
-
-CREATE TABLE tablename (
-
-column1 type1，
-
-column2 type2，
-
-column3 type3，
-
-....
-
-);
-
-```
-
-表名、列名和可以使用的值类型的限制取决于特定的数据库。以下是在 PostgreSQL 中创建表 person 的命令示例：
-
-```java
-
-创建表 person (
-
-id SERIAL PRIMARY KEY,
-
-first_name VARCHAR NOT NULL，
-
-last_name VARCHAR NOT NULL，
-
-dob DATE NOT NULL
-
-);
-
-```
-
-正如您所看到的，我们已经将`dob`（出生日期）列设置为不可为空。这对我们的`Person` Java 类施加了约束，该类将表示此表的记录：其`dob`字段不能为`null`。这正是我们在第六章中所做的，当时我们创建了我们的`Person`类，如下所示：
-
-```java
-
-class Person {
-
-private String firstName, lastName;
-
-private LocalDate dob;
-
-public Person(String firstName, String lastName, LocalDate dob) {
-
-this.firstName = firstName == null ? "" : firstName;
-
-this.lastName = lastName == null ? "" : lastName;
-
-if(dob == null){
-
-throw new RuntimeException("Date of birth is null");
-
-}
-
-this.dob = dob;
-
-}
-
-public String getFirstName() { return firstName; }
-
-public String getLastName() { return lastName; }
-
-public LocalDate getDob() { return dob; }
+return func;
 
 }
 
 ```
 
-我们没有设置`VARCHAR`类型的列的大小，因此允许这些列存储任意长度的值，而整数类型允许它们存储从公元前 4713 年到公元 5874897 年的数字。添加了`NOT NULL`，因为默认情况下列将是可空的，而我们希望确保每条记录的所有列都被填充。我们的`Person`类通过将名字和姓氏设置为空的`String`值来支持它，如果它们是`null`，作为`Person`构造函数的参数。
-
-我们还将`id`列标识为`PRIMARY KEY`，这表示该列唯一标识记录。`SERIAL`关键字表示我们要求数据库在添加新记录时生成下一个整数值，因此每条记录将有一个唯一的整数编号。或者，我们可以从`first_name`、`last_name`和`dob`的组合中创建`PRIMARY KEY`：
+现在我们可以编写一个只接受函数的方法：
 
 ```java
 
-CREATE TABLE person (
+void supplyProcessAndConsume(供应商<Integer> input,
 
-first_name VARCHAR NOT NULL,
+功能<Integer, Double> process,
 
-last_name VARCHAR NOT NULL,
+Consumer<Double> consume){
 
-dob DATE NOT NULL,
-
-PRIMARY KEY (first_name, last_name, dob)
-
-);
-
-```
-
-但有可能有两个人有相同的名字，并且出生在同一天，所以我们决定不这样做，并添加了`Person`类的另一个字段和构造函数：
-
-```java
-
-public class Person {
-
-private String firstName, lastName;
-
-private LocalDate dob;
-
-private int id;
-
-public Person(int id, String firstName,
-
-String lastName, LocalDate dob) {
-
-this(firstName, lastName, dob);
-
-this.id = id;
-
-}
-
-public Person(String firstName, String lastName, LocalDate dob) {
-
-this.firstName = firstName == null ? "" : firstName;
-
-this.lastName = lastName == null ? "" : lastName;
-
-if(dob == null){
-
-throw new RuntimeException("Date of birth is null");
-
-}
-
-this.dob = dob;
-
-}
-
-public String getFirstName() { return firstName; }
-
-public String getLastName() { return lastName; }
-
-public LocalDate getDob() { return dob; }
+consume.accept(processFunc.apply(input.get()));
 
 }
 
 ```
 
-我们将使用接受`id`的构造函数来基于数据库中的记录构建对象，而另一个构造函数将用于在插入新记录之前创建对象。
-
-我们在数据库控制台中运行上述 SQL 语句并创建这个表：
-
-![](img/00af477d-66c8-4e49-941b-8a8ddbaf76f0.png)
-
-如果必要，可以通过`DROP`命令删除表：
+注意`input`函数的输出类型与`process`函数的输入类型相同，它返回的类型与`consume`函数消耗的类型相同。这使得下面的代码成为可能：
 
 ```java
 
-DROP table person;
+供应商<Integer> supply7 = createSuppplier(7);
+
+功能<Integer, Double> multiplyByFive = createMultiplyBy(5);
+
+消费者<Double> printResult = createPrintingFunc("Result=", " Great!");
+
+supplyProcessAndConsume(supply7, multiplyByFive, printResult);
+
+//prints: Result=35.0 Great!
 
 ```
 
-可以使用`ALTER`命令更改现有表。例如，我们可以添加一个`address`列：
+此时，我们希望您开始欣赏函数式编程为我们带来的价值。它允许我们传递功能块，这些功能块可以插入到算法的中间，而无需创建对象。静态方法也不需要创建对象，但它们由 JVM 中的所有应用程序线程共享，因为它们在 JVM 中是唯一的。与此同时，每个函数都是一个对象，可以在 JVM 中是唯一的（如果分配给静态变量）或为每个处理线程创建（这通常是情况）。它的编码开销很小，在 lambda 表达式中使用时甚至可以更少——这是我们下一节的主题。
+
+到目前为止，我们已经演示了如何将函数插入现有的控制流表达式中。现在我们将描述最后一个缺失的部分——代表决策构造的函数，它也可以作为对象传递。
+
+# Predicate<T>
+
+这是一个表示布尔值函数的接口，它有一个方法：`boolean test(T)`。以下是一个创建`Predicate<Integer>`函数的方法示例：
 
 ```java
 
-ALTER table person add column address VARCHAR;
+Predicate<Integer> createTestSmallerThan(int num){
+
+Predicate<Integer> func = new Predicate<Integer>() {
+
+public boolean test(Integer d) {
+
+return d < num;
+
+}
+
+};
+
+return func;
+
+}
 
 ```
 
-如果您不确定这样的列是否已经存在，可以添加 IF EXISTS 或 IF NOT EXISTS：
+我们可以使用它来向处理方法添加一些逻辑：
 
 ```java
 
-ALTER table person add column IF NOT EXISTS address VARCHAR;
+void supplyDecideProcessAndConsume(Supplier<Integer> input,
 
-```
+Predicate<Integer> test,
 
-但这种可能性只存在于 PostgreSQL 9.6 之后。
+Function<Integer, Double> process,
 
-数据库表创建的另一个重要考虑因素是是否必须添加索引。索引是一种数据结构，可以加速表中的数据搜索，而无需检查每条表记录。索引可以包括一个或多个表的列。例如，主键的索引会自动生成。如果您已经创建了表的描述，您将看到：
+Consumer<Double> consume){
 
-![](img/b447b61b-1d4f-4578-a9be-778d1c6c8ec9.png)
+int in = input.get();
 
-如果我们认为（并通过实验已经证明）它将有助于应用程序的性能，我们也可以自己添加任何索引。例如，我们可以通过添加以下索引来允许不区分大小写的搜索名字和姓氏：
+if(test.test(in)){
 
-```java
+consume.accept(process.apply(in));
 
-CREATE INDEX idx_names ON person ((lower(first_name), lower(last_name));
+} else {
 
-```
+System.out.println("Input " + in +
 
-如果搜索速度提高，我们会保留索引。如果没有，可以删除它：
-
-```java
-
-drop index idx_names;
-
-```
-
-我们删除它，因为索引会增加额外的写入和存储空间开销。
-
-我们也可以从表中删除列：
-
-```java
-
-ALTER table person DROP column address;
-
-```
-
-在我们的示例中，我们遵循了 PostgreSQL 的命名约定。如果您使用不同的数据库，建议您查找其命名约定并遵循，以便您创建的名称与自动创建的名称对齐。
-
-# 创建，读取，更新和删除（CRUD）数据
-
-到目前为止，我们已经使用控制台将 SQL 语句发送到数据库。可以使用 JDBC API 从 Java 代码执行相同的语句，但是表只创建一次，因此没有必要为一次性执行编写程序。
-
-但是管理数据是另一回事。这是我们现在要编写的程序的主要目的。为了做到这一点，首先我们将以下依赖项添加到`pom.xml`文件中，因为我们已经安装了 PostgreSQL 9.6：
-
-```java
-
-<dependency>
-
-<groupId>org.postgresql</groupId>
-
-<artifactId>postgresql</artifactId>
-
-<version>42.2.2</version>
-
-</dependency>
-
-```
-
-# INSERT 语句
-
-在数据库中创建（填充）数据的 SQL 语句具有以下格式：
-
-```java
-
-INSERT INTO table_name（column1，column2，column3，...）
-
-VALUES（value1，value2，value3，...）;
-
-```
-
-当必须添加多个表记录时，它看起来像这样：
-
-```java
-
-INSERT INTO table_name（column1，column2，column3，...）
-
-VALUES（value1，value2，value3，...），（value11，value21，value31，...），...;
-
-```
-
-在编写程序之前，让我们测试我们的`INSERT`语句：
-
-！[]（img/c87f8461-b463-4dcb-a806-01b2bac288c7.png）
-
-它没有错误，返回的插入行数为 1，所以我们将创建以下方法：
-
-```java
-
-void executeStatement（String sql）{
-
-Connection conn = getConnection（）;
-
-尝试（conn; Statement st = conn.createStatement（））{
-
-st.execute（sql）;
-
-} catch（SQLException ex）{
-
-ex.printStackTrace（）;
+" does not pass the test and not processed.");
 
 }
 
@@ -658,39 +384,409 @@ ex.printStackTrace（）;
 
 ```
 
-我们可以执行前面的方法并插入另一行：
+以下代码演示了它的用法：
 
 ```java
 
-executeStatement（"insert into person（first_name，last_name，dob）"+
+Supplier<Integer> input = createSuppplier(7);
 
-“值（'Bill'，'Grey'，'1980-01-27'）”
+Predicate<Integer> test = createTestSmallerThan(5);
+
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
+
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
+
+//打印：Input 7 does not pass the test and not processed.
 
 ```
 
-我们将在下一节中看到此前`INSERT`语句执行的结果以及`SELECT`语句的演示。
-
-与此同时，我们想讨论`java.sql.Statement`接口的最受欢迎的方法：
-
-+   `boolean execute（String sql）`：如果执行的语句返回数据（作为`java.sql.ResultSet`对象），则返回`true`，可以使用`java.sql.Statement`接口的`ResultSet getResultSet（）`方法检索数据。如果执行的语句不返回数据（SQL 语句可能正在更新或插入某些行），则返回`false`，并且随后调用`java.sql.Statement`接口的`int getUpdateCount（）`方法返回受影响的行数。例如，如果我们在`executeStatement（）`方法中添加了打印语句，那么在插入一行后，我们将看到以下结果：
+让我们以 3 为例设置输入：
 
 ```java
 
-void executeStatement（String sql）{
+Supplier<Integer> input = createSuppplier(3)
 
-Connection conn = getConnection();
+```
 
-尝试（conn; Statement st = conn.createStatement（））{
+前面的代码将产生以下输出：
 
-System.out.println（st.execute（sql））; //打印：false
+```java
 
-System.out.println（st.getResultSet（））; //打印：null
+Result=15.0 Great!
 
-System.out.println（st.getUpdateCount（））; //打印：1
+```
 
-} catch（SQLException ex）{
+# 其他标准函数接口
 
-ex.printStackTrace（）;
+`java.util.function`包中的其他 39 个函数接口是我们刚刚审查的四个接口的变体。这些变体是为了实现以下一个或多个组合：
+
++   通过显式使用整数、双精度或长整型原始类型来避免自动装箱和拆箱，从而获得更好的性能
+
++   允许两个输入参数
+
++   更短的符号
+
+以下是一些示例：
+
++   `IntFunction<R>`具有`R apply(int)`方法，提供了更短的符号（无需为输入参数类型使用泛型），并通过要求`int`原始类型作为参数来避免自动装箱
+
++   `BiFunction<T,U,R>`具有`R apply(T,U)`方法，允许两个输入参数
+
++   `BinaryOperator<T>`具有`T apply(T,T)`方法，允许`T`类型的两个输入参数，并返回相同`T`类型的值
+
++   `IntBinaryOperator`具有`int applAsInt(int,int)`方法，接受两个`int`类型的参数，并返回`int`类型的值
+
+如果您要使用函数接口，我们鼓励您研究`java.util.functional`包的接口 API。
+
+# 链接标准函数
+
+`java.util.function`包中的大多数函数接口都有默认方法，允许我们构建一个函数链（也称为管道），将一个函数的结果作为输入参数传递给另一个函数，从而组成一个新的复杂函数。例如：
+
+```java
+
+Function<Double, Long> f1 = d -> Double.valueOf(d / 2.).longValue();
+
+Function<Long, String> f2 = l -> "Result: " + (l + 1);
+
+Function<Double, String> f3 = f1.andThen(f2);
+
+System.out.println(f3.apply(4.));            //打印：3
+
+```
+
+从上面的代码中可以看出，我们通过使用`andThen()`方法组合了`f1`和`f2`函数，创建了一个新的`f3`函数。这就是我们将要在本节中探讨的方法的思想。首先，我们将函数表示为匿名类，然后在下一节中，我们将介绍在前面的示例中使用的 lambda 表达式。
+
+# 链接两个 Function<T,R>
+
+我们可以使用`Function`接口的`andThen(Function after)`默认方法。我们已经创建了`Function<Integer, Double> createMultiplyBy()`方法：
+
+```java
+
+Function<Integer, Double> createMultiplyBy(double num){
+
+Function<Integer, Double> func = new Function<Integer, Double>(){
+
+public Double apply(Integer i){
+
+返回 i * num;
+
+}
+
+};
+
+return func;
+
+```
+
+我们还可以编写另一个方法，创建一个带有`Double`输入类型的减法函数，这样我们就可以将其链接到乘法函数：
+
+```java
+
+private static Function<Double, Long> createSubtractInt(int num){
+
+Function<Double, Long> func = new Function<Double, Long>(){
+
+public Long apply(Double dbl){
+
+返回 Math.round(dbl - num);
+
+}
+
+};
+
+返回 func;
+
+}
+
+```
+
+现在我们可以编写以下代码：
+
+```java
+
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
+
+System.out.println(multiplyByFive.apply(2));  //打印：10.0
+
+Function<Double, Long> subtract7 = createSubtractInt(7);
+
+System.out.println(subtract7.apply(11.0));   //打印：4
+
+long r = multiplyByFive.andThen(subtract7).apply(2);
+
+System.out.println(r);                          //打印：3
+
+```
+
+正如你所看到的，`multiplyByFive.andThen(subtract7)`链实际上是`Function<Integer, Long> multiplyByFiveAndSubtractSeven`。
+
+`Function`接口还有另一个默认方法，`Function<V,R> compose(Function<V,T> before)`，它也允许我们链接两个函数。必须首先执行的函数可以作为`before`参数传递到第二个函数的`compose()`方法中：
+
+```java
+
+boolean r = subtract7.compose(multiplyByFive).apply(2);
+
+System.out.println(r);                          //打印：3
+
+```
+
+# 链接两个 Consumer<T>
+
+`Consumer`接口也有`andThen(Consumer after)`方法。我们已经编写了创建打印函数的方法：
+
+```java
+
+Consumer<Double> createPrintingFunc(String prefix, String postfix){
+
+Consumer<Double> func = new Consumer<Double>() {
+
+public void accept(Double d) {
+
+System.out.println(prefix + d + postfix);
+
+}
+
+};
+
+return func;
+
+}
+
+```
+
+现在我们可以创建并链接两个打印函数，如下所示：
+
+```java
+
+Consumer<Double> print21By = createPrintingFunc("21 by ", "");
+
+Consumer<Double> equalsBy21 = createPrintingFunc("equals ", " by 21");
+
+print21By.andThen(equalsBy21).accept(2d);
+
+//打印：21 by 2.0
+
+// 由 21 等于 2.0
+
+```
+
+正如您在`Consumer`链中所看到的，两个函数按照链条定义的顺序消耗相同的值。
+
+# 链接两个 Predicate<T>
+
+`Supplier`接口没有默认方法，而`Predicate`接口有一个静态方法`isEqual(Object targetRef)`和三个默认方法：`and(Predicate other)`、`negate()`和`or(Predicate other)`。为了演示`and(Predicate other)`和`or(Predicate other)`方法的使用，例如，让我们编写创建两个`Predicate<Double>`函数的方法。一个函数检查值是否小于输入：
+
+```java
+
+Predicate<Double> testSmallerThan(double limit){
+
+Predicate<Double> func = new Predicate<Double>() {
+
+public boolean test(Double num) {
+
+System.out.println("Test if " + num + " is smaller than " + limit);
+
+返回 num < limit;
+
+}
+
+};
+
+返回 func;
+
+}
+
+```
+
+另一个函数检查值是否大于输入：
+
+```java
+
+Predicate<Double> testBiggerThan(double limit){
+
+Predicate<Double> func = new Predicate<Double>() {
+
+public boolean test(Double num) {
+
+System.out.println("Test if " + num + " is bigger than " + limit);
+
+返回 num > limit;
+
+}
+
+};
+
+return func;
+
+}
+
+```
+
+现在我们可以创建两个 `Predicate<Double>` 函数并将它们链接起来：
+
+```java
+
+Predicate<Double> isSmallerThan20 = testSmallerThan(20d);
+
+System.out.println(isSmallerThan20.test(10d));
+
+//打印：测试 10.0 是否小于 20.0
+
+//        true
+
+Predicate<Double> isBiggerThan18 = testBiggerThan(18d);
+
+System.out.println(isBiggerThan18.test(10d));
+
+//打印：测试 10.0 是否大于 18.0
+
+//        false
+
+boolean b = isSmallerThan20.and(isBiggerThan18).test(10.);
+
+System.out.println(b);
+
+//打印：测试 10.0 是否小于 20.0
+
+//        测试 10.0 是否大于 18.0
+
+//        false
+
+b = isSmallerThan20.or(isBiggerThan18).test(10.);
+
+System.out.println(b);
+
+//打印：测试 10.0 是否小于 20.0
+
+//        true
+
+```
+
+正如你所看到的，`and()` 方法需要执行每个函数，而 `or()` 方法在链中的第一个函数返回 `true` 时不执行第二个函数。
+
+# identity() 和其他默认方法
+
+`java.util.function` 包的函数接口还有其他有用的默认方法。其中最突出的是 `identity()` 方法，它返回一个始终返回其输入参数的函数：
+
+```java
+
+Function<Integer, Integer> id = Function.identity();
+
+System.out.println(id.apply(4));          //打印：4
+
+```
+
+`identity()` 方法在某些程序需要提供某个函数，但你不希望提供的函数改变任何东西时非常有用。在这种情况下，你可以创建一个具有必要输出类型的恒等函数。例如，在我们之前的代码片段中，我们可能决定 `multiplyByFive` 函数不应该在 `multiplyByFive.andThen(subtract7)` 链中改变任何东西：
+
+```java
+
+Function<Double, Double> multiplyByFive = Function.identity();
+
+System.out.println(multiplyByFive.apply(2.));  //打印：2.0
+
+Function<Double, Long> subtract7 = createSubtractInt(7);
+
+System.out.println(subtract7.apply(11.0));    //打印：4
+
+long r = multiplyByFive.andThen(subtract7).apply(2.);
+
+System.out.println(r);                       //打印：-5
+
+```
+
+正如你所看到的，`multiplyByFive` 函数没有对输入参数 `2` 做任何处理，所以结果（减去 `7` 后）是 `-5`。
+
+其他默认方法大多与转换和装箱和拆箱有关，但也包括提取两个参数的最小值和最大值。如果你感兴趣，可以查看一下 `java.util.function` 包接口的 API，了解一下可能性。
+
+# Lambda 表达式
+
+在上一节中的示例（使用匿名类实现函数接口）看起来笨重且过于冗长。首先，没有必要重复接口名称，因为我们已经将其声明为对象引用的类型。其次，在只有一个抽象方法的函数接口的情况下，没有必要指定必须实现的方法名称。编译器和 Java 运行时可以弄清楚。我们只需要提供新的功能。Lambda 表达式就是为了这个目的而引入的。
+
+# 什么是 lambda 表达式？
+
+术语 lambda 来自于 lambda 演算——一种通用的计算模型，可以用来模拟任何图灵机。它是由数学家阿隆佐·邱奇在 20 世纪 30 年代引入的。lambda 表达式是一个函数，在 Java 中实现为匿名方法，它还允许我们省略修饰符、返回类型和参数类型。这使得它的表示非常紧凑。
+
+lambda 表达式的语法包括参数列表、箭头标记 `->` 和主体。参数列表可以是空的 `()`，如果只有一个参数，则不需要括号，或者由括号括起来的逗号分隔的参数列表。主体可以是单个表达式或语句块。
+
+让我们看一些例子：
+
++   `() -> 42;` 总是返回 `42`
+
++   `x -> x + 1;` 将 `x` 变量增加 `1`
+
++   `(x, y) -> x * y;` multiplies `x` by `y` and returns the result
+
++   `(char x) -> x == '$';` compares the value of the `x` variable and the `$` symbol, and returns a Boolean value
+
++   `x -> {  System.out.println("x=" + x); };` prints the `x` value with the `x=` prefix
+
+# Re-implementing functions
+
+We can rewrite our functions, created in the previous section, using lambda expressions, as follows:
+
+```java
+
+Function<Integer, Double> createMultiplyBy(double num){
+
+Function<Integer, Double> func = i -> i * num;
+
+return func;
+
+}
+
+Consumer<Double> createPrintingFunc(String prefix, String postfix){
+
+Consumer<Double> func = d -> System.out.println(prefix + d + postfix);
+
+return func;
+
+}
+
+Supplier<Integer> createSuppplier(int num){
+
+Supplier<Integer> func = () -> num;
+
+return func;
+
+}
+
+Predicate<Integer> createTestSmallerThan(int num){
+
+Predicate<Integer> func = d -> d < num;
+
+return func;
+
+}
+
+```
+
+We don't repeat the name of the implemented interface because it is specified as the return type in the method signature. And we do not specify the name of the abstract method either because it is the only method of the interface that has to be implemented. Writing such a compact and efficient code became possible because of the combination of the lambda expression and functional interface.
+
+Looking at the preceding examples, you probably realize that there is no need to have methods that create a function anymore. Let's change the code that calls the `supplyDecideProcessAndConsume()` method:
+
+```java
+
+void supplyDecideProcessAndConsume(Supplier<Integer> input,
+
+Predicate<Integer> test,
+
+Function<Integer, Double> process,
+
+Consumer<Double> consume){
+
+int in = input.get();
+
+if(test.test(in)){
+
+consume.accept(process.apply(in));
+
+} else {
+
+System.out.println("Input " + in +
+
+" does not pass the test and not processed.");
 
 }
 
@@ -698,25 +794,161 @@ ex.printStackTrace（）;
 
 ```
 
-+   `ResultSet executeQuery（String sql）`：它将数据作为`java.sql.ResultSet`对象返回（预计执行的 SQL 语句是`SELECT`语句）。可以通过随后调用`java.sql.Statement`接口的`ResultSet getResultSet（）`方法检索相同的数据。`java.sql.Statement`接口的`int getUpdateCount（）`方法返回`-1`。例如，如果我们更改我们的`executeStatement（）`方法并使用`executeQuery（）`，则`executeStatement（"select first_name from person"）`的结果将是：
+Let's revisit the following lines:
 
 ```java
 
-void executeStatement（String sql）{
+Supplier<Integer> input = createSuppplier(7);
 
-Connection conn = getConnection();
+Predicate<Integer> test = createTestSmallerThan(5);
 
-尝试（conn; Statement st = conn.createStatement（））{
+Function<Integer, Double> multiplyByFive = createMultiplyBy(5);
 
-System.out.println（st.executeQuery（sql））; //打印：ResultSet
+Consumer<Double> printResult = createPrintingFunc("Result=", " Great!");
 
-System.out.println（st.getResultSet（））; //打印：ResultSet
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
 
-System.out.println（st.getUpdateCount（））; //打印：-1
+```
 
-} catch (SQLException ex) {
+We can change the preceding code to the following without changing the functionality:
 
-ex.printStackTrace();
+```java
+
+Supplier<Integer> input = () -> 7;
+
+Predicate<Integer> test = d -> d < 5.;
+
+Function<Integer, Double> multiplyByFive = i -> i * 5.;;
+
+Consumer<Double> printResult =
+
+d -> System.out.println("Result=" + d + " Great!");
+
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
+
+```
+
+We can even inline the preceding functions and write the preceding code in one line like this:
+
+```java
+
+supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5.,
+
+d -> System.out.println("Result=" + d + " Great!"));
+
+```
+
+Notice how much more transparent the definition of the printing function has become. That is the power and the beauty of lambda expressions in combination with functional interfaces. In Chapter 18, *Streams and Pipelines*, you will see that lambda expressions are, in fact, the only way to process streamed data.
+
+# Lambda limitations
+
+There are two aspects of a lambda expression that we would like to point out and clarify, which are:
+
++   If a lambda expression uses a local variable created outside it, this local variable has to be final or effectively final (not re-assigned in the same context)
+
++   The `this` keyword in a lambda expression refers to the enclosing context, and not the lambda expression itself
+
+# Effectively final local variable
+
+As in the anonymous class, the variable, created outside and used inside the lambda expression, becomes effectively final and cannot be modified. You can write the following:
+
+```java
+
+int x = 7;
+
+//x = 3;       //compilation error
+
+int y = 5;
+
+double z = 5.;
+
+supplyDecideProcessAndConsume(() -> x, d -> d < y, i -> i * z,
+
+d -> { //x = 3;      //compilation error
+
+System.out.println("Result=" + d + " Great!"); } );
+
+```
+
+但是，正如你所看到的，我们无法改变 lambda 表达式中使用的局部变量的值。这种限制的原因是函数可以在不同的上下文（例如不同的线程）中传递并执行，尝试同步这些上下文将破坏*无状态函数*和表达式的独立分布式评估的原始想法。这就是为什么 lambda 表达式中使用的所有局部变量实际上都是 final 的原因，这意味着它们可以显式地声明为 final，也可以通过在 lambda 表达式中使用而变为 final。
+
+这种限制有一个可能的变通方法。如果局部变量是引用类型（但不是`String`或原始包装类型），即使该局部变量在 lambda 表达式中使用，也可以改变其状态：
+
+```java
+
+class A {
+
+private int x;
+
+public int getX(){ return this.x; }
+
+public void setX(int x){ this.x = x; }
+
+}
+
+void localVariable2(){
+
+A a = new A();
+
+a.setX(7);
+
+a.setX(3);
+
+int y = 5;
+
+double z = 5.;
+
+supplyDecideProcessAndConsume(() -> a.getX(), d -> d < y, i -> i * z,
+
+d -> { a.setX(5);
+
+System.out.println("Result=" + d + " Great!"); } );
+
+}
+
+```
+
+但是这种变通方法只有在真正需要时才应该使用，并且必须小心操作，因为存在意外副作用的危险。
+
+# this 关键字的解释
+
+匿名类和 lambda 表达式之间的一个主要区别是对`this`关键字的解释。在匿名类中，它指的是匿名类的实例。在 lambda 表达式中，`this`指的是包围表达式的类实例，也称为*包围实例*、*包围上下文*或*包围范围*。
+
+让我们编写一个`ThisDemo`类来说明这种差异：
+
+```java
+
+class ThisDemo {
+
+private String field = "ThisDemo.field";
+
+public void useAnonymousClass() {
+
+Consumer<String> consumer = new Consumer<>() {
+
+private String field = "AnonymousClassConsumer.field";
+
+public void accept(String s) {
+
+System.out.println(this.field);
+
+}
+
+};
+
+consumer.accept(this.field);
+
+}
+
+public void useLambdaExpression() {
+
+Consumer<String> consumer = consumer = s -> {
+
+System.out.println(this.field);
+
+};
+
+consumer.accept(this.field);
 
 }
 
@@ -724,25 +956,51 @@ ex.printStackTrace();
 
 ```
 
-+   `int executeUpdate(String sql)`: 它返回受影响的行数（执行的 SQL 语句预期为`UPDATE`语句）。`java.sql.Statement`接口的`int getUpdateCount()`方法的后续调用返回相同的数字。`java.sql.Statement`接口的`ResultSet getResultSet()`方法的后续调用返回`null`。例如，如果我们更改我们的`executeStatement()`方法并使用`executeUpdate()`，`executeStatement("update person set first_name = 'Jim' where last_name = 'Adams'")`的结果将是：
+正如你所看到的，匿名类中的`this`指的是匿名类实例，而 lambda 表达式中的`this`指的是包围表达式的类实例。Lambda 表达式根本没有字段，也不能有字段。如果我们执行前面的方法，输出将确认我们的假设：
 
 ```java
 
-void executeStatement4(String sql){
+ThisDemo d = new ThisDemo();
 
-Connection conn = getConnection();
+d.useAnonymousClass();   //输出：AnonymousClassConsumer.field
 
-try (conn; Statement st = conn.createStatement()) {
+d.useLambdaExpression(); //输出：ThisDemo.field
 
-System.out.println(st.executeUpdate(sql));//prints: 1
+```
 
-System.out.println(st.getResultSet());    //prints: null
+lambda 表达式不是类实例，也不能被`this`引用。根据 Java 规范，这种方法*允许更多的实现灵活性*，*将[this]视为与周围上下文中的相同*。
 
-System.out.println(st.getUpdateCount());  //prints: 1
+# 方法引用
 
-} catch (SQLException ex) {
+让我们来看看我们对`supplyDecidePprocessAndConsume()`方法的最后一个实现：
 
-ex.printStackTrace();
+```java
+
+supplyDecideProcessAndConsume(() -> 7, d -> d < 5, i -> i * 5.,
+
+d -> System.out.println("Result=" + d + " Great!"));
+
+```
+
+我们使用的函数都相当简单。在实际代码中，每个函数可能需要多行实现。在这种情况下，将代码块内联会使代码几乎无法阅读。在这种情况下，引用具有必要实现的方法是有帮助的。假设我们有以下`Helper`类：
+
+```java
+
+public class Helper {
+
+public double calculateResult(int i){
+
+// 这里可能有很多行代码
+
+return i* 5;
+
+}
+
+public static void printResult(double d){
+
+// 这里可能有很多行代码
+
+System.out.println("Result=" + d + " Great!");
 
 }
 
@@ -750,280 +1008,116 @@ ex.printStackTrace();
 
 ```
 
-# SELECT 语句
-
-`SELECT`语句的格式如下：
+`Lambdas`类中的 lambda 表达式可以引用`Helper`和`Lambdas`类的方法，如下所示：
 
 ```java
 
-SELECT column_name, column_name
+public class Lambdas {
 
-FROM table_name WHERE some_column = some_value;
+public void methodReference() {
 
-```
+Supplier<Integer> input = () -> generateInput();
 
-当需要选择所有列时，格式如下：
+Predicate<Integer> test = d -> checkValue(d);
 
-```java
+Function<Integer, Double> multiplyByFive =
 
-SELECT * FROM table_name WHERE some_column=some_value;
+下一章将使读者熟悉数据流处理的强大概念。它解释了流是什么，如何创建它们并处理它们的元素，以及如何构建处理管道。它还展示了如何轻松地将流处理组织成并行处理。
 
-```
+Consumer<Double> printResult = d -> Helper.printResult(d);
 
-这是`WHERE`子句的更一般的定义：
+使用方法引用来表示创建一个新对象。假设我们有`class A{}`。用另一个使用方法引用的`Supplier`函数声明替换以下内容：
 
-```java
-
-WHERE column_name operator value
-
-操作符：
-
-=   等于
-
-<>  不等于。在某些版本的 SQL 中，!=
-
-> 大于
-
-<   小于
-
->=  大于或等于
-
-<=  小于或等于
-
-IN  指定列的多个可能值
-
-LIKE  指定搜索模式
-
-BETWEEN  指定列中值的包含范围
-
-```
-
-`column_name` operator value 构造可以使用`AND`和`OR`逻辑运算符组合，并用括号`( )`分组。
-
-在前面的语句中，我们执行了一个`select first_name from person`的`SELECT`语句，返回了`person`表中记录的所有名字。现在让我们再次执行它并打印出结果：
-
-```java
-
-Connection conn = getConnection();
-
-try (conn; Statement st = conn.createStatement()) {
-
-ResultSet rs = st.executeQuery("select first_name from person");
-
-while (rs.next()){
-
-System.out.print(rs.getString(1) + " "); //prints: Jim Bill
+supplyDecideProcessAndConsume(input, test, multiplyByFive, printResult);
 
 }
 
-} catch (SQLException ex) {
+private int generateInput(){
 
-ex.printStackTrace();
+// 这里可能有很多行代码
 
-}
-
-```
-
-`ResultSet`接口的`getString(int position)`方法从位置`1`（`SELECT`语句中列的第一个）提取`String`值。对于所有原始类型，如`getInt()`和`getByte()`，都有类似的获取器。
-
-还可以通过列名从`ResultSet`对象中提取值。在我们的情况下，它将是`getString("first_name")`。当`SELECT`语句如下时，这是特别有用的：
-
-```java
-
-select * from person;
-
-```
-
-但请记住，通过列名从`ResultSet`对象中提取值效率较低。性能差异非常小，只有在操作发生多次时才变得重要。只有实际的测量和测试才能告诉您这种差异对您的应用程序是否重要。通过列名提取值尤其有吸引力，因为它提供更好的代码可读性，在应用程序维护期间可以得到很好的回报。
-
-`ResultSet`接口中还有许多其他有用的方法。如果您的应用程序从数据库中读取数据，我们强烈建议您阅读`SELECT`语句和`ResultSet`接口的文档。
-
-# UPDATE 语句
-
-数据可以通过`UPDATE`语句更改：
-
-```java
-
-UPDATE table_name SET column1=value1,column2=value2,... WHERE-clause;
-
-```
-
-我们已经使用这样的语句来改变记录中的名字，将原始值`John`改为新值`Jim`：
-
-```java
-
-update person set first_name = 'Jim' where last_name = 'Adams'
-
-```
-
-稍后，使用`SELECT`语句，我们将证明更改是成功的。没有`WHERE`子句，表的所有记录都将受到影响。
-
-# DELETE 语句
-
-数据可以通过`DELETE`语句删除：
-
-```java
-
-DELETE FROM table_name WHERE-clause;
-
-```
-
-没有`WHERE`子句，表的所有记录都将被删除。在`person`表的情况下，我们可以使用`delete from person` SQL 语句删除所有记录。以下语句从`person`表中删除所有名为 Jim 的记录：
-
-```java
-
-delete from person where first_name = 'Jim';
-
-```
-
-# 使用 PreparedStatement 类
-
-`PreparedStatement`对象——`Statement`接口的子接口——旨在被缓存在数据库中，然后用于有效地多次执行 SQL 语句，以适应不同的输入值。与`Statement`对象类似（由`createStatement()`方法创建），它可以由同一`Connection`对象的`prepareStatement()`方法创建。
-
-生成`Statement`对象的相同 SQL 语句也可以用于生成`PreparedStatement`对象。事实上，考虑使用`PreparedStatement`来调用多次的任何 SQL 语句是一个好主意，因为它的性能优于`Statement`。要做到这一点，我们只需要更改前面示例代码中的这两行：
-
-```java
-
-try (conn; Statement st = conn.createStatement()) {
-
-ResultSet rs = st.executeQuery(sql);
-
-```
-
-或者，我们可以以同样的方式使用`PreparedStatement`类：
-
-```java
-
-try (conn; PreparedStatement st = conn.prepareStatement(sql)) {
-
-ResultSet rs = st.executeQuery();
-
-```
-
-但是`PreparedStatement`的真正用处在于它能够接受参数-替换（按照它们出现的顺序）`?`符号的输入值。例如，我们可以创建以下方法：
-
-```java
-
-List<Person> selectPersonsByFirstName(String sql, String searchValue){
-
-List<Person> list = new ArrayList<>();
-
-Connection conn = getConnection();
-
-try (conn; PreparedStatement st = conn.prepareStatement(sql)) {
-
-st.setString(1, searchValue);
-
-ResultSet rs = st.executeQuery();
-
-while (rs.next()){
-
-list.add(new Person(rs.getInt("id"),
-
-rs.getString("first_name"),
-
-rs.getString("last_name"),
-
-rs.getDate("dob").toLocalDate()));
+return 7;
 
 }
 
-} catch (SQLException ex) {
+private static boolean checkValue(double d){
 
-ex.printStackTrace();
+答案
+
+return d < 5;
+
+Supplier<A> supplier = A::new;
+
+// 这里可能有很多行代码
+
+```
+
+前述代码已经读起来更好了，函数可以再次内联：
 
 }
 
-return list;
+supplyDecideProcessAndConsume(() -> generateInput(), d -> checkValue(d),
+
+i -> new Helper().calculateResult(i), Helper.printResult(d));
+
+supplyDecideProcessAndConsume(input, test,
+
+但在这种情况下，表示法甚至可以更加简洁。当一行 lambda 表达式由对现有方法的引用组成时，可以通过使用方法引用进一步简化表示法，而无需列出参数。
+
+方法引用的语法是`Location::methodName`，其中`Location`表示可以找到`methodName`方法的位置（在哪个对象或类中），两个冒号（`::`）作为位置和方法名之间的分隔符。如果在指定位置有多个同名方法（因为方法重载），则引用方法由 lambda 表达式实现的函数式接口的抽象方法的签名来确定。
+
+使用方法引用，`Lambdas`类中`methodReference()`方法下的前述代码可以重写如下：
+
+```java
+
+Function<Integer, Double> multiplyByFive = new Helper()::calculateResult;;
+
+```java
+
+将上述文本按行翻译成中文，不要输出原文：
+
+```
 
 }
 
-```
+multiplyByFive, printResult);
 
-我们可以使用前面的方法从`person`表中读取与`WHERE`子句匹配的记录。例如，我们可以找到所有名为`Jim`的记录：
-
-```java
-
-String sql = "select * from person where first_name = ?";
-
-List<Person> list = selectPersonsByFirstName(sql, "Jim");
-
-for(Person person: list){
-
-System.out.println(person);
-
-}
-
-```
-
-结果将是：
+要内联这样的函数更有意义：
 
 ```java
 
-Person{firstName='Jim', lastName='Adams', dob=1999-08-23, id=1}
+supplyDecideProcessAndConsume(this::generateInput, Lambdas::checkValue,
 
-```
+new Helper()::calculateResult, Helper::printResult);
 
-`Person`对象以这种方式打印，因为我们添加了以下`toString()`方法：
+Consumer<Double> printResult = Helper::printResult;
 
-```java
+您可能已经注意到，我们故意在不同位置使用了两个实例方法和两个静态方法，以展示各种可能性。
 
-@Override
+如果感觉记住太多，好消息是现代 IDE（例如 IntelliJ IDEA）可以为您完成，并将您正在编写的代码转换为最紧凑的形式。
 
-public String toString() {
+# 练习 - 使用方法引用创建一个新对象
 
-return "Person{" +
-
-"firstName='" + firstName + '\'' +
-
-", lastName='" + lastName + '\'' +
-
-", dob=" + dob +
-
-", id=" + id +
-
-'}';
-
-}
-
-```
-
-我们可以通过运行以下代码获得相同的结果：
+Predicate<Integer> test = Lambdas::checkValue;
 
 ```java
 
-String sql = "select * from person where last_name = ?";
+Supplier<A> supplier = () -> new A();
 
-List<Person> list = selectPersonsByFirstName(sql, "Adams");
+本章介绍了函数式编程的概念。它概述了 JDK 提供的函数式接口，并演示了如何使用它们。它还讨论并演示了 lambda 表达式以及它们如何有效地提高代码的可读性。
 
-for(Person person: list){
+# i -> new Helper().calculateResult(i);
 
-System.out.println(person);
-
-}
-
-```
-
-总是使用准备好的语句进行 CRUD 操作并不是一个坏主意。如果只执行一次，它们可能会慢一点，但您可以测试看看这是否是您愿意支付的代价。使用准备好的语句可以获得一致的（更易读的）代码、更多的安全性（准备好的语句不容易受到 SQL 注入攻击的影响）以及少做一个决定-只需在任何地方重用相同的代码。
-
-# 练习-选择唯一的名字
-
-编写一个 SQL 语句，从人员表中选择所有的名字，而不重复。例如，假设人员表中有三条记录，这些记录有这些名字：`Jim`，`Jim`和`Bill`。您编写的 SQL 语句必须返回`Jim`和`Bill`，而不重复两次的`Jim`。
-
-我们没有解释如何做; 您必须阅读 SQL 文档，以找出如何选择唯一的值。
-
-# 答案
-
-使用`distinct`关键字。以下 SQL 语句返回唯一的名字：
+答案是：
 
 ```java
 
-从人员表中选择不同的名字;
+Supplier<Integer> input = this::generateInput;
 
 ```
 
-# 摘要
+# 总结
 
-本章介绍了如何编写能够操作数据库中的数据的 Java 代码。它还对 SQL 语言和基本数据库操作进行了简要介绍。读者已经学会了 JDBC 是什么，如何创建和删除数据库和表，以及如何编写一个管理表中数据的程序。
+```
 
-在下一章中，读者将学习函数式编程的概念。我们将概述 JDK 附带的功能接口，解释如何在 lambda 表达式中使用它们，并了解如何在数据流处理中使用 lambda 表达式。
+```

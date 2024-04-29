@@ -1,394 +1,260 @@
-# 第八章：包和可访问性（可见性）
+# 第九章：面向对象设计（OOD）原则
 
-到目前为止，您已经对包非常熟悉。在本章中，我们将完成其描述，然后讨论类和类成员（方法和字段）的不同可访问性级别（也称为可见性）。这一切都将归结为面向对象编程的关键概念——封装——并为我们讨论面向对象设计原则奠定基础。
+在本章中，我们将回到对编程和特别是 Java 编程的高层视图。我们将展示设计在软件系统过程中的作用，从最早的可行性阶段开始，经过高层设计、详细设计，最终到编码和测试。我们将讨论良好设计的标准，并提供一份经过验证的 OOD 原则指南。讨论将通过代码示例加以说明，演示主要 OOD 原则的应用。
 
 在本章中，我们将涵盖以下主题：
 
-+   什么是导入？
++   设计的目的是什么？
 
-+   静态导入
++   封装和编程到接口
 
-+   接口访问修饰符
++   利用多态性
 
-+   类访问修饰符
++   尽可能解耦
 
-+   方法访问修饰符
++   优先使用聚合而不是继承
 
-+   属性访问修饰符
++   这么多 OOD 原则，时间却如此有限
 
-+   封装
++   单一职责原则
 
-+   练习-遮蔽
++   开闭原则
 
-# 什么是导入？
++   里斯科夫替换原则
 
-导入允许我们在`.java`文件的开头只指定一次完全限定的类或接口名称，然后是类或接口声明。导入语句的格式如下：
++   接口隔离原则
+
++   依赖反转原则
+
++   练习 - 设计模式
+
+# 设计的目的是什么？
+
+任何项目都需要规划和对将要构建的东西的愿景。当同一个团队的几个成员必须协调他们的活动时，这尤为重要。但即使你是一个人工作，你也必须制定某种计划，无论是设计文档还是只是编写代码而没有以其他形式记录你的想法。这就是设计的目的——清晰地设想未来的系统，以便能够开始构建它。
+
+在这个过程中，设计会不断演变、改变并变得更加详细。项目生命周期的每个阶段都需要不同的东西。这就是我们现在要讨论的——随着项目从最初的想法到完整实施的进展，设计的目的如何演变。
+
+这里描述的项目步骤看起来是顺序的，但实际上它们是有重叠的。更重要的是，软件开发的敏捷方法鼓励将每个功能移动到所有项目步骤中，而不是等到发现未来产品的所有功能。
+
+在敏捷方法论中，交付物不是需求、设计或任何其他文档，而是部署到生产环境并产生价值的功能代码（也称为最小可行产品（MVP））。每次迭代都必须在一两周内完成。然后，基于真实客户体验的反馈循环允许不断调整最初的愿景，并驱动所有努力以在最短时间内实现最有价值的解决方案，并最小化资源浪费。
+
+许多现代成功的产品，如果不是大多数，都是以这种方式推向市场的。它们的作者经常承认，只有少数原创的想法被实现了，如果有的话。生活是一个伟大的笑话，不是吗？它偏爱那些更快适应变化的人。
+
+现在，让我们走过项目生命周期，看看系统设计是如何随着项目的进展而演变的。
+
+# 项目的可行性
+
+决定某个项目是否值得融资必须在非常早期就做出。否则，它可能根本就不会开始。这意味着决策者必须提供足够的信息，以提供一定程度的信心，即风险是合理的，值得承担。这些信息包括高层需求、高层设计，甚至原型设计或其他证明可用技术可以用于成功实施。基于这些数据和市场调研，项目倡导者估计工作量、费用、潜在收入和未来利润——一切目标的母亲。
+
+甚至在项目获得绿灯之前，产品成功最关键的特性就已经被确定，并以可与未来客户沟通的形式呈现，并与他们讨论甚至测试。如果团队中包括过去做过类似事情的人，肯定有助于简化决策过程。
+
+这个阶段的目的是以一种所有参与者和潜在客户都能理解的形式呈现未来的系统。
+
+# 需求收集和原型制作
+
+一旦项目获得批准和预算，需求收集就会全速进行，同时进行原型实现。事实上，原型通常被用作需求收集的工具。它有助于讨论具体的关键细节并避免误解。
+
+在这个项目阶段，高级设计不断进展，同时发现有关输入信息来源、消耗它所需的过程（和产生必要结果的过程）、可以用来执行它的技术，以及客户可能如何与系统交互的更多细节。
+
+随着对未来系统的更多数据，以及它可能如何工作和实现，可以确定可能妨碍进展或使整个项目不可能的障碍。因此，决策者继续密切关注结果并进行批判性评估。
+
+在这个阶段，设计的目的是将所有输入数据整合成未来运行系统的连贯动态图像。在面向对象编程的四个支柱中，封装和接口处于高级设计的前沿。实现细节应在关键领域进行核查，并证明可以使用所选的技术。但它们保持隐藏在接口后面，后者专注于系统与客户的互动以及发现实现的新功能和非功能要求。
+
+# 高级设计
+
+高级设计最明显的特征是其专注于子系统和它们之间的接口的系统结构。如果产品必须与外部系统交互，这些交互的接口和协议也是高级设计的一部分。架构也被确认和验证为能够支持设计。
+
+对于典型的中型软件系统，高级设计可以用包及其公共接口的列表来表达。如果系统具有图形用户界面，通常原型和线框图就足够了。
+
+# 详细设计
+
+一旦确定要实现的用例，详细设计就开始发挥作用。业务代表为新产品功能设置优先级。程序员确定并调整接口以支持第一个功能，并开始创建类来实现将在第一次迭代中交付的第一个用例。
+
+最初，实现可能在某些地方使用硬编码（虚拟）数据。因此，用例可能具有有限的应用范围。尽管如此，这样的实现是有价值的，因为它允许执行所有必需的过程，因此生产中的客户可以测试该功能并了解预期的情况。程序员还为每个实现的方法创建单元测试，即使是虚拟的方法也是如此。与此同时，用例被捕获在执行跨类和子系统的场景的集成测试中。
+
+在第一次迭代结束时，高优先级的用例已经实现并通过自动化测试进行了全面测试。第一次迭代通常非常忙碌。但程序员们有动力不再重复他们的错误，通常会充满热情并具有比平时更高的生产力。
+
+详细设计的目的是为编码提供模板。一旦模板建立，所有未来的类将主要是从现有类中剪切和粘贴。这就是为什么第一个类通常由高级程序员实现或在他们的密切监督下实现。在这样做的同时，他们试图尽可能保持封装封闭，以获得最小和直观的接口，并在可能的情况下利用继承和多态性。
+
+命名约定也是第一次迭代的重要组成部分。它必须反映领域术语，并且所有团队成员都能理解。因此，这个阶段的设计目的是为项目创建编码模式和词汇。
+
+# 编码
+
+正如你所看到的，编码从高层设计开始，甚至可能更早。随着详细设计产生了第一个结果，编码变得更加紧张。新成员可以加入团队，其中一些可能是初级成员。增加团队成员是最喜欢的管理活动，但必须以受控的方式进行，以便每个新成员都能得到指导，并且能够充分理解所有关于新产品功能的业务讨论。
+
+这个阶段的设计活动侧重于实现细节及其测试。在详细设计期间创建的模式必须根据需要进行应用和调整。编码期间的设计目的是验证到目前为止所做的所有设计决策，并产生具体的解决方案，表达为代码行。重构是这个阶段的主要活动之一，也有几次迭代。
+
+# 测试
+
+在编码完成时，测试也已编写，并且运行了多次。它们通常在每次向源代码库提交新的更改块时执行。一些公司正在实践持续集成模型，一旦提交到源代码库，就会触发自动回归和集成测试，并随后部署到生产环境。
+
+然而，仍然有许多开发团队专门有专门的测试专家，在代码部署到测试环境后，会手动测试并使用一些专门的工具。
+
+这个阶段的设计工作侧重于测试覆盖率、测试自动化以及与其他系统的集成，无论是自动化的还是非自动化的。部署和在生产环境中进行有限测试（称为**冒烟测试**）也是这个阶段设计工作的一部分。
+
+测试期间的设计目的是确保所有交付的用例都经过测试，包括负面和非功能性测试。监控和报告系统性能也是这个阶段的重要活动。
+
+# 良好设计的路线图
+
+正如我们在前一节中讨论的设计演变，我们已经暗示了确保设计质量的标准：
+
++   它必须足够灵活，以适应即将到来的变化（它们像税收一样不可避免，所以最好做好准备）
+
++   它必须清晰地传达项目结构和每个部分的专业化
+
++   它必须使用明确定义的领域术语
+
++   它必须允许独立测试部分并将其集成在一起
+
++   它必须以一种允许我们与未来客户讨论的形式呈现，并且理想情况下，由他们测试。
+
++   它必须充分利用四个面向对象的概念——封装、接口、继承和多态性
+
+这些是任何项目和任何面向对象语言的一般标准。但在本书中，我们介绍了 Java 最佳实践，因此我们需要主要讨论 Java 中的详细设计、编码和测试，所有这些都与最后一个标准有关。这就是我们现在要做的。
+
+# 封装和编码到接口
+
+我们多次在不同的上下文中提到了封装和接口。这既不是偶然的，也不是有意的。这是不可避免的。封装和接口是出于尽可能隐藏实现的必要性而产生的。它解决了早期编程中的两个问题：
+
++   未受监管的数据共享访问
+
++   以下是输出的屏幕截图：
+
+当部分之间的关系结构不够完善时更改代码时的困难
+
+正如我们在第六章中所演示的，*接口、类和对象构造*，使对象的状态私有化也解决了涉及继承时实例字段和实例方法之间可访问性的差异。子类不能覆盖父类的非私有字段，只能隐藏它们。只有方法可以被覆盖。为了演示这种差异，让我们创建以下三个类：
 
 ```java
 
-import <package>.<class or interface name>;
+public class Grandad {
 
-```
+public String name = "爷爷";
 
-例如，看下面的例子：
-
-```java
-
-import com.packt.javapath.ch04demo.MyApplication;
-
-```
-
-从现在开始，这个类只能在代码中通过它的名字`MyApplication`来引用。还可以使用通配符字符(`*`)导入包的所有类或接口：
-
-```java
-
-import com.packt.javapath.ch04demo.*;
-
-```
-
-注意，前面的导入语句导入了`com.packt.javapath.ch04demo`包的子包的类和接口。如果需要，每个子包都必须单独导入。
-
-但在我们继续之前，让我们谈谈`.java`文件的结构和包。
-
-# .java 文件和包的结构
-
-正如您已经知道的那样，包名反映了目录结构，从包含`.java`文件的项目目录开始。每个`.java`文件的名称必须与其中定义的公共类的名称相同。`.java`文件的第一行是以`package`关键字开头的包语句，后面是实际的包名称——此文件的目录路径，其中斜杠用点替换。让我们看一些例子。我们将主要关注包含类定义的`.java`文件，但我们还将查看包含接口和`enum`类定义的文件，因为有一种特殊的导入（称为静态导入）主要用于接口和`enum`。
-
-我们假设`src/main/java` (for Linux)或`src\main\java` (for Windows)项目目录包含所有`.java`文件，并且`MyClass`和`MyEnum`类以及`MyInterface`接口的定义来自`com.packt.javapath`包存储在以下文件中：
-
-```java
-
-src/main/java/com/packt/javapath/MyClass.java (for Linux)
-
-src/main/java/com/packt/javapath/MyEnum.java
-
-src/main/java/com/packt/javapath/MyInterface.java
-
-```
-
-或（对于 Windows）
-
-```java
-
-src\main\java\com\packt\javapath\MyClass.java (for Windows)
-
-src\main\java\com\packt\javapath\MyEnum.java
-
-src\main\java\com\packt\javapath\MyInterface.java
-
-```
-
-这些文件的每一行的第一行如下：
-
-```java
-
-package com.packt.javapath;
-
-```
-
-如果我们没有导入任何内容，那么每个文件的下一行就是一个类或接口声明。
-
-`MyClass`类的声明如下：
-
-```java
-
-public class MyClass extends SomeClass
-
-implements Interface1, Interface2, ... {...}
-
-```
-
-它包括以下内容：
-
-+   访问修饰符；文件中的一个类必须是`public`
-
-+   `class`关键字
-
-+   以大写字母开头的类名（标识符）
-
-+   如果类是另一个类的子类，则使用`extends`关键字和父类的名称
-
-+   如果类实现了一个或多个接口，使用`implements`关键字后跟随逗号分隔的接口列表
-
-+   类的主体（定义字段和方法的地方）由大括号`{}`括起来
-
-`MyEnum`类的声明如下：
-
-```java
-
-public enum MyEnum implements Interface1, Interface2, ... {...}
-
-```
-
-它包括以下内容：
-
-+   一个访问修饰符；如果它是文件中唯一定义的类，则必须是`public`
-
-+   `enum`关键字
-
-+   以大写字母开头的类名（标识符）按照约定
-
-+   没有`extends`关键字，因为枚举类型隐式地扩展了`java.lang.Enum`类，在 Java 中，一个类只能有一个父类
-
-+   如果类实现了一个或多个接口，则使用`implements`关键字后跟逗号分隔的接口列表
-
-+   类的主体（常量和方法的定义）由大括号`{}`括起来
-
-`MyInterface`接口的声明如下：
-
-```java
-
-public interface MyInterface extends Interface1, Interface2, ... {...}
-
-```
-
-它包括以下内容：
-
-+   一个访问修饰符；文件中的一个接口必须是`public`
-
-+   `interface`关键字
-
-+   按照约定以大写字母开头的接口名称（标识符）
-
-+   如果接口是一个或多个接口的子接口，则使用`extends`关键字后跟父接口的逗号分隔列表
-
-+   接口的主体（字段和方法的定义）由大括号`{}`括起来
-
-如果不导入，我们需要通过完全限定的名称引用我们使用的每个类或接口，其中包括包名和类或接口名。例如，`MyClass`类的声明将如下所示：
-
-```java
-
-我的类
-
-extends com.packt.javapath.something.AnotherMyClass
-
-implements com.packt.javapath.something2.Interface1,
-
-com.packt.javapath.something3.Interface2
-
-```
-
-或者，假设我们想要实例化`com.packt.javapath.something`包中的`SomeClass`类。该类的完全限定名称将是`com.packt.javapath.something.SomeClass`，其对象创建语句如下所示：
-
-```java
-
-com.packt.javapath.something.SomeClass someClass =
-
-new com.packt.javapath.something.SomeClass();
-
-```
-
-太啰嗦了，不是吗？这就是包导入发挥作用的地方。
-
-# 单个类导入
-
-为了避免在代码中使用完全限定的类或接口名称，我们可以在包声明和类或接口声明之间的空间中添加一个导入语句：
-
-```java
-
-package com.packt.javapath;
-
-import com.packt.javapath.something.SomeClass;
-
-public class MyClass {
-
-//...
-
-SomeClass someClass = new SomeClass();
-
-//...
+public String getName() { return this.name; }
 
 }
 
-```
+public class Parent extends Grandad {
 
-正如你所看到的，import 语句允许避免使用完全限定的类名，这样使得代码更容易阅读。
+public String name = "父亲";
 
-# 多个类导入
-
-如果从同一包中导入了多个类或接口，则可以使用星号（`*`）通配符字符导入所有包成员。
-
-如果`SomeClass`和`SomeOtherClass`属于同一个包，则导入语句可能如下所示：
-
-```java
-
-package com.packt.javapath;
-
-import com.packt.javapath.something.*;
-
-public class MyClass {
-
-//...
-
-SomeClass someClass = new SomeClass();
-
-SomeOtherClass someClass1 = new SomeOtherClass();
-
-//...
+public String getName() { return this.name; }
 
 }
 
-```
+public class Child extends Parent {
 
-使用星号的优点是更短的导入语句列表，但这种样式隐藏了导入的类和接口的名称。因此，程序员可能不知道它们确切来自哪里。此外，当两个或更多个包包含具有相同名称的成员时，您只需将它们作为单个类导入显式导入。否则，编译器将生成错误。
+public String name = "孩子";
 
-另一方面，喜欢通配符导入的程序员认为，这有助于防止意外地创建一个与导入包中已存在的名称相同的类。因此，当涉及到样式和配置 IDE 使用或不使用通配符导入时，你必须自己做出选择。
-
-在 IntelliJ IDEA 中，默认的导入样式是使用通配符。如果你想切换到单个类导入，点击文件|其他设置|默认设置，如下截图所示：
-
-![](img/15e4c441-99b0-4266-b669-26820d240037.png)
-
-在打开的屏幕上，选择编辑器|Java，并选中使用单个类导入复选框：
-
-![](img/7dbd6160-11da-4075-afe8-394c3b78582c.png)
-
-这个页面上还有其他一些你可能会发现有用的设置，所以试着记住如何访问它。
-
-# 静态导入
-
-静态导入允许单独导入一个类或接口，以及它的公共成员——字段和方法。如果你查看我们的一个测试类，你会看到以下静态导入语句：
-
-```java
-
-import static org.junit.jupiter.api.Assertions.*;
-
-```
-
-这个语句允许我们编写以下内容：
-
-```java
-
-Person p = new Person("Joe", "Blow", dob);
-
-assertTrue(p.equals(p));
-
-```
-
-这样写：
-
-```java
-
-Person p = new Person("Joe", "Blow", dob);
-
-Assertions.assertTrue(p.equals(p));
-
-```
-
-这是静态导入用法的一个普遍情况。另一个常见情况是静态导入接口或`enum`的常量。例如，如果我们有一个如下的接口：
-
-```java
-
-package com.packt.javapath.api;
-
-public interface Constants {
-
-String NAME = "name";
+public String getName() { return this.name; }
 
 }
 
-```java
+这种差异经常会引起混淆，并且可能导致难以调试的错误。为了避免这些错误，我们建议永远不直接允许访问对象状态（字段），只能通过方法（至少是 getter 和 setter）访问。这也是始终保持状态封装的另一个原因。
 
-然后，要使用它的常量，可以静态导入它们：
+OOP 是一个成功的解决方案。它确保对数据（对象状态）的受控访问，并且在不改变接口的情况下灵活地（根据需要）更改实现。此外，它有助于组织软件的设计和开发。在定义了接口之后，每个人都可以独立地进行实现。如果接口不发生变化，就不需要花时间开会和讨论。
 
-```java
+我们现在将创建一个小型软件建模系统，演示我们正在讨论的设计步骤的应用。假设我们的任务是创建一个交通模型，允许根据特定城市中汽车和卡车的典型混合来计算每辆车的速度。该模型将首先在该城市进行测试。模型返回的值应该是车辆在一定秒数后达到的速度（每小时英里）。结果将用于评估交通灯变绿后几秒钟内多车道道路上的交通密度。它将成为引入与汽车最低乘客数量（对于汽车）和有效载荷最大重量（对于卡车）相关的新交通法规时的决策的一部分。
 
-package com.packt.javapath;
+Grandad grandad = new Child();
 
-import static com.packt.javapath.api.Constants.*;
+System.out.println(grandad.name);
 
-public class MyClass {
-
-//...
-
-String s = "My " + NAME + " is Joe";
-
-System.out.println(s);        //打印：My name is Joe
-
-//...
-
-}
+System.out.println(grandad.getName());
 
 ```
 
-顺便说一句，通过非静态导入`Constants`接口并让类实现它也可以达到同样的效果：
+车辆数量
 
-```java
+![](img/8ff835e5-929c-4271-b026-757e044dd29e.png)
 
-package com.packt.javapath;
-
-import com.packt.javapath.api.Constants;
-
-public class MyClass implements Constants {
-
-//...
-
-String s = "My " + NAME + " is Joe";
-
-System.out.println(s);        //打印：My name is Joe
-
-//...
-
-}
+每个都有一个具有相同名称的公共字段和相同签名的方法。现在，在不往下看的情况下，尝试猜测以下代码的输出：
 
 ```
 
-这种实现接口以使用它们的常量的方式在 Java 程序员中相当流行。
+我们肯定简化了可能的现实需求，以使代码更易于阅读。在真实系统中，这样的计算将需要更多的输入数据和基于机器学习建模的更复杂的算法。但是，即使我们开发的简单系统也将具有真实系统具有的所有设计方面。
 
-使用静态导入来使用`enum`常量的示例看起来很相似：
+在讨论需求后，高级设计已经确定了 API。它必须接受三个参数：
+
++   ```java
+
++   所有车辆开始移动后的秒数
+
++   车辆负载：汽车乘客数量和卡车的有效载荷
+
+最后一个参数应该是可选的。它可以是以下之一：
+
++   基于目标城市的当前交通统计数据建模
+
++   设置特定值，以评估新交通法规的影响
+
+以下是位于`com.packt.javapath.ch08demo.traffic`包中的建模系统 API 的详细设计：
 
 ```java
 
-import static java.time.DayOfWeek.*;
+public interface Vehicle {
 
-```
+double getSpeedMph(double timeSec);
 
-它允许代码将`DayOfWeek`常量用作`MONDAY`，而不是`DayOfWeek.MONDAY`。
+static List<Vehicle> getTraffic(int vehiclesCount){
 
-# 访问修饰符
-
-有三种显式访问修饰符——public、private 和 protected——以及一种隐式（默认）访问修饰符，当没有设置访问修饰符时会被隐含。它们可以应用于顶级类或接口、它们的成员和构造函数。*顶级*类或接口可以包括*成员*类或接口。类或接口的其他*成员*是字段和方法。类还有*构造函数*。
-
-为了演示可访问性，让我们创建一个`com.packt.javapath.Ch07demo.pack01`包，其中包含两个类和两个接口：
-
-```java
-
-public class PublicClass01 {
-
-public static void main(String[] args){
-
-//我们将在这里编写代码
+return TrafficFactory.get(vehiclesCount);
 
 }
 
 }
 
-类 DefaultAccessClass01 {
+public interface Car extends Vehicle {
+
+void setPassengersCount(int passengersCount);
 
 }
 
-public interface PublicInterface01 {
+public interface Truck extends Vehicle {
 
-String name = "PublicInterface01";
-
-}
-
-接口 DefaultAccessInterface01 {
-
-String name = "DefaultAccessInterface01";
+void setPayloadPounds(int payloadPounds);
 
 }
 
 ```
 
-我们还将创建另一个`com.packt.javapath.Ch07demo.pack02`包，并在其中创建一个类：
+正如您所看到的，我们只向客户端公开接口并隐藏实现（关于这一点我们将在下一节详细讨论）。只要满足合同，它允许我们以我们认为最好的方式实现接口。如果以后更改了实现，客户端不需要更改他们的代码。这是封装和解耦接口与实现的一个例子。正如我们在上一章中讨论的那样，它还有助于代码的可维护性、可测试性和可重用性。更多关于后者的内容请参见*更喜欢聚合而不是继承*部分，尽管我们应该指出，继承也有助于代码重用，我们将在下一节中看到它的证明。
+
+通过从`Vehicle`接口扩展`Car`和`Truck`接口，我们已经暗示了我们将使用多态性，这就是我们将在接下来的部分讨论的内容。
+
+# 利用多态性
+
+`Car`和`Truck`接口正在扩展（子类）`Vehicle`接口。这意味着实现`Car`接口的类（例如，我们给这样的类命名为`CarImpl`），在实例化时，创建了一个具有三种类型的对象——`Vehicle`、`Car`和`CarImpl`。这些类型类似于一个人拥有三个国家的护照。每种国籍都有特定的权利和限制，一个人可以选择在国际旅行的不同情况下如何呈现自己，同样，`CarImpl`类的对象可以*转换*为这些类型中的任何一个，只要在进行转换的代码中可以访问该类型。这就是我们所说的类型可访问性的含义：
+
++   我们已经将`Car`、`Truck`和`Vehicle`接口声明为 public，这意味着任何包中的任何代码都可以访问这些类型
+
++   我们不希望客户端代码能够访问这些接口的实现，因此我们创建了`com.packt.javapath.ch08demo.traffic.impl`包，并将所有实现放在那里，而不指定访问修饰符（因此使用默认访问，使它们只对同一包中的其他成员可见）
+
+这里是交通接口的实现：
 
 ```java
 
-public class PublicClass02 {
+class VehicleImpl implements Vehicle {
 
-public static void main(String[] args){
+public double getSpeedMph(double timeSec){
 
-//我们将在这里编写代码
+return 42;
+
+}
+
+}
+
+class TruckImpl implements Truck {
+
+public void setPayloadPounds(int payloadPounds){
+
+}
+
+}
+
+车辆实现类实现了车辆接口：
+
+public void setPassengersCount(int passengersCount){
 
 }
 
@@ -396,33 +262,33 @@ public static void main(String[] args){
 
 ```
 
-前面的每个类和接口都在自己的文件中：
+我们在`com.packt.javapath.ch08demo.traffic.impl`包中创建了这些类，并使用了一些虚拟数据，只是为了使它们编译通过。但是`CarImpl`和`TruckImpl`类仍然会生成编译错误，因为`Vehicle`接口中列出了`getSpeedMph()`方法，而这两个类中没有实现。`Car`和`Truck`接口扩展了`Vehicle`接口，因此继承了它的抽象`getSpeedMph()`方法。
 
-![](img/eac9098f-e718-4bd2-ab43-b02aac7aa66e.png)
-
-现在我们准备探索类、接口、它们的成员和构造函数的可访问性。
-
-# 顶级类或接口的可访问性
-
-公共类或接口可以从任何地方访问。我们可以导入它们并从另一个包中访问它们：
+因此，现在我们需要在这两个类中实现`getSpeedMph()`方法，或者将它们都作为`VehicleImpl`类的子类，而这个方法已经被实现了。我们决定汽车和卡车的速度可能会以相同的方式计算，所以扩展`VehicleImpl`类是正确的方法。如果以后我们发现`CarImpl`或`TruckImpl`类需要不同的实现，我们可以覆盖父类中的实现。以下是相同两个类的新版本：
 
 ```java
 
-import com.packt.javapath.Ch07demo.pack01.PublicClass01;
+abstract class VehicleImpl implements Vehicle {
 
-import com.packt.javapath.Ch07demo.pack01.PublicInterface01;
+public double getSpeedMph(double timeSec){
 
-//import com.packt.javapath.Ch07demo.pack01.DefaultAccessClass01;
+返回 42；
 
-//import com.packt.javapath.Ch07demo.pack01.DefaultAccessInterface01;
+}
 
-public class PublicClass02 {
+}
 
-public static void main(String[] args){
+class TruckImpl extends VehicleImpl implements Truck {
 
-System.out.println(PublicInterface01.name);
+public void setPayloadPounds(int payloadPounds){
 
-PublicClass01 o = new PublicClass01();
+}
+
+}
+
+class CarImpl extends VehicleImpl implements Car {
+
+public void setPassengersCount(int passengersCount){
 
 }
 
@@ -430,73 +296,29 @@ PublicClass01 o = new PublicClass01();
 
 ```
 
-在上述代码中，两个导入语句被注释掉，因为它们会生成错误。这是因为在`DefaultAccessClass01`类和`DefaultAccessClass01`接口中，我们没有使用访问修饰符，这使它们只能被同一包的成员访问。
+请注意，我们还将`VehicleImpl`类设为抽象类，这使得不可能创建`VehicleImpl`类的对象。只能创建它的子类的对象。我们这样做是因为我们将其用作包含一些通用功能的基类，但我们永远不会需要通用的`Vehicle`对象，只需要特定的对象——`Car`或`Truck`。
 
-没有访问修饰符的顶层类或接口只能被同一包的成员访问。
+我们遵循了尽可能封装一切的建议。受限制的访问权限可以在以后更改为更可访问的权限。这比在已经编写了依赖于现有较不受限制访问级别的客户端代码之后再限制访问权限要容易得多。
 
-在顶层类或接口的声明中使用`private`访问修饰符会使它们无法访问，因此在顶层类或接口中使用`private`访问修饰符是没有意义的。
-
-`protected`关键字不能应用于顶层。这个限制并不那么明显。我们将在下一节中看到`protected`意味着它对包成员和子类是可访问的。因此，有人可能会认为`protected`访问也适用于顶层类或接口。然而，Java 的作者决定不这样做，如果您尝试将顶层类或接口设置为`protected`，编译器将生成异常。
-
-然而，`private`和`protected`访问修饰符可以应用于内部类或接口-顶层类或接口的成员。
-
-# 访问类或接口成员
-
-即使类或接口成员被声明为公共，如果封闭类或接口是不可访问的，它们也无法被访问。因此，以下所有讨论都将在类或接口是可访问的假设下进行。
-
-类或接口的成员可以访问同一类或接口的其他成员，无论它们有什么访问修饰符。这是有道理的，不是吗？这一切都发生在同一个封闭类或接口内。
-
-默认情况下，接口成员是公共的。因此，如果可以访问接口本身，则其没有访问修饰符的成员也可以被访问。而且，只是提醒一下，接口字段默认是静态和最终的（常量）。
-
-另一方面，没有访问修饰符的类成员只能被包成员访问。因此，类或接口可能是公共的，但它们的成员是不太可访问的，除非明确设置为公共。
-
-私有类或接口成员只能被同一类或接口的其他成员访问。这是可能的最受限制的访问。甚至类的子类也不能访问其父类的私有成员。
-
-受保护的包成员对于同一包中的其他成员和类或接口的子类是可访问的，这意味着受保护的成员可以被覆盖。程序员经常使用这种方式来表达意图：他们将那些他们期望被覆盖的成员设置为受保护。否则，他们将它们设置为私有或公共。默认-没有访问修饰符-访问很少被使用。
-
-**私有**：仅允许从相同的类（或接口）访问
-
-**无修饰符（默认）**：允许从相同的类（或接口）和相同的包中访问
-
-**受保护的**：允许从相同的类（或接口）、相同的包和任何子类访问
-
-**公共**：允许从任何地方访问
-
-相同的可访问性规则也适用于内部类和接口。这是一个包含内部类和接口的类的示例：
+所以，回到`CarImpl`和`TruckImpl`交通接口的实现。它们无法从包外访问，但这并不是问题，因为我们定义的 API 不需要它。如果`TrafficFactory`类可以访问它们，那就足够了。这就是为什么我们在`com.packt.javapath.ch08demo.traffic.impl`包中创建`TrafficFactor`类，它可以作为同一包的成员访问这两个实现：
 
 ```java
 
-public class PublicClass01 {
+package com.packt.javapath.ch08demo.traffic.impl;
 
-public static void main(String[] args){
+import com.packt.javapath.ch08demo.traffic.Vehicle;
 
-System.out.println(DefaultAccessInterface01.name);
+import java.util.ArrayList;
 
-DefaultAccessClass01 o = new DefaultAccessClass01();
+import java.util.List;
 
-}
+public class TrafficFactory {
 
-class DefaultAccessClass{
+public static List<Vehicle> get(int vehiclesCount) {
 
-}
+List<Vehicle> list = new ArrayList();
 
-受保护的类 ProtectedClass{
-
-}
-
-private class PrivateClass{
-
-}
-
-默认访问接口{
-
-}
-
-protected class ProtectedInterface{
-
-}
-
-private class PrivateInterface{
+return list;
 
 }
 
@@ -504,65 +326,33 @@ private class PrivateInterface{
 
 ```
 
-这是一个带有内部类和接口的接口：
+它并没有做太多事情，但在设计阶段足够好，以确保所有类都就位并具有适当的访问权限，然后我们开始编码。我们将在第十三章中更多地讨论`List<Vehicle>`构造。现在，假设它代表实现`Vehicle`接口的对象列表就足够了。
+
+现在，我们可以编写以下客户端代码：
 
 ```java
 
-public interface PublicInterface01 {
+double timeSec = 5;
 
-String name = "PublicInterface01";
+int vehiclesCount = 4;
 
-类 DefaultAccessClass{
+List<Vehicle> traffic = Vehicle.getTraffic(vehiclesCount);
 
-}
+for(Vehicle vehicle: traffic){
 
-接口 DefaultAccessInterface {
+System.out.println("已装载：" + vehicle.getSpeedMph(timeSec));
 
-}
+if(vehicle instanceof Car){
 
-}
+((Car) vehicle).setPassengersCount(0);
 
-```
-
-正如你所看到的，接口的内部类和接口只允许默认（公共）访问。
-
-而且，为了重复我们已经讨论过的内容，我们将简要提及一些与成员可访问性相关的其他方面：
-
-+   静态嵌套类（在静态类的情况下被称为嵌套类，但按照惯例）不能访问同一类的非静态成员，而它们可以访问它
-
-+   作为某个顶级类的成员，静态嵌套类可以是公共的、受保护的、包访问（默认）的或私有的
-
-+   类的公共、受保护和包访问成员都会被子类继承
-
-# 构造函数的可访问性与任何类成员相同
-
-正如本节标题所述，这就是我们对构造函数可访问性能说的一切。当然，当我们谈论构造函数时，我们只谈论类。
-
-构造函数的有趣之处在于它们只能具有私有访问权限。这意味着一个类可以提供自己的工厂方法（参见第六章，*接口、类和对象构造*），控制每个对象的构造方式，甚至控制可以将多少个对象放入流通中。在每个对象都需要访问某个资源（文件或另一个数据库）的情况下，最后一个特性尤为有价值，因为这些资源对并发访问的支持有限。以下是一个具有有限创建对象数量的最简单版本的工厂方法的样子：
-
-```java
-
-私有 String field;
-
-私有静态 int count;
-
-私有 PublicClass02(String s){
-
-this.field = s;
-
-}
-
-public static PublicClass02 getInstance(String s){
-
-if(count > 5){
-
-返回 null;
+System.out.println("汽车（无载荷）：" + vehicle.getSpeedMph(timeSec));
 
 } else {
 
-count++;
+((Truck) vehicle).setPayloadPounds(0);
 
-返回新的 PublicClass02(s);
+System.out.println("卡车（无载荷）：" + vehicle.getSpeedMph(timeSec));
 
 }
 
@@ -570,167 +360,161 @@ count++;
 
 ```
 
-这段代码的用处并不大，我们只是为了演示私有可访问的构造函数如何被使用。这是可能的，因为每个类成员都可以访问所有其他类成员，无论它们的访问修饰符是什么。
+前面的代码从`TrafficFactory`中检索任意数量的车辆（在本例中为 4 辆）。工厂隐藏（封装）了交通建模实现的细节。然后，代码在 for 循环中对列表进行迭代（参见第十章，*控制流语句*），并打印出每辆车在车辆开始移动后 5 秒的速度。
 
-除非可访问性相关的特性带来了一些优势，否则它们是不需要的。这就是我们将在下一节讨论的内容——面向对象编程的中心概念封装的优势。
+然后，代码演示了客户端可以更改车辆携带的负载，这是必需的。对于汽车，我们将乘客人数设置为零，对于卡车，我们将它们的有效载荷设置为零。
 
-# 封装
+我们执行此代码并没有得到结果，因为交通工厂返回了一个空列表。但是代码编译并运行，我们可以开始实现接口。我们可以将任务分配给不同的团队成员，只要他们不改变接口，我们就不必担心协调他们之间的工作。
 
-面向对象编程的概念诞生于管理软件系统日益增长的复杂性的努力中。将数据和程序捆绑在一个对象中，并对它们进行受控访问（称为封装）的概念允许更好地组织数据和程序在层中，其中一些被隐藏，其他则暴露给外部访问。前面章节中描述的可访问性控制是其中的重要部分。连同继承、接口（也称为抽象）和多态性，封装成为面向对象编程的中心概念之一。
+确保接口、继承和多态性得到充分利用后，我们可以将注意力转向编码细节。
 
-通常很难清晰地将一个面向对象的概念与另一个分开。接口也有助于隐藏（封装）实现细节。继承具有覆盖和隐藏父类方法的能力，为可访问性增加了动态方面。所有这三个概念使得多态的概念成为可能——同一个对象可以根据上下文（基于继承或实现的接口）呈现为不同类型，或者根据数据可用性改变其行为（使用组合——我们将在第八章中讨论，*面向对象设计（OOD）原则*，或者方法重载、隐藏和覆盖）。
+# 尽量解耦
 
-但没有封装，这些概念都是不可能的。这就是为什么它是面向对象编程的四个概念中最基本的。很有可能，你会经常听到它被提到，所以我们决定专门为这一部分介绍在封装的背景下经常使用的术语，基于它提供的优势：
-
-+   数据隐藏和解耦
-
-+   灵活性，可维护性，重构
-
-+   可重用性
-
-+   可测试性
-
-# 数据隐藏和解耦
-
-当我们使对象状态（字段的值）和一些方法私有或对内部对象数据施加一些其他限制访问的措施时，我们参与了*数据隐藏*。对象功能的用户只能根据其可访问性调用特定的方法，并且不能直接操纵对象的内部状态。对象的用户可能不知道功能的具体实现方式和数据的存储方式。他们将所需的输入数据传递给可访问的方法，并获得结果。这样我们就*解耦*了内部状态和其使用，以及 API 中的实现细节。
-
-将相关方法和数据放在同一个类中也增加了*解耦*，这次是在不同功能区域之间。
-
-你可能会听到*紧耦合*这个术语，只有在无法避免的情况下才应该允许，因为它通常意味着一个部分的任何更改都需要相应地更改另一个部分。即使在日常生活中，我们也更喜欢处理模块化系统，允许仅替换一个模块而不更改其余系统的任何其他组件。
-
-因此，*松耦合*通常是程序员喜欢的东西，尽管它经常以不确定系统在所有可能的执行路径中测试之前是否会出现意外惊喜的代价。一个经过深思熟虑的测试系统，覆盖了基本用例，通常有助于减少生产中缺陷传播的机会。
-
-# 灵活性，可维护性和重构
-
-当我们在上一节中谈到解耦时，灵活性和可维护性的概念可能会因为联想而浮现。松耦合的系统更灵活，更易于维护。
-
-例如，在第六章中，*接口、类和对象构造*，我们演示了一种灵活的解决方案，用于实现对象工厂：
+我们选择了继承来实现代码在不同实现之间的共享。结果如下。这是`VehicleImpl`类：
 
 ```java
 
-public static Calculator createInstance(){
+abstract class VehicleImpl implements Vehicle {
 
-WhichImpl whichImpl =
+private int weightPounds, horsePower;
 
-Utils.getWhichImplValueFromConfig(Utils.class,
+public VehicleImpl(int weightPounds, int horsePower) {
 
-Calculator.CONF_NAME, Calculator.CONF_WHICH_IMPL);
+this.weightPounds = weightPounds;
 
-switch (whichImpl){
+this.horsePower = horsePower;
 
-案例乘法：
+}
 
-return new CalculatorImpl();
+protected int getWeightPounds(){ return this.weightPounds; }
 
-案例添加：
+protected double getSpeedMph(double timeSec, int weightPounds){
 
-返回新的 AnotherCalculatorImpl();
+double v = 2.0 * this.horsePower * 746 * timeSec *
 
-default:
+32.174 / weightPounds;
 
-抛出新的 RuntimeException("休斯顿，我们又有问题了。"+
+return Math.round(Math.sqrt(v) * 0.68);
 
-"我们没有关键的实现" +
-
-Calculator.CONF_WHICH_IMPL + "值" + whichImpl);
+}
 
 }
 
 ```
 
-```
-
-它与其`Calculator`接口（其 API）紧密耦合，但这是不可避免的，因为这是实现必须遵守的合同。至于工厂内部的实现，只要遵守合同，就可以更自由地进行任何限制。
-
-我们只能创建每个实现的一个实例，并且只返回该实例（使每个类成为单例）。以下是`CalculatorImpl`作为单例的示例：
+请注意，一些方法具有`protected`访问权限，这意味着只有相同包和类子类的成员才能访问它们。这也是为了更好地封装。我们的代码客户端不需要访问这些方法，只有子类需要。以下是其中一个：
 
 ```java
 
-private static Calculator calculator = null;
+class CarImpl extends VehicleImpl implements Car {
 
-public static Calculator createInstance(){
+private int passengersCount;
 
-WhichImpl whichImpl =
+public CarImpl(int passengersCount, int weightPounds, int horsePower){
 
-Utils.getWhichImplValueFromConfig(Utils.class,
+super(weightPounds , horsePower);
 
-Calculator.CONF_NAME, Calculator.CONF_WHICH_IMPL);
-
-switch (whichImpl){
-
-案例乘法：
-
-if(calculator == null){
-
-calculator = new CalculatorImpl();
+this.passengersCount = passengersCount;
 
 }
 
-返回计算器；
+public void setPassengersCount(int passengersCount) {
 
-案例添加：
+this.passengersCount = passengersCount;
 
-返回新的 AnotherCalculatorImpl();
+}
 
-default:
+protected int getWeightPounds(){
 
-抛出新的 RuntimeException("休斯顿，我们又有问题了。"+
+return this.passengersCount * 200 + super.getWeightPounds();
 
-"我们没有关键的实现" +
+}
 
-Calculator.CONF_WHICH_IMPL + "值" + whichImpl);
+public double getSpeedMph(double timeSec){
 
-```
+return getSpeedMph(timeSec, this.getWeightPounds());
+
+}
 
 }
 
 ```
 
-或者我们可以将另一个`Calculator`实现作为嵌套类添加到工厂中，并使用它来代替`CalculatorImpl`：
+在前面的代码中，`this`和`super`关键字允许我们区分应该调用哪个方法-当前子对象中的方法还是父对象中的方法。
+
+前面实现的另外两个方面值得注意：
+
++   `getWeightPounds()` 方法的访问修饰符设置为`protected`。这是因为在父类中也声明了具有相同签名和`protected`访问修饰符的方法。但是，重写的方法不能比被重写的方法具有更严格的访问权限。或者，为了加强封装性，我们可以在`CarImpl`中更改方法名称为`getCarWeightPounds()`，并将其设置为私有。然后，就不需要使用`this`和`super`关键字了。但是，另一个包中的类无法访问`protected`方法，因此我们决定保留`getWeightPounds()`名称并使用`this`和`super`关键字，承认这只是一种风格问题。
+
++   构造函数的访问权限也可以设置为默认（包级别）。
+
+`TruckImpl`类看起来类似于以下代码片段：
 
 ```java
 
-public static Calculator createInstance(){
+class TruckImpl extends VehicleImpl implements Truck {
 
-String whichImpl = Utils.getStringValueFromConfig(CalculatorFactory.class,
+private int payloadPounds;
 
-"calculator.conf", "which.impl");
+TruckImpl(int payloadPounds, int weightPounds, int horsePower) {
 
-如果(whichImpl.equals("multiplies")){
+super(weightPounds, horsePower);
 
-return new Whatever();
+this.payloadPounds = payloadPounds;
 
-} else if (whichImpl.equals("adds")){
+}
 
-return new AnotherCalculatorImpl();
+public void setPayloadPounds(int payloadPounds) {
+
+this.payloadPounds = payloadPounds;
+
+}
+
+protected int getWeightPounds(){
+
+return this.payloadPounds + super.getWeightPounds();
+
+}
+
+public double getSpeedMph(double timeSec){
+
+return getSpeedMph(timeSec, this.getWeightPounds());
+
+}
+
+}
+
+```
+
+`TrafficFactory`类可以访问这些类和它们的构造函数来根据需要创建对象：
+
+```java
+
+public class TrafficFactory {
+
+public static List<Vehicle> get(int vehiclesCount) {
+
+List<Vehicle> list = new ArrayList();
+
+for (int i = 0; i < vehiclesCount; i++){
+
+Vehicle vehicle;
+
+if (Math.random() <= 0.5) {
+
+vehicle = new CarImpl(2, 2000, 150);
 
 } else {
 
-throw new RuntimeException("休斯顿，我们有问题。" +
-
-"未知的键 which.impl 值 " + whichImpl +
-
-" is in config.");
+vehicle = new TruckImpl(500, 3000, 300);
 
 }
 
-}
-
-static class Whatever implements Calculator {
-
-public static String addOneAndConvertToString(double d){
-
-System.out.println(Whatever.class.getName());
-
-return Double.toString(d + 1);
+list.add(vehicle);
 
 }
 
-public int multiplyByTwo(int i){
-
-System.out.println(Whatever.class.getName());
-
-return i * 2;
+return list;
 
 }
 
@@ -738,212 +522,306 @@ return i * 2;
 
 ```
 
-而这个工厂的客户端代码永远不会知道这种区别，除非它通过对从工厂返回的对象使用`getClass()`方法打印类的信息。但这是另一回事。从功能上讲，我们的`Whatever`的新实现将像旧的一样工作。
+The `random()` static method of the `Math` class generates a random decimal number between 0 and 1\. We use it to make the resulting mix of traffic look somewhat real. And we have hardcoded, for now, the values we pass into each of the vehicles' constructors.
 
-这实际上是一个常见的做法——从一个版本到另一个版本改变内部实现。当然有 bug 修复，还有新功能添加。随着实现代码的演变，程序员们不断地关注重构的可能性。在计算机科学中，factoring 是 decomposition 的同义词，它是将复杂的代码分解成更简单的部分，目的是使代码更易读和易维护。例如，假设我们被要求编写一个方法，接受两个`String`类型的参数（每个表示一个整数），并将它们的和作为整数返回。思考了一会儿后，我们决定这样做：
+Now, we can run the following code (we discussed it already a few pages ago):
 
 ```java
 
-public long sum(String s1, String s2){
+public class TrafficApp {
 
-int i1 = Integer.parseInt(s1);
+public static void main(String... args){
 
-int i2 = Integer.parseInt(s1);
+double timeSec = 5;
 
-return i1 + i2;
+int vehiclesCount = 4;
+
+List<Vehicle> traffic = Vehicle.getTraffic(vehiclesCount);
+
+for(Vehicle vehicle: traffic){
+
+System.out.println("Loaded: " + vehicle.getSpeedMph(timeSec));
+
+if(vehicle instanceof Car){
+
+((Car) vehicle).setPassengersCount(0);
+
+System.out.println("Car(no load): " +
+
+vehicle.getSpeedMph(timeSec));
+
+} else {
+
+((Truck) vehicle).setPayloadPounds(0);
+
+System.out.println("Truck(no load): " +
+
+vehicle.getSpeedMph(timeSec));
+
+}
+
+}
+
+}
 
 }
 
 ```
 
-但后来我们要求提供可能输入值的样本，这样我们就可以在接近生产条件的情况下测试我们的代码。结果发现，一些值可能高达 10,000,000,000，这超过了 2,147,483,647（Java 允许的最大`Integer.MAX_VALUE` int 值）。因此，我们将我们的代码更改为以下内容：
+The result is:
+
+![](img/3ff20e22-6228-435a-9211-4fcd408691b6.png)
+
+The calculated speed is the same because the input data is hardcoded in `TrafficFactory`. But before we move on and make the input data different, let's create a speed calculation test:
 
 ```java
 
-public long sum(String s1, String s2){
+package com.packt.javapath.ch08demo.traffic.impl;
 
-long l1 = Long.parseLong(s1);
+class SpeedCalculationTest {
 
-long l2 = Long.parseLong(s2);
+@Test
 
-return l1 + l2;
+void speedCalculation() {
+
+double timeSec = 5;
+
+Vehicle vehicle = new CarImpl(2, 2000, 150);
+
+assertEquals(83.0, vehicle.getSpeedMph(timeSec));
+
+((Car) vehicle).setPassengersCount(0);
+
+assertEquals(91.0, vehicle.getSpeedMph(timeSec));
+
+vehicle = new TruckImpl(500, 3000, 300);
+
+assertEquals(98.0, vehicle.getSpeedMph(timeSec));
+
+((Truck) vehicle).setPayloadPounds(0);
+
+assertEquals(105.0, vehicle.getSpeedMph(timeSec));
+
+}
 
 }
 
 ```
 
-现在我们的代码可以处理高达 9,223,372,036,854,775,807 的值（即`Long.MAX_VALUE`）。我们将代码部署到生产环境，它在几个月内都运行良好，被一个处理统计数据的大型软件系统使用。然后系统切换到了新的数据源，代码开始出现问题。我们调查后发现，新的数据源产生的值可能包含字母和其他一些字符。我们已经为这种情况测试了我们的代码，并发现以下行会抛出`NumberFormatException`：
+We could access the `CarImpl` and `TruckImpl` classes because the test belongs to the same package, although it's located in a different directory of our project (under the `test` directory, instead of `main`). On the classpath, they are placed according to their package, even if the source comes from another source tree.
+
+We have tested our code and now we can concentrate on processing real data and creating the corresponding objects for the client in `TrafficFactory`. The implementation is decoupled from the interface and, until it is ready, we can keep it hardcoded, so the client can start writing and testing their code without waiting until our system is fully functional. That is another advantage of encapsulation and interface.
+
+# Preferring aggregation over inheritance
+
+Those who worked on real-life projects know that the requirements can change at any moment. In the case of our project, even before the second iteration was completed, new methods had to be added to the `Car` and `Truck` interfaces, while speed calculation grew in its own project. The programmers who worked on the implementation of the interfaces and those working on the speed calculation started to change the `CarImpl`, `TruckImpl`, and `VehicleImpl` files.
+
+Not only that, but another project decided to use our speed calculation functionality, but they wanted to apply it to other objects, not cars and trucks. That is when we realized that we need to change our implementation in favor of aggregating the functionality instead of inheriting it, which is one of the recommended design strategies in general anyway, because it increases decoupling and facilitates more flexible design. Here is what it means.
+
+We copy the `getSpeedMph()` method of the `VehicleImpl` class and put it in the `SpeedModelImpl` class in a new `com.packt.javapath.ch08demo.speedmodel.impl` package:
 
 ```java
 
-long l1 = Long.parseLong(s1);
+class SpeedModelImpl implements SpeedModel {
+
+public double getSpeedMph(double timeSec, int weightPounds,
+
+int horsePower){
+
+double v = 2.0 * horsePower * 746 * timeSec * 32.174 / weightPounds;
+
+return Math.round(Math.sqrt(v) * 0.68);
+
+}
+
+}
 
 ```
 
-我们与领域专家讨论了这种情况，他们建议我们记录不是整数的值，跳过它们，并继续进行求和计算。因此，我们已经修复了我们的代码，如下所示：
+We add `SpeedModelFactory` to the same package:
 
 ```java
 
-public long sum(String s1, String s2){
+public class SpeedModelFactory {
 
-long l1 = 0;
+public static SpeedModel speedModel(){
 
-尝试{
-
-l1 = Long.parseLong(s1);
-
-} catch (NumberFormatException ex){
-
-//记录日志
+return new SpeedModelImpl();
 
 }
-
-long l2 = 0;
-
-尝试{
-
-l2 = Long.parseLong(s2);
-
-} catch (NumberFormatException ex){
-
-//记录日志
-
-}
-
-返回 l1 + l2;
 
 }
 
 ```
 
-我们迅速将代码发布到生产环境，但在下一个版本中得到了新的要求：输入的`String`值可以包含小数。因此，我们已经改变了处理输入`String`值的方式，假设它们包含小数值（也包括整数值），并重构了代码，如下所示：
+然后我们在`com.packt.javapath.ch08demo.speedmodel`包中创建了一个`SpeedModel`接口：
 
 ```java
 
-private long getLong(String s){
+public interface SpeedModel {
 
-double d = 0;
+double getSpeedMph（double timeSec，int weightPounds，int horsePower）;
 
-尝试{
+静态 SpeedModel getInstance（月份，dayOfMonth，小时）{
 
-d = Double.parseDouble(s);
-
-} catch (NumberFormatException ex){
-
-//记录日志
+返回 SpeedModelFactory.speedModel（月份，dayOfMonth，小时）;
 
 }
-
-返回 Math.round(d);
-
-}
-
-public long sum(String s1, String s2){
-
-返回 getLong(s1) + getLong(s2);
 
 }
 
 ```
 
-这就是重构的作用。它重新构造代码而不改变其 API。随着新的需求不断出现，我们可以改变`getLong()`方法，甚至不用触及`sum()`方法。我们还可以在其他地方重用`getLong()`方法，这将是下一节的主题。
-
-# 可重用性
-
-封装绝对使得实现可重用性更容易，因为它隐藏了实现细节。例如，我们在上一节中编写的`getLong()`方法可以被同一类的另一个方法重用：
+现在，我们通过为`SpeedModel`对象添加一个 setter 并在速度计算中使用此对象来更改`VehicleImpl`类：
 
 ```java
 
-public long sum(int i, String s2){
+抽象类 VehicleImpl 实现 Vehicle {
 
-返回 i + getLong(s2);
+私人 int weightPounds，horsePower;
+
+私人 SpeedModel speedModel;
+
+public VehicleImpl（int weightPounds，int horsePower）{
+
+this.weightPounds = weightPounds;
+
+this.horsePower = horsePower;
+
+}
+
+protected int getWeightPounds（）{返回 this.weightPounds; }
+
+protected double getSpeedMph（double timeSec，int weightPounds）{
+
+如果（this.speedModel == null）{
+
+抛出新的 RuntimeException（“需要速度模型”）;
+
+}否则{
+
+返回 speedModel.getSpeedMph（timeSec，weightPounds，horsePower）;
+
+}
+
+}
+
+public void setSpeedModel（SpeedModel speedModel）{
+
+this.speedModel = speedModel;
+
+}
 
 }
 
 ```
 
-它甚至可以被设为公共的并被其他类使用，就像以下行一样：
+正如您所看到的，如果在设置 SpeedModel 对象之前调用`getSpeedMph（）`方法，它现在会抛出异常（并停止工作）。
+
+我们还更改了`TrafficFactory`并让它在交通对象上设置`SpeedModel`：
 
 ```java
 
-int i = new Ch07DemoApp().getLong("23", "45.6");
+public class TrafficFactory {
+
+public static List<Vehicle> get（int vehiclesCount）{
+
+SpeedModel speedModel = SpeedModelFactory.speedModel（）;
+
+列表<Vehicle>列表=新的 ArrayList（）;
+
+对于（int i = 0; i <vehiclesCount; i ++）{
+
+车辆车辆;
+
+如果（Math.random（）<= 0.5）{
+
+车辆= new CarImpl（2，2000，150）;
+
+}否则{
+
+车辆= new TruckImpl（500，3000，300）;
+
+}
+
+（（VehicleImpl）vehicle）.setSpeedModel（speedModel）;
+
+列表.add（车辆）;
+
+}
+
+返回列表;
+
+}
+
+}
 
 ```
 
-这将是一个组合的例子，当某些功能是使用不相关的类的方法构建（组合）时。而且，由于它不依赖于对象状态（这样的方法称为无状态），它可以被设为静态：
+现在，速度模型继续独立于交通模型进行开发，我们完成了所有这些而不改变客户端的代码（这种不影响接口的内部代码更改称为**重构**）。这是封装和接口解耦的好处。`Vehicle`对象的行为现在是聚合的，这使我们能够在不修改其代码的情况下更改其行为。
 
-```java
+尽管本节的标题是*优先使用聚合而不是继承*，但这并不意味着继承应该总是被避免。继承有其自身的用途，对于多态行为尤其有益。但是当我们谈论设计灵活性和代码可重用性时，它有两个弱点：
 
-int i = Ch07DemoApp.getLong("23", "45.6");
++   Java 类不允许我们扩展超过一个父类，因此，如果类已经是子类，则不能扩展另一个类以重用其方法
 
-```
++   继承需要类之间的父子关系，而无关的类通常共享相同的功能
 
-嗯，如果该方法在运行时被几个其他方法同时使用，即使是这样一个简单的代码也可能需要受到保护（同步）以防并行使用。但这些考虑超出了本书的范围。现在，如果有疑问，不要将方法设为静态。
+有时，继承是解决手头问题的唯一方法，有时使用它会在以后引起问题。现实情况是我们永远无法可靠地预测未来会发生什么，因此如果使用继承或不使用继承的决定最终是错误的话，不要感到难过。
 
-如果你了解面向对象编程的历史，你会发现继承最初的任务之一是成为代码重用的主要机制。它做到了。子类继承（重用）其父类的所有方法，并且只覆盖那些需要为子类专门化的方法。
+# 这么多 OOD 原则，时间却那么少
 
-但实际上，实践中似乎更受欢迎的是其他可重用性技术，尤其是对于重用方法是无状态的情况。我们将在第八章中更多地讨论这些原因，*面向对象设计（OOD）原则*。
+如果您在互联网上搜索 OOD 原则，您很容易找到许多包含数十个推荐设计原则的列表。它们都有意义。
 
-# 可测试性
+例如，以下是经常捆绑在一起的五个最受欢迎的 OOD 原则，缩写为 SOLID（由原则标题的第一个字母组成）：
 
-代码可测试性是另一个封装有所帮助的领域。如果实现细节没有被隐藏，我们将需要测试每一行代码，并且每次改变实现的任何一行时都需要改变测试。但是将细节隐藏在 API 的外观后面，使我们只需要专注于所需的测试用例，并且受到可能的输入数据（参数值）的限制。
++   **单一责任原则**：一个类应该只有一个责任
 
-此外，还有一些框架允许我们创建一个对象，根据输入参数的某个值返回某个结果。Mockito 是一个流行的框架，它可以做到这一点（[`site.mockito.org`](http://site.mockito.org)）。这样的对象被称为模拟对象。当你需要从一个对象的方法中获得某些结果来测试其他方法时，它们尤其有帮助，但你不能运行你用作数据源的方法的实际实现，因为你没有数据库中需要的数据，或者它需要一些复杂的设置。为了解决这个问题，你可以用返回你需要的数据的方法替换某些方法的实际实现-模拟它们-无条件地或者响应于某些输入数据。没有封装，这样模拟方法行为可能是不可能的，因为客户端代码将与特定实现绑定，你将无法在不改变客户端代码的情况下进行更改。
++   **开闭原则**：一个类应该封装其功能（关闭），但应该能够扩展
 
-# 练习-阴影
++   **里氏替换原则**：对象应该能够被其子对象替换（替换）而不会破坏程序
 
-编写演示变量阴影的代码。我们还没有讨论过它，所以你需要做一些研究。
++   **接口隔离原则**：许多面向客户的接口比一个通用接口更好
+
++   **依赖反转原则**：代码应该依赖于接口，而不是实现。
+
+正如我们之前所说，关于如何实现更好的设计还有许多其他好主意。你应该学习所有这些吗？答案很大程度上取决于你喜欢学习新技能的方式。有些人通过实验来学习，其他人通过借鉴他人的经验来学习，大多数人则是通过这两种方法的结合来学习。
+
+好消息是，我们在本章讨论的设计标准、面向对象的概念以及良好设计的路线图，能够在大多数情况下引导你找到一个坚实的面向对象设计解决方案。
+
+但如果你决定了解更多关于面向对象设计，并看看其他人是如何解决软件设计问题的，不要犹豫去了解它们。毕竟，人类是通过将他们的经验传递给下一代，才走出了洞穴，登上了宇宙飞船。
+
+# 练习-设计模式
+
+有许多面向对象设计模式共享了特定编码问题的软件设计解决方案。面向对象设计模式也经常被程序员用来讨论不同的实现方式。
+
+它们通常被分为四类：创建、行为、结构和并发模式。阅读它们并：
+
++   在每个类别中列出一种模式
+
++   列出我们已经使用过的三种模式
 
 # 答案
 
-以下是一个可能的解决方案：
+四种模式——每种类别中的一种——可能是以下这些：
 
-```java
++   **创建模式**：工厂方法
 
-公共类 ShadowingDemo {
++   **结构模式**：组合
 
-私有字符串 x = "x";
++   **行为模式**：访问者
 
-public void printX(){
++   **并发模式**：消息模式
 
-System.out.println(x);
+在这本书中，我们已经使用了以下模式：
 
-字符串 x = "y";
++   **延迟初始化**：在第六章中，*接口、类和对象构造*，我们初始化了`SingletonClassExample OBJECT`静态字段，但只有在调用`getInstance()`方法时才会初始化
 
-System.out.println(x);
++   **单例模式**：在第六章中，*接口、类和对象构造*，查看`SingletonClassExample`类
 
-}
-
-}
-
-```
-
-如果您运行`new ShadowingDemo().printX();`，它将首先打印`x`，然后打印`y`，因为以下行中的局部变量`x`遮蔽了`x`实例变量：
-
-```java
-
-String x = "y";
-
-```
-
-请注意，遮蔽可能是程序的缺陷来源，也可以用于程序的利益。如果没有它，您将无法使用已经被实例变量使用的局部变量标识符。这里是另一个变量遮蔽有帮助的情况的例子：
-
-```java
-
-private String x = "x";
-
-public void setX(String x) {`;
-
-this.x = x;
-
-}
-
-```
-
-`x`局部变量（参数）遮蔽了`x`实例变量。它允许使用相同的标识符作为已经用于实例变量名称的局部变量名称。为了避免可能的混淆，建议使用关键字`this`来引用实例变量，就像我们在上面的示例中所做的那样。
++   **外观模式**：在第六章中，*接口、类和对象构造*，当我们创建了一个`Calculator`接口，用于捕捉对实现功能的所有可能交互
 
 # 总结
 
-在本章中，您了解了面向对象语言的基本特性之一 - 类、接口、成员和构造函数的可访问性规则。现在您可以从其他包中导入类和接口，并避免使用它们的完全限定名称。所有这些讨论使我们能够介绍面向对象编程的核心概念 - 封装。有了这个，我们可以开始对面向对象设计（OOD）原则进行有根据的讨论。
+在本章中，我们重新审视了编程的高层视图，特别是 Java 编程。我们讨论了软件系统开发过程中的设计演变，从最早的可行性阶段开始，经过高层设计、详细设计，最终到编码和测试。我们讨论了良好设计的标准，面向对象的概念，主要的面向对象设计原则，并提供了一个良好面向对象设计的路线图。我们通过代码示例来说明所有讨论过的面向对象设计原则的应用。
 
-下一章介绍了 Java 编程的更高层次视图。它讨论了良好设计的标准，并提供了经过验证的 OOD 原则指南。每个设计原则都有详细描述，并使用相应的代码示例进行说明。
+在下一章中，我们将更深入地探讨 Java 编程的三个核心元素：运算符、表达式和语句。我们将定义并讨论所有 Java 运算符，更详细地探讨最流行的运算符，并在具体示例中演示它们，以及表达式和语句。
