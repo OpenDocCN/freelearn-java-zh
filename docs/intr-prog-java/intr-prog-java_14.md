@@ -751,9 +751,9 @@ System.out.println(list7);  //[Alex Green, Maria Brown, Zoe Arnold]
 
 +   `int frequency(Collection<?> collection, Object object)`
 
-The `binarySearch()` methods search for the `key` value in the provided list. The important thing to notice is that the provided list must be *sorted* in *ascending* order because of the nature of the binary search. The algorithm compares the key to the middle element of the list; if they are unequal, the half in which the key cannot belong is ignored and the algorithm compares the key to the middle element of the other half of the list. The search continues until the element equal to the key is found or only one element is left to search and it is not equal to the key.
+`binarySearch()`方法在提供的列表中搜索`key`值。需要注意的重要一点是，由于二分搜索的性质，提供的列表必须*按升序*排列。算法将`key`与列表的中间元素进行比较；如果它们不相等，就会忽略掉`key`不可能存在的那一半，并且算法将`key`与列表另一半的中间元素进行比较。搜索将继续，直到找到与`key`相等的元素，或者只剩一个元素需要搜索而且它不等于`key`。
 
-The `indexOfSubList()` and `lastIndexOfSubList()` methods return the position of the provided sublist in the provided list:
+`indexOfSubList()`和`lastIndexOfSubList()`方法返回提供列表中提供子列表的位置：
 
 ```java
 List<String> list1 = List.of("s3","s5","s4","s1");
@@ -766,9 +766,9 @@ index = Collections.indexOfSubList(list1, list3);
 System.out.println(index);   //prints: 1
 ```
 
-Please notice that the sublist should be exactly in the same order. Otherwise, it will not be found.
+请注意，子列表应该按照完全相同的顺序。否则，它是无法被找到的。
 
-And the last method, `frequency(Collection, Object)`, returns the number of times the provided object appears in the provided collection:
+最后一个方法，`frequency(Collection, Object)`，返回提供的对象在提供的集合中出现的次数：
 
 ```java
 List<String> list4 = List.of("s3","s4","s4","s1");
@@ -776,7 +776,7 @@ int count = Collections.frequency(list4, "s4");
 System.out.println(count);         //prints: 2
 ```
 
-If you are going to use these methods (or any other methods that search collections for that matter) and if the collections include objects of custom classes, you have to have the method `equals()` implemented. A typical search algorithm uses the method `equals()` for the identification of the object. If you do not implement the method `equals()` in your custom class, the method `equals()` from the base class `Object` is going to be used, which compares only the object references, not their states (values of their fields). Here is a demonstration of this behavior:
+如果你打算使用这些方法（或者任何其他搜索集合的方法），如果集合中包含自定义类的对象，那么你必须要实现方法`equals()`。典型的搜索算法使用方法`equals()`来识别对象。如果你没有在自定义类中实现方法`equals()`，那么基类`Object`中的方法`equals()`会被使用，它只比较对象的引用，而不是它们的状态（字段的值）。以下是这种行为的演示：
 
 ```java
 class A{}
@@ -793,7 +793,7 @@ System.out.println(c);         //prints: 1
 
 ```
 
-As you can see, the object of class `A` is found only if it is literally the same object. But if we implement the method `equals()`, then the object of class A is found according to the criteria we have put in the method `equals()` implementation:
+如你所见，只有当类`A`的对象确实是同一个对象时才能找到。但是如果我们实现了方法`equals()`，那么根据我们在方法`equals()`实现中的标准，类`A`的对象就能被找到：
 
 ```java
 class A{
@@ -815,9 +815,9 @@ c = Collections.frequency(list6, a);
 System.out.println(c);         //prints: 2
 ```
 
-Now, the count of objects `A` in each case is `2` because `B` extends `A` and thus has two types, `B` and `A`.
+现在，每种情况下对象`A`的计数都是`2`，因为`B`扩展了`A`，因此具有`B`和`A`两种类型。
 
-If we prefer to identify the object by exactly the current class name and not include its parent class in the consideration, we should implement the method `equals()` differently:
+如果我们更喜欢仅以当前类名来标识对象而不考虑其父类，我们应该以不同的方式实现方法`equals()`：
 
 ```java
 class A{
@@ -839,7 +839,7 @@ c = Collections.frequency(list6, a);
 System.out.println(c);         //prints: 1
 ```
 
-The method `getClass()` returns the class name used when the object was created by the operator `new`. That is why the count in both cases is now `1`.
+方法`getClass()`返回对象通过`new`运算符创建时使用的类名。这就是为什么现在两种情况下计数都是`1`的原因。
 
 在本章的其余部分，我们将假设集合和数组的元素实现了`equals()`方法。大多数情况下，我们将在示例中使用`String`类的对象。正如我们在第九章中提到的那样，*运算符、表达式和语句*，`String`类具有基于字符串字面值的`equals()`方法实现，而不仅仅是基于对象引用。并且，正如我们在前一小节中解释的那样，`String`类还实现了`Comparable`接口，因此它提供了自然排序。
 
