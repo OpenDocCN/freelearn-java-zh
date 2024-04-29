@@ -5,4 +5,4 @@
 +   [第三章：多线程和响应式编程](hiperf-java9_3.md)
 +   [第四章：微服务](hiperf-java9_4.md)
 +   [第五章：利用新的 API 来改进您的代码](hiperf-java9_5.md)
-+   [附录 A. 评估答案](hiperf-java9_6.md)
++   [附录 A：评估答案](hiperf-java9_6.md)

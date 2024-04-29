@@ -9,4 +9,4 @@
 +   [第七章：继承和多态性](java-se7-std-gd_07.md)
 +   [第八章：在应用程序中处理异常](java-se7-std-gd_08.md)
 +   [第九章：Java 应用程序](java-se7-std-gd_09.md)
-+   [附录 A. 检验你的知识 - 答案](java-se7-std-gd_10.md)
++   [附录 A：检验你的知识 - 答案](java-se7-std-gd_10.md)
