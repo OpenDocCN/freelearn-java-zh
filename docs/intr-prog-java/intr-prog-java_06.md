@@ -415,9 +415,9 @@ public interface Calculator {
 
 正如你所看到的，我们在常量中捕获了配置文件名，以及配置键名。我们还为键的所有可能值创建了一个`enum`。我们还添加了实现之间差异的解释作为注释。如果解释太长，注释可以提供对文档、网站名称或 URL 的引用，例如。
 
-Since there are two implementations and two possible values in the configuration file, we need to run our unit test `CalculatorTest` twice—for each possible value of the configuration—to make sure that both implementations work as expected. But we do not want to change the configuration inside the deliverable software component itself.
+由于配置文件中存在两种实现和两种可能的值，我们需要运行我们的单元测试`CalculatorTest`两次——对于配置的每种可能的值——以确保两种实现都按预期工作。但我们不想改变交付软件组件本身的配置。
 
-That is when the `test/resources` directory (`test\resources` for Windows) comes into play again. Let's create a `calculator.conf` file in it and add the following lines to the `CalculatorTest` test, which will print the current settings in that file:
+这是`test/resources`目录（对于 Windows 为`test\resources`）再次发挥作用的时候。让我们在其中创建一个`calculator.conf`文件，并将以下行添加到`CalculatorTest`测试中，这将打印出该文件中的当前设置：
 
 ```java
 String whichImpl = 
@@ -427,7 +427,7 @@ System.out.println(Calculator.CONF_WHICH_IMPL + "=" + whichImpl);
 
 ```
 
-The `CalculatorTest` code should look as follows:
+`CalculatorTest`代码应如下所示：
 
 ```java
 void multiplyByTwo() {
@@ -443,7 +443,7 @@ void multiplyByTwo() {
 }
 ```
 
-Let's also add a line that prints out the class name of each implementation:
+我们还可以添加一行，打印出每个实现的类名：
 
 ```java
 public class CalculatorImpl implements Calculator {
@@ -460,25 +460,25 @@ public class AnotherCalculatorImpl implements Calculator {
 }
 ```
 
-If we set the value of `which.impl` (in the `calculator.conf` file in the `test` directory) to `adds`, it will look like this:
+如果我们将`test`目录中的`calculator.conf`文件中的`which.impl`值设置为`adds`，则会变成这样：
 
 ![](img/a123ab51-0369-4fe3-ac54-a73a829b2d6a.png)
 
-And the result of the `CalculatorTest` test will be:
+`CalculatorTest`测试的结果将是：
 
 ![](img/4af08c61-2654-40bc-89c4-a10f08681e58.png)
 
-The output tells us three things:
+输出告诉我们三件事：
 
-+   The value of `which.impl` in `calculator.conf` was set to `adds`
++   `calculator.conf`中`which.impl`的值被设置为`adds`
 
-+   The corresponding implementation of `AnotherCalculatorImpl` was used
++   使用了相应的`AnotherCalculatorImpl`实现
 
-+   The invoked implementation worked as expected
++   调用的实现按预期工作
 
-Similarly, we can run our unit test for the `calculator.conf` file set to `multiplies`.
+类似地，我们可以针对`calculator.conf`文件设置为`multiplies`运行我们的单元测试。
 
-The result looks very good, but we still can improve the code and make it less susceptible to error, if sometime in the future somebody decides to enhance the functionality by adding a new implementation or something similar. We can take advantage of the constants added to the `Calculator` interface and make the `create()`  factory method more protected from a human mistake:
+结果看起来很好，但我们仍然可以改进代码，使其不那么容易出错，如果将来某人决定通过添加新的实现或类似的方式来增强功能。我们可以利用添加到`Calculator`接口的常量，并使`create()`工厂方法更不容易受人为错误影响：
 
 ```java
 public static Calculator create(){
@@ -496,13 +496,14 @@ public static Calculator create(){
 }
 ```
 
-Just to make sure that the test doing its job, we change the value in the `calculator.conf` file in the test directory to `add` (instead of `adds`) and run the test again. The output will be as follows:
+为了确保测试完成了其工作，我们将测试目录中的`calculator.conf`文件中的值更改为`add`（而不是`adds`），然后再次运行测试。输出将如下所示：
 
 ![](img/252fb2df-1745-4fa7-8b42-92fae0a4f19d.png)
 
-The test failed, as was expected. It gives us a level of confidence that the code works and doesn't just always show success.
+如预期的那样，测试失败了。这使我们对代码的工作方式有了一定的信心，而不仅仅是显示成功。
 
-Yet, the code can be improved to become more readable, more testable, and less susceptible to human errors when it is modified or expanded. Using the knowledge of the `enum` functionality, we can write a method that converts the value of the key `which.impl` in the `calculator.conf` file to one of the constants (instances) of the class `enum WhichImpl`. To do it, we add this new method to the class `Utils`:
+然而，当代码被修改或扩展时，代码可以改进以变得更易读，更易测试，并且更不易受人为错误影响。利用`enum`功能的知识，我们可以编写一个方法，将`calculator.conf`文件中键`which.impl`的值转换为类`enum WhichImpl`的一个常量（实例）。为此，我们将此新方法添加到类`Utils`中：
+
 
 ```java
 WhichImpl getWhichImplValueFromConfig(String configFileName, String key){

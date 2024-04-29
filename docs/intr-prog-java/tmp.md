@@ -1,74 +1,88 @@
-在上面的示例中，我们在`Season`类中添加了三个属性：`feel`、`toString`和`averageTemperature`。我们还创建了一个构造函数（用于为对象状态分配初始值的特殊方法），该构造函数接受这三个属性并添加获取器和`toString()`返回值的方法。然后，在每个常量的括号中，我们设置了在创建此常量时要传递给构造函数的值。
+由于配置文件中存在两种实现和两种可能的值，我们需要运行我们的单元测试`CalculatorTest`两次——对于配置的每种可能的值——以确保两种实现都按预期工作。但我们不想改变交付软件组件本身的配置。
 
-这是我们将要使用的演示方法：
+这是`test/resources`目录（对于 Windows 为`test\resources`）再次发挥作用的时候。让我们在其中创建一个`calculator.conf`文件，并将以下行添加到`CalculatorTest`测试中，这将打印出该文件中的当前设置：
 
 ```java
-void enumDemo(Season season){
-  System.out.println(season + " is " + season.getFeel());
-  System.out.println(season + " has average temperature around " 
-                               + season.getAverageTemperature());
+String whichImpl = 
+   Utils.getStringValueFromConfig(Calculator.CONF_NAME, 
+                                     Calculator.CONF_WHICH_IMPL);
+System.out.println(Calculator.CONF_WHICH_IMPL + "=" + whichImpl);
+
+```
+
+`CalculatorTest`代码应如下所示：
+
+```java
+void multiplyByTwo() {
+  WhichImpl whichImpl = 
+      Utils.getWhichImplValueFromConfig(Calculator.CONF_NAME, 
+                                        Calculator.CONF_WHICH_IMPL);
+  System.out.println("\n" + Calculator.CONF_WHICH_IMPL + 
+                                                   "=" + whichImpl);
+  Calculator calculator = Calculator.createInstance();
+  int i = 2;
+  int result = calculator.multiplyByTwo(i);
+  assertEquals(4, result);
 }
 ```
 
-`enumDemo()`方法接受`enum Season`常量并构造并显示两个句子。让我们为每个季节运行上述代码，就像这样：
+我们还可以添加一行，打印出每个实现的类名：
 
 ```java
-enumDemo2(Season3.SPRING);
-enumDemo2(Season3.SUMMER);
-enumDemo2(Season3.AUTUMN);
-enumDemo2(Season3.WINTER);
-
+public class CalculatorImpl implements Calculator {
+  public int multiplyByTwo(int i){
+    System.out.println(CalculatorImpl.class.getClass().getName());
+    return i * 2;
+  }
+}
+public class AnotherCalculatorImpl implements Calculator {
+  public int multiplyByTwo(int i){
+    System.out.println(AnotherCalculatorImpl.class.getClass().getName());
+    return i + i;
+ }
+}
 ```
 
-结果如下：
+如果我们将`test`目录中的`calculator.conf`文件中的`which.impl`值设置为`adds`，则会变成这样：
 
-![图片](img/90d857fd-ef52-4317-97b9-d2435ab70fb9.png)
+![](img/a123ab51-0369-4fe3-ac54-a73a829b2d6a.png)
 
-`enum`类是一种非常强大的工具，它允许我们简化代码，并使其在运行时更加受保护，因为所有可能的值都是可预测的，并且可以提前测试。例如，我们可以使用以下单元测试来测试`SPRING`常量的获取器：
+`CalculatorTest`测试的结果将是：
+
+![](img/4af08c61-2654-40bc-89c4-a10f08681e58.png)
+
+输出告诉我们三件事：
+
++   `calculator.conf`中`which.impl`的值被设置为`adds`
+
++   使用了相应的`AnotherCalculatorImpl`实现
+
++   调用的实现按预期工作
+
+类似地，我们可以针对`calculator.conf`文件设置为`multiplies`运行我们的单元测试。
+
+结果看起来很好，但我们仍然可以改进代码，使其不那么容易出错，如果将来某人决定通过添加新的实现或类似的方式来增强功能。我们可以利用添加到`Calculator`接口的常量，并使`create()`工厂方法更不容易受人为错误影响：
 
 ```java
-@DisplayName("Enum Season tests")
-public class EnumSeasonTest {
-  @Test
-  @DisplayName("Test Spring getters")
-  void multiplyByTwo(){
-    assertEquals("Spring", Season.SPRING.toString());
-    assertEquals("warmer than winter", Season.SPRING.getFeel());
-    assertEquals(60, Season.SPRING.getAverageTemperature());
+public static Calculator create(){
+  String whichImpl = Utils.getStringValueFromConfig(Calculator.CONF_NAME, 
+                                       Calculator.CONF_WHICH_IMPL);         
+  if(whichImpl.equals(Calculator.WhichImpl.multiplies.name())){
+    return new CalculatorImpl();
+  } else if (whichImpl.equals(Calculator.WhichImpl.adds.name())){
+    return new AnotherCalculatorImpl();
+  } else {
+    throw new RuntimeException("Houston, we have a problem. " +
+                     "Unknown key " + Calculator.CONF_WHICH_IMPL +
+                     " value " + whichImpl + " is in config.");
   }
 }
 ```
 
-当然，获取器的代码不会出现太多错误。但如果`enum`类有更复杂的方法，或者固定值列表来自于一些应用需求文档，这样的测试将确保我们已按照要求编写了代码。
+为了确保测试完成了其工作，我们将测试目录中的`calculator.conf`文件中的值更改为`add`（而不是`adds`），然后再次运行测试。输出将如下所示：
 
-在标准的 Java 库中，有几个`enum`类。以下是这些类中常量的几个例子，可以让你了解其中的内容：
+![](img/252fb2df-1745-4fa7-8b42-92fae0a4f19d.png)
 
-```java
-Month.FEBRUARY;
-TimeUnit.DAYS;
-TimeUnit.MINUTES;
-DayOfWeek.FRIDAY;
-Color.GREEN;
-Color.green;
+如预期的那样，测试失败了。这使我们对代码的工作方式有了一定的信心，而不仅仅是显示成功。
 
-```
-
-所以，在创建自己的`enum`之前，尝试检查并查看标准库是否已提供具有所需值的类。
-
-# 将引用类型值作为方法参数传递
-
-一种需要特别讨论的引用类型和原始类型之间的重要区别是它们的值在方法中的使用方式。让我们通过示例来看看区别。首先，我们创建`SomeClass`类：
-
-```java
-class SomeClass{
-  private int count;
-  public int getCount() {
-    return count;
-  }
-  public void setCount(int count) {
-      this.count = count;
-    }
-}
-```
-
-然后我们创建一个使用它的类：
+然而，当代码被修改或扩展时，代码可以改进以变得更易读，更易测试，并且更不易受人为错误影响。利用`enum`功能的知识，我们可以编写一个方法，将`calculator.conf`文件中键`which.impl`的值转换为类`enum WhichImpl`的一个常量（实例）。为此，我们将此新方法添加到类`Utils`中：
