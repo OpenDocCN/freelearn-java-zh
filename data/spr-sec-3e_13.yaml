@@ -1,0 +1,1131 @@
+- en: Custom Authorization
+  id: totrans-0
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 自定义授权
+- en: In this chapter, we will write some custom implementations for Spring Security's
+    key authorization APIs. Once we have done this, we will use the understanding
+    of the custom implementations to understand how Spring Security's authorization
+    architecture works.
+  id: totrans-1
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在本章中，我们将为Spring Security的关键授权API编写一些自定义实现。一旦我们完成这些工作，我们将使用对自定义实现的理解来了解Spring
+    Security的授权架构是如何工作的。
+- en: 'Throughout this chapter, we will cover the following topics:'
+  id: totrans-2
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在本章中，我们将涵盖以下主题：
+- en: Gaining an understanding of how authorization works
+  id: totrans-3
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 了解授权是如何工作的
+- en: Writing a custom `SecurityMetaDataSource` backed by a database instead of `antMatchers()`
+    methods
+  id: totrans-4
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 编写一个自定义的`SecurityMetaDataSource`，而不是`antMatchers()`方法，由数据库支持。
+- en: Creating a custom SpEL expression
+  id: totrans-5
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 创建一个自定义SpEL表达式
+- en: Implementing a custom `PermissionEvaluator` object that allows our permissions
+    to be encapsulated
+  id: totrans-6
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 实现一个自定义的`PermissionEvaluator`对象，允许我们的权限被封装
+- en: Authorizing the requests
+  id: totrans-7
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 授权请求
+- en: As in the authentication process, Spring Security provides an `o.s.s.web.access.intercept.FilterSecurityInterceptor`
+    servlet filter, which is responsible for coming up with a decision as to whether
+    a particular request will be accepted or denied. At the point the filter is invoked,
+    the principal has already been authenticated, so the system knows that a valid
+    user has logged in; remember that we implemented the `List<GrantedAuthority> getAuthorities()`
+    method, which returns a list of authorities for the principal, in [Chapter 3](03.html),
+    Custom Authentication. In general, the authorization process will use the information
+    from this method (defined by the `Authentication` interface) to determine, for
+    a particular request, whether or not the request should be allowed.
+  id: totrans-8
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 与认证过程一样，Spring Security提供了一个`o.s.s.web.access.intercept.FilterSecurityInterceptor`
+    servlet过滤器，负责决定是否接受特定请求。在调用过滤器时，主体已经被认证，所以系统知道一个有效的用户已经登录；记住我们在[第3章](03.html)，自定义认证中实现了`List<GrantedAuthority>
+    getAuthorities()`方法，该方法返回主体的一个权限列表。通常，授权过程将使用这个方法（由`Authentication`接口定义）的信息来确定，对于一个特定的请求，是否应允许该请求。
+- en: Remember that authorization is a binary decision-a user either has access to
+    a secured resource or he does not. There is no ambiguity when it comes to authorization.
+  id: totrans-9
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 请记住，授权是一个二进制决策——用户要么有权访问受保护的资源，要么没有。在授权方面没有模棱两可。
+- en: A Smart object-oriented design is pervasive within the Spring Security framework,
+    and authorization decision management is no exception.
+  id: totrans-10
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 智能面向对象设计在Spring Security框架中无处不在，授权决策管理也不例外。
+- en: 'In Spring Security, the `o.s.s.access.AccessDecisionManager` interface specifies
+    two simple and logical methods that fit sensibly into the processing decision
+    flow of requests, as follows:'
+  id: totrans-11
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在Spring Security中，`o.s.s.access.AccessDecisionManager`接口规定了两个简单且符合逻辑的方法，适合于请求的决策处理流程，如下所示：
+- en: '`Supports`: This logical operation actually comprises two methods that allow
+    the `AccessDecisionManager` implementation to report whether or not it supports
+    the current request.'
+  id: totrans-12
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`Supports`：这个逻辑操作实际上包括两个方法，允许`AccessDecisionManager`实现报告它是否支持当前请求。'
+- en: '`Decide`: This allows the `AccessDecisionManager` implementation to verify,
+    based on the request context and security configuration, whether or not access
+    should be allowed and the request accepted. The `Decide` method actually has no
+    return value, and instead reports the denial of a request by throwing an exception
+    to indicate rejection.'
+  id: totrans-13
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`Decide`：这允许`AccessDecisionManager`实现基于请求上下文和安全配置来验证是否应允许访问和接受请求。实际上`Decide`方法没有返回值，而是通过抛出异常来报告请求的拒绝。'
+- en: Specific types of exceptions can further dictate the action to be taken by the
+    application to resolve authorization decisions. The `o.s.s.access.AccessDeniedException`
+    interface is the most common exception thrown in the area of authorization and
+    merits special handling by the filter chain.
+  id: totrans-14
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 特定类型的异常可以进一步规定应用程序为解决授权决定所采取的动作。`o.s.s.access.AccessDeniedException`接口是在授权领域中最常见的异常，并通过过滤器链值得特殊处理。
+- en: The implementation of `AccessDecisionManager` is completely configurable using
+    standard Spring bean binding and references. The default `AccessDecisionManager`
+    implementation provides an access granting mechanism based on `AccessDecisionVoter`
+    and votes aggregation.
+  id: totrans-15
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '`AccessDecisionManager`的实现完全可以通过标准Spring bean绑定和引用进行配置。默认的`AccessDecisionManager`实现提供了一个基于`AccessDecisionVoter`和投票聚合的访问授予机制。'
+- en: 'A voter is an actor in the authorization sequence whose job is to evaluate
+    any or all of the following things:'
+  id: totrans-16
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 选民是授权序列中的参与者，其任务是评估以下任何或所有内容：
+- en: The context of the request for a secured resource (such as a URL requesting
+    an IP address)
+  id: totrans-17
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 请求受保护资源的上下文（例如，请求IP地址的URL）
+- en: The credentials (if any) presented by the user
+  id: totrans-18
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 用户提交的凭证（如果有的话）
+- en: The secured resource being accessed
+  id: totrans-19
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 正在访问的受保护资源
+- en: The configuration parameters of the system, and the resource itself
+  id: totrans-20
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 系统的配置参数，以及资源本身
+- en: 'The `AccessDecisionManager` implementation is also responsible for passing
+    the access declaration (referred to in the code as implementations of the `o.s.s.access.ConfigAttribute`
+    interface) of the resource being requested to the voter. In the case of web URLs,
+    the voter will have information about the access declaration of the resource.
+    If we look at our very basic configuration file''s URL intercept declaration,
+    we''ll see `ROLE_USER` being declared as the access configuration for the resource
+    the user is trying to access, as follows:'
+  id: totrans-21
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '`AccessDecisionManager`的实现还负责将被请求资源的访问声明（在代码中表示为`o.s.s.access.ConfigAttribute`接口的实现）传递给选民。对于Web
+    URL，选民将了解关于资源的访问声明的信息。如果我们查看我们非常基本的配置文件的URL拦截声明，我们将看到`ROLE_USER`被声明为用户正在尝试访问的资源的访问配置，如下所示：'
+- en: '[PRE0]'
+  id: totrans-22
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE0]'
+- en: 'Based on the voter''s knowledge, it will decide whether the user should have
+    access to the resource or not. Spring Security allows the voter to make one of
+    three decisions, whose logical definition is mapped to constants in the interface,
+    as shown in the following table:'
+  id: totrans-23
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 根据选民的了解，它将决定用户是否应该有权访问资源。Spring Security允许选民做出三种决定之一，其逻辑定义映射到接口中的常量，如下表所示：
+- en: '| **Decision type** | **Description** |'
+  id: totrans-24
+  prefs: []
+  type: TYPE_TB
+  zh: '| **决策类型** | **描述** |'
+- en: '| `Grant (ACCESS_GRANTED)` | The voter recommends giving access to the resource.
+    |'
+  id: totrans-25
+  prefs: []
+  type: TYPE_TB
+  zh: '| `授权 (ACCESS_GRANTED)` | 选民建议给予对资源的访问权限。 |'
+- en: '| `Deny (ACCESS_DENIED)` | The voter recommends denying access to the resource.
+    |'
+  id: totrans-26
+  prefs: []
+  type: TYPE_TB
+  zh: '| `拒绝 (ACCESS_DENIED)` | 选民建议拒绝对资源的访问。 |'
+- en: '| `Abstain (ACCESS_ABSTAIN)` | The voter abstains (does not make a decision)
+    on access to the resource. This may happen for a number of reasons, such as follows:'
+  id: totrans-27
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '| `弃权 (ACCESS_ABSTAIN)` | 选民弃权（不对资源的访问做出决定）。这可能发生的原因很多，比如：'
+- en: The voter doesn't have conclusive information
+  id: totrans-28
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 选民没有确凿的信息
+- en: The voter can't decide on a request of this type
+  id: totrans-29
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 选民无法对这种类型的请求做出决定
+- en: '|'
+  id: totrans-30
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '|'
+- en: As you may have guessed from the design of access decision-related objects and
+    interfaces, this portion of Spring Security has been designed so that it can be
+    applied to authentication and access control scenarios that aren't exclusively
+    in the web domain. We'll encounter voters and access decision managers when we
+    look at method-level security later in this chapter.
+  id: totrans-31
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 正如您可能从与访问决策相关的对象和接口的设计中猜测的那样，Spring Security的这部分已经被设计为可以应用于不仅仅是Web领域的验证和访问控制场景。当我们在本章后面讨论方法级安全时，我们将遇到选民和访问决策管理器。
+- en: 'When we put this all together, the overall flow of the default authorization
+    check for web requests is similar to the following diagram:'
+  id: totrans-32
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 当我们将所有这些内容组合在一起时，Web请求的默认授权检查的整体流程类似于以下图表：
+- en: '![](img/af1ee98e-6dd7-4e44-b87a-9a06588d2e3b.png)'
+  id: totrans-33
+  prefs: []
+  type: TYPE_IMG
+  zh: '![](img/af1ee98e-6dd7-4e44-b87a-9a06588d2e3b.png)'
+- en: We can see that the abstraction of `ConfigAttribute` allows for data to be passed
+    from the configuration declarations (retained in the `o.s.s.web.access.intercept.DefaultFilterinvocationSecurityMetadataSource`
+    interface) to the voter responsible for acting on `ConfigAttribute` without any
+    intervening classes needing to understand the contents of `ConfigAttribute`. This
+    separation of concerns provides a solid foundation for building new types of security
+    declarations (such as the declarations we will see within method security) while
+    utilizing the same access decision pattern.
+  id: totrans-34
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们可以看到，`ConfigAttribute`的抽象允许从配置声明中传递数据（保存在`o.s.s.web.access.intercept.DefaultFilterinvocationSecurityMetadataSource`接口中）给负责处理`ConfigAttribute`的选民，而不需要任何中介类了解`ConfigAttribute`的内容。这种关注点的分离为构建新类型的安全声明（例如我们稍后将在方法安全中看到的声明）提供了坚实的基础，同时利用相同的访问决策模式。
+- en: Configuration of access decision aggregation
+  id: totrans-35
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 访问决策聚合的配置
+- en: 'Spring Security does actually allow for the configuration of `AccessDecisionManager`
+    in the security namespace. The `access-decision-manager-ref` attribute on the
+    `<http>` element allows you to specify a Spring bean reference to an implementation
+    of `AccessDecisionManager`. Spring Security ships with three implementations of
+    this interface, all in the `o.s.s.access.vote` package as follows:'
+  id: totrans-36
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Spring Security实际上允许在安全命名空间中配置`AccessDecisionManager`。`<http>`元素上的`access-decision-manager-ref`属性允许你指定一个Spring
+    bean引用，以引用`AccessDecisionManager`的实现。Spring Security随货提供了这个接口的三个实现，全部在`o.s.s.access.vote`包中，如下所示：
+- en: '| **Class name** | **Description** |'
+  id: totrans-37
+  prefs: []
+  type: TYPE_TB
+  zh: '| **类名** | **描述** |'
+- en: '| `AffirmativeBased` | If any voter grants access, access is immediately granted,
+    regardless of previous denials. |'
+  id: totrans-38
+  prefs: []
+  type: TYPE_TB
+  zh: '| `AffirmativeBased` | 如果有任何投票者授予访问权限，则立即授予访问权限，不顾之前的拒绝。|'
+- en: '| `ConsensusBased` | The majority vote (grant or deny) governs the decision
+    of `AccessDecisionManager`. Tie-breaking and the handling of empty votes (containing
+    only abstentions) is configurable. |'
+  id: totrans-39
+  prefs: []
+  type: TYPE_TB
+  zh: '| `ConsensusBased` | 由多数票（批准或拒绝）决定`AccessDecisionManager`的决策。决胜票和空票（仅包含弃权）的处理是可配置的。|'
+- en: '| `UnanimousBased` | All voters must grant access, otherwise, access is denied.
+    |'
+  id: totrans-40
+  prefs: []
+  type: TYPE_TB
+  zh: '| `UnanimousBased` | 所有投票者必须授予访问权限，否则，拒绝访问。|'
+- en: Configuring a UnanimousBased access decision manager
+  id: totrans-41
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 配置一个UnanimousBased访问决策管理器
+- en: 'If we want to modify our application to use the access decision manager, we
+    require two modifications. In order to do this, we add the `accessDecisionManager`
+    entry to the `http` element in our `SecurityConfig.java` file, as follows:'
+  id: totrans-42
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果我们想要修改我们的应用程序以使用访问决策管理器，我们需要进行两项修改。为此，我们需要在我们的`SecurityConfig.java`文件中的`http`元素中添加`accessDecisionManager`条目，如下所示：
+- en: '[PRE1]'
+  id: totrans-43
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE1]'
+- en: 'This is a standard Spring bean reference, so this should correspond to the
+    `id` attribute of a bean. We could then define the `UnanimousBased` bean, as shown
+    in the following code snippet. Note that we will not actually utilize this configuration
+    in our exercises:'
+  id: totrans-44
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这是一个标准的Spring bean引用，所以这应该对应于bean的`id`属性。我们然后可以定义`UnanimousBased` bean，如下面的代码片段所示。请注意，我们实际上不会在练习中使用这个配置：
+- en: '[PRE2]'
+  id: totrans-45
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE2]'
+- en: You may be wondering what the `decisionVoters` property is about. This property
+    is auto-configured until we declare our own `AccessDecisionManager`. The default
+    `AccessDecisionManager` class requires us to declare the list of voters who are
+    consulted to make authentication decisions. The two voters listed here are the
+    defaults supplied by the security namespace configuration.
+  id: totrans-46
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 您可能想知道`decisionVoters`属性是关于什么。这个属性在我们声明自己的`AccessDecisionManager`之前是自动配置的。默认的`AccessDecisionManager`类需要我们声明一个投票者列表，这些投票者被咨询以做出认证决策。这里列出的两个投票者是安全命名空间配置提供的默认值。
+- en: Spring Security doesn't come with a wide variety of voters, but it would be
+    trivial to implement a new one. As we will see later in the chapter, in most situations,
+    creating a custom voter is not necessary, since this can typically be implemented
+    using custom expressions or even a custom `o.s.s.access.PermissionEvaluator`.
+  id: totrans-47
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Spring Security没有包含多种投票者，但它实现一个新的投票者是微不足道的。正如我们将在本章后面看到的，在大多数情况下，创建自定义投票者是不必要的，因为这通常可以通过自定义表达式或甚至自定义`o.s.s.access.PermissionEvaluator`来实现。
+- en: 'The two voter implementations that we reference here are the following:'
+  id: totrans-48
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这里提到的两个投票者实现如下：
+- en: '| **Class name** | **Description** | **Example** |'
+  id: totrans-49
+  prefs: []
+  type: TYPE_TB
+  zh: '| **类名** | **描述** | **示例** |'
+- en: '| `o.s.s.access.vote.RoleVoter` | Checks that the user has the matching declared
+    role. Expects the attribute to define a comma-delimited list of names. The prefix
+    is expected, but optionally configurable. | `access="ROLE_USER,ROLE_ADMIN"` |'
+  id: totrans-50
+  prefs: []
+  type: TYPE_TB
+  zh: '| `o.s.s.access.vote.RoleVoter` | 检查用户具有匹配的声明角色。期望属性定义一个以逗号分隔的名称列表。前缀是期望的，但可选配置。|
+    `access="ROLE_USER,ROLE_ADMIN"` |'
+- en: '| `o.s.s.access.vote.AuthenticatedVoter` | Supports special declarations allowing
+    wildcard matches:'
+  id: totrans-51
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '| `o.s.s.access.vote.AuthenticatedVoter` | 支持特殊声明，允许通配符匹配：'
+- en: '`IS_AUTHENTICATED_FULLY` allows access if a fresh username and password are
+    supplied.'
+  id: totrans-52
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`IS_AUTHENTICATED_FULLY` 如果提供了新的用户名和密码，则允许访问。'
+- en: '`IS_AUTHENTICATED_REMEMBERED` allows access if the user has authenticated with
+    the remember-me functionality.'
+  id: totrans-53
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`IS_AUTHENTICATED_REMEMBERED` 如果用户使用记住我功能进行了认证，则允许访问。'
+- en: '`IS_AUTHENTICATED_ANONYMOUSLY` allows access if the user is anonymous'
+  id: totrans-54
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`IS_AUTHENTICATED_ANONYMOUSLY` 如果用户是匿名的，则允许访问'
+- en: '| `access="IS_AUTHENTICATED_ANONYMOUSLY"` |'
+  id: totrans-55
+  prefs: []
+  type: TYPE_TB
+  zh: '| `access="IS_AUTHENTICATED_ANONYMOUSLY"` |'
+- en: Expression-based request authorization
+  id: totrans-56
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 基于表达式的请求授权
+- en: As you might expect, SpEL handling is supplied by a different `Voter` implementation,
+    `o.s.s.web.access.expression.WebExpressionVoter`, which understands how to evaluate
+    the SpEL expressions. The `WebExpressionVoter` class relies on an implementation
+    of the `SecurityExpressionHandler` interface for this purpose. The `SecurityExpressionHandler`
+    interface is responsible both for evaluating the expressions and for supplying
+    the security-specific methods that are referenced in the expressions. The default
+    implementation of this interface exposes methods defined in the `o.s.s.web.access.expression.WebSecurityExpressionRoot`
+    class.
+  id: totrans-57
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 正如您可能预期的那样，SpEL 处理由不同的`Voter`实现提供，即`o.s.s.web.access.expression.WebExpressionVoter`，它知道如何评估
+    SpEL 表达式。`WebExpressionVoter`类为这个目的依赖于`SecurityExpressionHandler`接口的实现。`SecurityExpressionHandler`接口负责评估表达式以及提供在表达式中被引用的安全特定方法。这个接口的默认实现暴露了定义在`o.s.s.web.access.expression.WebSecurityExpressionRoot`类中的方法。
+- en: 'The flow and relationship between these classes are shown in the following
+    diagram:'
+  id: totrans-58
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这些类之间的流程和关系在下方的图表中显示：
+- en: '![](img/5f3cd41d-c323-4764-a9c2-897f26c87f8c.png)'
+  id: totrans-59
+  prefs: []
+  type: TYPE_IMG
+  zh: '![](img/5f3cd41d-c323-4764-a9c2-897f26c87f8c.png)'
+- en: Now that we know how to request authorization works, let's solidify our understanding
+    by making a few custom implementations of some key interfaces.
+  id: totrans-60
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 既然我们知道如何请求授权工作，那么通过实现一些关键接口的几个自定义实现来巩固我们的理解吧。
+- en: Customizing request authorization
+  id: totrans-61
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 自定义请求授权
+- en: The real power of Spring Security's authorization is demonstrated by how adaptable
+    it is to custom requirements. Let's explore a few scenarios that will help reinforce
+    our understanding of the overall architecture.
+  id: totrans-62
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Spring Security 授权的真正力量在于它如何适应定制化需求。让我们探索几个场景，以帮助加深对整体架构的理解。
+- en: Dynamically defining access control to URLs
+  id: totrans-63
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 动态定义 URL 的访问控制
+- en: Spring Security provides several methods for mapping `ConfigAttribute` objects
+    to a resource. For example, the `antMatchers()` method ensures it is simple for
+    developers to restrict access to specific HTTP requests in their web application.
+    Behind the scenes, an implementation of `o.s.s.acess.SecurityMetadataSource` is
+    populated with these mappings and queried to determine what is required in order
+    to be authorized to make any given HTTP request.
+  id: totrans-64
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Spring Security 为将`ConfigAttribute`对象映射到资源提供了多种方法。例如，`antMatchers()`方法确保它对开发人员来说简单易用，以便在他们
+    web 应用程序中限制对特定 HTTP 请求的访问。在幕后，`o.s.s.acess.SecurityMetadataSource`的实现被填充了这些映射，并查询它以确定为了被授权对任何给定的
+    HTTP 请求进行操作需要什么。
+- en: While the `antMatchers()` method is very simple, there may be times that it
+    would be desirable to provide a custom mechanism for determining the URL mappings.
+    An example of this might be if an application needs to be able to dynamically
+    provide the access control rules. Let's demonstrate what it would take to move
+    our URL authorization configuration into a database.
+  id: totrans-65
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 虽然`antMatchers()`方法非常简单，但有时可能希望提供一个自定义机制来确定 URL 映射。一个这样的例子可能是如果一个应用程序需要能够动态提供访问控制规则。让我们展示将我们的
+    URL 授权配置移动到数据库需要做什么。
+- en: Configuring the RequestConfigMappingService
+  id: totrans-66
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 配置 RequestConfigMappingService
+- en: 'The first step is to be able to obtain the necessary information from the database.
+    This will replace the logic that reads in the `antMatchers()` methods from our
+    security bean configuration. In order to do this, the chapter''s sample code contains
+    `JpaRequestConfigMappingService`, which will obtain a mapping of an ant pattern
+    and an expression from the database represented as `RequestConfigMapping`. The
+    rather simple implementation is as follows:'
+  id: totrans-67
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 第一步是能够从数据库中获取必要的信息。这将替换从我们的安全豆配置中读取`antMatchers()`方法的逻辑。为了实现这一点，章节示例代码中包含了`JpaRequestConfigMappingService`，它将从数据库中获取表示为`RequestConfigMapping`的
+    ant 模式和表达式的映射。这个相当简单的实现如下所示：
+- en: '[PRE3]'
+  id: totrans-68
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE3]'
+- en: It is important to notice that, just as with the `antMatchers()` methods, order
+    matters. Therefore, we ensure the results are sorted by the `sort_order` column.
+    The service creates an `AntRequestMatcher` and associates it to `SecurityConfig`,
+    an instance of `ConfigAttribute`. This will provide a mapping of the HTTP request
+    to `ConfigAttribute` objects that can be used by Spring Security to secure our
+    URLs.
+  id: totrans-69
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 需要注意的是，就像`antMatchers()`方法一样，顺序很重要。因此，我们确保结果按`sort_order`列排序。服务创建了一个`AntRequestMatcher`，并将其关联到`SecurityConfig`，这是一个`ConfigAttribute`实例。这将为
+    HTTP 请求到`ConfigAttribute`对象的映射提供支持，这些对象可以被 Spring Security 用来保护我们的 URL。
+- en: 'We need to create a domain object to use for JPA to map to as follows:'
+  id: totrans-70
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们需要创建一个域对象，以便JPA将其映射如下：
+- en: '[PRE4]'
+  id: totrans-71
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE4]'
+- en: 'Finally, we need to create a Spring Data repository object as follows:'
+  id: totrans-72
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 最后，我们需要创建一个Spring Data仓库对象，如下所示：
+- en: '[PRE5]'
+  id: totrans-73
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE5]'
+- en: 'In order for the new service to work, we will need to initialize our database
+    with the schema and the access control mappings. Just as with the service implementation,
+    our schema is rather straightforward:'
+  id: totrans-74
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 为了让新服务能工作，我们需要初始化我们的数据库，包括架构和访问控制映射。和实现服务一样，我们的架构相当简单：
+- en: '[PRE6]'
+  id: totrans-75
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE6]'
+- en: 'We can then use the same `antMatchers()` mappings from our `SecurityConfig.java`
+    file to produce the `schema.sql` file:'
+  id: totrans-76
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 然后我们可以使用相同的`antMatchers()`映射从我们的`SecurityConfig.java`文件来生成`schema.sql`文件：
+- en: '[PRE7]'
+  id: totrans-77
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE7]'
+- en: At this point, your code should be starting with `chapter13.00-calendar`.
+  id: totrans-78
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 此时，你的代码应该以`chapter13.00-calendar`开始。
+- en: Custom SecurityMetadataSource implementation
+  id: totrans-79
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 自定义SecurityMetadataSource实现
+- en: 'In order for Spring Security to be aware of our URL mappings, we need to provide
+    a custom `FilterInvocationSecurityMetadataSource` implementation. The `FilterInvocationSecurityMetadataSource`
+    package extends the `SecurityMetadataSource` interface which, given a particular
+    HTTP request, is what provides Spring Security with the information necessary
+    for determining if access should be granted. Let''s take a look at how we can
+    utilize our `RequestConfigMappingService` interface to implement a `SecurityMetadataSource`
+    interface:'
+  id: totrans-80
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 为了让Spring Security了解我们的URL映射，我们需要提供一个自定义的`FilterInvocationSecurityMetadataSource`实现。`FilterInvocationSecurityMetadataSource`包扩展了`SecurityMetadataSource`接口，对于特定的HTTP请求，它提供了Spring
+    Security确定是否应授予访问权限所需的信息。让我们看看如何利用我们的`RequestConfigMappingService`接口来实现一个`SecurityMetadataSource`接口：
+- en: '[PRE8]'
+  id: totrans-81
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE8]'
+- en: We are able to use our `RequestConfigMappingService` interface to create a map
+    of `RequestMatcher` objects that map to `ConfigAttribute` objects. We then delegate
+    to an instance of `ExpressionBasedFilterInvocationSecurityMetadataSource` to do
+    all the work. For simplicity, the current implementation would require restarting
+    the application to pick up changes. However, with a few minor changes, we could
+    avoid this inconvenience.
+  id: totrans-82
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们可以使用我们的`RequestConfigMappingService`接口创建一个`RequestMatcher`对象的映射到`ConfigAttribute`对象的映射。然后我们将工作委托给`ExpressionBasedFilterInvocationSecurityMetadataSource`的一个实例。为了简单起见，当前的实现将需要重新启动应用程序以获取更改。然而，通过一些小的改动，我们可以避免这种不便。
+- en: Registering a custom SecurityMetadataSource
+  id: totrans-83
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 注册一个自定义SecurityMetadataSource
+- en: 'Now, all that is left is for us to configure `FilterInvocationServiceSecurityMetadataSource.`
+    The only problem is that Spring Security does not support configuring a custom
+    `FilterInvocationServiceSecurityMetadataSource` interface directly. This is not
+    too difficult, so we will register this `SecurityMetadataSource` with our `FilterSecurityInterceptor`
+    in our `SecurityConfig` file:'
+  id: totrans-84
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 现在，剩下要做的就是配置`FilterInvocationServiceSecurityMetadataSource`。唯一的问题是Spring Security不支持直接配置自定义的`FilterInvocationServiceSecurityMetadataSource`接口。这并不太难，因此我们将在`SecurityConfig`文件中用我们的`FilterSecurityInterceptor`注册这个`SecurityMetadataSource`：
+- en: '[PRE9]'
+  id: totrans-85
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE9]'
+- en: This sets up our custom `SecurityMetadataSource` interface with the `FilterSecurityInterceptor`
+    object as the default metadata source.
+  id: totrans-86
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这设置了我们自定义的`SecurityMetadataSource`接口，将其作为默认元数据源与`FilterSecurityInterceptor`对象关联。
+- en: Removing our antMatchers() method
+  id: totrans-87
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 移除我们的antMatchers()方法
+- en: 'Now that the database is being used to map our security configuration, we can
+    remove the `antMatchers()` method from our `SecurityConfig.java` file. Go ahead
+    and remove them, so that the configuration looks similar to the following code
+    snippet:'
+  id: totrans-88
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 现在既然数据库正在被用来映射我们的安全配置，我们可以在`SecurityConfig.java`文件中删除`antMatchers()`方法。大胆地删除它们，使得配置看起来类似于以下的代码片段：
+- en: '[PRE10]'
+  id: totrans-89
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE10]'
+- en: If you use even one `http antMatchers` expression, then the custom expression
+    handler will not be invoked.
+  id: totrans-90
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果你使用了`http antMatchers`表达式中的任何一个，那么自定义表达式处理程序将不会被调用。
+- en: You should now be able to start the application and test to ensure that our
+    URLs are secured as they should be. Our users will not notice a difference, but
+    we know that our URL mappings are persisted in a database now.
+  id: totrans-91
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 现在你应该能够启动应用程序并测试，以确保我们的URL已经被正确保护。我们的用户不会注意到任何区别，但我们知道现在我们的URL映射已经保存在数据库中了。
+- en: Your code should now look like `chapter13.01-calendar`.
+  id: totrans-92
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 你的代码现在应该看起来像`chapter13.01-calendar`。
+- en: Creating a custom expression
+  id: totrans-93
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 创建一个自定义表达式
+- en: The `o.s.s.access.expression.SecurityExpresssionHandler` interface is how Spring
+    Security abstracts how the Spring expressions are created and initialized. Just
+    as with the `SecurityMetadataSource` interface, there is an implementation for
+    creating expressions for web requests and creating expressions for securing methods.
+    In this section, we will explore how we can easily add new expressions.
+  id: totrans-94
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '`o.s.s.access.expression.SecurityExpresssionHandler`接口是Spring Security如何抽象Spring表达式的创建和初始化的方式。就像`SecurityMetadataSource`接口一样，有一个用于创建web请求表达式的实现，还有一个用于保护方法的实现。在本节中，我们将探讨如何轻松添加新表达式。'
+- en: Configuring a custom SecurityExpressionRoot
+  id: totrans-95
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 配置自定义SecurityExpressionRoot
+- en: Let's assume that we want to support a custom web expression named `isLocal`
+    that will return `true` if the host is localhost and false otherwise. This new
+    method could be used to provide additional security for our SQL console by ensuring
+    that it is only accessed from the same machine that the web application is deployed
+    from.
+  id: totrans-96
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 假设我们想要支持一个名为`isLocal`的自定义web表达式，如果主机是localhost则返回`true`，否则返回`false`。这个新方法可以用来为我们的SQL控制台提供额外的安全性，通过确保它只从部署web应用程序的同一台机器访问。
+- en: This is an artificial example that does not add any security benefits since
+    the host comes from the headers of the HTTP request. This means a malicious user
+    could inject a header stating the host is localhost even if they are requesting
+    to an external domain.
+  id: totrans-97
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这是一个人为的例子，因为它不会增加任何安全益处，因为主机来自HTTP请求的头部。这意味着即使恶意用户请求一个外部域，他们也可以注入一个声明主机是localhost的头部。
+- en: All of the expressions that we have seen are available because the `SecurityExpressionHandler`
+    interface makes them available via an instance of `o.s.s.access.expression.SecurityExpressionRoot`.
+    If you open this object, you will find the methods and properties we use in Spring
+    expressions (that is, `hasRole`, `hasPermission`, and so on), which are common
+    in both web and method security. A subclass provides the methods that are specific
+    to web and method expressions. For example, `o.s.s.web.access.expression.WebSecurityExpressionRoot`
+    provides the `hasIpAddress` method for web requests.
+  id: totrans-98
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 所有我们见过的表达式都是可用的，因为`SecurityExpressionHandler`接口通过一个`o.s.s.access.expression.SecurityExpressionRoot`实例使它们可用。如果你打开这个对象，你会找到我们在Spring表达式中使用的方法和属性（即`hasRole`、`hasPermission`等），这在web和方法安全性中都很常见。一个子类提供了特定于web和方法表达式的方法。例如，`o.s.s.web.access.expression.WebSecurityExpressionRoot`为web请求提供了`hasIpAddress`方法。
+- en: 'To create a custom web `SecurityExpressionhandler`, we will first need to create
+    a subclass of `WebSecurityExpressionRoot` that defines our `isLocal` method as
+    follows:'
+  id: totrans-99
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 要创建一个自定义web `SecurityExpressionhandler`，我们首先需要创建一个定义我们的`isLocal`方法的`WebSecurityExpressionRoot`子类：
+- en: '[PRE11]'
+  id: totrans-100
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE11]'
+- en: It is important to note that `getServerName()` returns the value that is provided
+    in the `Host` header value. This means that a malicious user can inject a different
+    value into the header to bypass constraints. However, most application servers
+    and proxies can enforce the value of the `Host` header. Please read the appropriate
+    documentation before leveraging such an approach to ensure that malicious users
+    do not inject a `Host` header value to bypass such a constraint.
+  id: totrans-101
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 重要的是要注意`getServerName()`返回的是在`Host`头值中提供的值。这意味着恶意用户可以将不同的值注入到头中以绕过约束。然而，大多数应用服务器和代理可以强制`Host`头的值。在利用这种方法之前，请阅读适当的文档，以确保恶意用户不能注入`Host`头值以绕过这样的约束。
+- en: Configuring a custom SecurityExpressionHandler
+  id: totrans-102
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 配置自定义SecurityExpressionHandler
+- en: 'In order for our new method to become available, we need to create a custom
+    `SecurityExpressionHandler` interface that utilizes our new root object. This
+    is as simple as extending `WebSecurityExpressionHandler`, as follows:'
+  id: totrans-103
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 为了让我们的新方法变得可用，我们需要创建一个使用我们新根对象的定制`SecurityExpressionHandler`接口。这就像扩展`WebSecurityExpressionHandler`一样简单：
+- en: '[PRE12]'
+  id: totrans-104
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE12]'
+- en: We perform the same steps that the superclass does, except that we use `CustomWebSecurityExpressionRoot,`
+    which contains the new method. The `CustomWebSecurityExpressionRoot` becomes the
+    root of our SpEL expression.
+  id: totrans-105
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们执行父类所做的相同步骤，只不过我们使用`CustomWebSecurityExpressionRoot`，它包含了新方法。`CustomWebSecurityExpressionRoot`成为我们SpEL表达式的根。
+- en: For further details, refer to the SpEL documentation within the Spring Reference
+    at [http://static.springsource.org/spring/docs/current/spring-framework-reference/html/expressions.html](http://static.springsource.org/spring/docs/current/spring-framework-reference/html/expressions.html).
+  id: totrans-106
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 有关详细信息，请参阅Spring参考文档中的SpEL文档：[http://static.springsource.org/spring/docs/current/spring-framework-reference/html/expressions.html](http://static.springsource.org/spring/docs/current/spring-framework-reference/html/expressions.html)。
+- en: Configuring and using CustomWebSecurityExpressionHandler
+  id: totrans-107
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 配置和使用CustomWebSecurityExpressionHandler
+- en: 'Let''s take a look at the following steps to configure `CustomWebSecurityExpressionHandler`:'
+  id: totrans-108
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 让我们来看看配置`CustomWebSecurityExpressionHandler`的以下步骤：
+- en: 'We now need to configure `CustomWebSecurityExpressionHandler`. Fortunately,
+    this can be done easily using the Spring Security namespace configuration support.
+    Add the following configuration to the `SecurityConfig.java` file:'
+  id: totrans-109
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+  zh: 我们现在需要配置`CustomWebSecurityExpressionHandler`。幸运的是，这可以通过使用Spring Security命名空间配置支持很容易地完成。在`SecurityConfig.java`文件中添加以下配置：
+- en: '[PRE13]'
+  id: totrans-110
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE13]'
+- en: 'Now, let''s update our initialization SQL query to use the new expression.
+    Update the `data.sql` file so that it requires the user to be `ROLE_ADMIN` and
+    requested from the local machine. You will notice that we are able to write local
+    instead of `isLocal`, since SpEL supports Java Bean conventions:'
+  id: totrans-111
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+  zh: 现在，让我们更新我们的初始化SQL查询以使用新的表达式。更新`data.sql`文件，要求用户为`ROLE_ADMIN`，并且请求来自本地机器。你会注意到，由于SpEL支持Java
+    Bean约定，我们能够写本地而不是`isLocal`：
+- en: '[PRE14]'
+  id: totrans-112
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE14]'
+- en: Restart the application and access the H2 console using `localhost:8443/admin/h2`
+    and `admin1@example.com/admin1` to see the admin console. If the H2 console is
+    accessed using `127.0.0.1:8443/admin/h2` and `admin1@example.com admin1`, the
+    access denied page will be displayed.
+  id: totrans-113
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+  zh: 重新启动应用程序，使用`localhost:8443/admin/h2`和`admin1@example.com/admin1`访问H2控制台，以查看管理控制台。如果使用`127.0.0.1:8443/admin/h2`和`admin1@example.com
+    admin1`访问H2控制台，将显示访问被拒绝的页面。
+- en: Your code should look like `chapter13.02-calendar`.
+  id: totrans-114
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 你的代码应该看起来像`chapter13.02-calendar`。
+- en: Alternative to a CustomWebSecurityExpressionHandler
+  id: totrans-115
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: CustomWebSecurityExpressionHandler的替代方案
+- en: 'Another way to use a custom expression instead of using a `CustomWebSecurityExpressionHandler`
+    interface is to add a `@Component` web, as follows:'
+  id: totrans-116
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 使用自定义表达式而不是`CustomWebSecurityExpressionHandler`接口的另一种方法是在web上添加一个`@Component`，如下所示：
+- en: '[PRE15]'
+  id: totrans-117
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE15]'
+- en: 'Now, let''s update our initialization SQL query to use the new expression.
+    You will notice that we are able to reference the `@Component` directly since
+    SpEL supports Java Bean conventions:'
+  id: totrans-118
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 现在，让我们更新我们的初始化SQL查询，以使用新的表达式。你会注意到，由于SpEL支持Java Bean约定，我们能够直接引用`@Component`：
+- en: '[PRE16]'
+  id: totrans-119
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE16]'
+- en: How does method security work?
+  id: totrans-120
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 方法安全性是如何工作的？
+- en: The access decision mechanism for method security-whether or not a given request
+    is allowed-is conceptually the same as the access decision logic for web request
+    access. `AccessDecisionManager` polls a set of `AccessDecisionVoters`, each of
+    which can provide a decision to grant or deny access, or abstain from voting.
+    The specific implementation of `AccessDecisionManager` aggregates the voter decisions
+    and arrives at an overall decision to allow for the method invocation.
+  id: totrans-121
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 方法安全性的访问决策机制-是否允许给定请求-与web请求访问的访问决策逻辑概念上是相同的。`AccessDecisionManager`轮询一组`AccessDecisionVoters`，每个都可以提供允许或拒绝访问的决定，或者弃权。`AccessDecisionManager`的具体实现聚合了投票者的决定，并得出一个总体的决定来允许方法调用。
+- en: Web request access decision making is less complicated, due to the fact that
+    the availability of servlet filters makes interception (and summary rejection)
+    of securable requests relatively straightforward. As method invocation can happen
+    from anywhere, including areas of code that are not directly configured by Spring
+    Security, Spring Security designers chose to use a Spring-managed AOP approach
+    to recognize, evaluate, and secure method invocations.
+  id: totrans-122
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 由于servlet过滤器的可用性使得拦截（以及总结拒绝）可安全请求相对简单，web请求访问决策过程较为简单。由于方法调用可以来自任何地方，包括Spring
+    Security没有直接配置的代码区域，Spring Security设计者选择使用Spring管理的AOP方法来识别、评估和保护方法调用。
+- en: 'The following high-level flow illustrates the main players involved in authorization
+    decisions for method invocation:'
+  id: totrans-123
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 以下高级流程图展示了在方法调用授权决策中涉及的主要参与者：
+- en: '![](img/85d9b059-2b83-4f34-9dda-ecf1a5132c04.png)'
+  id: totrans-124
+  prefs: []
+  type: TYPE_IMG
+  zh: '![](img/85d9b059-2b83-4f34-9dda-ecf1a5132c04.png)'
+- en: We can see that Spring Security's `o.s.s.access.intercept.aopalliance.MethodSecurityInterceptor`
+    is invoked by the standard Spring AOP runtime to intercept method calls of interest.
+    From here, the logic of whether or not to allow a method call is relatively straightforward,
+    as per the previous flow diagram.
+  id: totrans-125
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们可以看到，Spring Security的`o.s.s.access.intercept.aopalliance.MethodSecurityInterceptor`被标准的Spring
+    AOP运行时调用，以拦截感兴趣的方法调用。从这里，是否允许一个方法调用的逻辑相对直接，如之前的流程图所示。
+- en: At this point, we might wonder about the performance of the method security
+    feature. Obviously, `MethodSecurityInterceptor` can't be invoked for every method
+    call in the application-so how do annotations on methods or classes result in
+    AOP interception?
+  id: totrans-126
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在这个阶段，我们可能会对方法安全特性性能感到好奇。显然，`MethodSecurityInterceptor`不能为应用程序中的每个方法调用都进行调用——那么方法或类上的注解是如何导致AOP拦截的呢？
+- en: First of all, AOP proxying isn't invoked for all Spring-managed beans by default.
+    Instead, if `@EnableGlobalMethodSecurity` is defined in the Spring Security configuration,
+    a standard Spring AOP `o.s.beans.factory.config.BeanPostProcessor` will be registered
+    that will introspect the AOP configuration to see if any AOP advisors indicate
+    that proxying (and the interception) is required. This workflow is standard Spring
+    AOP handling (known as AOP auto-proxying), and doesn't inherently have any functionality
+    specific to Spring Security. All registered `BeanPostProcessor` run upon initialization
+    of the spring `ApplicationContext`, after all, Spring bean configurations have
+    occurred.
+  id: totrans-127
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 首先，默认情况下，AOP代理不会为所有Spring管理的bean调用。相反，如果Spring Security配置中定义了`@EnableGlobalMethodSecurity`，将注册一个标准的Spring
+    AOP `o.s.beans.factory.config.BeanPostProcessor`，该处理器将内省AOP配置，以查看是否有任何AOP顾问指示需要代理（及拦截）。这个工作流程是标准的Spring
+    AOP处理（称为AOP自动代理），本质上并没有任何特定于Spring Security的功能。所有注册的`BeanPostProcessor`在spring
+    `ApplicationContext`初始化之后运行，此时Spring bean配置已经完成。
+- en: The AOP auto-proxy functionality queries all registered `PointcutAdvisor` to
+    see if there are AOP pointcuts that resolve method invocations that should have
+    AOP advice applied. Spring Security implements the `o.s.s.access.intercept.aopalliance.MethodSecurityMetadataSourceAdvisor`
+    class, which examines any and all configured method security and sets up appropriate
+    AOP interception. Take note that only interfaces or classes with declared method
+    security rules will be proxied for AOP!
+  id: totrans-128
+  prefs: []
+  type: TYPE_NORMAL
+  zh: AOP自动代理功能查询所有注册的`PointcutAdvisor`，以查看是否有关键的AOP切点可以解析应该应用AOP建议的方法调用。Spring Security实现了`o.s.s.access.intercept.aopalliance.MethodSecurityMetadataSourceAdvisor`类，该类检查所有配置的方法安全，并设置适当的AOP拦截。请注意，只有声明了方法安全规则的接口或类才会被AOP代理！
+- en: Be aware that it is strongly encouraged to declare AOP rules (and other security
+    annotations) on interfaces, and not on implementation classes. The use of classes,
+    while available using CGLIB proxying with Spring, may unexpectedly change the
+    behavior of your application, and is generally less semantically correct than
+    security declarations (through AOP) on interfaces. `MethodSecurityMetadataSourceAdvisor`
+    delegates the decision to affect methods with the AOP advice to an `o.s.s.access.method.MethodSecurityMetadataSource`
+    instance. The different forms of method security annotation each have their own
+    `MethodSecurityMetadataSource` implementation, which is used to introspect each
+    method and class in turn and add AOP advice to be executed at runtime.
+  id: totrans-129
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 请注意，强烈建议您在接口上声明AOP规则（和其他安全注解），而不是在实现类上。虽然使用CGLIB代理与Spring可用，但使用类可能会意外地改变应用程序的行为，并且从语义上讲，使用AOP在接口上声明安全（比在类上）通常更正确。`MethodSecurityMetadataSourceAdvisor`将决定影响方法的建议委托给一个`o.s.s.access.method.MethodSecurityMetadataSource`实例。每种方法安全注解都有自己的`MethodSecurityMetadataSource`实现，该实现用于依次内省每个方法和类，并添加在运行时执行的AOP建议。
+- en: 'The following diagram illustrates how this process occurs:'
+  id: totrans-130
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 以下图表展示了这一过程是如何发生的：
+- en: '![](img/0b685c5d-f978-4220-8c0b-87e4cc716f07.png)'
+  id: totrans-131
+  prefs: []
+  type: TYPE_IMG
+  zh: '![](img/0b685c5d-f978-4220-8c0b-87e4cc716f07.png)'
+- en: Depending on the number of Spring beans configured in your application, and
+    the number of secured method annotations you have, adding method security proxying
+    may increase the time required to initialize your ApplicationContext. Once your
+    Spring context is initialized, however, there is a negligible performance impact
+    on individual proxied beans.
+  id: totrans-132
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 根据您应用程序中配置的Spring bean数量，以及您拥有的受保护方法注解的数量，添加方法安全代理可能会增加初始化ApplicationContext所需的时间。然而，一旦Spring上下文初始化完成，对个别代理bean的性能影响可以忽略不计。
+- en: Now that we have an understanding of how we can use AOP to apply Spring Security,
+    let's strengthen our grasp of Spring Security authorization by creating a custom
+    `PermissionEvaluator`.
+  id: totrans-133
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 既然我们已经了解了如何使用AOP将Spring Security应用于实际场景，那么接下来让我们通过创建一个自定义`PermissionEvaluator`来加深对Spring
+    Security授权的理解。
+- en: Creating a custom PermissionEvaluator
+  id: totrans-134
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 创建自定义PermissionEvaluator
+- en: In the previous chapter, we demonstrated that we could use Spring Security's
+    built-in `PermissionEvaluator` implementation, `AclPermissionEvaluator`, to restrict
+    access to our application. While powerful, this can often be more complicated
+    than necessary. We have also discovered how SpEL can formulate complex expressions
+    that are able to secure our application. While simple, one of the downsides of
+    using complex expressions is that the logic is not centralized. Fortunately, we
+    can easily create a custom `PermissionEvaluator` that is able to centralize our
+    authorization logic and still avoid the complexity of using ACLs.
+  id: totrans-135
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在上一章中，我们展示了如何使用Spring Security内置的`PermissionEvaluator`实现，`AclPermissionEvaluator`，来限制对应用程序的访问。虽然这个实现很强大，但很多时候可能会比必要的更复杂。我们还发现SpEL可以制定复杂的表达式来保护我们的应用程序。虽然简单，使用复杂表达式的一个缺点是逻辑不集中。幸运的是，我们可以很容易地创建一个自定义`PermissionEvaluator`，它能够集中我们的授权逻辑，同时避免使用ACLs的复杂性。
+- en: CalendarPermissionEvaluator
+  id: totrans-136
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 日历权限评估器
+- en: 'A simplified version of our custom `PermissionEvaluator` that does not contain
+    any validation can be seen as follows:'
+  id: totrans-137
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 下面是一个不包含任何验证的我们自定义`PermissionEvaluator`的简化版本：
+- en: '[PRE17]'
+  id: totrans-138
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE17]'
+- en: The logic is fairly similar to the Spring expressions that we have already used,
+    except that it differentiates read and write access. If the current user's username
+    matches the owner's email of the `Event` object, then both read and write access
+    is granted. If the current user's email matches the attendee's email, then read
+    access is granted. Otherwise, access is denied.
+  id: totrans-139
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这个逻辑与我们已经使用的Spring表达式相当相似，不同之处在于它区分了读取和写入权限。如果当前用户的用户名与`Event`对象的拥有者邮箱匹配，那么授予读取和写入权限。如果当前用户的邮箱与参与者邮箱匹配，则授予读取权限。否则，拒绝访问。
+- en: It should be noted that a single `PermissionEvaluator` is used for every domain
+    object. So, in a real-world situation, we must perform `instanceof` checks first.
+    For example, if we were also securing our `CalendarUser` objects, these could
+    be passed into this same instance. For a full example of these minor changes,
+    refer to the sample code included in the book.
+  id: totrans-140
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 需要注意的是，对于每个领域对象，都会使用一个单独的`PermissionEvaluator`。因此，在现实世界中，我们必须首先进行`instanceof`检查。例如，如果我们还希望保护我们的`CalendarUser`对象，这些对象可以传递给这个相同的实例。关于这些小改动的完整示例，请参考书中包含的示例代码。
+- en: Configuring CalendarPermissionEvaluator
+  id: totrans-141
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 配置CalendarPermissionEvaluator
+- en: 'We can then leverage the `CustomAuthorizationConfig.java` configuration that
+    is provided with this chapter to provide an `ExpressionHandler` that uses our
+    `CalendarPermissionEvaluator`, like so:'
+  id: totrans-142
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 然后，我们可以利用本书提供的`CustomAuthorizationConfig.java`配置，提供一个使用我们的`CalendarPermissionEvaluator`的`ExpressionHandler`，如下所示：
+- en: '[PRE18]'
+  id: totrans-143
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE18]'
+- en: The configuration should look similar to the configuration from [Chapter 12](12.html),
+    *Access Control Lists*, except that we now use our `CalendarPermissionEvalulator`
+    class instead of `AclPermissionEvaluator`.
+  id: totrans-144
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 配置应该类似于第12章的配置，*访问控制列表*，不同之处在于我们现在使用的是我们的`CalendarPermissionEvaluator`类，而不是`AclPermissionEvaluator`。
+- en: Next, we inform Spring Security to use our customized `ExpressionHandler` by
+    adding the following configuration to `SecurityConfig.java`.
+  id: totrans-145
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 接下来，我们在`SecurityConfig.java`中添加以下配置，通知Spring Security使用我们的自定义`ExpressionHandler`。
+- en: '[PRE19]'
+  id: totrans-146
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE19]'
+- en: In the configuration, we ensure that `prePostEnabled` is enabled and point the
+    configuration to our `ExpressionHandler` definition. Once again, the configuration
+    should look very similar to our configuration from [Chapter 11](https://cdp.packtpub.com/spring_security__third_edition/wp-admin/post.php?post=169&action=edit),
+    *Fine-Grained Access Control*.
+  id: totrans-147
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在配置中，我们确保`prePostEnabled`被启用，并将配置指向我们的`ExpressionHandler`定义。再次强调，配置应该与第11章的配置非常相似，*细粒度访问控制*。
+- en: Securing our CalendarService
+  id: totrans-148
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 保护我们的CalendarService
+- en: 'Lastly, we can secure our `CalendarService getEvent(int eventId)` method with
+    a `@PostAuthorize` annotation. You will notice that this step is exactly the same
+    as what we did in [Chapter 1](01.html), *Anatomy of an Unsafe Application*, and
+    we have only changed the implementation of `PermissionEvaluator`:'
+  id: totrans-149
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 最后，我们可以用`@PostAuthorize`注解来保护我们的`CalendarService getEvent(int eventId)`方法。你会注意到这一步与我们在[第1章](01.html)中的操作完全相同，*不安全应用程序的剖析*，我们只是改变了`PermissionEvaluator`的实现：
+- en: '[PRE20]'
+  id: totrans-150
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE20]'
+- en: If you have not done so already, restart the application, log in as username/password
+    `admin1@example.com/admin1`, and visit the Conference Call event (`events/101`)
+    using the link on the Welcome page. The access denied page will be displayed.
+    However, we would, like `ROLE_ADMIN` users, to be able to access all events.
+  id: totrans-151
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果你还没有这么做，重新启动应用程序，以用户名/密码`admin1@example.com/admin1`登录，并使用欢迎页面上的链接访问电话会议事件(`events/101`)。将显示访问被拒绝的页面。然而，我们希望能够像`ROLE_ADMIN`用户一样访问所有事件。
+- en: Benefits of a custom PermissionEvaluator
+  id: totrans-152
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 自定义PermissionEvaluator的好处
+- en: 'With only a single method being protected, it would be trivial to update the
+    annotation to check if the user has the role of `ROLE_ADMIN` or has permission.
+    However, if we had protected all of our service methods that use an event, it
+    would have become quite cumbersome. Instead, we could just update our `CalendarPermissionEvaluator`.
+    Make the following changes:'
+  id: totrans-153
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 只有一个方法被保护，更新注解以检查用户是否有`ROLE_ADMIN`角色或权限将是微不足道的。然而，如果我们保护了所有使用事件的我们的服务方法，这将会变得非常繁琐。相反，我们只需更新我们的`CalendarPermissionEvaluator`。做出以下更改：
+- en: '[PRE21]'
+  id: totrans-154
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE21]'
+- en: Now, restart the application and repeat the previous exercise. This time, the
+    Conference Call event will display successfully. You can see that the ability
+    to encapsulate our authorization logic can be extremely beneficial. However, sometimes
+    it may be useful to extend the expressions themselves.
+  id: totrans-155
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 现在，重新启动应用程序并重复前面的练习。这次，电话会议事件将成功显示。你可以看到，将我们的授权逻辑封装起来可以非常有用。然而，有时扩展表达式本身可能是有用的。
+- en: Your code should look like `chapter13.03-calendar`.
+  id: totrans-156
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 你的代码应该看起来像`chapter13.03-calendar`。
+- en: Summary
+  id: totrans-157
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 摘要
+- en: After reading this chapter, you should have a firm understanding of how Spring
+    Security authorization works for HTTP requests and methods. With this knowledge,
+    and the provided concrete examples, you should also know how to extend authorization
+    to meet your needs. Specifically, in this chapter, we covered the Spring Security
+    authorization architecture for both HTTP requests and methods. We also demonstrated
+    how to configure secured URLs from a database.
+  id: totrans-158
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 阅读本章后，你应该对Spring Security如何为HTTP请求和方法工作有一个坚实的基础。有了这个知识，以及提供的具体示例，你也应该知道如何扩展授权以满足你的需求。特别是，在本章中，我们介绍了Spring
+    Security的HTTP请求和方法的授权架构。我们还展示了如何从数据库配置受保护的URL。
+- en: We also saw how to create a custom `PermissionEvaluator` object and custom Spring
+    Security expression.
+  id: totrans-159
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们还看到了如何创建一个自定义`PermissionEvaluator`对象和自定义Spring Security表达式。
+- en: In the next chapter, we will explore how Spring Security performs session management.
+    We will also gain an understanding of how it can be used to restrict access to
+    our application.
+  id: totrans-160
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在下一章中，我们将探讨Spring Security如何进行会话管理。我们还将了解如何使用它来限制对我们应用程序的访问。

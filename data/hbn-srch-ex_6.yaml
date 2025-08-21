@@ -1,0 +1,1103 @@
+- en: Chapter 6. System Configuration and Index Management
+  id: totrans-0
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 第6章 系统配置和索引管理
+- en: In this chapter, we will look at configuration options for Lucene indexes, and
+    learn how to perform basic maintenance tasks. We will see how to toggle between
+    automatic and manual updates to Lucene indexes. We will examine low-latency write
+    operations, synchronous versus asynchronous updates, and other performance tuning
+    alternatives.
+  id: totrans-1
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在本章中，我们将查看Lucene索引的配置选项，并学习如何执行基本维护任务。我们将了解如何切换Lucene索引的自动和手动更新。我们将研究低延迟写操作、同步与异步更新以及其他性能优化选择。
+- en: We will cover how to defragment and clean up a Lucene index for better performance,
+    and how to use Lucene without touching hard drive storage at all. Last but not
+    least, we will get exposure to the highly powerful **Luke** utility for working
+    with Lucene indexes outside of application code.
+  id: totrans-2
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们将介绍如何为更好的性能对Lucene索引进行碎片整理和清理，以及如何完全不用接触硬盘存储来使用Lucene。最后但并非最不重要的是，我们将接触到**Luke**这个强大的工具，用于在应用程序代码之外操作Lucene索引。
+- en: Automatic versus manual indexing
+  id: totrans-3
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 自动与手动索引
+- en: So far, we really haven't had to think much about the timing of when entities
+    are indexed. After all, Hibernate Search is tightly integrated with Hibernate
+    ORM. By default, the add-on updates Lucene whenever the core updates the database.
+  id: totrans-4
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 到目前为止，我们实际上并没有太多考虑实体索引的时间。毕竟，Hibernate Search与Hibernate ORM紧密集成。默认情况下，附加组件在核心更新数据库时更新Lucene。
+- en: 'However, you have the option of decoupling these operations, and indexing manually
+    if you like. Some common situations where you might consider a manual approach
+    are as follows:'
+  id: totrans-5
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 然而，你有选择将这些操作解耦的选项，如果你愿意，可以手动索引。一些你可能考虑手动方法的常见情况如下：
+- en: If you can easily live with Lucene being out of sync for limited periods, you
+    might want to defer indexing operations until off-peak hours, to reduce system
+    load during times of peak usage.
+  id: totrans-6
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 如果你能轻松地忍受在有限的时间内Lucene与数据库不同步，你可能想将索引操作推迟到非高峰时段，以在系统高峰使用期间减轻负载。
+- en: If you want to use conditional indexing, but are not comfortable with the experimental
+    nature of `EntityIndexingInterceptor` (refer to [Chapter 4](ch04.html "Chapter 4. Advanced
+    Mapping"), *Advanced Mapping*), you might use manual indexing as an alternative
+    approach.
+  id: totrans-7
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 如果你想使用条件索引，但又不习惯`EntityIndexingInterceptor`的实验性质（参见[第4章](ch04.html "第4章 高级映射")，*高级映射*），你可以使用手动索引作为一种替代方法。
+- en: If your database may be updated directly, by processes that do not go through
+    Hibernate ORM, you must manually update your Lucene indexes regularly to keep
+    them in sync with the database.
+  id: totrans-8
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 如果你的数据库可能直接被不通过Hibernate ORM的过程更新，你必须定期手动更新Lucene索引，以保持它们与数据库同步。
+- en: 'To disable automatic indexing, set the `hibernate.search.indexing_strategy`
+    property to `manual` in `hibernate.cfg.xml` (or `persistence.xml` if using JPA)
+    as follows:'
+  id: totrans-9
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 要禁用自动索引，请在`hibernate.cfg.xml`（或使用JPA时的`persistence.xml`）中设置`hibernate.search.indexing_strategy`属性为`manual`，如下所示：
+- en: '[PRE0]'
+  id: totrans-10
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE0]'
+- en: Individual updates
+  id: totrans-11
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 单独更新
+- en: When automatic indexing is disabled, manual indexing operations are driven by
+    methods on a `FullTextSession` object (either the traditional Hibernate or the
+    JPA version).
+  id: totrans-12
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 当自动索引被禁用时，手动索引操作是由`FullTextSession`对象上的方法驱动的（无论是传统的Hibernate版本还是JPA版本）。
+- en: Adds and updates
+  id: totrans-13
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 添加和更新
+- en: The most important of these methods is `index`, which works with both **add**
+    and **update** operations on the database side. This method takes one parameter,
+    an instance of any entity class that is configured for Hibernate Search indexing.
+  id: totrans-14
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这些方法中最重要的是`index`，它同时处理数据库侧的**添加**和**更新**操作。此方法接受一个参数，是任何为Hibernate Search索引配置的实体类的实例。
+- en: 'This chapter''s version of the VAPORware Marketplace application uses manual
+    indexing. `StartupDataLoader` calls `index` for each app, immediately after persisting
+    it in the database:'
+  id: totrans-15
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 本章的VAPORware Marketplace应用程序使用手动索引。`StartupDataLoader`在将app持久化到数据库后立即调用每个app的`index`：
+- en: '[PRE1]'
+  id: totrans-16
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE1]'
+- en: On the Lucene side, the `index` method works within the same transactional context
+    as the `save` method on the database side. The indexing only occurs when the transaction
+    commits. In the event of a rollback, the Lucene index is untouched.
+  id: totrans-17
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在Lucene侧，`index`方法在与数据库侧`save`方法相同的交易上下文中工作。只有在事务提交时才进行索引。在回滚事件中，Lucene索引不受影响。
+- en: Note
+  id: totrans-18
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 注意
+- en: Using `index` manually overrides any conditional indexing rules. In other words,
+    the `index` method ignores any `EntityIndexingInterceptor` that is registered
+    with that entity class.
+  id: totrans-19
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 手动使用`index`会覆盖任何条件索引规则。换句话说，`index`方法忽略与该实体类注册的任何`EntityIndexingInterceptor`。
+- en: This is not the case for mass updates (see the *Mass updates* section), but
+    is something to bear in mind when considering a manual indexing of individual
+    objects. The code that calls `index` would be responsible for checking any conditions
+    first.
+  id: totrans-20
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 对于批量更新（请参阅*批量更新*部分），情况并非如此，但在考虑对单个对象进行手动索引时，这是需要记住的。调用`index`的代码需要先检查任何条件。
+- en: Deletes
+  id: totrans-21
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 删除
+- en: 'The basic method for removing an entity from a Lucene index is `purge`. This
+    method is somewhat different from `index`, in that you do not pass it an object
+    instance to remove. Instead, you pass it the class reference for the entity, and
+    the ID of a particular instance to remove (that is, corresponding to `@Id` or
+    `@DocumentId`):'
+  id: totrans-22
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 从Lucene索引中删除实体的基本方法是`purge`。这个方法与`index`有点不同，因为你不需要向它传递一个要删除的对象实例。相反，你需要传递实体类引用和一个特定实例的ID（即对应于`@Id`或`@DocumentId`）：
+- en: '[PRE2]'
+  id: totrans-23
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE2]'
+- en: 'Hibernate Search also offers `purgeAll` , a convenient method for removing
+    all the instances of a particular entity type. This method also takes the entity
+    class reference, although obviously there is no need to pass a specific ID:'
+  id: totrans-24
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Hibernate Search还提供了`purgeAll`，这是一个方便的方法，用于删除特定实体类型的所有实例。这个方法也需要实体类引用，尽管显然不需要传递特定的ID：
+- en: '[PRE3]'
+  id: totrans-25
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE3]'
+- en: As with `index`, both `purge` and `purgeAll` operate within a transaction. **Deletes**
+    do not actually occur until the transaction commits. Nothing happens in the event
+    of a rollback.
+  id: totrans-26
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 与`index`一样，`purge`和`purgeAll`都在事务内操作。**删除**实际上直到事务提交才会发生。如果在回滚的情况下，什么也不会发生。
+- en: 'If you *really* want to write to a Lucene index before the transaction commits,
+    then the zero-parameter `flushToIndexes` method allows you to do so. This might
+    be useful if you are processing a large number of entities, and want to free up
+    memory along the way (with the `clear` method) to avoid `OutOfMemoryException`:'
+  id: totrans-27
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果你想在事务提交之前真正地向Lucene索引中写入数据，那么无参数的`flushToIndexes`方法允许你这样做。如果你正在处理大量实体，并且想要在过程中释放内存（使用`clear`方法）以避免`OutOfMemoryException`，这可能很有用：
+- en: '[PRE4]'
+  id: totrans-28
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE4]'
+- en: Mass updates
+  id: totrans-29
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 批量更新
+- en: Adding, updating, and deleting entities individually can be rather tedious,
+    and potentially error-prone if you miss things. Another option is to use `MassIndexer`,
+    which can be thought of as a compromise of sorts between automatic and manual
+    indexing.
+  id: totrans-30
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 单独添加、更新和删除实体可能会相当繁琐，而且如果你错过了某些东西，可能会出现错误。另一个选择是使用`MassIndexer`，它可以被认为是自动索引和手动索引之间的某种折中方案。
+- en: This utility class is still instantiated and used manually. However, when it
+    is called, it automatically rebuilds the Lucene indexes for all mapped entity
+    classes in one step. There's no need to distinguish between adds, updates, and
+    deletes, because the operation wipes out the entire index and recreates it from
+    scratch.
+  id: totrans-31
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这个工具类仍然需要手动实例化和使用。然而，当它被调用时，它会一次性重建所有映射实体类的Lucene索引。不需要区分添加、更新和删除，因为该操作会抹掉整个索引，并从头开始重新创建它。
+- en: 'A `MassIndexer` is instantiated with a `FullTextSession` object''s `createIndexer`
+    method. Once you have an instance, there are two ways to kick off the mass indexing:'
+  id: totrans-32
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '`MassIndexer`是通过`FullTextSession`对象的`createIndexer`方法实例化的。一旦你有一个实例，启动批量索引有两种方式：'
+- en: The `start` method indexes asynchronously, meaning that indexing occurs in a
+    background thread while the flow of code in the main thread continues.
+  id: totrans-33
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`start`方法以异步方式索引，这意味着索引在后台线程中进行，而主线程的代码流程继续。'
+- en: The `startAndWait` method runs the indexing in synchronous mode, meaning that
+    execution of the main thread is blocked until the indexing completes.
+  id: totrans-34
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`startAndWait`方法以同步模式运行索引，这意味着主线程的执行将一直阻塞，直到索引完成。'
+- en: 'When running in synchronous mode, you need to wrap the operation with a try-catch
+    block in case the main thread is interrupted while waiting:'
+  id: totrans-35
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 当以同步模式运行时，你需要用try-catch块包装操作，以防主线程在等待时被中断：
+- en: '[PRE5]'
+  id: totrans-36
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE5]'
+- en: Tip
+  id: totrans-37
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 提示
+- en: If practical, it is best to use mass indexing when the application is offline
+    and not responding to queries. Indexing will place the system under heavy load,
+    and Lucene will obviously be in a very inconsistent state relative to the database.
+  id: totrans-38
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果实际可行，当应用程序离线且不响应查询时，使用批量索引会更好。索引会将系统负载加重，而且Lucene与数据库相比会处于一个非常不一致的状态。
+- en: 'Mass indexing also differs from individual updates in two respects:'
+  id: totrans-39
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 大规模索引与个别更新在两个方面有所不同：
+- en: A `MassIndexer` operation is not transactional. There is no need to wrap the
+    operation within a Hibernate transaction, and likewise you cannot rely on a rollback
+    if something goes wrong.
+  id: totrans-40
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`MassIndexer`操作不是事务性的。没有必要将操作包装在Hibernate事务中，同样，如果出现错误，你也不能依赖回滚。'
+- en: '`MassIndexer` does respect conditional indexing (refer to [Chapter 4](ch04.html
+    "Chapter 4. Advanced Mapping"), *Advanced Mapping*). If you have an `EntityIndexingInterceptor`
+    registered for that entity class, it will be invoked to determine whether or not
+    to actually index particular instances.'
+  id: totrans-41
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`MassIndexer`确实支持条件索引（参考[第4章](ch04.html "第4章 高级映射")，*高级映射*）。如果你为那个实体类注册了一个`EntityIndexingInterceptor`，它将被调用以确定是否实际索引特定实例。'
+- en: Note
+  id: totrans-42
+  prefs:
+  - PREF_IND
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 注意
+- en: '`MassIndexer` support for conditional indexing was added in the 4.2 generation
+    of Hibernate Search. If you are working with an application that uses an older
+    version, you will need to migrate to 4.2 or higher in order to use `EntityIndexingInterceptor`
+    and `MassIndexer` together.'
+  id: totrans-43
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+  zh: '`MassIndexer`对条件索引的支持是在Hibernate Search的4.2代中添加的。如果你正在使用一个较老版本的应用程序，你需要将应用程序迁移到4.2或更高版本，以便同时使用`EntityIndexingInterceptor`和`MassIndexer`。'
+- en: Defragmenting an index
+  id: totrans-44
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 索引碎片化
+- en: Changes to a Lucene index slowly make it less efficient over time, in the same
+    way that a hard drive can become fragmented. When new entities are indexed, they
+    go into a file (called a **segment**) that is separate from the main index file.
+    When an entity is deleted, it actually remains in the index file and is simply
+    marked as inaccessible.
+  id: totrans-45
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 随着时间的推移，对Lucene索引的更改会逐渐使其变得效率更低，就像硬盘可能会变得碎片化一样。当新的实体被索引时，它们会被放入一个与主索引文件分离的文件（称为**片段**）。当一个实体被删除时，它实际上仍然留在索引文件中，只是被标记为不可访问。
+- en: These techniques help Lucene to keep its indexes as accessible for queries as
+    possible, but it leads to slower performance over time. Having to open multiple
+    segment files is slow, and can run up against operating system limits on the number
+    of open files. Keeping deleted entities in the index makes the files more bloated
+    than they need to be.
+  id: totrans-46
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这些技术有助于使Lucene的索引尽可能适用于查询，但随着时间的推移，这会导致性能变慢。打开多个片段文件是慢的，并且可能会遇到操作系统对打开文件数量的限制。保留在索引中的已删除实体会使文件比必要的更膨胀。
+- en: The process of merging all of these segments, and really purging deleted entities,
+    is called **optimization**. It is analogous to defragmenting a hard drive. Hibernate
+    Search provides mechanisms for optimizing your indexes on either on a manual or
+    automatic basis.
+  id: totrans-47
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 将所有这些片段合并在一起，并真正清除已删除实体的过程称为**优化**。这个过程类似于对硬盘进行碎片整理。Hibernate Search提供了基于手动或自动的基础上的索引优化机制。
+- en: Manual optimization
+  id: totrans-48
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 手动优化
+- en: The `SearchFactory` class offers two methods for optimizing Lucene indexes manually.
+    You can call these methods within your application, upon whatever event you like.
+    Alternatively, you might expose them, and trigger your optimizations from outside
+    the application (for example, with a web service called by a nightly cron job).
+  id: totrans-49
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '`SearchFactory`类提供了两种手动优化Lucene索引的方法。你可以在应用程序中的任何你喜欢的事件上调用这些方法。或者，你可能会公开它们，并从应用程序外部触发优化（例如，通过一个由夜间cron作业调用的web服务）。'
+- en: 'You can obtain a `SearchFactory` reference through a `FullTextSession` object''s
+    `getSearchFactory` method. Once you have an instance, its `optimize` method will
+    defragment all available Lucene indexes:'
+  id: totrans-50
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 您可以通过`FullTextSession`对象的`getSearchFactory`方法获得一个`SearchFactory`引用。一旦你有了这个实例，它的`optimize`方法将会碎片化所有可用的Lucene索引：
+- en: '[PRE6]'
+  id: totrans-51
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE6]'
+- en: 'Alternatively, you can use an overloaded version of `optimize`, taking an entity
+    class as a parameter. This method limits the optimization to only that entity''s
+    Lucene index, as follows:'
+  id: totrans-52
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 另外，您可以使用一个带有实体类参数的`optimize`重载版本。这个方法将优化限制在只对该实体的Lucene索引进行优化，如下所示：
+- en: '[PRE7]'
+  id: totrans-53
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE7]'
+- en: Note
+  id: totrans-54
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 注意
+- en: Another option is use a `MassIndexer` to rebuild your Lucene indexes (refer
+    to the *Mass updates* section). Rebuilding an index from scratch leaves it in
+    an optimized state anyway, so further optimization would be redundant if you are
+    already performing that kind of maintenance regularly.
+  id: totrans-55
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 另一个选择是使用`MassIndexer`重新构建你的Lucene索引（参考*大规模更新*部分）。从零开始重建索引无论如何都会使其处于优化状态，所以如果你已经定期执行这种类型的维护工作，进一步的优化将是多余的。
+- en: A *very* manual approach is to use the Luke utility, outside your application
+    code altogether. See the section on Luke at the very end of this chapter.
+  id: totrans-56
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 一个*非常*手动的方法是使用Luke工具，完全不在你的应用程序代码中。请参阅本章末尾关于Luke的部分。
+- en: Automatic optimization
+  id: totrans-57
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 自动优化
+- en: An easier, if less flexible approach, is to have Hibernate Search trigger optimization
+    for you automatically. This can be done on a global or a per-index basis. The
+    trigger event can be a threshold number of Lucene changes, or a threshold number
+    of transactions.
+  id: totrans-58
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 一个更简单，但灵活性较低的方法是让Hibernate Search自动为你触发优化。这可以全局或针对每个索引执行。触发事件可以是Lucene更改的阈值数量，或者事务的阈值数量。
+- en: 'The `chapter6` version of the VAPORware Marketplace application now contains
+    the following four lines in its `hibernate.cfg.xml` file:'
+  id: totrans-59
+  prefs: []
+  type: TYPE_NORMAL
+  zh: VAPORware Marketplace应用程序的`chapter6`版本现在在其`hibernate.cfg.xml`文件中包含了以下四行：
+- en: '[PRE8]'
+  id: totrans-60
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE8]'
+- en: The top two lines, referencing `default` in the property name, establish global
+    defaults for all Lucene indexes. The last two lines, referencing `App`, are override
+    values specific to the `App` entity.
+  id: totrans-61
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 最上面的两行，在属性名称中引用`default`，为所有Lucene索引建立了全局默认值。最后两行，引用`App`，是针对`App`实体的覆盖值。
+- en: Note
+  id: totrans-62
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 注意
+- en: Most of the configuration properties in this chapter may be made index-specific,
+    by replacing the `default` substring with the name of the relevant index.
+  id: totrans-63
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 本章中的大多数配置属性可以通过将`default`子字符串替换为相关索引的名称，使其变为索引特定。
+- en: Normally this is the class name of the entity (for example, `App`), but it could
+    be a custom name if you set the `index` element in that entity's `@Indexed` annotation.
+  id: totrans-64
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 通常这是实体类的名称（例如，`App`），但如果你设置了该实体的`@Indexed`注解中的`index`元素，它也可以是一个自定义名称。
+- en: Whether you deal at the global or index-specific level, `operation_limit.max`
+    refers to a threshold number of Lucene changes (that is, adds or deletes). `transaction_limit.max`
+    refers to a threshold number of transactions.
+  id: totrans-65
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 无论你是在全局还是索引特定级别操作，`operation_limit.max`指的是Lucene更改（即添加或删除）的阈值数量。`transaction_limit.max`指的是事务的阈值数量。
+- en: Overall, this snippet configures the `App` index for optimization after 100
+    transactions or Lucene changes. All other indexes will be optimized after 1,000
+    transactions or changes.
+  id: totrans-66
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 总的来说，此代码段配置了在100个事务或Lucene更改后对`App`索引进行优化。所有其他索引将在1,000个事务或更改后进行优化。
+- en: Custom optimizer strategy
+  id: totrans-67
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 自定义优化器策略
+- en: 'You might enjoy the best of both worlds by using the automatic approach with
+    a custom optimizer strategy. This chapter''s version of the VAPORware Marketplace
+    application uses a custom strategy to only allow optimization during off-peak
+    hours. This custom class extends the default optimizer strategy, but only allows
+    the base class to proceed with optimization when the current time is between midnight
+    and 6:00 a.m.:'
+  id: totrans-68
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 你可以通过使用带有自定义优化策略的自动方法，享受到两全其美。本章的VAPORware Marketplace应用程序使用自定义策略，只在非高峰时段允许优化。这个自定义类扩展了默认优化器策略，但只允许在当前时间在午夜至凌晨6点之间时，基类进行优化：
+- en: '[PRE9]'
+  id: totrans-69
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE9]'
+- en: Tip
+  id: totrans-70
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 提示
+- en: The easiest approach is to extend `IncrementalOptimizerStrategy`, and override
+    the `optimize` method with your intercepting logic. However, if your strategy
+    is fundamentally different from the default, then you can start with your own
+    base class. Just have it implement the `OptimizerStrategy` interface.
+  id: totrans-71
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 最简单的方法是扩展`IncrementalOptimizerStrategy`，并用你的拦截逻辑覆盖`optimize`方法。然而，如果你的策略与默认策略根本不同，那么你可以从自己的基类开始。只需让它实现`OptimizerStrategy`接口。
+- en: 'To declare your own custom strategy, at either the global or per-index level,
+    add a `hibernate.search.X.optimizer.implementation` property to `hibernate.cfg.xml`
+    (where *X* is either *default*, or the name of a particular entity index):'
+  id: totrans-72
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 为了声明你自己的自定义策略，无论是在全局还是每个索引级别，都需要在`hibernate.cfg.xml`中添加一个`hibernate.search.X.optimizer.implementation`属性（其中*X*是*default*，或者是特定实体索引的名称）：
+- en: '[PRE10]'
+  id: totrans-73
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE10]'
+- en: Choosing an index manager
+  id: totrans-74
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 选择索引管理器
+- en: An **index manager** is a component responsible for how and when changes are
+    applied to a Lucene index. It coordinates the optimization strategy, the directory
+    provider, and worker back ends (seen later in this chapter), and various other
+    low-level components.
+  id: totrans-75
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '**索引管理器**是一个负责将更改应用到Lucene索引的组件。它协调优化策略、目录提供者以及工作者后端（在本章后面部分介绍），还有各种其他底层组件。'
+- en: Hibernate Search includes two index manager implementations out of the box.
+    The default is `directory-based`, and is a very sensible choice in most situations.
+  id: totrans-76
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 休眠搜索自带两种索引管理器实现。默认的是基于`directory-based`的，在大多数情况下这是一个非常合理的选择。
+- en: The other built-in alternative is `near-real-time`. It is a subclass inheriting
+    from the directory-based index manager, but is designed for low-latency index
+    writes. Rather than performing adds or deletes on the disk right away, this implementation
+    queues them in the memory so they may be written more efficiently in batches.
+  id: totrans-77
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 另一个内置选项是**近实时**。它是一个从基于目录的索引管理器派生的子类，但设计用于低延迟的索引写入。而不是立即在磁盘上执行添加或删除，这个实现将它们排队在内存中，以便更有效地批量写入。
+- en: Note
+  id: totrans-78
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 注意
+- en: The `near-real-time` implementation offers greater performance than the `directory-based`
+    default, but there are two trade-offs. First, the `near-real-time` implementation
+    is not available when using Lucene in a clustered environment (refer to [Chapter
+    7](ch07.html "Chapter 7. Advanced Performance Strategies"), *Advanced Performance
+    Strategies*). Secondly, because Lucene operations are not written to disk right
+    away, they may be permanently lost in the event of an application crash.
+  id: totrans-79
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '**近实时**实现比基于目录的默认实现具有更好的性能，但有两个权衡。首先，当在集群环境中使用Lucene时，**近实时**实现是不可用的（参考[第7章](ch07.html
+    "Chapter 7. Advanced Performance Strategies")，*高级性能策略*）。其次，由于Lucene操作不会立即写入磁盘，因此在应用程序崩溃的情况下可能会永久丢失。'
+- en: 'As with most of the configuration properties covered in this chapter, an index
+    manager may be selected on a global default or on a per-index basis. The difference
+    is including `default`, or an entity index name (for example, `App`) in the property:'
+  id: totrans-80
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 与本章中介绍的大多数配置属性一样，索引管理器可以在全局默认或每索引的基础上选择。区别在于是否包括`default`，或者实体索引名称（例如，`App`）在属性中：
+- en: '[PRE11]'
+  id: totrans-81
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE11]'
+- en: It is possible to write your own index manager implementation. To get a deeper
+    sense of how index managers function, review the source code of the two implementations
+    provided out of the box. The directory-based manager is implemented by `DirectoryBasedIndexManager`,
+    and the near-real-time manager by `NRTIndexManager`.
+  id: totrans-82
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 可以编写自己的索引管理器实现。为了更深入地了解索引管理器是如何工作的，请查看提供的两个内置实现源代码。基于目录的管理器由`DirectoryBasedIndexManager`实现，近实时管理器由`NRTIndexManager`实现。
+- en: Tip
+  id: totrans-83
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 提示
+- en: An easy approach to writing a custom implementation is to subclass one of the
+    two built-in options, and override methods only as needed. If you want to create
+    a custom index manager completely from scratch, then it would need to implement
+    the `org.hibernate.search.indexes.spi.IndexManager` interface.
+  id: totrans-84
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 编写自定义实现的一种简单方法是继承两个内置选项中的一个，并根据需要重写方法。如果您想从头开始创建自定义索引管理器，那么它需要实现`org.hibernate.search.indexes.spi.IndexManager`接口。
+- en: Applying a custom index manager, at the global or the per-index level, works
+    the same as the built-in options. Just set the appropriate property to your implementation's
+    fully qualified class name (for example, `com.packtpub.hibernatesearch.util.MyIndexManager`)
+    rather than the `directory-based` or `near-real-time` strings.
+  id: totrans-85
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在全局或每索引级别应用自定义索引管理器与内置选项相同。只需将适当的属性设置为您的实现的全限定类名（例如，`com.packtpub.hibernatesearch.util.MyIndexManager`），而不是`directory-based`或`near-real-time`字符串。
+- en: Configuring workers
+  id: totrans-86
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 配置工作者
+- en: One of the component types that index managers coordinate are **workers**, which
+    are responsible for the actual updates made to a Lucene index.
+  id: totrans-87
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 索引管理器协调的组件类型之一是**工作者**，它们负责对Lucene索引进行实际的更新。
+- en: If you are using Lucene and Hibernate Search in a clustered environment, many
+    of the configuration options are set at the worker level. We will explore those
+    more fully in [Chapter 7](ch07.html "Chapter 7. Advanced Performance Strategies"),
+    *Advanced Performance Strategies*. However, three key configuration options are
+    available in any environment.
+  id: totrans-88
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果您在集群环境中使用Lucene和Hibernate Search，许多配置选项是在工作者级别设置的。我们将在[第7章](ch07.html "Chapter 7. Advanced
+    Performance Strategies")，*高级性能策略*中更全面地探讨这些内容。然而，在任何环境中都提供了三个关键的配置选项。
+- en: Execution mode
+  id: totrans-89
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 执行模式
+- en: By default, workers perform Lucene updates **synchronously**. That is, once
+    an update begins, execution of the main thread is blocked until that update completes.
+  id: totrans-90
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 默认情况下，工作者执行Lucene更新**同步**。也就是说，一旦开始更新，主线的执行就会被阻塞，直到更新完成。
+- en: Workers may instead be configured to update **asynchronously**, a "fire and
+    forget" mode that spawns a separate thread to perform the work. The advantages
+    are that the main thread will be more responsive, and the workload handled more
+    efficiently. The downside is that the database and the index may be out of sync
+    for very brief periods.
+  id: totrans-91
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 工人可能被配置为以**异步**方式更新，这是一种“启动并忘记”的模式，它会创建一个单独的线程来执行工作。优点是主线程将更具响应性，且能更高效地处理工作负载。缺点是在非常短暂的时间内数据库和索引可能会不同步。
+- en: 'Execution mode is declared in `hibernate.cfg.xml` (or `persistence.xml` for
+    JPA). A global default may be established with the `default` substring, and per-entity
+    configurations may be set with the entity index name (for example, `App`):'
+  id: totrans-92
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 执行模式在`hibernate.cfg.xml`（或`persistence.xml`对于JPA）中声明。可以用`default`子字符串建立全局默认值，而每个实体的配置可以用实体索引名称（例如，`App`）来设置：
+- en: '[PRE12]'
+  id: totrans-93
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE12]'
+- en: Thread pool
+  id: totrans-94
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 线程池
+- en: 'By default workers perform updates in only one thread, either the main thread
+    in the synchronous mode, or a single spawned thread in the asynchronous mode.
+    However, you have the option of creating a larger pool of threads to handle the
+    work. The pool may apply at the global default level, or be specific to a particular
+    index:'
+  id: totrans-95
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 默认情况下，工人在只有一个线程中更新，要么是同步模式下的主线程，要么是异步模式下单独创建的一个线程。然而，你有创建一个更大线程池来处理工作的选项。这个池可能适用于全局默认级别，也可能特定于某个索引：
+- en: '[PRE13]'
+  id: totrans-96
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE13]'
+- en: Tip
+  id: totrans-97
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 提示
+- en: Because of the way that Lucene indexes are locked during update operations,
+    using a lot of threads in parallel often does not provide the performance boost
+    that you might expect. However, it is worth experimenting when tuning and load-testing
+    an application.
+  id: totrans-98
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 由于Lucene索引在更新操作期间以这种方式被锁定，使用许多并行线程通常不会提供你可能会期望的性能提升。然而，在调整和负载测试应用程序时尝试是有价值的。
+- en: Buffer queue
+  id: totrans-99
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 缓冲队列
+- en: Pending work gets backed up in a queue, waiting for a thread to free up and
+    deal with it. By default, the size of this buffer is infinite, at least in theory.
+    In reality, it is bound by the amount of system memory available, and an `OutOfMemoryExeception`
+    may be thrown if the buffer grows too large.
+  id: totrans-100
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 挂起的工作会保存在队列中，等待线程空闲时处理。默认情况下，这个缓冲区的大小是无限的，至少在理论上如此。实际上，它受到可用系统内存量的限制，如果缓冲区增长过大，可能会抛出`OutOfMemoryExeception`。
+- en: Therefore, it is a good idea to place some limit, globally or on a per-index
+    basis, for the size to which these buffer can grow.
+  id: totrans-101
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 因此，为这些缓冲区设置一个全局大小或每个索引大小的限制是一个好主意。
+- en: '[PRE14]'
+  id: totrans-102
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE14]'
+- en: When a buffer reaches the maximum allowable size for its index, additional operations
+    will be performed by the thread which creates them. This blocks execution and
+    slows down performance, but ensures that the application will not run out of memory.
+    Experiment to find a balanced threshold for an application.
+  id: totrans-103
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 当一个缓冲区达到其索引允许的最大大小时，将由创建它们的线程执行额外操作。这会阻塞执行并减慢性能，但确保应用程序不会运行 out of memory。实验找到一个应用程序的平衡阈值。
+- en: Selecting and configuring a directory provider
+  id: totrans-104
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 选择和配置目录提供程序
+- en: Both of the built-in index managers use a subclass `DirectoryBasedIndexManager`.
+    As the name implies, both of them make use of Lucene's abstract class `Directory`,
+    to manage the form in which indexes are stored.
+  id: totrans-105
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 内置的索引管理器都使用了一个子类`DirectoryBasedIndexManager`。正如其名，它们都利用了Lucene的抽象类`Directory`，来管理索引存储的形式。
+- en: In the [Chapter 7](ch07.html "Chapter 7. Advanced Performance Strategies"),
+    we will look at some special directory implementations geared for clustered environments.
+    However, in single-server environments the two built-in choices are filesystem
+    storage, and storage in memory.
+  id: totrans-106
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在[第7章](ch07.html "第7章高级性能策略")中，我们将探讨一些特殊目录实现，这些实现是为集群环境量身定做的。然而，在单服务器环境中，内置的两种选择是文件系统存储和内存中的存储。
+- en: Filesystem-based
+  id: totrans-107
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: Filesystem-based
+- en: 'By default, Lucene indexes are stored on the filesystem, in the current working
+    directory of the Java application. No configuration is necessary for this arrangement,
+    but it has been explicitly set in all versions of the VAPORware Marketplace application
+    so far with this property in `hibernate.cfg.xml` (or `persistence.xml`):'
+  id: totrans-108
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 默认情况下，Lucene索引存储在Java应用程序的当前工作目录中。对于这种安排，无需进行任何配置，但在VAPORware Marketplace应用程序的所有版本中，都明确设置了这个属性在`hibernate.cfg.xml`（或`persistence.xml`）中：
+- en: '[PRE15]'
+  id: totrans-109
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE15]'
+- en: As with the other configuration properties that we've seen in this chapter,
+    you could replace `default` with a particular index name (for example, `App`).
+  id: totrans-110
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 正如我们在本章中看到的其他配置属性一样，你可以用特定的索引名称（例如，`App`）替换`default`。
+- en: 'When using filesystem-based indexes, you probably want to use a known fixed
+    location rather than the current working directory. You can specify either a relative
+    or absolute path with the `indexBase` property. In all of the VAPORware Marketplace
+    versions that we''ve seen so far, the Lucene indexes have been stored under each
+    Maven project''s `target` directory, so that Maven removes them up before each
+    fresh build:'
+  id: totrans-111
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 当使用基于文件系统的索引时，您可能希望使用一个已知的固定位置，而不是当前工作目录。您可以使用 `indexBase` 属性指定相对路径或绝对路径。在我们见过的所有
+    VAPORware Marketplace 版本中，Lucene 索引都存储在每个 Maven 项目的 `target` 目录下，这样 Maven 在每次全新构建之前会删除它们：
+- en: '[PRE16]'
+  id: totrans-112
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE16]'
+- en: Locking strategy
+  id: totrans-113
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 锁策略
+- en: 'All Lucene directory implementations lock their indexes when writing to them,
+    to prevent corruption from multiple processes or threads writing to them simultaneously.
+    There are four locking strategies available, and you can specify one by setting
+    the `hibernate.search.default.locking_strategy` property to one of these strings:'
+  id: totrans-114
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 所有 Lucene 目录实现当向其写入时都会锁定它们的索引，以防止多个进程或线程同时向其写入导致的损坏。有四种锁策略可供选择，您可以通过将 `hibernate.search.default.locking_strategy`
+    属性设置为这些字符串之一来指定一个：
+- en: '`native`: This is the default strategy for filesystem-based directories, when
+    no locking strategy property is specified. It relies on file locking at the native
+    operating system level, so that if your application crashes the index locks will
+    still be released. However, the downside is that this strategy should not be used
+    when your indexes are stored remotely on a network shared drive.'
+  id: totrans-115
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`native`: 当没有指定锁策略属性时，基于文件系统的目录默认采用的策略。它依赖于本地操作系统级别的文件锁，因此如果您的应用程序崩溃，索引锁仍然会被释放。然而，这种策略不适用于您的索引存储在远程网络共享驱动器上时。'
+- en: '`simple`: This strategy relies on the JVM to handle file locking. It is safer
+    to use when your Lucene index is on a remote shared drive, but locks will not
+    be cleanly released if the application crashes or has to be killed.'
+  id: totrans-116
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`simple`: 这种策略依赖于 JVM 来处理文件锁。当您的 Lucene 索引存储在远程共享驱动器上时，使用这种策略更安全，但如果应用程序崩溃或被杀死，锁不会被干净地释放。'
+- en: '`single`: This strategy does not create a lock file on the filesystem, but
+    rather uses a Java object in memory (similar to a `synchronized` block in multithreaded
+    Java code). For a single-JVM application, this works well no matter where the
+    index files are, and there is no issue with locks being released after a crash.
+    However, this strategy is only viable if you are sure that no other process outside
+    the JVM might write to your index files.'
+  id: totrans-117
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`single`: 这种策略不会在文件系统上创建锁文件，而是使用内存中的 Java 对象（类似于多线程 Java 代码中的 `synchronized`
+    块）。对于单 JVM 应用程序，无论索引文件在哪里，这种方法都工作得很好，而且在崩溃后没有锁被释放的问题。然而，这种策略只有在您确信没有任何其他外部 JVM
+    进程可能会写入您的索引文件时才是可行的。'
+- en: '`none`: It does not use locking at all. This is *not* a recommended option.'
+  id: totrans-118
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`none`: 根本不使用锁。这不是一个推荐的选项。'
+- en: Tip
+  id: totrans-119
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 提示
+- en: To remove locks that were not cleanly released, use the Luke utility explored
+    in the *Using the Luke utility* section of this chapter.
+  id: totrans-120
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 为了删除未干净释放的锁，请使用本章*使用 Luke 工具*部分探索的 Luke 工具。
+- en: RAM-based
+  id: totrans-121
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 基于 RAM
+- en: For testing and demo purposes, our VAPORware Marketplace application has used
+    an in-memory H2 database throughout this book. It is recreated every time the
+    application starts, and is destroyed when the application stops, with nothing
+    being persisted to permanent storage along the way.
+  id: totrans-122
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 出于测试和演示目的，我们这本书中的 VAPORware Marketplace 应用程序一直使用内存中的 H2 数据库。每次应用程序启动时都会重新创建它，应用程序停止时会摧毁它，在此过程中没有任何持久化存储。
+- en: 'Lucene indexes are able to work in the exact same manner. In this chapter''s
+    version of the example application, the `hibernate.cfg.xml` file has been modified
+    to store its index in RAM rather than on the filesystem:'
+  id: totrans-123
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Lucene 索引能够以完全相同的方式工作。在本章示例应用程序的版本中，`hibernate.cfg.xml` 文件已经被修改以将其索引存储在 RAM
+    中，而不是文件系统上：
+- en: '[PRE17]'
+  id: totrans-124
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE17]'
+- en: Note
+  id: totrans-125
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 注意
+- en: The RAM-based directory provider initializes its Lucene indexes when the Hibernate
+    `SessionFactory` (or JPA `EntityManagerFactory`) is created. Be aware that when
+    you close this factory, it destroys all your indexes!
+  id: totrans-126
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 基于 RAM 的目录提供者在其 Hibernate `SessionFactory`（或 JPA `EntityManagerFactory`）创建时初始化其
+    Lucene 索引。请注意，当你关闭这个工厂时，它会摧毁你所有的索引！
+- en: This shouldn't be a problem when using a modern dependency-injection framework,
+    because the framework will keep your factory in memory and available when needed.
+    Even in our vanilla example application, we have stored a singleton `SessionFactory`
+    in the `StartupDataLoader` class for this reason.
+  id: totrans-127
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 使用现代依赖注入框架时，这不应该是一个问题，因为框架会在内存中保持您的工厂实例，并在需要时可用。即使在我们的基础示例应用程序中，我们也为此原因在 `StartupDataLoader`
+    类中存储了一个单例 `SessionFactory`。
+- en: An in-memory index would seem to offer greater performance, and it may be worth
+    experimenting with in your application tuning. However, it is not generally recommended
+    to use the RAM-based directory provider in production settings.
+  id: totrans-128
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 内存中的索引似乎能提供更好的性能，在您的应用程序调整中尝试一下可能是值得的。然而，通常不建议在生产环境中使用基于 RAM 的目录提供程序。
+- en: First and foremost, it is easy to run out of memory and crash the application
+    with a large data set. Also, your application has to rebuild its indexes from
+    scratch upon each and every restart. Clustering is not an option, because only
+    the JVM which created the in-memory index has access to that memory. Last but
+    not least, the filesystem-based directory provider already makes intelligent use
+    of caching, and its performance is surprisingly comparable to the RAM-based provider.
+  id: totrans-129
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 首先，当数据集很大时，很容易耗尽内存并导致应用程序崩溃。另外，每次重新启动时，您的应用程序都必须从头开始重建索引。由于只有创建内存索引的 JVM 才能访问该内存，因此无法使用集群。最后但同样重要的是，基于文件系统的目录提供程序已经智能地使用了缓存，其性能出奇地与基于
+    RAM 的提供程序相当。
+- en: All that being said, the RAM-based provider is a common approach for testing
+    applications. Unit tests are likely to involve fairly small sets of data, so running
+    out of memory is not a concern. Also, having the indexes completely and cleanly
+    destroyed in between each unit test might be more of a feature than a drawback.
+  id: totrans-130
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 话虽如此，基于 RAM 的提供程序是测试应用程序的常见方法。单元测试可能涉及相对较小的数据集，因此耗尽内存不是问题。另外，在每次单元测试之间完全且干净地销毁索引可能更是一个特性而非缺点。
+- en: Tip
+  id: totrans-131
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+  zh: 提示
+- en: The RAM-based directory provider defaults to the `single` locking strategy,
+    and it really makes no sense to change this.
+  id: totrans-132
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 基于 RAM 的目录提供程序默认使用 `single` 锁定策略，而且真的没有改变它的意义。
+- en: Using the Luke utility
+  id: totrans-133
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 使用 Luke 工具
+- en: Hibernate ORM gives your application code pretty much everything it needs to
+    interact with the database. However, you probably still use some sort of SQL client
+    to manually work with your database outside the context of your application code.
+  id: totrans-134
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Hibernate ORM 为您的应用程序代码提供了与数据库交互所需的大部分功能。然而，您可能仍然需要使用某种 SQL 客户端，在应用程序代码的上下文之外手动操作数据库。
+- en: Likewise, it can be useful to explore a Lucene index manually without having
+    to write code for the task. Luke ([http://code.google.com/p/luke](http://code.google.com/p/luke))
+    is a very useful utility that fills this role for Lucene. You can use Luke to
+    browse your indexes, test queries, and perform helpful tasks such as removing
+    index locks that did not cleanly release.
+  id: totrans-135
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 同样，在没有编写相关代码的情况下手动探索 Lucene 索引可能很有用。Luke（[http://code.google.com/p/luke](http://code.google.com/p/luke)）是一个非常有用的工具，它为
+    Lucene 提供了这一功能。您可以使用 Luke 浏览索引、测试查询，并执行诸如删除未正常释放的索引锁等有用任务。
+- en: 'The Luke download is a monolithic executable JAR file. Double-clicking the
+    JAR, or otherwise executing it from a console prompt, brings up a graphical interface
+    and a prompt for your index location, as shown in the following screenshot:'
+  id: totrans-136
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Luke 的下载文件是一个单片式的可执行 JAR 文件。双击 JAR 文件，或者从控制台提示符执行它，会弹出一个图形界面和一个提示您索引位置的输入框，如下面的屏幕快照所示：
+- en: '![Using the Luke utility](img/9205_06_01.jpg)'
+  id: totrans-137
+  prefs: []
+  type: TYPE_IMG
+  zh: '![使用 Luke 工具](img/9205_06_01.jpg)'
+- en: The previous screenshot shows Luke at startup. Unfortunately, Luke can only
+    access filesystem-based indexes, not the RAM-based index used in this chapter.
+    So in these examples, Luke points to the `chapter5` code file directory's Maven
+    project workspace. The `App` entity index is located under `target/luceneIndex/com.packtpub.hibernatesearch.domain.App`.
+  id: totrans-138
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 前一个屏幕快照显示了 Luke 启动时的界面。不幸的是，Luke 只能访问基于文件系统的索引，而不能访问本章中使用基于 RAM 的索引。所以在这段示例中，Luke
+    指向了 `chapter5` 代码文件目录的 Maven 项目工作区。`App` 实体的索引位于 `target/luceneIndex/com.packtpub.hibernatesearch.domain.App`。
+- en: Notice the **Force unlock, if** **locked** checkbox near the top of the open-index
+    dialog box. If you have an index for which a file lock did not cleanly release
+    (refer to the *Locking strategy* section), then you can fix the problem by checking
+    this box and opening the index.
+  id: totrans-139
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 请注意打开索引对话框顶部附近的**强制解锁，如果** **锁定**复选框。如果您有一个索引文件锁没有干净释放（参考*锁定策略*部分），则可以通过勾选此复选框并打开索引来解决问题。
+- en: 'Once you have opened a Lucene index, Luke displays an assortment of information
+    about the number of indexed documents (that is, entities), the current state of
+    optimization (that is, fragmentation), and other details, as shown in the following
+    screenshot:'
+  id: totrans-140
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 一旦您打开了一个Lucene索引，Luke就会显示关于索引文档（即实体）数量的各类信息（即，碎片化）和其他详细信息，如下面的屏幕截图所示：
+- en: '![Using the Luke utility](img/9205_06_02.jpg)'
+  id: totrans-141
+  prefs: []
+  type: TYPE_IMG
+  zh: '![使用Luke工具](img/9205_06_02.jpg)'
+- en: From the **Tools** menu at the top of the utility, you have options for performing
+    basic maintenance tasks such as checking the index for corruption, or manual optimization
+    (that is, defragmenting). These operations are best performed during off-peak
+    hours, or during a full outage window.
+  id: totrans-142
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 从工具栏顶部的**工具**菜单中，您可以选择执行诸如检查索引是否损坏或手动优化（即，去碎片化）等基本维护任务。这些操作最好在非高峰时段或全面停机窗口期间执行。
+- en: '![Using the Luke utility](img/9205_06_03.jpg)'
+  id: totrans-143
+  prefs: []
+  type: TYPE_IMG
+  zh: '![使用Luke工具](img/9205_06_03.jpg)'
+- en: 'The **Documents** tab allows you to browse through entities one by one, which
+    may have some limited use. Much more interesting is the **Search** tab, which
+    allows you to explore your index using free-form Lucene queries, as shown in the
+    following screenshot:'
+  id: totrans-144
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '**文档**标签允许您逐一浏览实体，这可能有一些有限的用途。更有趣的是**搜索**标签，它允许您使用自由形式的Lucene查询来探索您的索引，如下面的屏幕截图所示：'
+- en: '![Using the Luke utility](img/9205_06_04.jpg)'
+  id: totrans-145
+  prefs: []
+  type: TYPE_IMG
+  zh: '![使用Luke工具](img/9205_06_04.jpg)'
+- en: 'The full-blown Lucene API is beyond the scope of this book, but here are some
+    basics to get you started:'
+  id: totrans-146
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 完整的Lucene API超出了本书的范围，但这里有一些基础知识来帮助您入门：
+- en: Search expressions are in the form of a field name and a desired value, separated
+    by a colon. For example, to search for apps in the `business` category, use the
+    search expression `category:business`.
+  id: totrans-147
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 搜索表达式的形式是字段名和期望值，由冒号分隔。例如，要搜索`business`类别的应用程序，请使用搜索表达式`category:business`。
+- en: Associated items may be specified with the entity field name, followed by a
+    period, followed by the field name within the associated item. In the above screenshot,
+    we are searching for all apps supported on the `xPhone` device, by using the search
+    expression `supportedDevices.name:xphone`.
+  id: totrans-148
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 相关项目可以用实体字段名，后跟一个点，后跟相关项目内的字段名来指定。在上面的屏幕截图中，我们通过使用搜索表达式`supportedDevices.name:xphone`来搜索所有支持`xPhone`设备的应用程序。
+- en: Remember that the default analyzer converts terms into lower case during the
+    indexing process. So if you wanted to search on `xPhone` for example, be sure
+    to type it as `xphone`.
+  id: totrans-149
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 记住，默认分析器在索引过程中将术语转换为小写。所以如果你想搜索`xPhone`，例如，请确保将其输入为`xphone`。
+- en: 'If you double-click on one of the search results found, then Luke flips over
+    to the **Documents** tab with the relevant document loaded. Click on the **Reconstruct
+    & Edit** button to examine that entity''s fields, as shown in the following screenshot:'
+  id: totrans-150
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果您双击找到的搜索结果之一，Luke会切换到**文档**标签，并加载相关文档。点击**重建&编辑**按钮来检查该实体的字段，如下面的屏幕截图所示：
+- en: '![Using the Luke utility](img/9205_06_05.jpg)'
+  id: totrans-151
+  prefs: []
+  type: TYPE_IMG
+  zh: '![使用Luke工具](img/9205_06_05.jpg)'
+- en: Browsing this data will give you a feel for how the analyzer parses your entities.
+    Words will be filtered out, and text will be tokenized unless you configured the
+    `@Field` annotation to the contrary (as we did with `sorting_name`). If a Hibernate
+    Search query doesn't return the results that you expect, browsing field data in
+    Luke can help you spot the issue.
+  id: totrans-152
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 浏览这些数据将让您了解分析器如何解析您的实体。单词将被过滤掉，除非您配置了`@Field`注解相反（正如我们用`sorting_name`所做的那样），否则文本将被分词。如果Hibernate
+    Search查询没有返回您期望的结果，Luke中浏览字段数据可以帮助您发现问题。
+- en: Summary
+  id: totrans-153
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 摘要
+- en: In this chapter we saw how to update Lucene indexes manually, one entity object
+    at a time or in bulk, as an alternative to letting Hibernate Search manage updates
+    automatically. We learned about the fragmentation that accumulates from Lucene
+    update operations, and how to approach optimization on a manual or automatic basis.
+  id: totrans-154
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在本章中，我们了解了如何手动更新Lucene索引，一次一个实体对象或批量更新，作为让Hibernate Search自动管理更新的一种替代方式。我们了解了Lucene更新操作积累的碎片，以及如何基于手动或自动方法进行优化。
+- en: We explored various performance tuning options for Lucene, from low-latency
+    writes to multi-threaded asynchronous updates. We now know how to configure Hibernate
+    Search for creating Lucene indexes on either the filesystem or RAM, and why you
+    might choose one over the other. Finally, we worked with the Luke utility to inspect
+    and perform maintenance tasks on a Lucene index without having to go through an
+    application's Hibernate Search code.
+  id: totrans-155
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们探索了Lucene的各种性能调优选项，从低延迟写入到多线程异步更新。我们现在知道如何配置Hibernate Search，在文件系统或RAM上创建Lucene索引，以及为什么您可能会选择其中之一。最后，我们使用Luke工具来检查和执行维护任务，而无需通过应用程序的Hibernate
+    Search代码来操作Lucene索引。
+- en: In the next chapter, we will look at some advanced strategies for improving
+    the performance of your applications. This will include recapping the performance
+    tips covered so far, before diving into server clusters and Lucene index sharding.
+  id: totrans-156
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在下一章中，我们将探讨一些高级策略，以提高您的应用程序的性能。这将包括回顾到目前为止介绍的性能提示，然后深入探讨服务器集群和Lucene索引分片。

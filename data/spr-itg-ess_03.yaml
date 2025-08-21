@@ -1,0 +1,592 @@
+- en: Chapter 3. Message Processing
+  id: totrans-0
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 第3章. 消息处理
+- en: 'In [Chapter 1](part0018_split_000.html#page "Chapter 1. Getting Started"),
+    *Getting Started*, we discussed that the need for enterprise integration was evolved
+    to solve the problem of intercommunication between heterogeneous systems: how
+    will they share data, how will they understand other systems'' data, how cross-cutting
+    concerns across applications will be handled, and so on. In the previous chapter,
+    we covered one of the aspects, that is, how the systems will exchange data. Channels
+    provide a logical unit over which data can be dropped off for other interested
+    applications. However, it introduces the next set of challenges: what if the format
+    of data is not understandable by other modules, or what if the rate of producing
+    a message versus the rate of consuming it is different? Let''s take an example;
+    an RSS feed needs to be fetched from the Internet and put in a database for reporting,
+    as well as on a mailing system to send out mails about the availability of new
+    items. What challenges does it throw?'
+  id: totrans-1
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在[第1章](part0018_split_000.html#page "第1章. 入门")，*入门 *，我们讨论了企业集成需求是为了解决异构系统之间互操作通信的问题：它们将如何共享数据，它们将如何理解其他系统的数据，如何处理跨应用程序的交叉问题等等。在第2章中，我们讨论了一个方面，即系统将如何交换数据。通道为数据提供了一个逻辑单位，可以将其投放给其他感兴趣的应用程序。然而，它引入了下一组挑战：如果数据格式其他模块无法理解，或者消息生成与消息消费的速率不同怎么办？让我们以一个例子来看；需要从互联网获取RSS源并将其放入数据库以进行报告，以及在邮件系统中发送有关新条目可用性的邮件。它会带来什么挑战？
+- en: The RSS feed is in the XML format, while for databases and mail it needs to
+    be converted to the Java entity and the Java `MailMessage` format, respectively
+    (assuming JPA and java mail is being used). This means the XML payload needs to
+    be translated into the format expected by the next set of endpoints.
+  id: totrans-2
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: RSS源是XML格式的，而数据库和邮件需要转换成Java实体和Java `MailMessage`格式（假设使用JPA和java邮件）。这意味着XML负载需要转换为下一组端点期望的格式。
+- en: There could be latency while sending out mails; hence, flooding the mail server
+    might result in loss of messages, indicating the need for throttling.
+  id: totrans-3
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 发送邮件时可能会出现延迟；因此，淹没邮件服务器可能会导致消息丢失，表明需要节流。
+- en: Before the message can be handed over to the database, some audit information
+    such as timestamp, user logged in, and others, needs to be augmented.
+  id: totrans-4
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 在消息可以被交给数据库之前，需要增加一些审计信息，如时间戳、登录用户等。
+- en: There might be some XML payloads that are not valid or may be incomplete. We
+    would like to discard those and retry!
+  id: totrans-5
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 可能存在一些无效或不完整的XML负载。我们希望丢弃这些负载并重新尝试！
+- en: The mail server might not be available at the time the feed arrived—what to
+    do then?
+  id: totrans-6
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 邮件服务器可能在源到达时不可用——那时该怎么办？
+- en: 'These points provide a glimpse into a few of the aspects that need to be taken
+    care of when two systems try to communicate. It''s definitely not a good idea
+    to load the systems with all this heavy logic and in turn introduce tight coupling
+    between them. Then, who takes care of all of these aspects? Let''s welcome message
+    endpoints. In this chapter, we will cover the following topics:'
+  id: totrans-7
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这些点提供了一个快速了解在两个系统尝试通信时需要照顾到的几个方面。肯定不希望用这么多重逻辑来负载系统，并引入它们之间的紧密耦合。那么，谁来照顾所有这些方面呢？让我们欢迎消息端点。在本章中，我们将介绍以下主题：
+- en: Message endpoints
+  id: totrans-8
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 消息端点
+- en: Gateways
+  id: totrans-9
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 网关
+- en: Service activators
+  id: totrans-10
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 服务激活器
+- en: Delayers
+  id: totrans-11
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 延迟器
+- en: Transactions
+  id: totrans-12
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: 事务
+- en: Message endpoints
+  id: totrans-13
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 消息端点
+- en: 'In the simplest analogy, **message endpoints** are enablers that facilitate
+    interaction between two systems—be it transformation of messages, throttling,
+    intermediate business processing, or any other tasks that might be needed for
+    the message to be successfully and seamlessly handled by the next system in the
+    chain. To cater to different needs, different types of message endpoints are available,
+    for example, *enrichers*, *delayers*, *service activators*, and others. However,
+    before diving deep into each specific detail, let''s discuss the broad level of
+    categorization for the endpoints:'
+  id: totrans-14
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在最简单的类比中，**消息端点**是促进两个系统之间交互的启用器——无论是消息的转换、节流、中间业务处理，还是消息成功且无缝地处理所需的任何其他任务。为了满足不同的需求，提供了不同类型的消息端点，例如，*增强器*、*延迟器*、*服务激活器*等。然而，在深入讨论每个具体细节之前，让我们讨论一下端点的广泛分类：
+- en: '**Receivers or senders**: Endpoints can either receive messages from the channel
+    or put messages on the channel for further processing.'
+  id: totrans-15
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '**接收器或发送器**：端点可以从信道中接收消息，或者将消息放入信道进行进一步处理。'
+- en: '**Polling endpoints or event-driven endpoints**: Endpoints can either pull
+    messages from the channel or can subscribe to it. Whenever a message is available,
+    a registered callback method is called.'
+  id: totrans-16
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '**轮询端点或事件驱动端点**：端点可以从信道中拉取消息，或者可以订阅它。每当有消息可用时，注册的回调方法就会被调用。'
+- en: '**Unidirectional or bidirectional endpoints**: Unidirectional endpoints send
+    off or receive messages, but do not expect or receive any acknowledgement. Spring
+    Integration provides channel adapters for such types of interactions. Bidirectional
+    adapters can send, receive, and acknowledge messages. Spring Integration provides
+    gateways that are synonymous with synchronous two-way communication.'
+  id: totrans-17
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '**单向或双向端点**：单向端点发送或接收消息，但不期望或接收任何确认。Spring Integration为这类交互提供了信道适配器。双向适配器可以发送、接收和确认消息。Spring
+    Integration提供了与同步双向通信相同的网关。'
+- en: '**Inbound or outbound endpoints**: Outbound endpoints interact with external
+    systems such as social networks, mail servers, enterprise JMS, and others, whereas
+    inbound endpoints listen for events from outside entities such as mail connector,
+    FTP connector, and so on.'
+  id: totrans-18
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '**入站或出站端点**：出站端点与社交网络、邮件服务器、企业JMS等外部系统交互，而入站端点则监听来自外部实体（如邮件连接器、FTP连接器等）的事件。'
+- en: Spring Integration has provided implementation of all of these types; let's
+    explore them.
+  id: totrans-19
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Spring Integration为这些类型提供了所有实现的；让我们探索它们。
+- en: Gateways
+  id: totrans-20
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 网关
+- en: 'Abstraction and loose coupling is always desired. **Messaging gateways** is
+    a mechanism to publish a contract that can be used by systems without exposing
+    the underlying messaging implementation. For example, a gateway for a mailing
+    subsystem can expose methods for sending and receiving mail. Internally, the implementation
+    can be done using the raw Java mail API, or can be adapters from Spring Integration,
+    or may be some custom implementation altogether. As long as the contract does
+    not change, implementation can be easily switched or enhanced without impacting
+    on the rest of the modules. It is an implementation of more generic *gateway*
+    patterns. Gateways can be of two types: *synchronous* and *asynchronous*.'
+  id: totrans-21
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 总是希望实现抽象和松耦合。**消息网关**是一种机制，用于发布可以被系统使用而不暴露底层消息实现的合同。例如，邮件子系统的网关可以暴露发送和接收邮件的方法。内部实现可以使用原始Java邮件API，或可以是Spring
+    Integration的适配器，或可能是自定义实现。只要合同不改变，实现可以很容易地切换或增强，而不会影响其他模块。它是更一般的*网关*模式的一种实现。网关可以分为两种类型：*同步*和*异步*。
+- en: Synchronous gateways
+  id: totrans-22
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 同步网关
+- en: 'Let''s quickly see what a declaration of a gateway looks like in Spring Integration,
+    and then decimate it further to build our understanding:'
+  id: totrans-23
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 让我们快速看看在Spring Integration中一个网关的声明看起来像什么，然后再进一步解析以建立我们的理解：
+- en: '[PRE0]'
+  id: totrans-24
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE0]'
+- en: 'This basic code defines a gateway in Spring. Let''s understand the preceding
+    declaration:'
+  id: totrans-25
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这段基本代码定义了Spring中的一个网关。让我们理解一下前面的声明：
+- en: '`int:gateway`: This is the Spring framework namespace for gateway'
+  id: totrans-26
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`int:gateway`：这是Spring框架的网关命名空间。'
+- en: '`service-interface`: This is an interface that is the contract published by
+    the gateway'
+  id: totrans-27
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`service-interface`：这是一个由网关发布的接口合同。'
+- en: '`default-request-channel`: This is the channel on which gateway puts the message
+    for processing'
+  id: totrans-28
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`default-request-channel`：这是网关放置消息进行处理的信道。'
+- en: '`default-reply-channel`: This is the channel on which gateway expects a reply'
+  id: totrans-29
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`default-reply-channel`：这是网关期望回复的信道。'
+- en: 'The interface is a simple Java interface declaration:'
+  id: totrans-30
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 接口是一个简单的Java接口声明：
+- en: '[PRE1]'
+  id: totrans-31
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE1]'
+- en: 'We defined an interface and then defined the channels on which messages will
+    be sent and read through using the gateway—but where is the implementation class
+    that the components use to process the message and acknowledge it? Here, some
+    Spring Integration magic is involved—when this XML is parsed, a proxy for this
+    interface is created by the framework''s `GatewayProxyFactoryBean` class. If there
+    is a service request for a declared gateway, a proxy will forward the message
+    on `default-request-channel` and will block the call until an acknowledgement
+    is available on the `default-reply-channel`. The preceding declaration can be
+    further extended to have channels per method call of the gateway:'
+  id: totrans-32
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们定义了一个接口，然后定义了通过网关发送和读取消息的通道——但组件用来处理消息并确认它的实现类在哪里？在这里，涉及到一些Spring Integration的魔法——当解析这个XML时，框架的`GatewayProxyFactoryBean`类会创建这个接口的代理。如果有对声明的网关的服务请求，代理会将消息转发到`default-request-channel`，并会阻塞调用到`default-reply-channel`上有确认可用。前面的声明可以进一步扩展，以每个网关方法调用的通道为单位：
+- en: '[PRE2]'
+  id: totrans-33
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE2]'
+- en: Now when the `createFeed` method is called, messages will be put on `createFeedRequestChannel`,
+    while for the `readAllFeed` method of gateway, messages will be forwarded to `readFeedRequestChannel`.
+    Hold on a second—where is the `default-reply-channel`? The reply channel is an
+    optional parameter and if it's not declared, an anonymous point-to-point reply
+    channel is created by the gateway and is added to message headers with the name
+    `replyChannel`. Explicit declaration would be helpful if we need a publish-subscribe
+    channel to which multiple endpoints can listen.
+  id: totrans-34
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 现在当调用`createFeed`方法时，消息将被放入`createFeedRequestChannel`，而对于网关的`readAllFeed`方法，消息将被转发到`readFeedRequestChannel`。等一下——`default-reply-channel`在哪里？回复通道是一个可选参数，如果没有声明，网关会创建一个匿名的点对点回复通道，并将其添加到消息头中，名为`replyChannel`。如果我们需要一个发布-订阅通道，多个端点可以监听，显式声明将会有所帮助。
+- en: 'We can easily leverage Spring Integration annotation support instead of using
+    XML declarations:'
+  id: totrans-35
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们可以很容易地利用Spring Integration的注解支持，而不是使用XML声明：
+- en: '[PRE3]'
+  id: totrans-36
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE3]'
+- en: Asynchronous gateways
+  id: totrans-37
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+  zh: 异步网关
+- en: 'Asynchronous gateways do not expect an acknowledgement. After putting messages
+    on the request channel, they move onto other processing without blocking for a
+    reply on the reply channel. The Java language''s `java.util.concurrent.Future`
+    class provides a mechanism to fulfill this behavior; we can define our gateway
+    service that returns a `Future` value. Let''s modify `FeedService`:'
+  id: totrans-38
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 异步网关不期望确认。在将消息放入请求通道后，它们会在回复通道上阻塞等待回复的情况下，转而进行其他处理。Java语言的`java.util.concurrent.Future`类提供了一种实现这种行为的方法；我们可以定义一个返回`Future`值的网关服务。让我们修改`FeedService`：
+- en: '[PRE4]'
+  id: totrans-39
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE4]'
+- en: Nothing else changes and all XML declarations remain the same. When the return
+    type is changed to `Future`, Spring framework's `GatewayProxyFactoryBean` class
+    takes care of switching to asynchronous mode by leveraging `AsyncTaskExecutor`.
+  id: totrans-40
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 其他一切保持不变，所有的XML声明都保持一样。当返回类型更改为`Future`时，Spring框架的`GatewayProxyFactoryBean`类通过利用`AsyncTaskExecutor`来处理切换到异步模式。
+- en: Service activators
+  id: totrans-41
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 服务激活器
+- en: '**Service** **activators** are one of the simplest and most useful endpoints—a
+    plain java class whose methods can be invoked on the messages received on a channel.
+    Service activators can either terminate the message processing or pass it on to
+    the next channel for further processing. Let''s have a look at the following example.
+    We would like to do some validation or business logic before passing the message
+    on to the next channel. We can define a Java class and annotate it as follows:'
+  id: totrans-42
+  prefs: []
+  type: TYPE_NORMAL
+  zh: '**服务激活器**是最简单且最实用的端点之一——一个普通的Java类，其方法可以被调用在通道上接收的消息。服务激活器可以选择终止消息处理，或者将其传递到下一个通道进行进一步处理。让我们看一下以下的示例。我们希望在将消息传递到下一个通道之前进行一些验证或业务逻辑。我们可以定义一个Java类，并按照如下方式注解它：'
+- en: '[PRE5]'
+  id: totrans-43
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE5]'
+- en: 'In our XML, we can attach the class to a channel so that it processes each
+    and every message on it:'
+  id: totrans-44
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在我们的XML中，我们可以将类附加到一个通道上，以便处理其中的每一个消息：
+- en: '[PRE6]'
+  id: totrans-45
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE6]'
+- en: 'Let''s quickly go through the elements used in the preceding declaration:'
+  id: totrans-46
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 让我们快速浏览一下前面声明中使用的元素：
+- en: '`@MessageEndpoint`: This annotation tells Spring to treat a class as a specific
+    Spring bean—a message endpoint. Since we have annotated this call with `MessageEndpoint`,
+    there is no need to declare this bean in XML. It will be discovered in the component
+    scan of Spring.'
+  id: totrans-47
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`@MessageEndpoint`：这个注解告诉Spring将一个类作为特定的Spring bean——一个消息端点。由于我们用`MessageEndpoint`注解了这个调用，所以在XML中不需要声明这个bean。它将在Spring的组件扫描中被发现。'
+- en: '`@ServiceActivator`: This annotation maps a method that should be invoked when
+    a message arrives on the channel. This message is passed as a parameter.'
+  id: totrans-48
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`@ServiceActivator`：这个注解将一个应该在消息到达通道时调用的方法映射起来。这个消息作为一个参数传递。'
+- en: '`int:service-activator`: This is an XML namespace declaring the Spring endpoint
+    type.'
+  id: totrans-49
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`int:service-activator`：这是声明Spring端点类型的XML命名空间。'
+- en: '`input-channel`: This is the channel from which the service activator will
+    read the messages.'
+  id: totrans-50
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`input-channel`：这是服务激活器将要读取消息的通道。'
+- en: '`output-channel`: This is the channel on which the activator will dump the
+    processed messages.'
+  id: totrans-51
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`output-channel`：这是激活器将要倾倒处理过的消息的通道。'
+- en: '`ref`: This is a reference of the bean that performs the processing.'
+  id: totrans-52
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+  zh: '`ref`：这是执行处理的bean的引用。'
+- en: 'The preceding example restricts a single method in a class as `@ServiceActivator`.
+    However, what if we want to delegate to an explicit method—maybe based on payloads?
+    We define the method element for the service activator in the following code:'
+  id: totrans-53
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 前面的示例限制了一个类中的单个方法作为`@ServiceActivator`。然而，如果我们想要委派到一个明确的方法——也许根据负载？我们在以下代码中定义服务激活器的方法元素：
+- en: '[PRE7]'
+  id: totrans-54
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE7]'
+- en: In these two declarations, reference for the service activator is the same,
+    that is, the class acting as the service is `feedDaoService`, but its different
+    methods are invoked in different scenarios.
+  id: totrans-55
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在这两个声明中，服务激活器的引用是相同的，也就是说，作为服务的类是`feedDaoService`，但在不同的场景中调用其不同的方法。
+- en: As we mentioned earlier, the output channel is optional. If the method return
+    type is void, then it indicates that the message flow is terminated and Spring
+    Integration is fine with it. However, what if the message type is not null and
+    the output channel is also omitted? Spring Integration will try a fallback mechanism—it
+    will try to look for a header with the name `replyChannel` in the message. If
+    the value against the `replyChannel` header is of the type `MessageChannel`, then
+    the messages will be sent to that channel. But if it's a string, then it will
+    try looking for channels with that name. If both fail, then it will throw a `DestinationResolutionException`
+    exception.
+  id: totrans-56
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如我们之前提到的，输出通道是可选的。如果方法返回类型是void，那么它表示消息流已经终止，Spring Integration对此没有问题。然而，如果消息类型不为null，输出通道也省略了怎么办？Spring
+    Integration将尝试一个后备机制——它将尝试在消息中查找名为`replyChannel`的头部。如果`replyChannel`头部的值是`MessageChannel`类型，那么消息将被发送到那个通道。但如果它是一个字符串，那么它将尝试查找具有该名称的通道。如果两者都失败，它将抛出一个`DestinationResolutionException`异常。
+- en: What type of message can a service activator process? The method argument can
+    be either of the type `Message` or a Java `Object`. If it is `Message`, then we
+    can read the payload and work upon it—but this introduces a dependency on the
+    Spring `Message` type. A better approach is to declare the Java type as declared
+    in the preceding example. Spring Integration will take care of extracting the
+    payload and converting it to a declared object type before invoking the method
+    on the service activator. If type conversion fails, an exception will be thrown.
+    Similarly, returned data from the method is wrapped in a `Message` object and
+    passed on to the next channel.
+  id: totrans-57
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 服务激活器可以处理哪种类型的消息？方法参数可以是`Message`类型或Java `Object`类型。如果是`Message`，那么我们可以读取载荷并对其进行处理——但这引入了对Spring
+    `Message`类型的依赖。一个更好的方法是在前一个示例中声明Java类型。Spring Integration将负责提取载荷并将其转换为声明的对象类型，然后调用服务激活器上的方法。如果类型转换失败，将抛出异常。同样，方法返回的数据将被包裹在一个`Message`对象中，并传递到下一个通道。
+- en: Can there be an activator method without any argument? Yes! This could be pretty
+    useful in a scenario where we only care if an action was performed or not, for
+    example, perhaps for an audit or for reporting purposes.
+  id: totrans-58
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 有没有没有参数的激活方法呢？有的！这在只关心是否执行了某个操作的场景中非常有用，例如，或许用于审计或报告目的。
+- en: Delayers
+  id: totrans-59
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 延迟者
+- en: 'As we already discussed in the introduction section, there could be a difference
+    in the rate of messages produced and its rate of consumption—what if the consumer
+    is slow? Since external systems are involved, it might not be in our control to
+    influence the rate at which the producer produces messages. This is where a delayer
+    is used. A **delayer** is a simple endpoint that introduces a delay before the
+    message is delivered to the next endpoint. The most notable part is that the original
+    sender is neither blocked nor slowed down; rather, the delayer will pick a message
+    from a channel and use an instance of `org.springframework.scheduling.TaskScheduler`
+    to schedule its delivery to the output channel after a configured interval. Let''s
+    write a simple delayer:'
+  id: totrans-60
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 正如我们在介绍部分已经讨论过的，消息的生产率和消费率可能会有所不同——如果消费者变慢了怎么办？由于涉及到外部系统，我们可能无法控制生产消息的速率。这时就需要使用延时器。**延时器**是一个简单的端点，在消息被传递到下一个端点之前引入一个延迟。最值得注意的是，原始发送者既不会被阻塞也不会被减慢；而是，延时器将从通道中选择一个消息，并使用`org.springframework.scheduling.TaskScheduler`实例来安排其在配置间隔后发送到输出通道。让我们写一个简单的延时器：
+- en: '[PRE8]'
+  id: totrans-61
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE8]'
+- en: This simple configuration will delay the delivery of messages on the input channel
+    to the output channel by 10 seconds.
+  id: totrans-62
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 这个简单的配置将会延迟输入通道向输出通道发送消息10秒。
+- en: 'What if we want to delay each message with a different time interval—let''s
+    say based on payload size we want to increase or decrease the delay? The `expression`
+    attribute comes in handy here. The preceding example can be modified as follows:'
+  id: totrans-63
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 如果我们想延迟每个消息以不同的时间间隔——比如说根据负载大小我们想增加或减少延迟时间，`expression`属性就派上用场了。之前的例子可以修改如下：
+- en: '[PRE9]'
+  id: totrans-64
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE9]'
+- en: '[PRE10]'
+  id: totrans-65
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE10]'
+- en: The delayer delays message by certain intervals—what if the system goes down
+    while there were delayed messages yet to be delivered on the output channel? We
+    can leverage `MessageStore`, especially persistent `MessageStore` interfaces such
+    as `JdbcMessageStore`. If it is used, then all messages are persisted as soon
+    as the system goes down. When it comes up, all of the messages for which a delay
+    interval has expired will be delivered on the output channel immediately.
+  id: totrans-66
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 延时器通过一定的间隔来延迟消息——如果系统在还有尚未在输出通道上交付的延迟消息时宕机怎么办？我们可以利用`MessageStore`，特别是持久性`MessageStore`接口，如`JdbcMessageStore`。如果使用它，那么系统一旦宕机，所有消息都会被立即持久化。当系统恢复时，所有延迟间隔已到的消息都将立即在输出通道上交付。
+- en: Transactions
+  id: totrans-67
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 事务
+- en: We have been talking about how message endpoints enable communication across
+    different subsystems. This brings up a very crucial question—what about transactions?
+    How are they handled across the chain? What are the Spring Integration offerings
+    on transactions?
+  id: totrans-68
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 我们一直在讨论消息端点如何使不同子系统之间能够进行通信。这引发了一个非常关键的问题——那么关于事务呢？它们如何在链上处理？Spring Integration在事务方面提供了哪些功能？
+- en: 'Spring Integration, per se, does not provide additional support for transactions;
+    rather, it builds upon the existing infrastructure of the transaction support
+    provided by Spring. It just provides hooks that can be used to plug in the transactional
+    behavior. Annotating a service activator or gateway with a transactional annotation
+    will support the transaction boundaries of the message flow. Let''s say a user
+    process was initiated with the transaction that is propagatory in nature and all
+    Spring Integration components in the chain have been annotated as transactional,
+    then a failure at any stage in the chain will result in a roll back. However,
+    this will happen only if transaction boundaries have not been broken—put simply,
+    everything is going on in a single thread. A single thread execution can break,
+    for example, use cases such as task executor that spawns new threads, aggregators
+    that can hold onto the messages, and time outs that can occur. Here is a quick
+    example of making a poller transactional:'
+  id: totrans-69
+  prefs: []
+  type: TYPE_NORMAL
+  zh: Spring Integration本身并不提供对事务的额外支持；相反，它是建立在Spring提供的事务支持的基础之上。它只是提供了一些可以用来插入事务行为的钩子。给服务激活器或网关注解上事务注解将支持消息流的事务边界。假设一个用户流程在事务性传播的上下文中启动，并且链中的所有Spring
+    Integration组件都注解为事务性的，那么链中任何阶段的失败都将导致回滚。然而，这只有在事务边界没有被破坏的情况下才会发生——简单来说，一切都在一个线程中进行。单线程执行可能会断裂，例如，使用任务执行器创建新线程用例，持有消息的聚合器，以及可能发生超时。以下是一个快速示例，使轮询器具有事务性：
+- en: '[PRE11]'
+  id: totrans-70
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE11]'
+- en: Here, `"entity-manager"`, `"transaction-manager"`, and so on are all standard
+    Spring components—only the namespace from Spring Integration, such as `int-jpa`
+    and `int:transactional`, has been used to plug them in. Right now, the adapter
+    is of no interest to us; we will cover all other tags in subsequent chapters.
+  id: totrans-71
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在这里，`"entity-manager"`、`"transaction-manager"` 等都是标准的 Spring 组件——只是这里使用了来自 Spring
+    Integration 的命名空间，比如 `int-jpa` 和 `int:transactional`，来将它们集成进来。目前，适配器对我们来说并不重要；我们将在后续章节中涵盖所有其他的标签。
+- en: 'What about a use case where a process was not initiated with a transaction
+    but, down the line, we want to introduce transactions on a subsystem? For example,
+    a batch job or a poller that polls on a channel and picks a file to put it on
+    an FTP server. There is no propagation of transactions, but we want to make this
+    aspect transactional so that we can retry in case of failures. Spring Integration
+    provides transaction support for pollers that can help start a transaction so
+    that the process beyond a poller can be handled in a single unit of work! Here
+    is a quick example:'
+  id: totrans-72
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 那么，有没有一种用例，进程没有在事务中启动，但后来我们想在子系统中引入事务呢？例如，一个批处理作业或轮询器，它在通道上轮询并选择一个文件上传到 FTP
+    服务器。这里没有事务的传播，但我们希望使这一部分具有事务性，以便在失败时可以重试。Spring Integration 为轮询器提供了事务支持，可以帮助启动事务，以便在轮询器之后的进程可以作为一个单一的工作单元来处理！下面是一个快速示例：
+- en: '[PRE12]'
+  id: totrans-73
+  prefs: []
+  type: TYPE_PRE
+  zh: '[PRE12]'
+- en: To summarize, Spring Integration hooks into the Spring transaction support and,
+    with a little intuition and creativity, it can even be extended to systems that
+    are nontransactional in nature!
+  id: totrans-74
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 总结一下，Spring Integration 整合了 Spring 事务支持，并且凭借一点直觉和创造力，它甚至可以扩展到本质上非事务性的系统！
+- en: Summary
+  id: totrans-75
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+  zh: 总结
+- en: In this chapter, we understood the reason why messaging endpoints are required,
+    and discovered a few of the endpoints provided by Spring Integration. We covered
+    how gateways can abstract underlying messaging implementation, making life simpler
+    for a developer, how service activators can be used for intermediate processing
+    of messages in the system, and how delayers can be used to throttle message processing
+    rates to match the producer's and consumer's speed! We touched upon the transactional
+    support—we discussed it only because it does not provide any new implementation
+    and hooks into the Spring framework's transactional support.
+  id: totrans-76
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在本章中，我们理解了为什么需要消息端点的原因，并发现了一些 Spring Integration 提供的端点。我们介绍了网关如何抽象底层消息实现，使开发者的工作更加简单，服务激活器如何在系统中对消息进行中间处理，以及延时器如何用来调节消息处理速率以匹配生产者和消费者的速度！我们简要提到了事务支持——我们只讨论它是因为它不提供任何新的实现，并且依赖于
+    Spring 框架的事务支持。
+- en: In the next chapter, we will dive deeper into one of the most important endpoints—message
+    transformers.
+  id: totrans-77
+  prefs: []
+  type: TYPE_NORMAL
+  zh: 在下一章中，我们将更深入地探讨一个最重要的端点——消息转换器。
