@@ -1,0 +1,451 @@
+<html><head></head><body>
+<div id="sbo-rt-content"><div id="_idContainer103">
+<h1 class="chapter-number" id="_idParaDest-75"><a id="_idTextAnchor074"/>5</h1>
+<h1 id="_idParaDest-76"><a id="_idTextAnchor075"/>Architecting a Batch Processing Pipeline</h1>
+<p>In the previous chapter, we learned how to architect medium- to low-volume batch-based solutions using Spring Batch. We also learned how to profile such data using DataCleaner. However, with data growth becoming exponential, most companies have to deal with huge volumes of data and analyze it to their advantage.</p>
+<p>In this chapter, we will discuss how to analyze, profile, and architect a big data solution for a batch-based pipeline. Here, we will learn how to choose the technology stack and design a data pipeline to create an optimized and cost-efficient big data solution. We will also learn how to implement this solution using Java, Spark, and various AWS components and test our solution. After that, we will discuss how to optimize the solution to be more time and cost-efficient. By the end of this chapter, you will know how to architect and implement a data analysis pipeline in AWS using S3, Apache Spark (Java), AWS EMR, AWS Lambda, and AWS Athena. You will also know how to fine-tune the code for optimized performance, as well as how to plan and optimize the cost of implementations.</p>
+<p>In this chapter, we’re going to cover the following main topics:</p>
+<ul>
+<li>Developing the architecture and choosing the right tools </li>
+<li>Implementing the solution</li>
+<li>Querying the ODL using AWS Athena</li>
+</ul>
+<h1 id="_idParaDest-77"><a id="_idTextAnchor076"/>Technical requirements</h1>
+<p>To follow along with this chapter, you’ll need the following:</p>
+<ul>
+<li>Prior knowledge of Java</li>
+<li>Prior knowledge of the basics of Apache Spark</li>
+<li>Java 1.8 or above installed on your local machine</li>
+<li>IntelliJ Idea community or ultimate edition installed on your local machine</li>
+<li>An AWS account</li>
+</ul>
+<p>The code for this chapter can be found in this book’s GitHub repository: <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05</a>.</p>
+<h1 id="_idParaDest-78"><a id="_idTextAnchor077"/>Developing the architecture and choosing the right tools  </h1>
+<p>In data engineering, after the data has been successfully ingested and stored in a data lake or a data warehouse, often, it needs to be mined and stored for specific needs in a more sorted and customized form for reporting and analysis. In this chapter, we will discuss such a problem where a huge volume of data needs to be analyzed and stored in a more customized format for a specific downstream audience.</p>
+<h2 id="_idParaDest-79"><a id="_idTextAnchor078"/>Problem statement</h2>
+<p>Let’s assume that an e-commerce firm, ABC, wants to analyze various kinds of user interaction on its products and <a id="_idIndexMarker548"/>determine the top-selling products for each category each month. They want to provide incentives to the top-selling products in each category. They also want to provide special offers and marketing promotion tools to products with top view-to-sale ratios but are not the top-selling products. In addition, they want to market seller tools and training, as well as marketing services, to the team with the lowest-selling product in each category. Currently, ABC stores all user transactions in its transactional databases for a product, but there is no monthly data view where information about the top seller, worst seller, and the top view-to-sale ratio is available. They want an <strong class="bold">Organized Data Layer</strong> (<strong class="bold">ODL</strong>) to be created so that such analytical queries can easily be performed with optimum performance every month.</p>
+<h2 id="_idParaDest-80"><a id="_idTextAnchor079"/>Analyzing the problem</h2>
+<p>Let’s analyze the given problem. First, let’s analyze the requirements in terms of the four dimensions of data. </p>
+<p>First, we will try to<a id="_idIndexMarker549"/> answer the question, <em class="italic">what is the velocity of the data?</em> Here, as evident from the requirements, we need to create an ODL with monthly analyzed data. Hence, our data will be used after a month, so we have no real-time data processing requirement. So, we can safely assume that we are dealing with a batch processing problem. However, it will be helpful to know how frequently the data arrives, which will help us determine at what frequency we can schedule a batch job. So, we must ask the e-commerce firm, <em class="italic">how frequently will source data be provided to us?</em> ABC tells us that the source data will be dropped to us as CSV files on a monthly or bi-monthly basis, but never twice daily. This information is helpful to us, but that brings other questions to mind.</p>
+<p>Now, the most obvious next question that comes to our mind is, <em class="italic">how big is the data/file that will be shared once or twice monthly?</em> Considering that each record will be an event on each transaction that any user has made on any product in the e-commerce marketplace, the data is likely to be huge. ABC tells us that transactions can be either view, cart, or purchase transactions. So, for each action, such as viewing a product, adding to the cart, and purchasing a product, there will be separate entries in the file. ABC also tells us that the number of products and categories is likely to increase in the future. From our guestimate and ABC’s internal data, each file sent to us can vary from hundreds of gigabytes to terabytes of data. The data that needs to be processed is in the range of hundreds of gigabytes and terabytes, which is ideal for big data processing. Our analysis also tells that the e-commerce traffic is going to increase over time. These observations indicate that this is a big data problem. So, we need to develop a big data solution to solve this batch processing problem.</p>
+<p>Now, we will look at the <em class="italic">variety of the data</em>. From our previous discussion, we know that data is arriving in CSV format. So, this is structured data that needs to be analyzed and processed. We will hold the discussion on the variety of data for a while as we will be taking that up during the implementation phase.</p>
+<p>The next decision that we must make, as architects, is to choose the right platform. Should we run this application on-premise or in the cloud? There are pros and cons to both. However, there are a few vital points regarding why the cloud may be a better choice in this case:</p>
+<ul>
+<li><strong class="bold">Cost saving</strong>: Running a big data job with terabytes of data will require a very good big data infrastructure to run on-premise. However, these jobs will only run once or twice a month. If we choose to create an on-premise environment, it doesn’t make sense to spend so many dollars creating a clustered Hadoop infrastructure that will only be used once or twice a month, but where the infrastructure needs to be maintained and running at all times. The amount of cost and effort involved in creating and maintaining such an infrastructure doesn’t justify the utilization. This will be much cheaper on the cloud, where you pay only for the resources you utilize during the job run. The cloud can give you the choice to only pay for what you use. </li>
+</ul>
+<p>For example, in the cloud, you can choose to keep your Hadoop environment running for only 2 hours daily; this way, you only pay for those 2 hours and not for the whole day. More importantly, it supports elasticity, which means you can auto-scale your number of nodes to a higher or lower number based on your usage. This gives you the flexibility to use only the required resource each time. For example, if we know<a id="_idIndexMarker550"/> that the data (which needs to be processed) will be huge in November and the jobs will take up more resources and time in November, we can increase the resource capacity for November and bring it down when the volume reduces to a normal level. Such capabilities of cloud technologies<a id="_idIndexMarker551"/> enable huge cost savings on the overall execution of the system (especially <strong class="bold">capital expenditure</strong> (<strong class="bold">CapEx</strong>) costs).</p>
+<ul>
+<li><strong class="bold">Seasonal variation in workloads</strong>: Usually, in an e-commerce site, the activity during the holiday season or festival season is high, while at other times, the activity is low. User activity directly impacts the size of the file for that month. So, we must be able to scale the infrastructure up and down as we need. This can easily be achieved in the cloud.</li>
+<li><strong class="bold">Future elasticity</strong>: As one of the requirements clearly states that the number of products and categories is likely to increase, this means we will need to scale up both processing and storage capacities in the future. While such changes require a lot of time and resources in on-premise environments, this can easily be achieved in the cloud.</li>
+<li><strong class="bold">Lack of sensitive data</strong>: There is no specific federal or <strong class="bold">Protected Health Information</strong> (<strong class="bold">PHI</strong>) data involved in our use case that needs to be encrypted or tokenized before it is stored in the cloud. So, we should be good with legal and data security requirements.</li>
+</ul>
+<p>Although we can choose any public<a id="_idIndexMarker552"/> cloud platform, for our convenience, we will use AWS as our cloud platform in this book.</p>
+<h2 id="_idParaDest-81"><a id="_idTextAnchor080"/>Architecting the solution</h2>
+<p>Now that we have gathered and<a id="_idIndexMarker553"/> analyzed our requirements, let’s try building the architecture for the solution. To architect this solution, we need to answer the following questions:</p>
+<ul>
+<li>Where should we store or land the input data?</li>
+<li>How should we process the input data?</li>
+<li>Where and how should we store the output data/ODL?</li>
+<li>How should we provide a querying interface to the ODL?</li>
+<li>How and when should we schedule a processing job?</li>
+</ul>
+<p>Let’s see what options we have for storing the input data. We can store the data in one of the following services:</p>
+<ul>
+<li><strong class="bold">S3</strong>: <strong class="bold">S3</strong> or <strong class="bold">Simple Storage Service</strong> is a very popular object storage service. It is also cheap and very reliable.</li>
+<li><strong class="bold">EMR/EC2 attached EBS volumes</strong>: <strong class="bold">Elastic Block Storage</strong> (<strong class="bold">EBS</strong>) is a block storage solution where storage volumes can be attached to any virtual server, such as an EC2 instance. For a big data solution, if you use <strong class="bold">Elastic Map Reduce</strong> (<strong class="bold">EMR</strong>), EBS volumes can be attached to each participating EC2 node in that EMR cluster.</li>
+<li><strong class="bold">Elastic File System (EFS)</strong>: EFS is a shared filesystem that’s often attached to a NAS server. It is usually used for content repositories, media stores, or user home directories.</li>
+</ul>
+<p>Let’s discuss the different<a id="_idIndexMarker554"/> factors to consider before choosing your storage.</p>
+<h2 id="_idParaDest-82"><a id="_idTextAnchor081"/>Factors that affect your choice of storage</h2>
+<p>Cost is an important factor that we<a id="_idIndexMarker555"/> need to consider when choosing any cloud component. However, let’s look at factors other than cost that affect our choice of storage. These factors are as follows:</p>
+<ul>
+<li><strong class="bold">Performance</strong>: Both EBS and EFS can perform faster than S3 in terms of IOPS. Although performance is slower in S3, it’s not significantly slower to read the data from other storage options. From a performance perspective, an EFS or EBS volume will still be preferred.</li>
+<li><strong class="bold">Scalability</strong>: Although all three storage options are scalable, S3 has the most seamless scalability without any manual effort or interruption. Since scalability is one of our important needs as our data grows over time and there is a possibility of bigger file sizes in the future (according to the requirements), from this perspective, S3 is a clear winner.</li>
+<li><strong class="bold">Life cycle management</strong>: Both S3 and EFS have life cycle management features. Suppose you believe that older files (older than a year) need to be archived; these programs can seamlessly move to another cheaper storage class, which provides seamless archival storage as well as cost savings.</li>
+<li><strong class="bold">Serverless architecture support</strong>: Both S3 and EFS provide serverless architecture support.</li>
+<li><strong class="bold">High availability and robustness</strong>: Again, both S3 and EFS are highly robust and available options for storage. In this regard, EBS is not on par with the other two storage options.</li>
+<li><strong class="bold">Big data analytic tool compatibility</strong>: Reading and writing data from an S3 or EBS volume is much easier from big data processing engines such as Spark and MapReduce. Also, creating external Hive or Athena tables is much easier if the data resides in S3 or EBS.</li>
+</ul>
+<p>As we can see, both S3 and <a id="_idIndexMarker556"/>EFS seem to be promising options to use. Now, let’s look at how crucial cost is in determining cloud storage solutions.</p>
+<h2 id="_idParaDest-83"><a id="_idTextAnchor082"/>Determining storage based on cost</h2>
+<p>One of the most important tools for any <a id="_idIndexMarker557"/>cloud solution architect is a cost estimator or pricing calculator. As we are using AWS, we will use AWS Pricing Calculator: <a href="https://calculator.aws/#/">https://calculator.aws/#/</a>.</p>
+<p>We will use this tool to compare the cost of storing input data in EFS versus S3 storage. In our use case, we’ll assume that we get 2 TB of data per month and that we must store monthly data for 3 months before we can archive it. We also need to store data for up to 1 year. Let’s see how our cost varies based on our choice of storage.</p>
+<p>Here, for either kind of storage, we will use <strong class="bold">S3 Intelligent-Tiering</strong> (which supports automatic life cycle management<a id="_idIndexMarker558"/> and reduces cost) to do the calculation. It asks for the average data storage per month and the amount stored in the frequent access layer, infrequent access layer, and archive layers. </p>
+<p>To calculate the average data storage required per month, 2 TB of new data per month gets generated for our use case. So, we have 2 TB of data to store in the first month, 4 TB of data to store in the second, 6 TB of data to store in the third, and so on. So, to calculate the average data, we must add all the storage requirements for each month together and divide the result by 12. The mathematical equation for this is as follows:</p>
+<p><img alt="" height="115" src="image/B17084_Formula_5.1.png" width="567"/></p>
+<p>The preceding formula gives us a 13 TB per month calculation. Now, it asks us for the percentage stored in the frequent access layer – the layer that we will read the data from. The data in the frequent access layer can only be 2 TB for each month (which is around 15% of 13 TB). Using these<a id="_idIndexMarker559"/> values, we can calculate the estimated cost, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer075">
+<img alt="Figure 5.1 – AWS S3 cost estimation tool " height="863" src="image/B17084_05_001.jpg" width="1643"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.1 – AWS S3 cost estimation tool</p>
+<p>Using the previously mentioned calculation, ballpark estimates for Amazon S3 come to 97.48 USD per month on average. However, a similar calculation for Amazon EFS would cost 881.92 USD. This depicts that using EFS will be nine times costlier than using Amazon S3. </p>
+<p>So, looking at the cost, combined with other parameters, we can safely decide on choosing Amazon S3 as our input storage. Based on a similar set of logic and calculations, we can store the ODL in S3 as well.</p>
+<p>However, a discussion about the storage layer for the output data is incomplete without deciding on the schema and format of the output files. Based on the requirements, we can conclude that the output data should have the following columns:</p>
+<ul>
+<li><strong class="source-inline">year</strong></li>
+<li><strong class="source-inline">month</strong></li>
+<li><strong class="source-inline">category_id</strong></li>
+<li><strong class="source-inline">product_id</strong></li>
+<li><strong class="source-inline">tot_sales</strong></li>
+<li><strong class="source-inline">tot_onlyview</strong></li>
+<li><strong class="source-inline">sales_rev</strong></li>
+<li><strong class="source-inline">rank_by_revenue</strong></li>
+<li><strong class="source-inline">rank_by_sales</strong></li>
+</ul>
+<p>It is advisable to partition the table on a yearly and monthly basis since most of the queries on the ODL will be monthly. Now that we have finalized all the details of the storage layer, let’s discuss the processing layer of the solution.</p>
+<p>Now, we must look at the options that are available in AWS for processing a big data batch job. Primarily, there are two native alternatives. One is running Spark on EMR clusters, while the other is running <a id="_idIndexMarker560"/>Glue jobs (Glue is a fully managed serverless AWS service). AWS Glue allows you to write a script in Scala or Python and trigger Glue jobs either through the AWS Management Console or programmatically. Since we are interested in implementing the solution in Java, AWS Glue is not an option for us. Also, AWS Glue scripts have less portability and a higher learning curve. Here, we will stick to Spark on EMR. However, Spark jobs can be run on an EMR cluster in two ways:</p>
+<ul>
+<li>The classical approach of running <strong class="source-inline">spark submit</strong> from the command line</li>
+<li>The cloud-specific approach of adding a <strong class="source-inline">spark submit</strong> step</li>
+</ul>
+<p>Now, let’s see how the cost matrix helps us determine which approach we should take to submit a Spark job among the two options mentioned earlier.</p>
+<h2 id="_idParaDest-84"><a id="_idTextAnchor083"/>The cost factor in the processing layer</h2>
+<p>The first option is to keep the EMR cluster<a id="_idIndexMarker561"/> up and running all the time and trigger the <strong class="source-inline">spark submit</strong> command using a shell script from a cronjob trigger at specific time intervals (very similar to what we would do on an on-premise Hadoop cluster). Such<a id="_idIndexMarker562"/> a cluster is known as a <em class="italic">persistent EMR cluster</em>.</p>
+<p>The second option is to add an EMR step to run the Spark job while creating the cluster and then terminate it once it has run <a id="_idIndexMarker563"/>successfully. This kind of EMR cluster is known as a <em class="italic">transient EMR cluster</em>. Let’s see how the cost estimates vary for each option.</p>
+<p>In an EMR cluster, there are three types of nodes: <em class="italic">master node</em>, <em class="italic">core node</em>, and <em class="italic">task node</em>. The master node manages<a id="_idIndexMarker564"/> the cluster and acts as the NameNode and the Jobtracker. The core<a id="_idIndexMarker565"/> node acts as the DataNode, as well as the worker node, which is responsible for processing the data. TaskNodes are optional, but they are <a id="_idIndexMarker566"/>required for separate task tracker activities.</p>
+<p>Due to their nature of work, usually, selecting a compute-optimized instance works great for the master node, while a mixed instance works best for the core nodes. In our calculation, we will use the c4.2xlarge instance type for the master node and the m4.4xlarge instance type for the core nodes. If we need four core nodes, a persistent EMR cluster would cost us around 780 USD per month. A similar configuration on a transient EMR cluster would only cost around 7 USD per month, considering the job runs two or three times a <a id="_idIndexMarker567"/>month with a job run duration not exceeding 2 hours each. As we can see, the second option is nearly 100 times more cost-effective. Therefore, we will choose a transient EMR cluster.</p>
+<p>Now, let’s figure out how to create and schedule the transient EMR clusters. In our use case, the data arrives in the S3 buckets. Each successful creation event in an S3 bucket generates an event that can trigger an AWS Lambda function. We can use such a Lambda function to create the transient cluster every time a new file lands in the landing zone of the S3 bucket.</p>
+<p>Based on the preceding discussion, the following diagram depicts the architecture of the solution that’s been proposed:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer076">
+<img alt="Figure 5.2 – Solution architecture " height="496" src="image/B17084_05_002.jpg" width="689"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.2 – Solution architecture</p>
+<p>As shown in the preceding diagram, the input data lands in the S3 bucket (also known as landing zone) as the source data. Here, one <a id="_idIndexMarker568"/>source data file arrives twice a month. The architecture diagram depicts four steps denoted by numerals. Let’s look at these steps in more detail:</p>
+<ol>
+<li>A CloudWatch event is generated when an incoming source file is completely written in the S3 bucket. This generates a Lambda trigger, which, in turn, invokes a Lambda function.</li>
+<li>The Lambda function receives the creation event records and creates a transient EMR cluster with a step configured to run a Spark job to read and process the new input file(s).</li>
+<li>The Spark job in the EMR step reads and processes the data. Then, it writes the transformed output data to the S3 bucket for the ODL layer. Upon successfully terminating the Spark step, the transient cluster gets terminated.</li>
+<li>All the data residing in the ODL layer will be exposed as Athena tables that can be queried for any analytical purposes.</li>
+</ol>
+<p>This gives us a very simple yet powerful architecture to solve such big data batch processing problems. The logs and <a id="_idIndexMarker569"/>metrics in all the processing and storage components will be captured by AWS CloudWatch logs. We can further improve this architecture by adding auditing and alert features using CloudWatch logs and metrics.</p>
+<p class="callout-heading">Important note</p>
+<p class="callout">It is advisable to use the Parquet format as the output storage format because of the following factors:</p>
+<p class="callout"><strong class="bold">Cost saving and performance</strong>: Since multiple output columns can potentially have low cardinality, the ODL data storage format should be a columnar format, which can give cost savings as well as better performance.</p>
+<p class="callout"><strong class="bold">Technology compatibility</strong>: Since we are dealing with big data processing, and our processing layer is Spark-based, Parquet will be the most suitable data format to use for the ODL layer.</p>
+<p>Now that we have analyzed the problem and developed a robust, reliable, and cost-effective architecture, let’s implement the solution.</p>
+<h1 id="_idParaDest-85"><a id="_idTextAnchor084"/>Implementing the solution</h1>
+<p>The first step of any implementation is<a id="_idIndexMarker570"/> always understanding the source data. This is because all our low-level transformation and cleansing will be dependent on the variety of the data. In the previous chapter, we used DataCleaner to profile the data. However, this time, we are dealing with big data and the cloud. DataCleaner may not be a very effective tool for profiling the data if its size runs into the terabytes. For our scenario, we will use an AWS cloud-based data profiling tool called AWS Glue<a id="_idIndexMarker571"/> DataBrew.</p>
+<h2 id="_idParaDest-86"><a id="_idTextAnchor085"/>Profiling the source data</h2>
+<p>In this section, we will learn <a id="_idIndexMarker572"/>how to <a id="_idIndexMarker573"/>do data profiling and analysis to understand the incoming data (you can find the sample file for this on GitHub at <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05</a>. Follow these steps:</p>
+<ol>
+<li value="1">Create an S3 bucket called <strong class="source-inline">scalabledataarch</strong> using the AWS Management Console and upload the sample input data to the S3 bucket:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer077">
+<img alt="Figure 5.3 – Creating an S3 bucket and uploading the input file " height="1013" src="image/B17084_05_003.jpg" width="1520"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.3 – Creating an S3 bucket and uploading the input file</p>
+<ol>
+<li value="2">From the AWS Management Console, go to the AWS Glue DataBrew service. Click on the <strong class="bold">DATASET</strong> side tab. Then, click the <strong class="bold">Connect new dataset</strong> button. A dialog box similar to the one shown in the following screenshot will appear. Select <strong class="bold">Amazon S3</strong> and then enter the source data path of the S3 bucket. Finally, click the <strong class="bold">Create Dataset</strong> button to create a new dataset:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer078">
+<img alt="Figure 5.4 – Adding a new dataset to AWS Glue DataBrew " height="999" src="image/B17084_05_004.jpg" width="1498"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.4 – Adding a new dataset to AWS Glue DataBrew</p>
+<ol>
+<li value="3">Now, let’s create a <a id="_idIndexMarker574"/>data profiling job using the<a id="_idIndexMarker575"/> dataset that we’ve added. First, select the newly added dataset and go to the <strong class="bold">Data profile overview</strong> tab, as shown in the following screenshot: </li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer079">
+<img alt="Figure 5.5 – The Data profile overview tab " height="846" src="image/B17084_05_005.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.5 – The Data profile overview tab</p>
+<p>Now, click on<a id="_idIndexMarker576"/> the <strong class="bold">Run data profile</strong> button, which <a id="_idIndexMarker577"/>will take you to a <strong class="bold">Create job</strong> popup. Enter the job name and choose to run the sample using the <strong class="bold">Full dataset</strong> option, as shown here:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer080">
+<img alt="Figure 5.6 – Creating a data profiling job " height="980" src="image/B17084_05_006.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.6 – Creating a data profiling job</p>
+<p>Set the output<a id="_idIndexMarker578"/> location as <strong class="source-inline">scalablearch-dataprof</strong> (our S3 bucket). The<a id="_idIndexMarker579"/> output files of the data profiling job will be stored here:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer081">
+<img alt="Figure 5.7 – Configuring the data profiling job " height="648" src="image/B17084_05_007.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.7 – Configuring the data profiling job</p>
+<p>Then, configure <strong class="bold">Dataset level configurations</strong>, as shown in the following screenshot. Since we want to<a id="_idIndexMarker580"/> find the <a id="_idIndexMarker581"/>correlation between <strong class="source-inline">product_id</strong>, <strong class="source-inline">category_id</strong>, and <strong class="source-inline">brand</strong>, </p>
+<p>we have configured them accordingly, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer082">
+<img alt="Figure 5.8 – Configuring the Correlations widget " height="910" src="image/B17084_05_008.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.8 – Configuring the Correlations widget</p>
+<p>Then, we must set up the<a id="_idIndexMarker582"/> security roles for the data <a id="_idIndexMarker583"/>profiling job. Once you’ve done this, click the <strong class="bold">Create Job</strong> button to create the data profiling job:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer083">
+<img alt="Figure 5.9 – Setting the security permissions for the data profiling job " height="894" src="image/B17084_05_009.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.9 – Setting the security permissions for the data profiling job</p>
+<ol>
+<li value="4">Finally, we can see the<a id="_idIndexMarker584"/> newly created data <a id="_idIndexMarker585"/>profiling job in the <strong class="bold">Profile jobs</strong> tab. We can run the data profiling job by clicking the <strong class="bold">Run job</strong> button on this screen:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer084">
+<img alt="Figure 5.10 – Data profiling job created and listed " height="438" src="image/B17084_05_010.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.10 – Data profiling job created and listed</p>
+<p>Once the job successfully runs, we can go to the dataset, open the <strong class="bold">Data lineage</strong> tab, and view the data lineage, as well as the time interval before which the last successful data profiling job ran:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer085">
+<img alt="Figure 5.11 – Lineage of the data profiling job " height="856" src="image/B17084_05_011.jpg" width="1590"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.11 – Lineage of the data profiling job</p>
+<ol>
+<li value="5">We can visualize the report to<a id="_idIndexMarker586"/> find missing values, cardinalities, the correlation between columns, and the<a id="_idIndexMarker587"/> distribution of the data. These metrics help us determine whether there are anomalies in the data that need to be cleaned up or if there are missing values and if they need to be handled. It also helps us understand the quality of the data that we are dealing with. This helps us do proper cleansing and transformation so that it doesn’t give us surprises later during our implementation. The following screenshot shows some sample metrics that AWS Glue DataBrew displays:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer086">
+<img alt="Figure 5.12 – Data profile metrics " height="1353" src="image/B17084_05_012.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.12 – Data profile metrics</p>
+<p>Here, we can see some useful <a id="_idIndexMarker588"/>statistics. For example, <strong class="source-inline">event_type</strong> has no noise and it has a very low cardinality. It also shows that the data is<a id="_idIndexMarker589"/> not uniformly distributed by this column.</p>
+<p>Now that we have analyzed the data, let’s develop the Spark application that will process the records.</p>
+<h2 id="_idParaDest-87"><a id="_idTextAnchor086"/>Writing the Spark application</h2>
+<p>Based on the analysis in the previous<a id="_idIndexMarker590"/> section, we will create the incoming record schema string. Then, we will use that schema string to read the incoming <a id="_idIndexMarker591"/>data, as shown in the following code snippet:</p>
+<pre class="source-code">private static final String EVENT_SCHEMA = "event_time TIMESTAMP,event_type STRING,product_id LONG,category_id LONG,category_code STRING,brand STRING,price DOUBLE,user_id LONG,user_session STRING";
+. . .
+Dataset&lt;Row&gt; ecommerceEventDf = spark.read().option("header","true").schema(EVENT_SCHEMA).csv(inputPath);</pre>
+<p>Then, we will calculate the total sales and total views for each product using the <strong class="source-inline">count_if</strong> aggregation function of Spark, as shown in the following code snippet:</p>
+<pre class="source-code">Dataset&lt;Row&gt; countAggDf = spark.sql("select year(event_time) as year,month(event_time) as month,category_id,product_id,count_if(event_type='purchase') as tot_sales,count_if(event_type='view') as tot_onlyview from ecommerceEventDf where event_type!='cart' group by year,month,category_id,product_id ");</pre>
+<p>We will create another DataFrame to calculate the total revenue for only the purchase events. The following code snippet shows how to do this:</p>
+<pre class="source-code">Dataset&lt;Row&gt; revenueAggDf = spark.sql("select year(event_time) as year,month(event_time) as month,category_id,product_id,sum(price) as sales_rev from ecommerceEventDf where event_type='purchase' group by year,month,category_id,product_id");</pre>
+<p>Now, we will combine the <strong class="source-inline">countAggDf</strong> and <strong class="source-inline">revenueAggDf</strong> DataFrames using a <strong class="source-inline">LEFT OUTER JOIN</strong> SparkSQL query, as shown in the following code snippet. The null values for <strong class="source-inline">total_sales</strong> for the product that didn’t have a single sale are set to <strong class="source-inline">0.0</strong> using the <strong class="source-inline">na.fill()</strong> method of Spark:</p>
+<pre class="source-code">Dataset&lt;Row&gt; combinedAggDf = spark.sql("select cadf.year,cadf.month,cadf.category_id,cadf.category_id,cadf.product_id,tot_sales,tot_onlyview,sales_rev from countAggDf cadf LEFT OUTER JOIN revenueAggDf radf ON cadf.year==radf.year AND cadf.month== radf.month AND cadf.category_id== radf.category_id AND cadf.product_id == radf.product_id");
+Dataset&lt;Row&gt; combinedEnrichAggDf = combinedAggDf.na().fill(0.0,new String[]{"sales_rev"});</pre>
+<p>Now, we will apply window<a id="_idIndexMarker592"/> functions on the resultant <strong class="source-inline">combinedEnrichedDf</strong> DataFrame to derive the columns – that is, <strong class="source-inline">rank_by_revenue</strong> and <strong class="source-inline">rank_by_sales</strong>:</p>
+<pre class="source-code">Dataset&lt;Row&gt; finalTransformedDf = spark.sql("select year,month,category_id,product_id,tot_sales,tot_onlyview,sales_rev,dense_rank() over (PARTITION BY category_id ORDER BY sales_rev DESC) as rank_by_revenue,dense_rank() over (PARTITION BY category_id ORDER BY tot_sales DESC) as rank_by_sales from combinedEnrichAggDf");</pre>
+<p>The result is ready and is in the<a id="_idIndexMarker593"/> same format as the output. So, we must write the transformed data to the output S3 bucket using Parquet format while ensuring it’s partitioned by year and month:</p>
+<pre class="source-code">finalTransformedDf.write().mode(SaveMode.Append).partitionBy("year","month").parquet(outputDirectory);</pre>
+<p>The full source code for this application is available on GitHub at <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05/sourcecode/EcommerceAnalysis">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05/sourcecode/EcommerceAnalysis</a>.</p>
+<p>In the next section, we will learn how to deploy and run the Spark application on an EMR cluster.</p>
+<h2 id="_idParaDest-88"><a id="_idTextAnchor087"/>Deploying and running the Spark application</h2>
+<p>Now that we have <a id="_idIndexMarker594"/>developed the Spark job, let’s try to<a id="_idIndexMarker595"/> run it using a transient EMR cluster. First, we will create an EMR cluster manually and run the job. To create the transient EMR cluster manually, follow these steps:</p>
+<ol>
+<li value="1">First, build the Spark application JAR file and upload it to an S3 bucket.</li>
+<li>Go to the AWS Management Console for AWS EMR. Click the <strong class="bold">Create Cluster</strong> button to create a new transient cluster manually.</li>
+<li>Set up the EMR configuration. Make sure that you set <strong class="bold">Launch mode</strong> to <strong class="bold">Step execution</strong>. Make sure<a id="_idIndexMarker596"/> that you select <strong class="bold">emr-6.4.0</strong> as the value of the <strong class="bold">Release</strong> field in the <strong class="bold">Software configuration</strong> section. Also, for <strong class="bold">Add Steps</strong>, choose <strong class="bold">Spark application</strong> for <strong class="bold">Step type</strong>. Leave all the other fields as-is. Your configuration should look as follows:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer087">
+<img alt="Figure 5.13 – Manual transient EMR cluster creation " height="837" src="image/B17084_05_013.jpg" width="1440"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.13 – Manual transient EMR cluster creation</p>
+<ol>
+<li value="4">Now, to add the <a id="_idIndexMarker597"/>Spark step, click on the <strong class="bold">Configure</strong> button. This will make a dialog box appear where you can enter various Spark step-related configurations, as shown in the following screenshot:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer088">
+<img alt="Figure 5.14 – Adding a Spark step to the EMR cluster " height="983" src="image/B17084_05_014.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.14 – Adding a Spark step to the EMR cluster</p>
+<p>Please ensure that you<a id="_idIndexMarker598"/> specify the driver class name in the <strong class="bold">Spark-submit options</strong> area and provide the necessary<a id="_idIndexMarker599"/> information in the <strong class="bold">Application location*</strong> and <strong class="bold">Arguments</strong> boxes. </p>
+<ol>
+<li value="5">Click <strong class="bold">Add</strong> to add the step. Once added, it will look similar to what’s shown in the following screenshot. Then, click <strong class="bold">Create Cluster</strong>. This will create the transient cluster, run the Spark job, and terminate the cluster once the Spark job has finished executing:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer089">
+<img alt="Figure 5.15 – EMR cluster configuration with an added Spark step " height="894" src="image/B17084_05_015.jpg" width="1500"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.15 – EMR cluster configuration with an added Spark step</p>
+<ol>
+<li value="6">Once it has successfully<a id="_idIndexMarker600"/> run, you will<a id="_idIndexMarker601"/> see that the job succeeded in the <strong class="bold">Steps</strong> tab of the cluster:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer090">
+<img alt="Figure 5.16 – Job monitoring in the EMR cluster " height="471" src="image/B17084_05_016.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.16 – Job monitoring in the EMR cluster</p>
+<p class="callout-heading">Troubleshooting Spark errors</p>
+<p class="callout">A Spark job runs on huge volumes of data and can throw multiple exceptions. It can also report multiple stage failures, such as <strong class="source-inline">OutOfMemoryException</strong>, large frame errors, throttling errors from multipart files uploaded in AWS S3, and so on. Covering all of these is beyond the scope of this book. However, you can refer to a very concise Spark troubleshooting guide at <a href="https://docs.qubole.com/en/latest/troubleshooting-guide/spark-ts/troubleshoot-spark.xhtml#troubleshooting-spark-issues">https://docs.qubole.com/en/latest/troubleshooting-guide/spark-ts/troubleshoot-spark.xhtml#troubleshooting-spark-issues</a> for more information.</p>
+<p>Now that we have deployed <a id="_idIndexMarker602"/>and run the Spark application manually, let’s automate how Spark jobs are created and run by implementing a <a id="_idIndexMarker603"/>Lambda trigger.</p>
+<h2 id="_idParaDest-89"><a id="_idTextAnchor088"/>Developing and testing a Lambda trigger</h2>
+<p>AWS Lambda functions are fully<a id="_idIndexMarker604"/> managed serverless services that help process information. They are supported by multiple languages <a id="_idIndexMarker605"/>such as Python, JavaScript, Java, and so on. Although<a id="_idIndexMarker606"/> Python or JavaScript runtimes are faster, we will use the Java runtime in this book to implement the solution (since we are focusing on Java-based implementations in this book).</p>
+<p>To write a Lambda function that will react to an S3 event, we must create a Java class that implements the <strong class="source-inline">RequestHandler</strong> interface and takes <strong class="source-inline">S3Event</strong> as its generic <strong class="source-inline">Input</strong> type, as shown in the following code block:</p>
+<pre class="source-code">import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.amazonaws.services.lambda.runtime.events.S3Event;
+. . .
+public class Handler implements RequestHandler&lt;S3Event, Integer&gt; {
+. . .</pre>
+<p>In this class, we must implement the <strong class="source-inline">handleRequest</strong> method of the <strong class="source-inline">RequestHandler</strong> interface. In the <strong class="source-inline">handleRequest</strong> method, we loop through each <strong class="source-inline">S3EventNotificationRecord</strong>, which denotes a new file being created or updated. We collect all the S3 object names attached to this <strong class="source-inline">S3EventNotificationRecord</strong> in <strong class="source-inline">S3ObjectNames</strong>. For each distinct S3 object name present in <strong class="source-inline">S3ObjectNames</strong>, we create <a id="_idIndexMarker607"/>and launch an AWS transient EMR cluster. The following code snippet shows<a id="_idIndexMarker608"/> the implementation <a id="_idIndexMarker609"/>of the <strong class="source-inline">handleRequest</strong> method:</p>
+<pre class="source-code">Set&lt;String&gt; s3ObjectNames = new HashSet&lt;&gt;();
+for (S3EventNotificationRecord record:
+        s3Event.getRecords()) {
+    String s3Key = record.getS3().getObject().getKey();
+    String s3Bucket = record.getS3().getBucket().getName();
+    s3ObjectNames.add("s3://"+s3Bucket+"/"+s3Key);
+}
+s3ObjectNames.forEach(inputS3path -&gt;{
+    createClusterAndRunJob(inputS3path,logger);
+});</pre>
+<p>Now, let’s look at the implementation of the <strong class="source-inline">createClusterAndRunJob</strong> method. This takes two arguments: <strong class="source-inline">inputS3path</strong> and the Lambda logger. This method uses AWS SDK to create an <strong class="source-inline">ElasticMapReduce</strong> object. This method uses the <strong class="source-inline">StepConfig</strong> API to build a <strong class="source-inline">spark submit</strong> step. Then, it uses all the configuration details, along with <strong class="source-inline">SparkSubmitStep</strong>, to configure the <strong class="source-inline">RunJobFlowRequest</strong> object. </p>
+<p>Finally, we can submit a request to create and run an EMR cluster using the <strong class="source-inline">runJobFlow</strong> method of the <strong class="source-inline">ElasticMapReduce</strong> object, as shown here:</p>
+<pre class="source-code">private void createClusterAndRunJob(String inputS3path, LambdaLogger logger) {
+    //Create a EMR object using AWS SDK
+    AmazonElasticMapReduce emr = AmazonElasticMapReduceClientBuilder.standard()
+            .withRegion("us-east-2")
+            .build();
+    
+    // create a step to submit spark Job in the EMR cluster to be used by runJobflow request object
+    StepFactory stepFactory = new StepFactory();
+    HadoopJarStepConfig sparkStepConf = new HadoopJarStepConfig()
+            .withJar("command-runner.jar")
+            .withArgs("spark-submit","--deploy-mode","cluster","--class","com.scalabledataarchitecture.bigdata.EcomAnalysisDriver","s3://jarandconfigs/EcommerceAnalysis-1.0-SNAPSHOT.jar",inputS3path,"s3://scalabledataarch/output");
+    StepConfig sparksubmitStep = new StepConfig()
+            .withName("Spark Step")
+            .withActionOnFailure("TERMINATE_CLUSTER")
+            .withHadoopJarStep(sparkStepConf);
+    //Create an application object to be used by runJobflow request object
+    Application spark = new Application().withName("Spark");
+    //Create a runjobflow request object
+    RunJobFlowRequest request = new RunJobFlowRequest()
+            .withName("chap5_test_auto")
+            .withReleaseLabel("emr-6.4.0")
+            .withSteps(sparksubmitStep)
+            .withApplications(spark)
+            .withLogUri(...)
+            .withServiceRole("EMR_DefaultRole")
+            ...            ;
+    //Create and run a new cluster using runJobFlow method
+    RunJobFlowResult result = emr.runJobFlow(request);
+    logger.log("The cluster ID is " + result.toString());
+}</pre>
+<p>Now that we<a id="_idIndexMarker610"/> developed the<a id="_idIndexMarker611"/> Lambda <a id="_idIndexMarker612"/>function, let’s deploy, run, and test it:</p>
+<ol>
+<li value="1">Create an IAM security role for the Lambda function to trigger the EMR cluster, as shown in the following screenshot:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer091">
+<img alt="Figure 5.17 – Creating a new IAM role " height="896" src="image/B17084_05_017.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.17 – Creating a new IAM role</p>
+<ol>
+<li value="2">Create a Lambda<a id="_idIndexMarker613"/> function using the AWS <a id="_idIndexMarker614"/>Management Console. Please provide the name <a id="_idIndexMarker615"/>and runtime of the function, as shown in the following screenshot:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer092">
+<img alt="Figure 5.18 – Creating an AWS Lambda function " height="824" src="image/B17084_05_018.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.18 – Creating an AWS Lambda function</p>
+<ol>
+<li value="3">While creating the<a id="_idIndexMarker616"/> Lambda function, please make sure that you change <a id="_idIndexMarker617"/>the default execution role<a id="_idIndexMarker618"/> to the IAM role you created in <em class="italic">Step 1</em>:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer093">
+<img alt="Figure 5.19 – Setting the IAM role to an AWS Lambda function " height="535" src="image/B17084_05_019.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.19 – Setting the IAM role to an AWS Lambda function</p>
+<ol>
+<li value="4">Now, you must add an S3 trigger for the Lambda function, as shown in the following screenshot. Make<a id="_idIndexMarker619"/> sure that you <a id="_idIndexMarker620"/>enter the proper bucket name and prefix where<a id="_idIndexMarker621"/> you will push your source files:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer094">
+<img alt="Figure 5.20 – Creating an S3 event trigger for the Lambda function " height="1013" src="image/B17084_05_020.jpg" width="1379"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.20 – Creating an S3 event trigger for the Lambda function</p>
+<ol>
+<li value="5">Then, you must build the JAR file locally from the Lambda function we developed using our Maven Java project (the full source code for the project can be found at <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05/sourcecode/S3lambdaTriggerEmr">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter05/sourcecode/S3lambdaTriggerEmr</a>). Once the JAR file has been built, you must upload it using the <strong class="bold">Upload from</strong> | <strong class="bold">.zip or .jar file</strong> option, as shown in the following screenshot:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer095">
+<img alt="Figure 5.21 – Deploying an AWS Lambda JAR file " height="609" src="image/B17084_05_021.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.21 – Deploying an AWS Lambda JAR file</p>
+<ol>
+<li value="6">Now, you can test the whole workflow by placing a new data file in the S3 bucket mentioned in the S3<a id="_idIndexMarker622"/> trigger. Once the<a id="_idIndexMarker623"/> Lambda function executes, it creates a<a id="_idIndexMarker624"/> transient EMR cluster where the Spark job will run. You can monitor the metrics of the Lambda function from the AWS Management Console:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer096">
+<img alt="Figure 5.22 – Monitoring the AWS Lambda function " height="817" src="image/B17084_05_022.jpg" width="1500"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.22 – Monitoring the AWS Lambda function</p>
+<p>You can monitor the <a id="_idIndexMarker625"/>Spark application from the AWS EMR management <a id="_idIndexMarker626"/>console by looking through<a id="_idIndexMarker627"/> the <strong class="bold">Persistent user interfaces</strong> options in the transient cluster’s <strong class="bold">Summary</strong> tab, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer097">
+<img alt="Figure 5.23 – EMR Cluster management console " height="731" src="image/B17084_05_023.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.23 – EMR Cluster management console</p>
+<p class="callout-heading">Troubleshooting a Lambda function</p>
+<p class="callout">In the real world, you may <a id="_idIndexMarker628"/>have trouble when invoking or executing a Lambda function. A very concise guide to troubleshoot all such issues has been published by AWS. For more information, check out <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-troubleshooting.xhtml">https://docs.aws.amazon.com/lambda/latest/dg/lambda-troubleshooting.xhtml</a>.</p>
+<p>Now, let’s see if we can further <a id="_idIndexMarker629"/>optimize the Spark <a id="_idIndexMarker630"/>application by monitoring the <a id="_idIndexMarker631"/>Spark job.</p>
+<h2 id="_idParaDest-90"><a id="_idTextAnchor089"/>Performance tuning a Spark job</h2>
+<p>We can investigate<a id="_idIndexMarker632"/> the Spark UI to<a id="_idIndexMarker633"/> see <a id="_idIndexMarker634"/>its <strong class="bold">directed acyclic graph</strong> (<strong class="bold">DAG</strong>). In our case, our DAG looks like this:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer098">
+<img alt="Figure 5.24 – DAG of the Spark job " height="881" src="image/B17084_05_024.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.24 – DAG of the Spark job</p>
+<p>As we can see, both <em class="italic">Stage 5</em> and <em class="italic">Stage 6</em> are performing the same job of scanning and reading the CSV into a DataFrame. This is because we have a DataFrame called <strong class="source-inline">ecommerceEventDf</strong> that is<a id="_idIndexMarker635"/> being used to derive two different DataFrames. Both derived DataFrames calculate <strong class="source-inline">ecommerceEventDf</strong> separately<a id="_idIndexMarker636"/> due to Spark’s lazy evaluation technique, which causes the performance to slow down. We can overcome this issue by persisting the <strong class="source-inline">ecommerceEventDf</strong> DataFrame, as shown in the following code snippet:</p>
+<pre class="source-code">ecommerceEventDf.persist(StorageLevel.MEMORY_AND_DISK());</pre>
+<p>After making this change, the new DAG will look as follows:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer099">
+<img alt="Figure 5.25 – Optimized DAG of the Spark job " height="1007" src="image/B17084_05_025.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.25 – Optimized DAG of the Spark job</p>
+<p>In the new DAG, there’s a green dot in the <strong class="source-inline">InMemoryTableScan</strong> task. This green dot represents the in-memory persistence of the data by Spark so that it doesn’t scan the CSV file twice, thus saving<a id="_idIndexMarker637"/> processing time. In this use <a id="_idIndexMarker638"/>case, it will speed up the performance of the Spark job by around 20%.</p>
+<p>Now that we have implemented and tested our solution, let’s learn how to build an Athena table on top of the output folder and enable easy querying of the results.</p>
+<h1 id="_idParaDest-91"><a id="_idTextAnchor090"/>Querying the ODL using AWS Athena</h1>
+<p>In this section, we will learn <a id="_idIndexMarker639"/>how to perform data querying on the ODL that we have <a id="_idIndexMarker640"/>created using our architecture. We will focus on how to set up Athena on our output folder to do easy data discovery and querying:</p>
+<ol>
+<li value="1">Navigate to AWS Athena via the AWS Management Console. Click on <strong class="bold">Explore the query editor</strong>. First, go to the <strong class="bold">Manage settings</strong> form of the <strong class="bold">Query editor</strong> area and set up an S3 bucket where the query results can be stored. You can create an empty bucket for this purpose:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer100">
+<img alt="Figure 5.26 – Setting up AWS Athena " height="798" src="image/B17084_05_026.jpg" width="1500"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.26 – Setting up AWS Athena</p>
+<ol>
+<li value="2">We will create an Athena table on<a id="_idIndexMarker641"/> top of our S3 output bucket. For this, we will create a DDL to create a<a id="_idIndexMarker642"/> table called <strong class="source-inline">ecom_odl</strong>, which is a partitioned table on the <strong class="source-inline">year</strong> and <strong class="source-inline">month</strong> columns. The DDL of the table can be seen in the following code snippet:<p class="source-code">CREATE EXTERNAL TABLE IF NOT EXISTS ecom_odl(</p><p class="source-code">     category_id bigint,</p><p class="source-code">     product_id bigint,</p><p class="source-code">     tot_sales bigint,</p><p class="source-code">     tot_onlyview bigint,</p><p class="source-code">     sales_rev double,</p><p class="source-code">     rank_by_revenue int,</p><p class="source-code">     rank_by_sales int</p><p class="source-code">) PARTITIONED BY (year int, month int) STORED AS parquet LOCATION 's3://scalabledataarch/output/';</p></li>
+</ol>
+<p>We will run this DDL <a id="_idIndexMarker643"/>statement in the <strong class="bold">Query editor</strong> area of Athena<a id="_idIndexMarker644"/> to create the table shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer101">
+<img alt="Figure 5.27 – Creating an Athena table based on the output data " height="1150" src="image/B17084_05_027.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.27 – Creating an Athena table based on the output data</p>
+<ol>
+<li value="3">Once the table has been created, we need to add the partition. We can do this by using the <strong class="source-inline">MSCK REPAIR</strong> command (similar to Hive):<p class="source-code"><strong class="bold">MSCK REPAIR TABLE ecom_odl</strong></p></li>
+<li>Upon running the previous command, all partitions are auto-discovered from the S3 bucket. Now, you can run any query on the <strong class="source-inline">ecom_odl</strong> table and get the result. As shown in the following screenshot, we run a sample query to find the top three products by revenue for each category in October 2019:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer102">
+<img alt="Figure 5.28 – Querying ODL using an Athena table " height="1124" src="image/B17084_05_028.jpg" width="1560"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.28 – Querying ODL using an Athena table</p>
+<p>With that, we have<a id="_idIndexMarker645"/> successfully architected, designed, and <a id="_idIndexMarker646"/>developed a big data batch processing solution and created an interface for the downstream teams to query our analyzed data using AWS Athena. Now, let’s summarize what we have learned in this chapter.</p>
+<h1 id="_idParaDest-92"><a id="_idTextAnchor091"/>Summary</h1>
+<p>In this chapter, we learned how to analyze a problem and identified that it was a big data problem. We also learned how to choose a platform and technology that will be performance-savvy, optimized, and cost-effective. We learned how to use all these factors judiciously to develop a big data batch processing solution in the cloud. Then, we learned how to analyze, profile, and draw inferences from big data files using AWS Glue DataBrew. After that, we learned how to develop, deploy, and run a Spark Java application in the AWS cloud to process a huge volume of data and store it in an ODL. We also discussed how to write an AWS Lambda trigger function in Java to automate the Spark jobs. Finally, we learned how to expose the processed ODL data through an AWS Athena table so that downstream systems can easily query and use the ODL data.</p>
+<p>Now that we have learned how to develop optimized and cost-effective batch-based data processing solutions for different kinds of data volumes and needs, in the next chapter, we will learn how to effectively build solutions that help us process and store data in real time.</p>
+</div>
+</div>
+</body></html>

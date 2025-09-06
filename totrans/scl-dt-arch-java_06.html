@@ -1,0 +1,544 @@
+<html><head></head><body>
+<div id="sbo-rt-content"><div id="_idContainer118">
+<h1 class="chapter-number" id="_idParaDest-93"><a id="_idTextAnchor092"/>6</h1>
+<h1 id="_idParaDest-94"><a id="_idTextAnchor093"/>Architecting a Real-Time Processing Pipeline</h1>
+<p>In the previous chapter, we learned how to architect a big data solution for a high-volume batch-based data engineering problem. Then, we learned how big data can be profiled using Glue DataBrew. Finally, we learned how to logically choose between various technologies to build a Spark-based complete big data solution in the cloud.</p>
+<p>In this chapter, we will discuss how to analyze, design, and implement a real-time data analytics solution to solve a business problem. We will learn how the reliability and speed of processing can be achieved with the help of distributed messaging systems such as Apache Kafka to stream and process the data. Here, we will discuss how to write a Kafka Streams application to process and analyze streamed data and store the results of a real-time processing engine in a NoSQL database such as MongoDB, DynamoDB, or DocumentDB using Kafka connectors. </p>
+<p>By the end of this chapter, you will know how to build a real-time streaming solution to predict the risk category of a loan application using Java and Kafka-related technologies. You will also know how a real-time data analytics problem is designed and architected. Throughout this journey, you will learn how to publish events to Kafka, analyze that data using Kafka Streams, and store the result of the analytics in MongoDB in real time. By doing so, you will know how to approach a real-time data engineering problem and build an effective streaming solution.</p>
+<p>In this chapter, we’re going to cover the following main topics:</p>
+<ul>
+<li>Understanding and analyzing the streaming problem</li>
+<li>Architecting the solution</li>
+<li>Implementing and verifying the design</li>
+</ul>
+<h1 id="_idParaDest-95"><a id="_idTextAnchor094"/>Technical requirements</h1>
+<p>To complete this chapter, you’ll need the following:</p>
+<ul>
+<li>Prior knowledge of Java</li>
+<li>Java 1.8 or above, Maven, Apache Kafka, and PostgreSQL installed on your local system</li>
+<li>A MongoDB Atlas subscription in the cloud</li>
+<li>IntelliJ IDEA Community or Ultimate edition installed on your local system</li>
+</ul>
+<h1 id="_idParaDest-96"><a id="_idTextAnchor095"/>Understanding and analyzing the streaming problem</h1>
+<p>So far, we have<a id="_idIndexMarker647"/> looked at data engineering problems that involve ingesting, storing, or analyzing the stored data. However, in today’s competitive business world, online web apps and mobile applications have made consumers more demanding and less patient. As a result, businesses must adapt and make decisions in real time. We will be trying to solve such a real-time decision-making problem in this chapter.</p>
+<h2 id="_idParaDest-97"><a id="_idTextAnchor096"/>Problem statement</h2>
+<p>A<a id="_idIndexMarker648"/> financial firm, XYZ, that offers credit cards, has a credit card application that works in real time and uses various user interfaces such as mobile and online web applications. Since customers have multiple options and are less patient, XYZ wants to make sure that the credit loan officer can decide on credit card approval in a split second or in real time. To do that, the application needs to be analyzed and a credit risk score needs to be generated for each application. This risk score, along with the necessary application parameters, will help the credit loan officer decide quickly.</p>
+<h2 id="_idParaDest-98"><a id="_idTextAnchor097"/>Analyzing the problem</h2>
+<p>Let’s analyze<a id="_idIndexMarker649"/> the given problem. First, let’s analyze the requirements in terms of the four dimensions of data. </p>
+<p>First, we will try to answer the question, <em class="italic">what is the velocity of the data?</em> This is the most important factor of this problem. As evident from the problem statement, unlike our previous problems, source data is being received in real time and the data analysis also needs to happen in real time. This kind of problem is well suited for a real-time streaming solution.</p>
+<p>Now, the <a id="_idIndexMarker650"/>next dimension that we need to discuss is <em class="italic">volume</em>. However, since our problem involves streaming data, it doesn’t make sense to discuss the total volume of the data. Rather, we should be answering questions such as, <em class="italic">how many applications are submitted every minute or every hour on average, as well as at peak times? Will this volume increase in the future? If it does, how many times and how frequently it is likely to increase?</em> We should go back to the client with these questions. Often, in a business, these answers are not readily available if the client is creating a real-time pipeline for the first time. In such a scenario, we should ask for the most granular average data velocity information (in this case, the number of applications filed) available with the client – for each day, week, or month and then calculate the average expected volume in a minute. Also, to understand the increase in volume, we can ask about the target projections as far as sales are concerned over a year and try to predict the volume increase. </p>
+<p>Let’s suppose that the client is getting one million applications per day and that their target is to increase sales by 50% over the next 2 years. Considering that the usual approval rate is 50%, we can expect a two times increase in the application submission rate. This would mean that we could expect a volume of 2 million applications per day in the future.</p>
+<p>Since our solution needs to be real-time, must process more than a million records, and the volume is likely to increase in the future, the following characteristics are essential for our streaming solution:</p>
+<ul>
+<li>Should be robust</li>
+<li>Should support asynchronous communication between various systems within the solution and external source/sink</li>
+<li>Should ensure zero data loss</li>
+<li>Should be fault tolerant as we are processing data in real time</li>
+<li>Should be scalable</li>
+<li>Should give great performance, even if the volume increases</li>
+</ul>
+<p>Keeping all these factors in mind, we should choose a pub-sub messaging system as this can ensure scalability, fault tolerance, higher parallelism, and message delivery guarantees. Distributed messaging/streaming platforms such as Apache Kafka, AWS Kinesis, and Apache Pulsar are best suited to solve our problem.</p>
+<p>Next, we <a id="_idIndexMarker651"/>will be focusing on the <em class="italic">variety</em> of the data. In a typical streaming platform, we receive data as events. Each event generally contains one record, though sometimes, it may contain multiple records. Usually, these events are transmitted in platform-independent data formats such as JSON and Avro. In our use case, we will receive the data in JSON format. In an actual production scenario, there’s a chance that the data may be in Avro format.</p>
+<p>One of the challenges that real-time streaming solutions face is the <em class="italic">veracity</em> of the data. Often, veracity is determined based on the various possibilities of noise that can come from the data. However, accurate analysis of the veracity happens as a real-time project gets implemented and tests are run with real data. As with many software engineering solutions, real-time data engineering solutions mature over time to handle noise and exceptions. </p>
+<p>For the sake of simplicity, we will assume that our data that is getting published in the input topic is already clean, so we won’t discuss veracity in our current use case. However, in the real world, the data that is received over the input topic contains anomalies and noise, which needs to be taken care of. In such cases, we can write a Kafka Streams application to clean and format the data and put it in a processing topic. Also, erroneous records are moved to the error topic from the input topic; they are not sent to the processing topic. Then, the streaming app for data analytics consumes the data from the processing topic (which contains clean data only).</p>
+<p>Now that we have analyzed the dimensions of data for this problem and have concluded that we need to build a real-time streaming pipeline, our next question will be, <em class="italic">which platform? Cloud or on-premise?</em></p>
+<p>To answer these questions, let’s look at any constraints that we have. To analyze the streaming data, we must pull and read each customer’s credit history record. However, since the credit history of a customer is sensitive information, we would prefer to use that information from an on-premise application. However, the company’s mobile or web backend systems are deployed on the cloud. So, it makes sense to store the analyzed data on the cloud since it will take less time for the mobile or other web applications to fetch the data from the cloud than from on-premise. So, in this case, we will go with a hybrid approach, in which credit history data will be stored on-premise and the data will be analyzed and processed on-premise, but the resultant data will be stored in the cloud so that it can easily be retrieved from mobile and web backend systems.</p>
+<p>In this section, we<a id="_idIndexMarker652"/> analyzed the data engineering problem and realized that this is a real-time stream processing problem, where the processing will happen on-premise. In the next section, we will use the result of this analysis and connect the dots to design the data pipeline and choose the correct technology stack.</p>
+<h1 id="_idParaDest-99"><a id="_idTextAnchor098"/>Architecting the solution</h1>
+<p>To <a id="_idIndexMarker653"/>architect<a id="_idIndexMarker654"/> the solution, let’s summarize the analysis we discussed in the previous section. Here are the conclusions we can make:</p>
+<ul>
+<li>This is a real-time data engineering problem</li>
+<li>This problem can be solved using a streaming platform such as Kafka or Kinesis</li>
+<li>1 million events will be published daily, with a chance of the volume of events increasing over time</li>
+<li>The solution should be hosted on a hybrid platform, where data processing and analysis are done on-premise and the results are stored in the cloud for easy retrieval</li>
+</ul>
+<p>Since our streaming platform is on-premise and can be maintained on on-premise servers, Apache Kafka is a great choice. It supports a distributed, fault-tolerant, robust, and reliable architecture. It can be easily scaled by increasing the number of partitions and provides an at-least-once delivery guarantee (which ensures that at least one copy of all events will be delivered without event drops).</p>
+<p>Now, let’s see how we will determine how the results and other information will be stored. In this use case, the credit history of an individual has a structured format and should be stored on-premise. RDBMS is a great option for such data storage. Here, we will be using PostgreSQL for this because PostgreSQL is open source, enterprise-ready, robust, reliable, and high performing (and also because we used it as an RDBMS option in <a href="B17084_04.xhtml#_idTextAnchor062"><em class="italic">Chapter 4</em></a>, <em class="italic">ETL Data Load – A Batch-Based Solution to Ingesting Data in a Data Warehouse</em>). Unlike credit history, the applications need to be accessed by mobile and web backends running on AWS, so the data storage should be on the cloud. </p>
+<p>Also, let’s consider that this data will primarily be consumed by mobile and web backend applications. So, would it be worth storing the data in a document format that can be readily pulled and used by the web and mobile backends? MongoDB Atlas on AWS cloud is a great option for storing documents in a scalable way and has a pay-as-you-go model. We will use MongoDB Atlas on AWS as the sink of the resultant data.</p>
+<p>Now, let’s <a id="_idIndexMarker655"/>discuss how we will process the data in real time. The data will be sent as events to a Kafka topic. We will write a streaming application to process and write the result event on an output topic. The resulting <a id="_idIndexMarker656"/>record will contain the risk score as well. To dump the data from Kafka to any other data store or database, we can either write a consumer application or use Kafka Sink connectors. Writing a Kafka consumer app requires development and maintenance effort. However, if we choose to use Kafka Connect, we have to just configure it to get the benefits of a Kafka consumer. Kafka Connect is faster to deliver, easier to maintain, and more robust as all exception handling and edge cases are already taken care of and well-documented. So, we will use a Kafka Sink connector to save the result events from the output topic to the MongoDB Atlas database.</p>
+<p>The following diagram describes the solution architecture:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer104">
+<img alt="Figure 6.1 – Solution architecture for our real-time credit risk analyzer " height="421" src="image/B17084_06_001.jpg" width="706"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.1 – Solution architecture for our real-time credit risk analyzer</p>
+<p>As shown in the preceding diagram, our <a id="_idIndexMarker657"/>solution architecture<a id="_idIndexMarker658"/> is as follows:</p>
+<ul>
+<li>A new application event gets published in the input Kafka topic</li>
+<li>The Kafka Streams application – the Risk Calculator app – reads the application event and fetches the corresponding credit history of the applicant from the credit history database</li>
+<li>The Risk Calculator app creates and sends an HTTP request to the Risk Score Generator app with all the required parameters</li>
+<li>The Risk Score Generator app uses the already trained ML models to calculate the risk score of the application and returns the result to the Risk Calculator app</li>
+<li>The Risk Calculator app generates the enriched application event and writes the resultant event in the output topic</li>
+<li>A Kafka Sink connector, which is configured on the output topic, is responsible for consuming and writing the data to the MongoDB Atlas cloud database</li>
+<li>If there is a processing error during Kafka streaming, an error message, along with the input event, will be written in the error database</li>
+</ul>
+<p>Now that we have learned how to architect a solution for our real-time data analysis needs, let’s learn how to implement the architecture.</p>
+<h1 id="_idParaDest-100"><a id="_idTextAnchor099"/>Implementing and verifying the design</h1>
+<p>The first <a id="_idIndexMarker659"/>step in a real-time implementation like this is to set up the streaming platform. To implement our architecture, we need to install Apache Kafka and create the necessary topics on our local machine.</p>
+<h2 id="_idParaDest-101"><a id="_idTextAnchor100"/>Setting up Apache Kafka on your local machine</h2>
+<p>In this<a id="_idIndexMarker660"/> section, you<a id="_idIndexMarker661"/> will learn how to set up an Apache Kafka cluster, run it, and create and list topics. Follow these steps:</p>
+<ol>
+<li>Download Apache Kafka version 2.8.1 from <a href="https://archive.apache.org/dist/kafka/2.8.1/kafka_2.12-2.8.1.tgz">https://archive.apache.org/dist/kafka/2.8.1/kafka_2.12-2.8.1.tgz</a>.</li>
+<li>Extract the <strong class="source-inline">kafka_2.12-2.8.1.tgz</strong> archive file. The following command will help you do the same on Linux or macOS:<p class="source-code"><strong class="bold">$ tar -xzf kafka_2.12-2.8.1.tgz</strong></p><p class="source-code"><strong class="bold">$ cd kafka_2.12-2.8.1</strong></p></li>
+<li>Navigate to the Kafka installation root directory and start zookeeper using the following command:<p class="source-code"><strong class="bold">$ bin/zookeeper-server-start.sh config/zookeeper.properties</strong></p></li>
+<li>Next, run the Kafka server using the following command:<p class="source-code"><strong class="bold">$ bin/kafka-server-start.sh config/server.properties</strong></p></li>
+<li>Next, create the topics using the following commands:<p class="source-code"><strong class="bold">$ bin/kafka-topics.sh --create --topic landingTopic1 --bootstrap-server localhost:9092</strong></p><p class="source-code"><strong class="bold">$ bin/kafka-topics.sh --create --topic enrichedTopic1 --bootstrap-server localhost:9092</strong></p></li>
+</ol>
+<p>For the <a id="_idIndexMarker662"/>sake of simplicity, we have defined one partition and set the replication factor as 1. But in a real production environment, the replication factor should be three or more. The number of partitions is based on the volume and velocity of data that needs to be processed and the optimum speed at which they should be processed.</p>
+<ol>
+<li value="6">We can list the topics that we created in the cluster using the following command:<p class="source-code"><strong class="bold">$ bin/kafka-topics.sh --describe --bootstrap-server localhost:9092</strong></p></li>
+</ol>
+<p>Now <a id="_idIndexMarker663"/>that we have installed Apache Kafka and created the topics that we need for the solution, you<a id="_idIndexMarker664"/> can focus on creating the credit records table and error table in a PostgreSQL instance installed on your local machine. The DDL and DML statements for these tables are available at <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter06/SQL">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter06/SQL</a>.</p>
+<p class="callout-heading">Reference notes</p>
+<p class="callout">If you are new to Kafka, I recommend learning the basics by reading the official Kafka documentation: <a href="https://kafka.apache.org/documentation/#gettingStarted">https://kafka.apache.org/documentation/#gettingStarted</a>. Alternatively, you can refer to the book <em class="italic">Kafka, The Definitive Guide</em>, by <em class="italic">Neha Narkhede</em>, <em class="italic">Gwen Sharipa</em>, and <em class="italic">Todd Palino</em>.</p>
+<p>In this section, we set up the Kafka streaming platform and the credit record database. In the next section, we will learn how to implement the Kafka streaming application to process the application event that reaches <em class="italic">landingTopic1</em> in real time.</p>
+<h2 id="_idParaDest-102"><a id="_idTextAnchor101"/>Developing the Kafka streaming application</h2>
+<p>Before we implement<a id="_idIndexMarker665"/> the solution, let’s explore and understand a few basic <a id="_idIndexMarker666"/>concepts about Kafka Streams. Kafka Streams provides a client library for processing and analyzing data on the fly and sending the processed result into a sink (preferably an output topic).</p>
+<p>A<a id="_idIndexMarker667"/> stream is an abstraction that represents unbound, continuously updating data in Kafka Streams. A stream processing application is a program written using the Kafka Streams library to process data that is present in the stream. It defines processing logic using a topology. A Kafka Streams topology is a graph that consists of stream processors as nodes and streams as edges. The following diagram shows an example topology for Kafka Streams:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer105">
+<img alt="Figure 6.2 – Sample Kafka Streams topology " height="391" src="image/B17084_06_002.jpg" width="481"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.2 – Sample Kafka Streams topology</p>
+<p>As you <a id="_idIndexMarker668"/>can see, a topology <a id="_idIndexMarker669"/>consists of <strong class="bold">Stream Processors</strong> – these are nodes and <a id="_idIndexMarker670"/>edges that represent streams. There can be two kinds of special stream processor nodes, as follows:</p>
+<ul>
+<li><strong class="bold">Source Processor</strong>: This<a id="_idIndexMarker671"/> is a special stream processing node that produces an input stream of data from consuming messages from one or multiple Kafka topics</li>
+<li><strong class="bold">Sink Processor</strong>: As the<a id="_idIndexMarker672"/> name suggests, a sink processor consumes data from upstream and writes it to a sink or target topic</li>
+</ul>
+<p>A topology in a Kafka streaming application can be built using a low-level Processor API or using<a id="_idIndexMarker673"/> high-level <strong class="bold">Domain-Specific Language</strong> (<strong class="bold">DSL</strong>) APIs. When an event is published to a source Kafka topic, the topology gets triggered, which processes the event using the topology definition and publishes the processed event to the Sink topic. Once a topology is successfully invoked and completed on a source event, the event offset is committed.</p>
+<p>In our use case, the Kafka Streams application will do the following:</p>
+<ul>
+<li>For the application event received, find the credit history from the credit record database.</li>
+<li>Create the ML request body using the data received from Kafka and the data pulled out from the credit record database</li>
+<li>Make a REST call to the Risk Score Generator application</li>
+<li>Form the final output record</li>
+<li>Send the final output record to a sink topic using a Sink processor</li>
+</ul>
+<p>First and <a id="_idIndexMarker674"/>foremost, we need to create a Spring Boot Maven project and add the <a id="_idIndexMarker675"/>required Maven dependencies. The following Spring Maven dependencies should be added to the <strong class="source-inline">pom.xml</strong> file, as follows:</p>
+<pre class="source-code">&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-test&lt;/artifactId&gt;
+    &lt;scope&gt;test&lt;/scope&gt;
+&lt;/dependency&gt;
+&lt;!-- https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-starter-jdbc --&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-jdbc&lt;/artifactId&gt;
+&lt;/dependency&gt;
+&lt;!-- https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-starter-web --&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-web&lt;/artifactId&gt;
+&lt;/dependency&gt;</pre>
+<p>Apart <a id="_idIndexMarker676"/>from this, as we are planning to develop a Kafka streaming application, we also need to add <a id="_idIndexMarker677"/>Kafka-related Maven dependencies, as follows:</p>
+<pre class="source-code">&lt;!-- Kafka dependencies --&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.kafka&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-kafka&lt;/artifactId&gt;
+    &lt;version&gt;2.6.2&lt;/version&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.kafka&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-kafka-test&lt;/artifactId&gt;
+    &lt;version&gt;2.6.2&lt;/version&gt;
+    &lt;scope&gt;test&lt;/scope&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;
+    &lt;artifactId&gt;kafka-streams&lt;/artifactId&gt;
+    &lt;version&gt;3.0.0&lt;/version&gt;
+&lt;/dependency&gt;</pre>
+<p>First, let’s write the <strong class="source-inline">main</strong> class, where we will initialize the Kafka Spring Boot application. However, in <a id="_idIndexMarker678"/>our application, we must exclude <strong class="source-inline">KafkaAutoConfiguration</strong> (as we intend to use our own property names for Kafka-related <a id="_idIndexMarker679"/>fields and not Spring Boot’s default Kafka property names), as shown in the following code:</p>
+<pre class="source-code">@SpringBootApplication(exclude = KafkaAutoConfiguration.class)
+@Configuration
+public class CreditRiskCalculatorApp {
+    public static void main(String[] args) {
+        SpringApplication.run(CreditRiskCalculatorApp.class);
+    }
+. . .
+}</pre>
+<p>After creating the <strong class="source-inline">main</strong> class, we will create the main <strong class="source-inline">KafkaStreamConfiguration</strong> class, where all streaming beans will be defined and instantiated. This is where we will use Kafka Streams DSL to build the topology. This class must be annotated with <strong class="source-inline">@EnableKafka</strong> and <strong class="source-inline">@EnableKafkaStreams</strong>, as shown in the following code snippet:</p>
+<pre class="source-code">@Configuration
+@EnableKafka
+@EnableKafkaStreams
+public class KStreamConfiguration {
+...</pre>
+<p>Next, we will create the <strong class="source-inline">KafkaStreamsConfiguration</strong> bean. The following code snippet shows <a id="_idIndexMarker680"/>the implementation of the <strong class="source-inline">KafkaStreamsConfiguration</strong> bean:</p>
+<pre class="source-code">@Bean(name = KafkaStreamsDefaultConfiguration.DEFAULT_STREAMS_CONFIG_BEAN_NAME)
+public KafkaStreamsConfiguration kStreamsConfig(){
+    Map&lt;String,Object&gt; props = new HashMap&lt;&gt;();
+    props.put(StreamsConfig.APPLICATION_ID_CONFIG,appId);
+    props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG,bootstrapServer);
+    props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+    props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG,Serdes.String().getClass());
+    props.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG, LogAndContinueExceptionHandler.class);
+    return new KafkaStreamsConfiguration(props);
+}</pre>
+<p>While<a id="_idIndexMarker681"/> creating the <strong class="source-inline">KafkaStreamsConfiguration</strong> bean, we must pass all Kafka streaming-related properties. Here, it is mandatory to set <strong class="source-inline">StreamsConfig.APPLICATION_ID</strong> and <strong class="source-inline">StreamsConfig.BOOTSTRAP_SERVERS_CONFIG</strong>. In this case, <strong class="source-inline">StreamsConfig.APPLICATION_ID</strong> corresponds to the consumer group ID of the Kafka Streams application, while <strong class="source-inline">StreamsConfig.BOOTSTRAP_SERVERS_CONFIG</strong> corresponds to the Kafka broker address. Without these values, no Kafka streaming or consumer application can run or connect to the Kafka cluster. Kafka Streams applications can distribute the traffic coming from a topic within a consumer group among multiple consumers that share the same consumer <a id="_idIndexMarker682"/>group ID. By increasing the running instance of the streaming application while using the same ID, we can have more parallelism and better throughput. However, increasing the number of instances beyond the number of partitions in the Kafka topic will not have any effect on the throughput.</p>
+<p>Now that we have created the <strong class="source-inline">KafkaStreamsConfiguration</strong> bean, let’s create <strong class="source-inline">KStream</strong>. While creating this <strong class="source-inline">KStream</strong> bean, we must define the topology. The following code creates the <strong class="source-inline">KStream</strong> bean:</p>
+<pre class="source-code">@Bean
+public KStream&lt;String,String&gt; kStream(StreamsBuilder builder){
+    KStream&lt;String,String&gt; kStream = builder.stream(inputTopic);
+    kStream.transform(()-&gt;new RiskCalculateTransformer (jdbcTemplate,restTemplate,mlRequestUrl)).to(outTopic);
+    return kStream;
+}</pre>
+<p>Each<a id="_idIndexMarker683"/> message in a Kafka topic consists of a key and a value. The value contains the actual message, while the key helps determine the partition while the message is published. However, when we consume the message using streams, we must mention the type of key and value that we are expecting. In our case, we are expecting both the key and value to be <strong class="source-inline">String</strong>. So, the <strong class="source-inline">KStream</strong> bean is created as an instance of <strong class="source-inline">KStream&lt;String,String&gt;</strong>. First, we must create a stream using the <strong class="source-inline">StreamsBuilder</strong> class, which is part of the Kafka Streams API. In our use case, the topology is built as follows:</p>
+<ol>
+<li value="1">First, using the <strong class="source-inline">StreamsBuilder</strong> API, input streams are created from <strong class="source-inline">inputTopic</strong>.</li>
+<li>A transform processor is applied to the resultant input stream using the <strong class="source-inline">transform()</strong> DSL function.</li>
+<li>A custom Transformer called <strong class="source-inline">RiskCalculatorTransformer</strong> is used to transform/process the data coming from the input stream.</li>
+<li>The processed output event is written to <strong class="source-inline">outputTopic</strong>.</li>
+</ol>
+<p>Now, let’s learn <a id="_idIndexMarker684"/>how to write a custom Transformer for a Kafka Streams application. In our scenario, we have created <strong class="source-inline">RiskCalculatorTransformer</strong>. The following discussion explains how to develop a custom Transformer:</p>
+<p>First, we must create a class that implements the <strong class="source-inline">org.apache.kafka.streams.kstream.Transformer</strong> interface. It has three methods – <strong class="source-inline">init</strong>, <strong class="source-inline">transform</strong>, and <strong class="source-inline">close</strong> – that need to be implemented. The following code shows the definition of the <strong class="source-inline">Transformer</strong> interface:</p>
+<pre class="source-code">public interface Transformer&lt;K, V, R&gt; {
+    void init(ProcessorContext var1);
+    R transform(K var1, V var2);
+    void close();
+}</pre>
+<p>As you <a id="_idIndexMarker685"/>can see, the <strong class="source-inline">Transformer</strong> interface expects three generic types – <strong class="source-inline">K</strong>, <strong class="source-inline">V</strong>, and <strong class="source-inline">R</strong>. <strong class="source-inline">K</strong> specifies the data type of the key of the message, <strong class="source-inline">V</strong> specifies the data type of the value of the message, and <strong class="source-inline">R</strong> specifies the data type of the result of the message. While <strong class="source-inline">init</strong> and <strong class="source-inline">close</strong> are only used when some pre or post-processing is needed before the message is processed, <strong class="source-inline">transform</strong> is a mandatory method that defines the actual transformation or processing logic.</p>
+<p>In our use case, we receive the value of the message as a JSON string, process it, add the risk score, and send out the resultant value as a JSON string. The data type of the key remains unchanged. Hence, we send out a <strong class="source-inline">KeyValue</strong> pair object as a result. Our final <strong class="source-inline">Transformer</strong> outline<a id="_idIndexMarker686"/> looks as follows:</p>
+<pre class="source-code">public class RiskCalculateTransformer implements Transformer&lt;String,String, KeyValue&lt;String,String&gt;&gt; {
+    
+    @Override
+    public void init(ProcessorContext processorContext) {
+     ...
+    }
+    @Override
+    public KeyValue&lt;String, String&gt; transform(String key, String value) {
+        ...
+    }
+  
+    @Override
+    public void close() {
+     ...
+    }
+}</pre>
+<p>As shown<a id="_idIndexMarker687"/> in the preceding code, our Transformer is expecting the key and value of the message to be of the <strong class="source-inline">String</strong> type, and it returns a <strong class="source-inline">KeyValue</strong> pair where both the key and value are of the <strong class="source-inline">String</strong> type.</p>
+<p>In our Transformer, we don’t need any pre or post-processing. So, let’s move on and discuss how to implement the <strong class="source-inline">transform</strong> method of our <strong class="source-inline">Transformer</strong>. The code of the <strong class="source-inline">transform</strong> method<a id="_idIndexMarker688"/> is as follows:</p>
+<pre class="source-code">@Override
+public KeyValue&lt;String, String&gt; transform(String key, String value) {
+    try {
+        ApplicationEvent event = mapper.readValue(value,ApplicationEvent.class);
+        List&lt;CreditRecord&gt; creditRecord = jdbcTemplate.query(String.format("select months_balance,status from chapter6.creditrecord where id='%s'",event.getId()),new BeanPropertyRowMapper&lt;CreditRecord&gt;(CreditRecord.class));
+        MLRequest mlRequest = new MLRequest();
+        mlRequest.setAmtIncomeTotal(event.getAmtIncomeTotal());
+        ...
+        HttpEntity&lt;MLRequest&gt; request = new HttpEntity&lt;&gt;(mlRequest);
+        ResponseEntity&lt;RiskScoreResponse&gt; response = restTemplate.exchange(mlRequestUrl, HttpMethod.POST, request, RiskScoreResponse.class);
+        if(response.getStatusCode()== HttpStatus.OK){
+            EnrichedApplication enrichedApplicationEvent = new EnrichedApplication();
+            enrichedApplicationEvent.setApplicationforEnrichedApplication(event);
+            enrichedApplicationEvent.setRiskScore(response.getBody().getScore());
+            return KeyValue.pair(key,mapper.writeValueAsString(enrichedApplicationEvent));
+        }else{
+            throw new Exception("Unable to generate risk score.Risk REST response - "+ response.getStatusCode());
+        }
+    } catch (Exception e) {
+        ...
+    }
+    return null;
+}</pre>
+<p>Here is the<a id="_idIndexMarker689"/> step-by-step guide for implementing our <strong class="source-inline">transform</strong> method:</p>
+<ol>
+<li value="1">First, we <a id="_idIndexMarker690"/>deserialize the incoming value, which is a JSON string, into a POJO called <strong class="source-inline">ApplicationEvent</strong> using the Jackson <strong class="source-inline">ObjectMapper</strong> class. </li>
+<li>Then, we initiate a JDBC call to the credit record database using Spring’s <strong class="source-inline">JdbcTemplate</strong>. While forming the SQL, we use the application ID that was deserialized in the previous step. We get a list of the <strong class="source-inline">CreditRecord</strong> objects because of the JDBC call.</li>
+<li>Next, we form the request body for the HTTP REST call that we are going to make to get the risk score. Here, we populate an <strong class="source-inline">MLRequest</strong> object using the <strong class="source-inline">ApplicationEvent</strong> object (deserialized earlier) and the list of <strong class="source-inline">CreditRecord</strong> objects we obtained in the previous step.</li>
+<li>Then, we wrap the <strong class="source-inline">MLRequest</strong> object in an <strong class="source-inline">HTTPEntity</strong> object and make the REST call using the Spring <strong class="source-inline">RestTemplate</strong> API.</li>
+<li>We <a id="_idIndexMarker691"/>deserialize the REST response to the <strong class="source-inline">RiskScoreResponse</strong> object. The model of the <strong class="source-inline">RiskScoreResponse</strong> object looks as follows:<p class="source-code">public class RiskScoreResponse {</p><p class="source-code">    private int score;</p><p class="source-code">    public int getScore() {</p><p class="source-code">        return score;</p><p class="source-code">    }</p><p class="source-code">    public void setScore(int score) {</p><p class="source-code">        this.score = score;</p><p class="source-code">    }</p><p class="source-code">}</p></li>
+<li>If the REST response is <strong class="source-inline">OK</strong>, then we form the <strong class="source-inline">EnrichedApplication</strong> object using the <strong class="source-inline">ApplicationEvent</strong> and <strong class="source-inline">RiskScoreResponse</strong> objects.</li>
+<li>Finally, we create and return a new <strong class="source-inline">KeyValue</strong> pair object, where the key is unchanged, but the value is the serialized string of the <strong class="source-inline">EnrichedApplication</strong> object we created in <em class="italic">step 6</em>.</li>
+<li>For exception handling, we log any errors as well as send the error events to an error database for future analysis, reporting, and reconciliation. The reporting and<a id="_idIndexMarker692"/> reconciliation processes won’t be covered here and are usually done by some kind of batch programming.</li>
+</ol>
+<p>In this section, we learned how to develop a Kafka Streams application from scratch. However, we should be able to successfully unit test a streaming application to make sure that our intended functionalities are working fine. In the next section, we will learn how to unit test a Kafka Streams application.</p>
+<h2 id="_idParaDest-103"><a id="_idTextAnchor102"/>Unit testing a Kafka Streams application</h2>
+<p>To <a id="_idIndexMarker693"/>unit test a<a id="_idIndexMarker694"/> Kafka Streams application, we must add the Kafka Streams test utility dependencies to the <strong class="source-inline">pom.xml</strong> file:</p>
+<pre class="source-code">&lt;!-- test dependencies --&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;
+    &lt;artifactId&gt;kafka-streams-test-utils&lt;/artifactId&gt;
+    &lt;version&gt;3.0.0&lt;/version&gt;
+    &lt;scope&gt;test&lt;/scope&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;junit&lt;/groupId&gt;
+    &lt;artifactId&gt;junit&lt;/artifactId&gt;
+    &lt;version&gt;4.12&lt;/version&gt;
+    &lt;scope&gt;test&lt;/scope&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.hamcrest&lt;/groupId&gt;
+    &lt;artifactId&gt;hamcrest-core&lt;/artifactId&gt;
+    &lt;version&gt;1.3&lt;/version&gt;
+    &lt;scope&gt;test&lt;/scope&gt;
+&lt;/dependency&gt;</pre>
+<p>Also, before<a id="_idIndexMarker695"/> we do a JUnit test, we need to refactor our code a little bit. We have to break the <a id="_idIndexMarker696"/>definition of the <strong class="source-inline">KStream</strong> bean into two methods, like so:</p>
+<pre class="source-code">@Bean
+public KStream&lt;String,String&gt; kStream(StreamsBuilder builder){
+    KStream&lt;String, String&gt; kStream = StreamBuilder.INSTANCE.getkStream(builder,inputTopic,outTopic,mlRequestUrl,jdbcTemplate,restTemplate);
+    return kStream;
+}
+...
+public enum StreamBuilder {
+    INSTANCE;
+    public KStream&lt;String, String&gt; getkStream(StreamsBuilder builder, String inputTopic,String outTopic, String mlRequestUrl, JdbcTemplate jdbcTemplate, RestTemplate restTemplate) {
+        KStream&lt;String,String&gt; kStream = builder.stream(inputTopic);
+        kStream.transform(()-&gt;new RiskCalculateTransformer (jdbcTemplate,restTemplate,mlRequestUrl)).to(outTopic);
+        return kStream;
+    }
+}</pre>
+<p>As shown<a id="_idIndexMarker697"/> in the preceding code, we took out the <strong class="source-inline">KStream</strong> formation code, put it in <a id="_idIndexMarker698"/>a utility method in a singleton class called <strong class="source-inline">StreamBuilder</strong>, and used the <strong class="source-inline">Bean</strong> method as a wrapper on top of it. </p>
+<p>Now, let’s learn how to write the JUnit test case. First, our transformation requires a JDBC call and a REST call. To do so, we need to mock the JDBC call. To do that, we will use Mockito libraries.</p>
+<p>We can mock our <strong class="source-inline">JdbcTemplate</strong> call like so:</p>
+<pre class="source-code">@Mock
+JdbcTemplate jdbcTemplate;
+...
+public void creditRiskStreams(){
+   ...
+    List&lt;CreditRecord&gt; creditRecords = new ArrayList&lt;&gt;();
+    CreditRecord creditRecord = new CreditRecord();
+    . . .
+    creditRecords.add(creditRecord);
+    Mockito. lenient().when(jdbcTemplate.query("select months_balance,status from chapter6.creditrecord where id='5008804'",new BeanPropertyRowMapper&lt;CreditRecord&gt;(CreditRecord.class)))
+            .thenReturn(creditRecords);
+      ...</pre>
+<p>First, we<a id="_idIndexMarker699"/> create a mock <strong class="source-inline">JdbcTemplate</strong> object using the <strong class="source-inline">@Mock</strong> annotation. Then, we use Mockito’s <strong class="source-inline">when().thenReturn()</strong> API to define a mock output for a call made using the mock <strong class="source-inline">JdbcTemplate</strong> object.</p>
+<p>A similar technique can be used to mock <strong class="source-inline">RestTemplate</strong>. The code for mocking <strong class="source-inline">RestTemplate</strong> is as follows:</p>
+<pre class="source-code">@Mock
+private RestTemplate restTemplate;
+public void creditRiskStreams(){
+    ...
+    RiskScoreResponse riskScoreResponse = new RiskScoreResponse();
+    ...
+    Mockito
+            .when(restTemplate.exchange(Mockito.anyString(), HttpMethod.POST, Mockito.any(), RiskScoreResponse.class))
+      .thenReturn(new ResponseEntity(riskScoreResponse, HttpStatus.OK));</pre>
+<p>As you can see, first, we mock <strong class="source-inline">RestTemplate</strong> using the <strong class="source-inline">@Mock</strong> annotation. Then, using Mockito APIs, we <a id="_idIndexMarker700"/>mock any <strong class="source-inline">POST</strong> call that returns a <strong class="source-inline">RiskScoreResponse</strong> object.</p>
+<p>Now, let’s form <a id="_idIndexMarker701"/>the topology. You can use the following code to create the topology:</p>
+<pre class="source-code">@Test
+public void creditRiskStreamsTest() throws JsonProcessingException {
+    //test input and outputTopic
+    String inputTopicName = "testInputTopic";
+    String outputTopicName = "testOutputTopic";
+    ...
+   StreamsBuilder builder = new StreamsBuilder();
+StreamBuilder.INSTANCE.getkStream(builder,inputTopicName,outputTopicName,"any url",jdbcTemplate,restTemplate);
+Topology testTopology = builder.build();
+  ...</pre>
+<p>Here, we created an instance of the <strong class="source-inline">org.apache.kafka.streams.StreamsBuilder</strong> class. Using our <strong class="source-inline">StreamBuilder</strong> utility class, we defined the topology by calling the <strong class="source-inline">getkStream</strong> method. Finally, we built the topology by calling the <strong class="source-inline">build()</strong> method of the <strong class="source-inline">org.apache.kafka.streams.StreamsBuilder</strong> class.</p>
+<p>Kafka Stream’s test utils <a id="_idIndexMarker702"/>come with a <strong class="source-inline">Utility</strong> class <a id="_idIndexMarker703"/>called <strong class="source-inline">TopologyTestDriver</strong>. <strong class="source-inline">TopologyTestDriver</strong> is created by passing the topology and config details. Once <strong class="source-inline">TopologyTestDriver</strong> has been created, it helps to create <strong class="source-inline">TestInputTopic</strong> and <strong class="source-inline">TestOutputTopic</strong>. The following code describes how to instantiate a <strong class="source-inline">TopologyTestDriver</strong> and create <strong class="source-inline">TestInputTopic</strong> and <strong class="source-inline">TestOutputTopic</strong>:</p>
+<pre class="source-code">public class CreditRiskCalculatorTests {
+    private final Properties config;
+public CreditRiskCalculatorTests() {
+    config = new Properties();
+    config.setProperty(StreamsConfig.APPLICATION_ID_CONFIG, "testApp");
+    config.setProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "test:1234");
+    config.setProperty(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
+    config.setProperty(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
+}
+. . .
+@Test
+public void creditRiskStreamsTest() throws JsonProcessingException {
+. . .
+TopologyTestDriver testDriver = new TopologyTestDriver(testTopology,config);
+TestInputTopic&lt;String,String&gt; inputTopic = testDriver.createInputTopic(inputTopicName, Serdes.String().serializer(), Serdes.String().serializer());
+TestOutputTopic&lt;String,String&gt; outputTopic = testDriver.createOutputTopic(outputTopicName, Serdes.String().deserializer(), Serdes.String().deserializer());
+. . .</pre>
+<p>To create a <strong class="source-inline">TestInputTopic</strong>, we need to specify the name of the topic, as well as the key and <a id="_idIndexMarker704"/>value serializers. Similarly, <strong class="source-inline">TestOutputTopic</strong> requires key and value deserializers, along with the output topic name. We can push a test event to <strong class="source-inline">TestInputTopic</strong> using the following code:</p>
+<pre class="source-code">inputTopic.pipeInput(inputPayload);</pre>
+<p>Finally, we <a id="_idIndexMarker705"/>can assert our expected result with the actual result using the <strong class="source-inline">org.junit.Assert.assertEquals</strong> static method, as follows:</p>
+<pre class="source-code">assertEquals(mapper.readTree(outputTopic.readValue()), mapper.readTree("{ \"id\": \"5008804\", \"genderCode\": \"M\", \"flagOwnCar\": \"Y\", \"flagOwnRealty\": \"Y\", \"cntChildren\": 0, \"amtIncomeTotal\": 427500.0, \"nameIncomeType\": \"Working\", \"nameEducationType\": \"Higher education\", \"nameFamilyStatus\": \"Civil marriage\", \"nameHousingType\": \"Rented apartment\", \"daysBirth\": -12005, \"daysEmployed\": -4542, \"flagMobil\": 1, \"flagWorkPhone\": 1, \"flagPhone\": 0, \"flagEmail\": 0, \"occupationType\": \"\", \"cntFamMembers\": 2 , \"riskScore\": 3.0}"));</pre>
+<p>We can run <a id="_idIndexMarker706"/>this JUnit test by right-clicking and running the <strong class="source-inline">Test</strong> class, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer106">
+<img alt="Figure 6.3 – Running a Kafka Streams JUnit test case " height="1013" src="image/B17084_06_003.jpg" width="1325"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.3 – Running a Kafka Streams JUnit test case</p>
+<p>Once you <a id="_idIndexMarker707"/>have run the JUnit test case, you will see the test result in the run window of IntelliJ IDE, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer107">
+<img alt="Figure 6.4 – Verifying the JUnit test’s results " height="395" src="image/B17084_06_004.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.4 – Verifying the JUnit test’s results</p>
+<p>In this section, we <a id="_idIndexMarker708"/>learned how to write a JUnit test case for a <a id="_idIndexMarker709"/>Kafka streaming application and unit test our Streams application. In the next section, we will learn how to configure the streaming application and run the application on our local system.</p>
+<h2 id="_idParaDest-104"><a id="_idTextAnchor103"/>Configuring and running the application</h2>
+<p>To run <a id="_idIndexMarker710"/>this <a id="_idIndexMarker711"/>application, we <a id="_idIndexMarker712"/>must configure the <strong class="source-inline">application.yaml</strong> file, which <a id="_idIndexMarker713"/>contains the following details:</p>
+<ul>
+<li>Application port number (as we will launch two Spring Boot applications on our local machine)</li>
+<li>Data source details</li>
+<li>Kafka details such as bootstrap servers and topics</li>
+<li>The REST HTTP URL for the Risk Score Generator app</li>
+</ul>
+<p>Our sample <strong class="source-inline">application.yaml</strong> file will look as follows:</p>
+<pre class="source-code">spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/database
+    username: postgres
+    driverClassName: org.postgresql.Driver
+riskcalc:
+  bootstrap-servers: localhost:9092
+  appId: groupId1
+  inputTopic: landingTopic1
+  outTopic: enrichedTopic1
+  mlRequestUrl: "http://localhost:8081/riskgenerate/score"</pre>
+<p>Now, we can<a id="_idIndexMarker714"/> run the application by running the main class, <strong class="source-inline">CreditRiskCalculatorApp</strong>, of the CreditRiskCalculator application. But <a id="_idIndexMarker715"/>before we start the CreditRiskCalculator app, we should run the RiskScoreGenerator app by running its main class – that is, <strong class="source-inline">RiskScoreGenerator</strong>. Both these applications are Spring Boot applications; please refer to the <em class="italic">Implementing and unit testing the solution</em> section of <a href="B17084_04.xhtml#_idTextAnchor062"><em class="italic">Chapter 4</em></a>, <em class="italic">ETL Data Load – A Batch-Based Solution to Ingesting Data in a Data Warehouse</em>, to learn how to run a Spring Boot application.</p>
+<p class="callout-heading">Troubleshooting tips</p>
+<p class="callout">If, while starting the CreditRiskCalculator application, you notice a warning message such as <strong class="bold">Connection to node -1 (localhost/127.0.0.1:9092) could not be established. Broker may not be available.</strong> in the logs, please ensure your Kafka server is reachable and running.</p>
+<p class="callout">If you notice an exception such as <strong class="bold">org.apache.kafka.clients.consumer.CommitFailedException:Commit cannot be completed since the group has already rebalanced and assigned the partitions to another member</strong>, then try to increase <strong class="source-inline">max.poll.interval.ms</strong> or decrease the value of <strong class="source-inline">max.poll.records</strong>. This usually happens when the number of records polled takes more time to process than the maximum poll interval time configured.</p>
+<p class="callout-heading">If you encounter an error such as <strong class="bold">java.lang.IllegalArgumentException: Assigned partition</strong></p>
+<p class="callout"><strong class="bold"> x-topic for non-subscribed topic regex pattern; subscription pattern is y-topic</strong> while starting your streaming app, then check for other streaming or consumer applications that are using the same <strong class="source-inline">application.id</strong>. Change your <strong class="source-inline">application.id</strong> to solve this problem.</p>
+<p>In this section, we<a id="_idIndexMarker716"/> learned how to create and unit test a Kafka Streams application. The source code for this application is available on GitHub at <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter06/sourcecode/CreditRiskCalculator">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter06/sourcecode/CreditRiskCalculator</a>.</p>
+<p>Since implementing <a id="_idIndexMarker717"/>an ML-based Risk Score Generator app is outside the scope of this book, we have created a Spring Boot REST application that generates a dummy risk score between 1 to 100. The code base of this dummy application is available on GitHub at <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter06/sourcecode/RiskScoreGenerator">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter06/sourcecode/RiskScoreGenerator</a>.</p>
+<p>In a real-world scenario, ML-based applications are more likely to be written in Python than Java since Python has better support for AI/ML libraries. However, a Kafka Streams application will <a id="_idIndexMarker718"/>be able to make a REST call and get the generated risk score from that application, as shown earlier.</p>
+<p>So far, we have <a id="_idIndexMarker719"/>been receiving the event from an input Kafka topic, processing it on the fly, generating a risk score, and writing the enriched event to an output Kafka topic. In the next section, we will learn how to integrate Kafka with MongoDB and stream the events to MongoDB as soon as they are published to the output Kafka topic.</p>
+<h2 id="_idParaDest-105"><a id="_idTextAnchor104"/>Creating a MongoDB Atlas cloud instance and database</h2>
+<p>In this section, we<a id="_idIndexMarker720"/> will create a cloud-based instance using MongoDB Atlas. Follow these steps to set <a id="_idIndexMarker721"/>up the MongoDB cloud instance:</p>
+<ol>
+<li value="1">Sign up for a MongoDB Atlas account if you haven’t done so already (<a href="https://www.mongodb.com/atlas/database">https://www.mongodb.com/atlas/database</a>). While signing up, you will be asked for the type of subscription that you need. For this exercise, you can choose the shared subscription, which is free, and choose an AWS cluster<a id="_idTextAnchor105"/> as your preferred choice of cloud.</li>
+<li>You will <a id="_idIndexMarker722"/>see the following screen. Here, click the <strong class="bold">Build a Database</strong> button <a id="_idIndexMarker723"/>to create a new database instance:</li>
+</ol>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US"><img alt="Figure 6.5 – MongoDB Atlas welcome screen " height="803" src="image/B17084_06_005.png" width="1650"/></p>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.5 – MongoDB Atlas welcome screen</p>
+<ol>
+<li value="3">To provision a new database, we will be asked to set a username and a password, as shown in the following screenshot:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer109">
+<img alt="Figure 6.6 – Provisioning a new database instance " height="1013" src="image/B17084_06_006.jpg" width="1640"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.6 – Provisioning a new database instance</p>
+<ol>
+<li value="4">Then, we<a id="_idIndexMarker724"/> will be asked to enter all the IP addresses that we want to grant access<a id="_idIndexMarker725"/> to the MongoDB instance. Here, since we will run our application from our local system, we will add our local IP address to the IP Access List. Then, click <strong class="bold">Finish and Close</strong>:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer110">
+<img alt="Figure 6.7 – Setting up an IP Access List during database provisioning " height="1066" src="image/B17084_06_007.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.7 – Setting up an IP Access List during database provisioning</p>
+<ol>
+<li value="5">Once the<a id="_idIndexMarker726"/> cluster<a id="_idIndexMarker727"/> has been created, we will see the cluster on the dashboard, as shown in the following screenshot. Now, click the <strong class="bold">Browse Collections</strong> button to see the collections and data in this database instance:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer111">
+<img alt="Figure 6.8 – Cluster dashboard in MongoDB Atlas " height="876" src="image/B17084_06_008.jpg" width="1590"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.8 – Cluster dashboard in MongoDB Atlas</p>
+<ol>
+<li value="6">As shown<a id="_idIndexMarker728"/> in the <a id="_idIndexMarker729"/>following screenshot, currently, there are no collections or data. However, you can create collections or data manually while using this interface by clicking the <strong class="bold">Add My Own Data</strong> button:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer112">
+<img alt="Figure 6.9 – Exploring collections and data in the MongoDB database instance " height="876" src="image/B17084_06_009.jpg" width="1590"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.9 – Exploring collections and data in the MongoDB database instance</p>
+<p>In this section, we<a id="_idIndexMarker730"/> learned <a id="_idIndexMarker731"/>how to create a cloud-based MongoDB instance using the online interface of MongoDB Atlas. In the next section, we will learn how to configure and deploy our MongoDB Kafka connectors to send the data from Kafka to MongoDB in real time.</p>
+<h2 id="_idParaDest-106"><a id="_idTextAnchor106"/>Configuring Kafka Connect to store the results in MongoDB</h2>
+<p>Kafka Connect is <a id="_idIndexMarker732"/>an open source, pluggable data integration framework for Kafka. It enables data sources and data sinks to easily connect with Kafka. Instead <a id="_idIndexMarker733"/>of writing cumbersome code to publish a message from the data source or consume a message from Kafka to write into a data sink, Kafka Connect provides declarative configuration to connect to a data source or sink.</p>
+<p>A <a id="_idIndexMarker734"/>Kafka Connect cluster already ships with a few types of connectors, such as <strong class="source-inline">FileSourceConnector</strong>. However, we can install any available connectors by placing them in the <strong class="source-inline">plugins</strong> folder. For our use case, we will deploy the MongoDB connector plugin (discussed later in this chapter).</p>
+<p>A Kafka Connect instance can be deployed and run in either cluster or standalone mode. However, in production, it <a id="_idIndexMarker735"/>usually runs in cluster mode. When we run in cluster mode, we can register the Kafka connector configuration using Kafka Connects’ REST API. In standalone mode, we can register a connector configuration while starting the Kafka Connect instance.</p>
+<p>Since we<a id="_idIndexMarker736"/> are running our Kafka cluster on our local machine, we will deploy our Kafka Connect instance in standalone mode for this implementation. But <a id="_idIndexMarker737"/>remember, if you are implementing for production purposes, you should run Kafka, as well as Kafka Connect, in a clustered environment (this can be a physical cluster or a virtual cluster, such as a virtual machine, AWS ECS, or Docker container).</p>
+<p>First, let’s set up<a id="_idIndexMarker738"/> the Kafka Connect cluster: </p>
+<ol>
+<li value="1">First, create a new folder called <strong class="source-inline">plugins</strong> under the Kafka root installation folder, as shown in the following screenshot:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer113">
+<img alt="Figure 6.10 – Creating the plugins folder " height="354" src="image/B17084_06_010.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.10 – Creating the plugins folder</p>
+<ol>
+<li value="2">Next, navigate to <strong class="source-inline">connect-standalone.properties</strong>, which is present in the <strong class="source-inline">&lt;Kafka-root&gt;/config</strong> folder. Add the following property to the <strong class="source-inline">connect-standalone.properties</strong> file:<p class="source-code">.. .</p><p class="source-code">plugin.path=/&lt;full path of Kafka installation root&gt;/plugins</p></li>
+<li>Then, download <a id="_idIndexMarker739"/>the MongoDB Kafka connector plugin from <a href="https://www.confluent.io/hub/mongodb/kafka-connect-mongodb">https://www.confluent.io/hub/mongodb/kafka-connect-mongodb</a>.</li>
+</ol>
+<p>A ZIP file will be downloaded. Copy and extract the ZIP file in the <strong class="source-inline">plugin</strong> folder created under<a id="_idIndexMarker740"/> the Kafka root installation folder. At this point, the folder structure should look as follows:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer114">
+<img alt="Figure 6.11 – Kafka folder structure after deploying the mongo-kafka-connect plugin " height="387" src="image/B17084_06_011.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.11 – Kafka folder structure after deploying the mongo-kafka-connect plugin</p>
+<p>Now, let’s<a id="_idIndexMarker741"/> learn how to create and deploy a Kafka Connect worker <a id="_idIndexMarker742"/>configuration to create a pipeline between a Kafka topic and MongoDB sink.</p>
+<p>To write a<a id="_idIndexMarker743"/> Kafka Connect worker, we must understand the various types of declarative properties that Kafka Connect supports. The following diagram depicts various kinds of components that a Kafka Connect worker consists of:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer115">
+<img alt="Figure 6.12 – Kafka Connect components " height="261" src="image/B17084_06_012.jpg" width="661"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.12 – Kafka Connect components</p>
+<p>A Kafka connector consists of three types of components. They are as follows:</p>
+<ul>
+<li><strong class="bold">Connector</strong>: This <a id="_idIndexMarker744"/>interfaces Kafka with external data sources. It takes care of implementing whatever external protocol those data sources and sinks need to communicate with Kafka.</li>
+<li><strong class="bold">Converter</strong>: Converters <a id="_idIndexMarker745"/>are used to serialize and deserialize events.</li>
+<li><strong class="bold">Transformer</strong>: This <a id="_idIndexMarker746"/>is an optional property. It is a stateless function that’s used to slightly transform the data so that it is in the right format for the destination.</li>
+</ul>
+<p>For our use <a id="_idIndexMarker747"/>case, we don’t need a transformer, but we do need to set all the<a id="_idIndexMarker748"/> properties related to the connector and converter. The following code is for the Kafka Sink Connect worker:</p>
+<pre class="source-code">name=mongo-sink
+topics=enrichedTopic1
+connector.class=com.mongodb.kafka.connect.MongoSinkConnector
+tasks.max=1
+# converter configs
+key.converter=org.apache.kafka.connect.storage.StringConverter
+value.converter=org.apache.kafka.connect.json.JsonConverter
+key.converter.schemas.enable=false
+value.converter.schemas.enable=false
+...</pre>
+<p>As shown in the preceding configuration code, the connector properties such as <strong class="source-inline">connector.class</strong> and other properties specific to MongoDB are configured, and the converter properties such as <strong class="source-inline">key.converter</strong> and <strong class="source-inline">value.converter</strong> are set. Next, in the sink<a id="_idIndexMarker749"/> connector configuration, we define all the MongoDB connection properties, like so:</p>
+<pre class="source-code"># Specific global MongoDB Sink Connector configuration
+connection.uri=mongodb+srv://username:password@cluster0.ipguv.mongodb.net/CRRD?retryWrites=true&amp;w=majority
+database=CRRD
+collection=newloanrequest
+max.num.retries=1
+retries.defer.timeout=5000</pre>
+<p>Now, we <a id="_idIndexMarker750"/>will set the <strong class="source-inline">document.id</strong> and <strong class="source-inline">writemodel.strategy</strong> properties in the sink connector configuration, as shown here:</p>
+<pre class="source-code">document.id.strategy=com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy
+document.id.strategy.partial.value.projection.list=id
+document.id.strategy.partial.value.projection.type=AllowList
+writemodel.strategy=com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneBusinessKeyStrategy</pre>
+<p>Save this configurations in a property file called <strong class="source-inline">connect-riskcalc-mongodb-sink.properties</strong> and place it in Kafka Connect’s <strong class="source-inline">config</strong> folder. </p>
+<p>Now, we <a id="_idIndexMarker751"/>can run the Kafka Connect i<a id="_idTextAnchor107"/>nstance<a id="_idIndexMarker752"/> in standalone mode and start the <strong class="source-inline">mongodb-sink</strong> connector using the following command:</p>
+<p class="source-code">bin/connect-standalone.sh config/connect-standalone.properties connect-riskcalc-mongodb-sink.properties</p>
+<p>Now, let’s learn how to troubleshoot possible issues that we may encounter.</p>
+<h3>Troubleshooting the Kafka Sink connector</h3>
+<p>When a source or a<a id="_idIndexMarker753"/> sink connector runs on a Kafka Connect cluster, you may encounter multiple issues. The following list specifies a few common issues and how to resolve them:</p>
+<ul>
+<li>If you encounter an error similar to the following, then please check whether the JSON message should contain a schema or not. If the JSON message should not contain schema, make sure that you set the <strong class="source-inline">key.converter.schemas.enable</strong> and <strong class="source-inline">value.converter.schemas.enable</strong> properties to <strong class="source-inline">false</strong>:<p class="source-code"><strong class="bold">org.apache.kafka.connect.errors.DataException: JsonConverter with schemas.enable requires "schema" and "payload" fields and may not contain additional fields.</strong></p></li>
+<li>If you encounter an error such as <strong class="source-inline">org.apache.kafka.common.errors.SerializationException: Error deserializing Avro message for id -1</strong>, then check if the payload is Avro or JSON. If the message is a JSON payload instead of Avro, please change the value of the <strong class="source-inline">value.converter</strong> property in the connector to <strong class="source-inline">org.apache.kafka.connect.json.JsonConverter</strong>.</li>
+<li>You may encounter <strong class="source-inline">BulkWriteExceptions</strong> while writing to MongoDB. <strong class="source-inline">BulkWriteExceptions</strong> can be a <strong class="source-inline">WriteError</strong>, a <strong class="source-inline">WriteConcernError</strong>, or a <strong class="source-inline">WriteSkippedError</strong> (due to an earlier record <a id="_idIndexMarker754"/>failing in the ordered bulk write). Although we cannot prevent such errors, we can set the following parameters to move the rejected message to an error topic called <strong class="source-inline">dead-letter-queue</strong>:<p class="source-code"><strong class="bold">errors.tolerance=all</strong></p><p class="source-code"><strong class="bold">errors.deadletterqueue.topic.name=&lt;name of topic to use as dead letter queue&gt;</strong></p><p class="source-code"><strong class="bold">errors.deadletterqueue.context.headers.enable=true</strong></p></li>
+</ul>
+<p>In this section, we successfully created, deployed, and ran the MongoDB Kafka Sink connector. In the next section, we will discuss how to test the end-to-end solution.</p>
+<h2 id="_idParaDest-107"><a id="_idTextAnchor108"/>Verifying the solution</h2>
+<p>To<a id="_idIndexMarker755"/> test the end-to-end pipeline, we must make sure that all the services, such as Kafka, PostgreSQL, Kafka Connect, and the MongoDB instance, are up and running.</p>
+<p>Apart from that, the Kafka Streams application and the Risk Score Generator REST application should be up and running. We can start these applications by running the main Spring Boot application class. </p>
+<p>To test the application, open a new Terminal and navigate to the Kafka root installation folder. To start an instance of the Kafka console producer, use the following command:</p>
+<p class="source-code">bin/kafka-console-producer.sh --topic landingTopic1 --bootstrap-server localhost:9092</p>
+<p>Then, we can publish input messages by using the console producer, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer116">
+<img alt="Figure 6.13 – Publishing messages using the Kafka console producer " height="445" src="image/B17084_06_013.jpg" width="1404"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.13 – Publishing messages using the Kafka console producer</p>
+<p>As soon as <a id="_idIndexMarker756"/>we publish the message in the input topic, it gets processed, and the result is written to the MongoDB instance. You can verify the results in MongoDB like so:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer117">
+<img alt="Figure 6.14 – Verifying the results " height="772" src="image/B17084_06_015.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 6.14 – Verifying the results</p>
+<p>In this section, we learned how to test the end-to-end solution for a real-time data processing problem and verify the result. Now, let’s summarize what we learned in this chapter.</p>
+<h1 id="_idParaDest-108"><a id="_idTextAnchor109"/>Summary</h1>
+<p>In this chapter, we discussed how to analyze a real-time data engineering problem, identify the streaming platform, and considered the basic characteristics that our solution must have to become an effective real-time solution. First, we learned how to choose a hybrid platform to suit legal needs as well as performance and cost-effectiveness. </p>
+<p>Then, we learned how to use our conclusions from our problem analysis to build a robust, reliable, and effective real-time data engineering solution. After that, we learned how to install and run Apache Kafka on our local machine and create topics in that Kafka cluster. We also learned how to develop a Kafka Streams application to do stream processing and write the result to an output topic. Then, we learned how to unit test a Kafka Streams application to make the code more robust and defect-free. After that, we learned how to set up a MongoDB Atlas instance on the AWS cloud. Finally, we learned about Kafka Connect and how to configure and use a Kafka MongoDB Sink connector to send the processed event from the output topic to the MongoDB cluster. While doing so, we learned how to test and verify the real-time data engineering solution that we developed.</p>
+<p>With that, we have learned how to develop optimized and cost-effective solutions for both batch-based and real-time data engineering problems. In the next chapter, we will learn about the various architectural patterns that are commonly used in data ingestion or analytics problems.</p>
+</div>
+</div>
+</body></html>

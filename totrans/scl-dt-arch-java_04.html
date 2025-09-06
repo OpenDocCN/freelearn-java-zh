@@ -1,0 +1,660 @@
+<html><head></head><body>
+<div id="sbo-rt-content"><div id="_idContainer073">
+<h1 class="chapter-number" id="_idParaDest-63"><a id="_idTextAnchor062"/>4</h1>
+<h1 id="_idParaDest-64"><a id="_idTextAnchor063"/>ETL Data Load – A Batch-Based Solution to Ingesting Data in a Data Warehouse</h1>
+<p>In the previous chapters, we discussed various foundational concepts surrounding data engineering, starting with the different types of data engineering problems. Then, we discussed various data types, data formats, data storage, and databases. We also discussed the various platforms that are available to deploy and run data engineering solutions in production.</p>
+<p>In this chapter, we will learn how to architect and design a batch-based solution for low to medium-volume data ingestion from a data source to a <strong class="bold">data warehouse</strong>. Here, we will be taking a real-time use case to discuss, model, and design a data warehouse for such a scenario. We will also learn how to develop this solution using a Java-based technical stack and run and test our solution. By the end of this chapter, you should be able to design and develop an <strong class="bold">extract, transform, load</strong> (<strong class="bold">ETL</strong>)-based batch pipeline using Java and its related stack.</p>
+<p>In this chapter, we’re going to cover the following main topics:</p>
+<ul>
+<li>Understanding the problem and source data</li>
+<li>Building an effective data model</li>
+<li>Designing the solution</li>
+<li>Implementing and unit testing the solution</li>
+</ul>
+<h1 id="_idParaDest-65"><a id="_idTextAnchor064"/>Technical requirements</h1>
+<p>You can find all the code files for this chapter in this book’s GitHub repository: <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter04/SpringBatchApp/EtlDatawarehouse">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/tree/main/Chapter04/SpringBatchApp/EtlDatawarehouse</a>.</p>
+<h1 id="_idParaDest-66"><a id="_idTextAnchor065"/>Understanding the problem and source data</h1>
+<p>Data engineering often involves collecting, storing, and analyzing data. But nearly all data engineering landscapes start with ingesting raw data into a data lake or a data warehouse. In this chapter, we will be discussing one such typical use case and build an end-to-end solution for the problem discussed in the following section.</p>
+<h2 id="_idParaDest-67"><a id="_idTextAnchor066"/>Problem statement</h2>
+<p>Company XYZ is a<a id="_idIndexMarker439"/> third-party vendor that provides services for building and maintaining data centers. Now, Company XYZ is planning to build a data center monitoring tool for its customer. The customer wants to see various useful metrics, such as the number of incidents reported for any device on an hourly, monthly, or quarterly basis. They also want reports on closure ratios and average closure duration. They are also interested in searching incidents based on the type of device or incident type. They are also interested to find time-based outage patterns to predict seasonal or hourly usage surges for any set of resources. These reports need to be generated once every 12 hours. To generate such reports, a data warehouse needs to be built, and data must be ingested and stored daily in that data warehouse so that such reports can easily be generated.</p>
+<p>To create the solution for this data engineering problem, we must analyze the four dimensions of data (refer to the <em class="italic">Dimensions of data</em> section in <a href="B17084_01.xhtml#_idTextAnchor014"><em class="italic">Chapter 1</em></a>, <em class="italic">Basics of Modern Data Architecture</em>) in this use case. Our first question would be, <em class="italic">What is the velocity of data?</em> The answer to this question helps us to determine whether it is a real-time or batch processing problem. Although there is not much information about the input frequency of data as per the problem statement, it is clearly stated that the report needs to be generated after every 12 hours or twice daily. Irrespective of the incoming speed of data, if the frequency in which the downstream system needs data is more than an hour, we can safely decide that we are dealing with a batch-based data engineering problem (please refer to the <em class="italic">Types of data engineering problems</em> section in <a href="B17084_01.xhtml#_idTextAnchor014"><em class="italic">Chapter 1</em></a>, <em class="italic">Basics of Modern Data Architecture</em>).</p>
+<p>Our second question would be, <em class="italic">What is the volume of the data? Is it huge? Is there a chance that this can grow into hundreds of terabytes in the future?</em> These questions generally help us choose the technology that we should use. If the volume is huge (in terabytes or hundreds of terabytes), only then should we choose <strong class="bold">big data</strong> technologies to solve our problem. A lot of times, architects tend to use big data in a non-big data use case, which makes the solution unsustainable and expensive in terms of cost, maintenance, and time. In our case, the data that needs to be ingested is incident log data. Such data is usually not huge. However, an architect should get confirmation <a id="_idIndexMarker440"/>about the data that will be sent for ingestion. In this case, let’s suppose that the customers responded and said that the data will be sent every couple of hours as a flat file, consisting of a Delta of the incidents that have either been newly logged or updated. This would mean that our datasets will be either in a small file or a medium-sized file. This means that as an architect, we should choose a non-big data-based solution.</p>
+<h2 id="_idParaDest-68"><a id="_idTextAnchor067"/>Understanding the source data</h2>
+<p>The<a id="_idIndexMarker441"/> third important question that an architect must ask is, <em class="italic">What is the variety of the data? Is it structured, unstructured, or semi-structured?</em> This question often helps to determine how such data can be processed and stored. If the data is unstructured, then we need to store it in a NoSQL database, but structured data can be stored in RDBMS databases. There is another question related<a id="_idIndexMarker442"/> to <strong class="bold">data variety</strong> – that is, <em class="italic">What is the format of the data? Is it in CSV format, JSON format, Avro format, or Parquet format? Is the data compressed when received?</em> Often, these questions help determine the techniques, technologies, processing rules, and pipeline design required to process and ingest the data. In our case, since it is not mentioned in the initial requirement, we need to ask the customers these questions. Let’s suppose our customers agree to send the data in the form of CSV files. So, in this case, we are dealing with structured data and the data is coming as a CSV file without any compression. As it is structured data, it is apt for us to use a relational data model or RDBMS database to store our data.</p>
+<p>This brings us to the final question regarding the dimension of the data: <em class="italic">What is the veracity of the data?</em> Or, in simpler terms, <em class="italic">What is the quality of the data that we receive? Is there too much noise in the data?</em> Of all the data engineering solutions that fail to solve a customer problem, the majority fail because of a lack of time spent analyzing and profiling the source data. Understanding the nature of the data that is coming is very important. We must ask, and be able to answer, the following kinds of questions at the end of the analysis:</p>
+<ul>
+<li>Does the source data contain any junk characters that need to be removed? </li>
+<li>Does it contain any special characters? </li>
+<li>Does the source data contain non-English characters (such as French or German)? </li>
+<li>Do any numeric columns contain null values? Which can or cannot be nullable columns? </li>
+<li>Is there something unique with which we can determine each record? </li>
+</ul>
+<p>And the list goes on. </p>
+<p>To analyze the source data, we should run a data profiling tool such as Talend Open Studio, DataCleaner, or AWS Glue DataBrew to analyze and visualize various metrics of the data. This activity helps us understand the data better. </p>
+<p>Here, we will analyze the CSV data file that we need to ingest for our use case using the DataCleaner tool. Follow these steps:</p>
+<ol>
+<li>First, you can download DataCleaner Community Edition by going to <a href="https://datacleaner.github.io/downloads">https://datacleaner.github.io/downloads</a>. </li>
+<li>Then, unzip the downloaded ZIP file in the desired installation folder. Based on your operating system, you can start DataCleaner using either the <strong class="source-inline">datacleaner.sh</strong> command or the <strong class="source-inline">datacleaner.cmd</strong> file present under the root installation folder. You will see a home screen, as shown in the following screenshot. Here, you can start a new data profiling job by clicking the <strong class="bold">Build new job</strong> button:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer056">
+<img alt="Figure 4.1 – DataCleaner welcome screen " height="1013" src="image/B17084_04_001.jpg" width="1003"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.1 – DataCleaner welcome screen</p>
+<ol>
+<li value="3">Then, a dialog will pop up, where<a id="_idIndexMarker443"/> you can select the data store, as shown in the following screenshot. Here, we will browse for and select our input file called <strong class="source-inline">inputData.csv</strong>: </li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer057">
+<img alt="Figure 4.2 – DataCleaner – the Select datastore popup " height="670" src="image/B17084_04_002.jpg" width="1350"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.2 – DataCleaner – the Select datastore popup</p>
+<p>Once the <a id="_idIndexMarker444"/>datastore is selected, we will see our data source at the top of the left pane. We should be able to see the column names of our CSV as well.</p>
+<ol>
+<li value="4">Now, we will <a id="_idIndexMarker445"/>drag and drop our data source <strong class="source-inline">inputData.csv</strong> file to the right pane, which is the pipeline building canvas. To profile the data, DataCleaner provides various analyzer tools under the <strong class="bold">Analyze</strong> menu, which is visible in the left pane. For our use case, we will <a id="_idIndexMarker446"/>be using <strong class="bold">String analyzer</strong>: </li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer058">
+<img alt="Figure 4.3 – Creating an analysis pipeline " height="1350" src="image/B17084_04_003.jpg" width="1470"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.3 – Creating an analysis pipeline</p>
+<p><strong class="bold">String analyzer</strong> analyzes <a id="_idIndexMarker447"/>various <a id="_idIndexMarker448"/>string-related metrics such as the <a id="_idIndexMarker449"/>NULL count, blank count, white spaces, character case, and so on. The following screenshot shows the various configuration options of a <strong class="bold">String analyzer</strong>:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer059">
+<img alt="Figure 4.4 – Adding String analyzer " height="783" src="image/B17084_04_004.jpg" width="1394"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.4 – Adding String analyzer</p>
+<ol>
+<li value="5">We <a id="_idIndexMarker450"/>will <a id="_idIndexMarker451"/>add another <a id="_idIndexMarker452"/>analyzer called <strong class="bold">Completeness analyzer</strong> to our flow to check whether any rows cannot be ingested. Each event log record must have an <strong class="source-inline">incidentNumber</strong>, <strong class="source-inline">deviceSerialNum</strong>, <strong class="source-inline">eventCode</strong>, and <strong class="source-inline">loggedTime</strong> to be an eligible entry for our data warehouse. </li>
+</ol>
+<p>If any of this information is missing, such a record will not add value to the problem that we are trying to solve. Here, <strong class="bold">Completeness analyzer</strong> will help us determine whether we need special checks to handle these constraints and drop records if these fields are blank. The following screenshot shows the various configuration options of <strong class="bold">Completeness analyzer</strong>:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer060">
+<img alt="Figure 4.5 – Adding the Completeness analyzer " height="1013" src="image/B17084_04_005.jpg" width="1156"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.5 – Adding the Completeness analyzer</p>
+<p>The<a id="_idIndexMarker453"/> final profiling pipeline<a id="_idIndexMarker454"/> for our <a id="_idIndexMarker455"/>use case can be seen in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer061">
+<img alt="Figure 4.6 – Final analyzer pipeline " height="925" src="image/B17084_04_006.jpg" width="1440"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.6 – Final analyzer pipeline</p>
+<ol>
+<li value="6">Once <a id="_idIndexMarker456"/>we execute this <a id="_idIndexMarker457"/>pipeline, <strong class="bold">Analysis results</strong> will be generated, as shown in the following screenshot:</li>
+</ol>
+<div>
+<div class="IMG---Figure" id="_idContainer062">
+<img alt="Figure 4.7 – Analysis results " height="776" src="image/B17084_04_007.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.7 – Analysis results</p>
+<p>Such data profiling can provide us with various pieces of information about the data, which can help us adjust our tools, technologies, and transformations to create an effective and successful data engineering solution. As shown in the preceding screenshot, we <a id="_idIndexMarker458"/>can infer that the total data size is 300 rows. Out of these, 53 are open incidents. The <a id="_idIndexMarker459"/>resolution comments can have spaces in them, all <strong class="source-inline">deviceSerialNum</strong> values are lowercase, and <strong class="source-inline">status</strong> values are uppercase. Such information helps us make effective decisions while designing the solution.</p>
+<p>For the brevity of this discussion, we are only showing one form of data profiling for a source data file. However, we can do the same for other kinds of datasets. In this use case, you can do similar data profiling for the data in the <strong class="source-inline">device_dm.csv</strong> and <strong class="source-inline">event_dm.csv</strong> files.</p>
+<p>Now that we have understood the requirements and have a fair idea of the source data, in the next section, we will discuss how to design the model so that it can store the ingested data.</p>
+<h1 id="_idParaDest-69"><a id="_idTextAnchor068"/>Building an effective data model</h1>
+<p>From our<a id="_idIndexMarker460"/> previous discussion and after analyzing the data, we have concluded that our data is structured, so it’s suitable for being stored in a relational data model. From the requirements, we have gathered that our final data store should be a data warehouse. Keeping these two basic factors in mind, let’s learn about relational data warehouse schemas. </p>
+<h2 id="_idParaDest-70"><a id="_idTextAnchor069"/>Relational data warehouse schemas</h2>
+<p>Let’s explore<a id="_idIndexMarker461"/> the popular relational data warehouse schemas that we can consider when creating our data model: </p>
+<ul>
+<li><strong class="bold">Star schema</strong>: This<a id="_idIndexMarker462"/> is the most popular <a id="_idIndexMarker463"/>data warehouse schema type. As shown in the following diagram, there is a <strong class="bold">Fact Table</strong> in the middle where each record represents a fact or an event that has happened over time:</li>
+</ul>
+<div>
+<div class="IMG---Figure" id="_idContainer063">
+<img alt="Figure 4.8 – Star schema " height="1163" src="image/B17084_04_008.jpg" width="1350"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.8 – Star schema</p>
+<p>This <strong class="bold">Fact Table</strong> consists of <a id="_idIndexMarker464"/>various dimensions whose details need to be looked up from associated lookup <a id="_idIndexMarker465"/>tables <a id="_idIndexMarker466"/>called <strong class="bold">dimension tables</strong>. This <strong class="bold">Fact Table</strong> is associated with each dimension table using a foreign key. The preceding diagram shows what a star schema looks like. Since there is a <strong class="bold">Fact Table</strong> in the middle surrounded by multiple dimension tables on various sides, its structure looks like a star, hence its name.</p>
+<ul>
+<li><strong class="bold">Snowflake schema</strong>: This <a id="_idIndexMarker467"/>is an extension<a id="_idIndexMarker468"/> of the star schema. Just like the star schema, here, there is a <strong class="bold">Fact Table</strong> in the middle and multiple dimension tables around it. However, in the snowflake schema, each dimension table further references other child dimension tables, making the structure look like a snowflake:</li>
+</ul>
+<div>
+<div class="IMG---Figure" id="_idContainer064">
+<img alt="Figure 4.9 – Snowflake schema " height="1445" src="image/B17084_04_009.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.9 – Snowflake schema</p>
+<p>Here, we <a id="_idIndexMarker469"/>can see how each<a id="_idIndexMarker470"/> dimension table is connected to the child dimension tables using foreign key relations, making the structure look like a snowflake, hence its name.</p>
+<ul>
+<li><strong class="bold">Galaxy schema</strong>: A <a id="_idIndexMarker471"/>galaxy schema is a <a id="_idIndexMarker472"/>schema that consists of more than one fact table. Here, one or more dimension tables are shared by multiple fact tables. This schema can <a id="_idIndexMarker473"/>be visualized as a <a id="_idIndexMarker474"/>collection of two or more star schemas, hence its name.</li>
+</ul>
+<h2 id="_idParaDest-71"><a id="_idTextAnchor070"/>Evaluation of the schema design</h2>
+<p>For our use case, we <a id="_idIndexMarker475"/>need to evaluate what schema design best fits our use case. </p>
+<p>The first question that we should ask is, <em class="italic">In our use case, do we need multiple fact tables?</em> Since our fact table only consists of device events or incidents, we can only have one fact table. This eliminates any chance of having a galaxy schema as our candidate data model. Now, we must determine whether a star schema or a snowflake schema is suitable for our use case.</p>
+<p>To choose between those two alternatives, let’s look at the following columns of our <strong class="source-inline">inputData.csv</strong> file:</p>
+<ul>
+<li><strong class="source-inline">incidentNumber</strong></li>
+<li><strong class="source-inline">deviceSerialNo</strong></li>
+<li><strong class="source-inline">eventCode</strong></li>
+<li><strong class="source-inline">loggedTime</strong></li>
+<li><strong class="source-inline">closureTime</strong></li>
+<li><strong class="source-inline">status</strong></li>
+<li><strong class="source-inline">assignedTo</strong></li>
+<li><strong class="source-inline">resolutionComments</strong></li>
+</ul>
+<p>By looking at the column names for this file, we can say that this is the device event log file. This implies that the data from the <strong class="source-inline">inputData.csv</strong> file needs to be ingested into our central fact table. But first, we need to determine whether we need to reference only dimension tables, which are complete in themselves, or whether our dimensions table needs to do further lookups in another set of dimension tables.</p>
+<p>Let’s begin by figuring out the candidate dimensions from the dataset present in <strong class="source-inline">inputData.csv</strong>. It is important to remember that candidate dimensions are determined by the purpose or goal of building the data warehouse. The purpose of the data warehouse we are building is to obtain metrics on <strong class="source-inline">eventType</strong>, device over different time intervals such as hourly, monthly, and quarterly, and closure duration metrics.</p>
+<p>In our case, <strong class="source-inline">deviceSerialNo</strong> and <strong class="source-inline">eventCode</strong> can correspond to two <a id="_idIndexMarker476"/>dimensions <a id="_idIndexMarker477"/>called <strong class="bold">device</strong> and <strong class="bold">event</strong>. <strong class="source-inline">incidentNumber</strong> will vary in each fact record, so it’s not a candidate for dimension. <strong class="source-inline">status</strong>, <strong class="source-inline">loggedTime</strong>, and <strong class="source-inline">closureTime</strong> will vary from record to record, so they are best suited for being facts and not dimensions. Since we are not doing any analysis on the <strong class="source-inline">assignedTo</strong> and <strong class="source-inline">resolutionComment</strong> fields, we can ignore those columns in our data model. In a real-world scenario, usually, incoming source data files contain hundreds of columns. However, only a small percentage of those columns are useful for solving a problem. </p>
+<p>It is always <a id="_idIndexMarker478"/>advised to ingest only the columns that you need. This saves space, complexity, and money (remember that a lot of solutions these days are deployed on cloud platforms or are candidates for future migration to cloud platforms, and cloud platforms follow the principle of pay for what you use, so you should only ingest data that you intend to use). Apart from these, our requirements need us to mark every event on an hourly, monthly, and quarterly basis so that aggregations can easily be run on these intervals and hourly, monthly, and quarterly patterns can be analyzed. This interval tagging can be derived from <strong class="source-inline">loggedTime</strong> while saving the record. However, <strong class="source-inline">hour</strong>, <strong class="source-inline">month</strong>, and <strong class="source-inline">quarter</strong> can be stored as derived dimensions associated with our central fact table.</p>
+<p>Hence, from our analysis, it is clear that our fact table only references those dimension tables that are complete in themselves. So, we can conclude that we will be using a star schema for our data modeling with the following set of tables:</p>
+<ul>
+<li><strong class="source-inline">DEVICE_EVENT_LOG_FACT</strong>: This is the centralized fact table, which consists of each incident entry</li>
+<li><strong class="source-inline">DEVICE_DIMENSION</strong>: This is the dimension table, which consists of device lookup data</li>
+<li><strong class="source-inline">EVENT_DIMENSION</strong>: This is the dimension table, which consists of event lookup data</li>
+<li><strong class="source-inline">HOUR_DIMENSION</strong>: This is the dimension table, which consists of static hour lookup data</li>
+<li><strong class="source-inline">MONTH_DIMENSION</strong>: This is the dimension table, which consists of static month lookup data</li>
+<li><strong class="source-inline">QAURTER_DIMENSION</strong>: This is the dimension table, which consists of static quarter lookup data</li>
+</ul>
+<p>The following <a id="_idIndexMarker479"/>diagram depicts the detailed star schema data model of the data warehouse that we are building:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer065">
+<img alt="Figure 4.10 – Data model for our data warehouse " height="621" src="image/B17084_04_010.jpg" width="781"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.10 – Data model for our data warehouse</p>
+<p>Now, let’s understand the tables and their columns shown in the preceding diagram:</p>
+<ul>
+<li>In the <strong class="source-inline">DEVICE_EVENT_LOG_FACT</strong> table, the following is happening: <ol><li>We use <strong class="source-inline">eventLogId</strong> as the primary key, which maps to <strong class="source-inline">incidentNumber</strong> from our file</li>
+<li>We have foreign key fields for the <strong class="source-inline">DEVICE_DIMENSION</strong>, <strong class="source-inline">EVENT_DIMENSION</strong>, <strong class="source-inline">HOUR_DIMENSION</strong>, <strong class="source-inline">MONTH_DIMENSION</strong>, and <strong class="source-inline">QUARTER_DIMENSION</strong> tables</li>
+<li><strong class="source-inline">eventTimestamp</strong>, <strong class="source-inline">closurestatus</strong>, and <strong class="source-inline">closureDuration</strong> are all facts for each row in the fact table</li>
+</ol></li>
+<li>The <a id="_idIndexMarker480"/>columns of <strong class="source-inline">DEVICE_DIMENSION</strong> and <strong class="source-inline">EVENT_DIMENSION</strong> are determined by the need as well as the data/attributes available for the device and events in the input files – that is, <strong class="source-inline">device_dm.csv</strong> and <strong class="source-inline">event_dm.csv</strong>. However, the primary keys of these two tables (<strong class="source-inline">deviceId</strong> and <strong class="source-inline">eventId</strong>) should be system-generated sequence numbers that are assigned to a record. The primary key in these two tables is the reference column for the foreign key relationship with the fact table.</li>
+<li>Apart from the device and event, we have designed three other dimension tables denoting hours of the day (<strong class="source-inline">HOUR_DIMENSION</strong>), month (<strong class="source-inline">MONTH_DIMENSION</strong>), and quarter (<strong class="source-inline">QUARTER_DIMENSION</strong>) of the year. These are static lookup tables, and their data will always remain constant over time.</li>
+</ul>
+<p>The next design decision that needs to be made in terms of the data model is the decision to choose a database. Various <strong class="bold">Relational Database Management Systems</strong> (<strong class="bold">RDBMSs</strong>) are<a id="_idIndexMarker481"/> well suited for a data warehouse, such as Snowflake, AWS Redshift, PostgreSQL, and Oracle. While the first two options are cloud-based data warehouses, the other two options can be run both on-premises and in the cloud. For our use case, we should choose a database that is cost-effective as well as future-compatible. </p>
+<p>Out of these choices, we will choose PostgreSQL since it is a free database that is powerful and feature-rich to host a data warehouse. Also, our application may be migrated to the cloud in the future. In that case, it can easily be migrated to AWS Redshift, as AWS Redshift is based on industry-standard PostgreSQL.</p>
+<p>Now that we have designed our data model and chosen our database, let’s go ahead and architect the solution.</p>
+<h1 id="_idParaDest-72"><a id="_idTextAnchor071"/>Designing the solution</h1>
+<p>To design the <a id="_idIndexMarker482"/>solution for the current problem statement, let’s analyze the data points or facts that are available to us right now:</p>
+<ul>
+<li>The current problem is a batch-based data engineering problem </li>
+<li>The problem at hand is a data ingestion problem </li>
+<li>Our source is CSV files containing structured data</li>
+<li>Our target is a PostgreSQL data warehouse</li>
+<li>Our data warehouse follows a star schema, with one fact table, two dynamic dimension tables, and three static dimension tables</li>
+<li>We should choose a technology that is independent of the deployment platform, considering that our solution can be migrated to the cloud in the future</li>
+<li>For the context and scope of this book, we will explore optimum solutions based on Java-based technologies</li>
+</ul>
+<p>Based on the preceding facts, we can conclude that we have to build three similar data ingestion pipelines – one for the fact table and two others for the dynamic dimension tables. At this point, we must ask ourselves, <em class="italic">What happens to the file if the file ingestion is successful or if it fails? How do we avoid reading the file again?</em></p>
+<p>We will read the file from the <strong class="source-inline">input</strong> folder and ingest it into the data warehouse. If it fails, we will move the file to an <strong class="source-inline">error</strong> folder; otherwise, we will move it to an <strong class="source-inline">archive</strong> folder. The following diagram shows our findings and provides an overview of our proposed solution:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer066">
+<img alt="Figure – 4.11 – Solution overview " height="698" src="image/B17084_04_011.jpg" width="606"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure – 4.11 – Solution overview</p>
+<p>However, this <a id="_idIndexMarker483"/>proposed solution is a 10,000-feet view of it. There are still many questions that have been left unanswered in this solution. For instance, there are no details about the ingestion processes or the technology that we should use to solve this problem. </p>
+<p>First, let’s try to decide on a technology based on the facts we have at hand. We need to find a Java-based ETL technology that supports batch ingestion. Also, it should have easy-to-use JDBC support to write and read data from PostgreSQL. We also need to have a scheduler to schedule the batch ingestion job and should have a retry ability mechanism. Also, our data is not huge, so we want to avoid big data-based ETL tools. </p>
+<p>Spring Batch fits all<a id="_idIndexMarker484"/> these requirements. Spring Batch is <a id="_idIndexMarker485"/>an excellent Java-based ETL tool for building batch jobs. It comes with a job scheduler and a job repository. Also, since it is a part of the Spring Framework, it can easily be integrated with various tools and technologies with Spring Boot and Spring integration. The following diagram shows the high-level components of the<a id="_idIndexMarker486"/> Spring Batch architecture:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer067">
+<img alt="Figure 4.12 – Spring Batch architecture " height="1197" src="image/B17084_04_012.jpg" width="1454"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.12 – Spring Batch architecture</p>
+<p>The preceding diagram denotes how a Spring Batch job works. Let’s look at the various steps that a Spring Batch job goes through to be executed:</p>
+<ol>
+<li value="1">The <a id="_idIndexMarker487"/>Spring Batch job uses Spring’s job scheduler to schedule a job. </li>
+<li><strong class="bold">Spring Job Scheduler</strong> runs <strong class="bold">Job Launcher</strong>, which, in turn, executes a <strong class="bold">Spring Batch job</strong>. It also creates a job instance at this point and persists this information in the job repository database.</li>
+<li>The <strong class="bold">Spring Batch job</strong> tracks all job-related information in a job repository database <a id="_idIndexMarker488"/>automatically using batch execution tables. The various batch execution tables are as follows:<ul><li><strong class="source-inline">batch_job_instance</strong></li>
+<li><strong class="source-inline">batch_job_execution</strong></li>
+<li><strong class="source-inline">batch_job_execution_params</strong></li>
+<li><strong class="source-inline">batch_step_execution</strong></li>
+<li><strong class="source-inline">batch_job_execution_context</strong></li>
+<li><strong class="source-inline">batch_step_execution_context</strong></li>
+</ul></li>
+<li>The <strong class="bold">Spring Batch job</strong>, which is executed by the <strong class="bold">Job Launcher</strong>, initiates individual steps to perform the job. Each step performs a specific task to achieve the overall aim of the job.</li>
+<li>While there is a <strong class="bold">Job Execution Context</strong> present across all the steps of a job instance, there is a <strong class="bold">Step Execution Context</strong> present in each execution step.</li>
+<li>Usually, a Spring Batch configuration helps stitch together each step in the desired sequence to create the Spring Batch pipeline.</li>
+<li>Each step, in turn, reads the data using <strong class="source-inline">Reader</strong> or <strong class="source-inline">ItemReader</strong>, processes the data using <strong class="source-inline">Processor</strong> or <strong class="source-inline">ItemProcessor</strong>, and writes the processed data using <strong class="source-inline">Writer</strong> or <strong class="source-inline">ItemWriter</strong>.</li>
+</ol>
+<p>Now that we have a fair understanding of the Spring Batch architecture, we will architect our ingestion pipeline using the Spring Batch job framework. The following diagram shows the <a id="_idIndexMarker489"/>architecture of our data ingestion pipeline:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer068">
+<img alt="Figure 4.13 – Solution architecture " height="975" src="image/B17084_04_013.jpg" width="1114"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.13 – Solution architecture</p>
+<p>Let’s look at this <a id="_idIndexMarker490"/>solution in more detail:</p>
+<ol>
+<li value="1">Like all <strong class="bold">Spring Batch jobs</strong>, the <strong class="bold">Spring Job Scheduler</strong> schedules a <strong class="bold">Job Launcher</strong>, which instantiates the Spring job. </li>
+<li>In our use case, we will use a total of three sequential and two conditional steps to complete the job.</li>
+<li>In the first steps, the application looks at whether there is a new file in the input folder or <strong class="bold">Landing Zone</strong>. If there is, it updates the file path in <strong class="source-inline">JobExecutionContext</strong> and marks <strong class="bold">ExitStatus</strong> as <strong class="bold">COMPLETED</strong>.</li>
+<li>If <strong class="bold">ExitStatus</strong> of the first step is <strong class="bold">COMPLETED</strong>, then the second step is initiated. The second step moves the file mentioned in the file path (of <strong class="source-inline">JobExecutionContext</strong>) from <strong class="bold">Landing Zone</strong> to <strong class="bold">Processing Zone</strong>.</li>
+<li>Upon completing the second step, the third step (<strong class="bold">Spring Process Step</strong>) is initiated. The third step transforms and loads the data into a data warehouse.</li>
+<li>Upon <a id="_idIndexMarker491"/>completing the third step, <strong class="bold">Spring Archival Step</strong> is initiated, which moves the processed file from the process folder to the archive folder.</li>
+<li>However, if <strong class="bold">String Process Step</strong> fails, <strong class="bold">Spring Error Handler Step</strong> will be initiated, where it moves the file from the <strong class="bold">Processing Zone</strong> folder to the <strong class="bold">Error Zone</strong> folder.</li>
+</ol>
+<p>In this section, we learned how to logically divide the solution using the available facts and data points and come up with an optimal architecture for the problem. We also learned how the effectiveness of each solution is dependent on the technology stack that we choose.</p>
+<p>In the next section, we will learn how to implement and test our solution using Spring Batch and related technologies.</p>
+<h1 id="_idParaDest-73"><a id="_idTextAnchor072"/>Implementing and unit testing the solution</h1>
+<p>In this section, we<a id="_idIndexMarker492"/> will build the Spring Batch application to implement the solution that we designed in the preceding section. We <a id="_idIndexMarker493"/>will also run and test the solution. </p>
+<p>First, we must understand that different jobs will have their own schedules. However, the dimension tables need to be loaded before the fact table, because the dimension tables are the lookup tables.</p>
+<p>For the brevity of our discussion, we will only implement the Spring Batch application for the fact table. In this implementation, we will load the device data and event data from CSV to the table manually. However, you can follow the lead of the discussion by implementing the solution and developing two different Spring Batch applications for the device and event dimension tables. In this implementation, we will assume that the device and event data have already been loaded into the data warehouse.</p>
+<p>You can do that manually by executing the DMLs present at the following GitHub link: <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/blob/main/Chapter04/SQL/chapter4_ddl_dml.sql">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/blob/main/Chapter04/SQL/chapter4_ddl_dml.sql</a>.</p>
+<p>We need to <a id="_idIndexMarker494"/>begin by creating a Spring Boot Maven project and adding the required Maven dependencies. The <a id="_idIndexMarker495"/>following Maven dependencies should be added to the <strong class="source-inline">pom.xml</strong> file, as follows:</p>
+<pre class="source-code">&lt;dependencies&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+        &lt;artifactId&gt;spring-boot-starter-batch&lt;/artifactId&gt;
+        &lt;version&gt;2.4.0&lt;/version&gt;
+    &lt;/dependency&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+        &lt;artifactId&gt;spring-boot-starter-jdbc&lt;/artifactId&gt;
+        &lt;version&gt;2.4.0&lt;/version&gt;
+    &lt;/dependency&gt;
+    &lt;!-- https://mvnrepository.com/artifact/org.postgresql/postgresql --&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.postgresql&lt;/groupId&gt;
+        &lt;artifactId&gt;postgresql&lt;/artifactId&gt;
+        &lt;version&gt;42.3.1&lt;/version&gt;
+    &lt;/dependency&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.slf4j&lt;/groupId&gt;
+        &lt;artifactId&gt;slf4j-api&lt;/artifactId&gt;
+        &lt;version&gt;2.0.0-alpha0&lt;/version&gt;
+    &lt;/dependency&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.slf4j&lt;/groupId&gt;
+        &lt;artifactId&gt;slf4j-log4j12&lt;/artifactId&gt;
+        &lt;version&gt;2.0.0-alpha0&lt;/version&gt;
+        &lt;scope&gt;runtime&lt;/scope&gt;
+    &lt;/dependency&gt;
+&lt;/dependencies&gt;</pre>
+<p>Two <a id="_idIndexMarker496"/>Spring dependencies are added here: <strong class="source-inline">spring-boot-starter-batch</strong> is added for Spring Batch and <strong class="source-inline">spring-boot-starter-jdbc</strong> is added for communicating with the <strong class="source-inline">postgreSQL</strong> database (which is used as a data warehouse and the Spring Batch repository database). Apart from this, the JDBC driver for PostgreSQL and the logging dependencies are added.</p>
+<p>As per <a id="_idIndexMarker497"/>our architecture, let’s start by creating the entry point of the Spring Boot application, which is the <strong class="source-inline">Main</strong> class, and initializing the job scheduler. The following code denotes our <strong class="source-inline">Main</strong> class:</p>
+<pre class="source-code">@EnableConfigurationProperties
+@EnableScheduling
+@ComponentScan ({"com.scalabledataarchitecture.etl.*", "com.scalabledataarchitecture.etl.config.*"})
+@SpringBootApplication
+public class EtlDatawarehouseApplication {
+    private static Logger LOGGER = LoggerFactory.getLogger(EtlDatawarehouseApplication.class);
+    
+    @Autowired
+    JobLauncher jobLauncher;
+    @Autowired
+    Job etlJob;
+    public static void main(String[] args) {
+        try {
+            SpringApplication.run(EtlDatawarehouseApplication.class, args);
+        }catch (Throwable ex){
+            LOGGER.error("Failed to start Spring Boot application: ",ex);
+        }
+    }
+    @Scheduled(cron = "0 */1 * * * ?")
+    public void perform() throws Exception
+    {
+        JobParameters params = new JobParametersBuilder().addString("JobID", String.valueOf(System.currentTimeMillis())).toJobParameters();
+        jobLauncher.run(etlJob, params);
+    }
+}</pre>
+<p>The <strong class="source-inline">@SpringBootApplication</strong> annotation denotes that this class is the entry point <a id="_idIndexMarker498"/>of the Spring Boot application. Also, please note that the <strong class="source-inline">@EnableScheduling</strong> annotation denotes that this application supports Spring job scheduling. A method with the <strong class="source-inline">@Scheduled</strong> annotation helps perform the scheduled function at the configured schedule interval. </p>
+<p>The <a id="_idIndexMarker499"/>Spring Batch job scheduler supports all of the three formats as shown in the following block of code:</p>
+<pre class="source-code">@Scheduled(fixedDelayString = "${fixedDelay.in.milliseconds}")
+@Scheduled(fixedRateString = "${fixedRate.in.milliseconds}")
+@Scheduled(cron = "${cron.expression}")</pre>
+<p>Here, <strong class="source-inline">fixedDelayString</strong> makes sure that there is a delay of <em class="italic">n</em> milliseconds between the end of a job and the beginning of another job. <strong class="source-inline">fixedRateString</strong> runs the scheduled job every <em class="italic">n</em> milliseconds, while <strong class="source-inline">cron</strong> schedules the job using some cron expression. In our case, we are using a <strong class="source-inline">cron</strong> expression to schedule the <strong class="source-inline">perform()</strong> method. </p>
+<p>The <strong class="source-inline">perform()</strong> method adds a job parameter called <strong class="source-inline">JobID</strong> and triggers a Spring Batch job called <strong class="source-inline">etlJob</strong> using <strong class="source-inline">jobLauncher</strong>. <strong class="source-inline">jobLauncher</strong> is an auto-wired bean of the <strong class="source-inline">JobLauncher</strong> type.</p>
+<p>The <strong class="source-inline">etlJob</strong> field in the <strong class="source-inline">EtlDatawarehouseApplication</strong> class, as shown earlier, is also auto-wired and hence is a Spring bean. </p>
+<p>Next, we will explore the Spring Batch configuration file where the <strong class="source-inline">etlJob</strong> bean is created:</p>
+<pre class="source-code">@Configuration
+@EnableBatchProcessing
+public class BatchJobConfiguration {
+    @Bean
+    public Job etlJob(JobBuilderFactory jobs,
+                      Step fileCheck, Step fileMoveToProcess, Step processFile,Step fileMoveToArchive, Step fileMoveToError) {
+        return jobs.get("etlJob")
+                .start(fileCheck).on(ExitStatus.STOPPED.getExitCode()).end()
+                .next(fileMoveToProcess)
+                .next(processFile).on(ExitStatus.COMPLETED.getExitCode()).to(fileMoveToArchive)
+                .from(processFile).on(ExitStatus.FAILED.getExitCode()).to(fileMoveToError)
+                .end()
+                .build();
+    }
+}</pre>
+<p>As <a id="_idIndexMarker500"/>you can see, the <a id="_idIndexMarker501"/>class is annotated with <strong class="source-inline">@Configuration</strong> and <strong class="source-inline">@EnableBatchProcessing</strong>. This ensures that the <strong class="source-inline">BatchJobConfiguration</strong> class is registered as a configuration bean in Spring, as well as a couple of other batch-related bean components, such as <strong class="source-inline">JobLauncher</strong>, <strong class="source-inline">JobBuilderFactory</strong>, <strong class="source-inline">JobRepository</strong>, and <strong class="source-inline">JobExplorer</strong>.</p>
+<p>The <strong class="source-inline">etlJob()</strong> function uses <strong class="source-inline">JobBuilderFactory</strong> to create the step pipeline, as described during the design phase. The <strong class="source-inline">etlJob</strong> pipeline starts with the <strong class="source-inline">fileCheck</strong> step. If the exit status of the <strong class="source-inline">fileCheck</strong> step is <strong class="source-inline">STOPPED</strong>, the batch job ends; otherwise, it moves to the next step – that is, <strong class="source-inline">fileMoveToProcess</strong>. The next step is <strong class="source-inline">processFile</strong>. On returning <strong class="source-inline">COMPLETED</strong> from the <strong class="source-inline">processFile</strong> step, the <strong class="source-inline">moveToArchive</strong> step is invoked. However, on returning <strong class="source-inline">ExitStatus</strong> as <strong class="source-inline">FAILED</strong>, the <strong class="source-inline">moveToError</strong> step is invoked.</p>
+<p>However, we <a id="_idIndexMarker502"/>can create an <strong class="source-inline">etlJob</strong> bean. To do so, we need to create all the step beans <a id="_idIndexMarker503"/>that are stitched together to form the batch job pipeline. Let’s begin by looking at how to create the <strong class="source-inline">fileCheck</strong> bean.</p>
+<p>To create<a id="_idIndexMarker504"/> the <strong class="source-inline">fileCheck</strong> bean, we have written the following two classes:</p>
+<ul>
+<li><strong class="source-inline">FileCheckConfiguration</strong>: A <a id="_idIndexMarker505"/>configuration class where the <strong class="source-inline">fileCheck</strong> bean is initialized.</li>
+<li><strong class="source-inline">FileCheckingTasklet</strong>: A <strong class="source-inline">Tasklet</strong> class for the <strong class="source-inline">fileCheck</strong> step. <strong class="source-inline">Tasklet</strong> is meant to <a id="_idIndexMarker506"/>perform a single task within a step.</li>
+</ul>
+<p><strong class="source-inline">FileCheckingTasklet</strong> is a <strong class="source-inline">Tasklet</strong>, so it will implement a <strong class="source-inline">Tasklet</strong> interface. The code will be similar to the following:</p>
+<pre class="source-code">public class FileCheckingTasklet implements Tasklet{
+//...
+}</pre>
+<p><strong class="source-inline">Tasklet</strong> contains <a id="_idIndexMarker507"/>only one method – <strong class="source-inline">execute()</strong> – that must be implemented. It has the following type signature:</p>
+<pre class="source-code">public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception</pre>
+<p>In <strong class="source-inline">FileCheckingTasklet</strong>, we wish to check whether any file is present in the landing zone or not. Our main aim for using this <strong class="source-inline">Tasklet</strong> is to change the <strong class="source-inline">EXITSTATUS</strong> property of the task based on whether the file is present or not. Spring Batch provides an<a id="_idIndexMarker508"/> interface called <strong class="source-inline">StepExecutionListener</strong> that enables us to modify <strong class="source-inline">EXITSTATUS</strong> based on our <a id="_idIndexMarker509"/>requirements. This can be done by implementing the <strong class="source-inline">afterStep()</strong> method of <strong class="source-inline">StepExecutionListener</strong>. The interface definition of <strong class="source-inline">StepExecutionListener</strong> looks as follows:</p>
+<pre class="source-code">public interface StepExecutionListener extends StepListener {
+    void beforeStep(StepExecution var1);
+    @Nullable
+    ExitStatus afterStep(StepExecution var1);
+}</pre>
+<p>So, our <strong class="source-inline">FileCheckingTasklet</strong> will look similar to the following:</p>
+<pre class="source-code">public class FileCheckingTasklet implements Tasklet, StepExecutionListener {
+//...
+@Override
+public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+//...
+}
+@Override
+public ExitStatus afterStep(StepExecution stepExecution) {
+//...
+}
+}</pre>
+<p>Now, let’s understand the logic that we want to execute in this <strong class="source-inline">Tasklet</strong>. We want to list all the files in the landing zone directory. If no files are present, we want to set <strong class="source-inline">EXITSTATUS</strong> to <strong class="source-inline">STOPPED</strong>. If we find one or more files, we want to set <strong class="source-inline">EXITSTATUS</strong> to <strong class="source-inline">COMPLETED</strong>. If an error occurs while listing the directory, we will set <strong class="source-inline">EXITSTATUS</strong> to <strong class="source-inline">FAILED</strong>. Since we can modify <strong class="source-inline">EXITSTATUS</strong> in the <strong class="source-inline">afterStep()</strong> method, we will write our logic in that method. However, we want to configure our landing zone folder in our application. We <a id="_idIndexMarker510"/>can do that by using a configuration POJO called <strong class="source-inline">EnvFolderProperty</strong> (we will discuss the code of this class later in this chapter). Here is <a id="_idIndexMarker511"/>the logic of the <strong class="source-inline">afterstep()</strong> method:</p>
+<pre class="source-code">@Override
+public ExitStatus afterStep(StepExecution stepExecution) {
+    Path dir = Paths.get(envFolderProperty.getRead());
+    LOGGER.debug("Checking if read directory {} contains some files...", dir);
+    try {
+        List&lt;Path&gt; files = Files.list(dir).filter(p -&gt; !Files.isDirectory(p)).collect(Collectors.toList());
+        if(files.isEmpty()) {
+            LOGGER.info("Read directory {} does not contain any file. The job is stopped.", dir);
+            return ExitStatus.STOPPED;
+        }
+        LOGGER.info("Read directory {} is not empty. We continue the job.", dir);
+        return ExitStatus.COMPLETED;
+    } catch (IOException e) {
+        LOGGER.error("An error occured while checking if read directory contains files.", e);
+        return ExitStatus.FAILED;
+    }
+}</pre>
+<p>Since we don’t <a id="_idIndexMarker512"/>want to do <a id="_idIndexMarker513"/>any other processing in this <strong class="source-inline">Tasklet</strong>, we will let the <strong class="source-inline">execute()</strong> method pass with a <strong class="source-inline">RepeatStatus</strong> of <strong class="source-inline">FINISHED</strong>. So, our full code for <strong class="source-inline">FileCheckingTasklet</strong> will look as follows:</p>
+<pre class="source-code">public class FileCheckingTasklet implements Tasklet, StepExecutionListener {
+    private final static Logger LOGGER = LoggerFactory.getLogger(FileCheckingTasklet.class);
+    private final EnvFolderProperty envFolderProperty;
+    public FileCheckingTasklet(EnvFolderProperty envFolderProperty) {
+        this.envFolderProperty = envFolderProperty;
+    }
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+    }
+    @Override
+    public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+        return RepeatStatus.FINISHED;
+    }
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+        // Source code as shown in previous discussion ...
+    }
+}</pre>
+<p>Now, let’s <a id="_idIndexMarker514"/>see how we can <a id="_idIndexMarker515"/>use <strong class="source-inline">FileCheckingTasklet</strong> to create the <strong class="source-inline">fileCheck</strong> step. In the <strong class="source-inline">FileCheckConfiguration</strong> configuration class, first, we create a bean for <strong class="source-inline">FileCheckingTasklet</strong>, as follows:</p>
+<pre class="source-code">@Bean
+public Tasklet fileCheckingTasklet(EnvFolderProperty envFolderProperty) {
+    return new FileCheckingTasklet(envFolderProperty);
+}</pre>
+<p>Then, we use this bean to create the <strong class="source-inline">fileCheck</strong> step bean, as follows:</p>
+<pre class="source-code">@Bean
+public Step fileCheck(StepBuilderFactory stepBuilderFactory, Tasklet fileCheckingTasklet) {
+    return stepBuilderFactory.get("fileCheck")
+            .tasklet(fileCheckingTasklet)
+            .build();
+}</pre>
+<p>Finally, the full code for the <strong class="source-inline">FileCheckConfiguration</strong> configuration class will look as follows:</p>
+<pre class="source-code">@Configuration
+public class FileCheckConfiguration {
+    @Bean
+    public Tasklet fileCheckingTasklet(EnvFolderProperty envFolderProperty) {
+        return new FileCheckingTasklet(envFolderProperty);
+    }
+    @Bean
+    public Step fileCheck(StepBuilderFactory stepBuilderFactory, Tasklet fileCheckingTasklet) {
+        return stepBuilderFactory.get("fileCheck")
+                .tasklet(fileCheckingTasklet)
+                .build();
+    }
+}</pre>
+<p>In the <a id="_idIndexMarker516"/>preceding steps, we <a id="_idIndexMarker517"/>learned how to create a step using <strong class="source-inline">Tasklet</strong> and the <strong class="source-inline">StepExecutionListener</strong> interface and instantiate and utilize them using Spring’s powerful annotations, such as <strong class="source-inline">@Bean</strong>, <strong class="source-inline">@Configuration</strong>, and <strong class="source-inline">@AutoWired</strong>.</p>
+<p class="callout-heading">Important note</p>
+<p class="callout">Spring Batch provides <a id="_idIndexMarker518"/>various listeners (listener interfaces) to intercept, listen, and react to the Spring Batch job flow at different levels. If you are interested, you can learn more about <a id="_idIndexMarker519"/>Spring Batch listeners at <a href="https://howtodoinjava.com/spring-batch/spring-batch-event-listeners/">https://howtodoinjava.com/spring-batch/spring-batch-event-listeners/</a>.</p>
+<p>Now, we will move on to the next step, called <strong class="source-inline">moveFileToProcess</strong>, and see how we can implement its design. Again, to implement the <strong class="source-inline">moveFileToProcess</strong> step, we will be writing a configuration file called <strong class="source-inline">FileMoveToProcessConfiguration</strong> and a tasklet file called <strong class="source-inline">FileMoveToProcessTasklet</strong>. </p>
+<p>First, let’s build <a id="_idIndexMarker520"/>our <strong class="source-inline">FileMoveToProcessTasklet</strong> tasklet. To build our tasklet, we will define the tasks that we want to achieve while using it. Here are the tasks that we want to accomplish using this tasklet:</p>
+<ul>
+<li>List the files present in the landing zone</li>
+<li>Move one file at a time to the process zone</li>
+<li>Add the destination full file path (the file path in the processing zone) as the key-value entry to <strong class="source-inline">JobExecutionContext</strong></li>
+</ul>
+<p>Just like the <a id="_idIndexMarker521"/>previous tasklet that we developed, <strong class="source-inline">FileMoveToProcessTasklet</strong> will also implement the <strong class="source-inline">Tasklet</strong> and <strong class="source-inline">StepExecutionListener</strong> interfaces. </p>
+<p>The <a id="_idIndexMarker522"/>following code shows our implementation of the <strong class="source-inline">execute()</strong> function of the <strong class="source-inline">Tasklet</strong> interface:</p>
+<pre class="source-code">@Override
+public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+    Path dir = Paths.get(envFolderProperty.getRead());
+    assert Files.isDirectory(dir);
+    List&lt;Path&gt; files = Files.list(dir).filter(p -&gt; !Files.isDirectory(p)).collect(Collectors.toList());
+    if(!files.isEmpty()) {
+        Path file = files.get(0);
+        Path dest = Paths.get(envFolderProperty.getProcess() + File.separator + file.getFileName());
+        LOGGER.info("Moving {} to {}", file, dest);
+        Files.move(file, dest);
+        filepath = dest;
+    }
+    return RepeatStatus.FINISHED;
+}</pre>
+<p>First, we list the <a id="_idIndexMarker523"/>files from the landing zone (the read directory path) and if the list of files is not empty, we get the first file and move it to the destination path. Here, we create the destination path by appending the filename and file separator to the processing directory. </p>
+<p>Once <a id="_idIndexMarker524"/>the file is successfully moved to the destination, we set the value of the <strong class="source-inline">filepath</strong> instance variable as the destination path where the file has been moved.  We will use this in our implementation of the <strong class="source-inline">afterStep()</strong> method. Now, let’s look at the implementation of the <strong class="source-inline">afterStep()</strong> method, as follows:</p>
+<pre class="source-code">@Override
+public ExitStatus afterStep(StepExecution stepExecution) {
+    if(filepath != null) {
+        stepExecution.getJobExecution().getExecutionContext().put("filepath", filepath);
+        stepExecution.getJobExecution().getExecutionContext().put("filepathName", filepath.toString());
+    }
+    return ExitStatus.COMPLETED;
+}</pre>
+<p>In the <strong class="source-inline">afterStep()</strong> method implementation, we store two key-value entries (<strong class="source-inline">filePath</strong> and <strong class="source-inline">filePathName</strong>) in <strong class="source-inline">JobExecutionContext</strong> if <strong class="source-inline">filePath</strong> is not null (which means at least one file was present in the landing zone during tasklet execution <a id="_idIndexMarker525"/>and has been <a id="_idIndexMarker526"/>successfully moved to the processing zone by the tasklet). </p>
+<p>Now, let’s see the full code for the <strong class="source-inline">FileMoveToProcessTasklet</strong> class:</p>
+<pre class="source-code">public class FileMoveToProcessTasklet implements Tasklet, StepExecutionListener {
+    private final static Logger LOGGER = LoggerFactory.getLogger(FileMoveToProcessTasklet.class);
+    private final EnvFolderProperty envFolderProperty;
+    private Path filepath;
+    public FileMoveToProcessTasklet(EnvFolderProperty envFolderProperty) {
+        this.envFolderProperty = envFolderProperty;
+    }
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+    }
+    @Override
+    public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+   // Source code as shown in previous discussion ...
+ }
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+     // Source code as shown in previous discussion ...            
+    }
+}</pre>
+<p>The <a id="_idIndexMarker527"/>source code of <strong class="source-inline">FileMoveToProcessConfiguration</strong> will be very similar to <strong class="source-inline">FileCheckConfiguration</strong>, which we discussed earlier. </p>
+<p>The <a id="_idIndexMarker528"/>source code of <strong class="source-inline">FileMoveToProcessConfiguration</strong> is as follows:</p>
+<pre class="source-code">@Configuration
+public class FileMoveToProcessConfiguration {
+    @Bean
+    public Tasklet fileMoveToProcessTasklet(EnvFolderProperty envFolderProperty) {
+        return new FileMoveToProcessTasklet(envFolderProperty);
+    }
+    @Bean
+    public Step fileMoveToProcess(StepBuilderFactory stepBuilderFactory, Tasklet fileMoveToProcessTasklet) {
+        return stepBuilderFactory.get("fileMoveToProcess")
+                .tasklet(fileMoveToProcessTasklet)
+                .build();
+    }
+}</pre>
+<p>Now, we <a id="_idIndexMarker529"/>will learn how to develop the <strong class="source-inline">processFile</strong> step. This is an important step as all the transformation and ingestion happens here. This step follows a typical <strong class="source-inline">SpringBatch</strong> step template, where there is an <strong class="source-inline">ItemReader</strong>, <strong class="source-inline">ItemProcessor</strong>, and <strong class="source-inline">ItemWriter</strong>. They are stitched together to form the step pipeline. </p>
+<p>First, let’s<a id="_idIndexMarker530"/> look at the source code for building the step pipeline in the <strong class="source-inline">processFile()</strong> method of the <strong class="source-inline">ProcessFileConfiguration</strong> configuration class:</p>
+<pre class="source-code">@Bean
+public Step processFile(StepBuilderFactory stepBuilderFactory, ItemReader&lt;EventLogODL&gt; csvRecordReader, JdbcBatchItemWriter&lt;DeviceEventLogFact&gt; jdbcWriter) {
+    return stepBuilderFactory.get("processFile")
+            .&lt;EventLogODL, DeviceEventLogFact&gt;chunk(chunkSize)
+            .reader(csvRecordReader)
+            .processor(deviceEventProcessor)
+            .writer(jdbcWriter)
+            .build();
+}</pre>
+<p>Here, we are building the step from an <strong class="source-inline">ItemReader</strong> bean called <strong class="source-inline">csvRecordReader</strong>, which reads the records from the CSV file and returns a set of <strong class="source-inline">EventLogODL</strong> POJO objects. An <strong class="source-inline">ItemProcessor</strong> bean called <strong class="source-inline">deviceEventProcessor</strong>, which reads each <strong class="source-inline">EventLogODL</strong> POJO and transforms them into <strong class="source-inline">DeviceEventLogFact</strong> POJOs, and an <strong class="source-inline">ItemWriter</strong> bean called <strong class="source-inline">jdbcWriter</strong>, which reads each record as a <strong class="source-inline">DeviceEventLogFact</strong> POJO and persists them in the PostgreSQL data warehouse. We also mention <strong class="source-inline">chunk</strong> while building the pipeline while using <strong class="source-inline">chunkSize</strong> as a configurable parameter (for learning purposes, we will test with a <strong class="source-inline">chunkSize</strong> of <strong class="source-inline">1</strong>).</p>
+<p>Before we explain how to develop the <strong class="source-inline">ItemReader</strong> bean, let’s look at the source code of the <strong class="source-inline">EventLogODL</strong> POJO class:</p>
+<pre class="source-code">public class EventLogODL {
+    private String incidentNumber;
+    private String deviceSerialNum;
+    private String eventCode;
+    private String loggedTime;
+    private String closureTime;
+    private String status;
+    private String assignedTo;
+    private String resolutionComment;
+  // Getters and Setter of the instance fields
+ } </pre>
+<p>Now, let’s <a id="_idIndexMarker531"/>look at the method <a id="_idIndexMarker532"/>that creates the <strong class="source-inline">ItemReader</strong> bean:</p>
+<pre class="source-code">@Bean
+@StepScope
+public FlatFileItemReader&lt;EventLogODL&gt; csvRecordReader(@Value("#{jobExecutionContext['filepathName']}")  String filePathName)
+        throws UnexpectedInputException, ParseException {
+    FlatFileItemReader&lt;EventLogODL&gt; reader = new FlatFileItemReader&lt;EventLogODL&gt;();
+    DelimitedLineTokenizer tokenizer = new DelimitedLineTokenizer();
+    String[] tokens = { "incidentNumber","deviceSerialNum","eventCode","loggedTime","closureTime","status","assignedTo","resolutionComment" };
+    tokenizer.setNames(tokens);
+    reader.setResource(new FileSystemResource(filePathName));
+    reader.setLinesToSkip(1);
+    DefaultLineMapper&lt;EventLogODL&gt; lineMapper =
+            new DefaultLineMapper&lt;EventLogODL&gt;();
+    lineMapper.setLineTokenizer(tokenizer);
+    lineMapper.setFieldSetMapper(new BeanWrapperFieldSetMapper&lt;EventLogODL&gt;(){
+        {
+            setTargetType(EventLogODL.class);
+        }
+    });
+    reader.setLineMapper(lineMapper);
+    return reader;
+}</pre>
+<p>Here, we <a id="_idIndexMarker533"/>are using Spring Batch’s inbuilt <strong class="source-inline">FlatFileItemReader</strong> to read the CSV source file. Since we <a id="_idIndexMarker534"/>need to dynamically read <strong class="source-inline">filePathName</strong> from <strong class="source-inline">jobExecutionContext</strong>, which we set in the previous step, we used the <strong class="source-inline">@SetScope</strong> annotation, which changes the default bean scope from a singleton to a step-specific object. This annotation is especially helpful for late binding where we want to read some parameters dynamically from <strong class="source-inline">JobExecutionContext</strong> or <strong class="source-inline">StepExecutionContext</strong>. Also, we are creating a delimited tokenizer with <strong class="source-inline">fieldNames</strong> and a <strong class="source-inline">BeanWrapperFieldSetMapper</strong> to map each record to the <strong class="source-inline">EventLogODL</strong> POJO and set the corresponding properties of the <strong class="source-inline">FlatfileItemReader</strong> instance.</p>
+<p class="callout-heading">Troubleshooting tips </p>
+<p class="callout">In an ideal world, all data is perfect, and our job should run fine every time. But we don’t live in an ideal world. What happens if the data is corrupted? What happens if a few records in the file are not following the proper schema? How do we handle such situations? </p>
+<p class="callout">There is no simple answer. However, Spring Batch gives you few capabilities to handle failures. If the file itself is corrupted and not readable or the file doesn’t have proper read and write permissions, then it will go to a <strong class="bold">Step Failure</strong>, which results in moving the file to the error folder (as discussed earlier in this chapter). However, some exceptions are encountered while processing, which should not result in <strong class="bold">Step Failure</strong> (for example a parsing error for a few lines should not result in the whole file being discarded) but should be skipped instead. Such scenarios can be handled by setting a <strong class="source-inline">faultTolerance</strong> during building the step. This can either be done by using the <strong class="source-inline">skipLimit()</strong>, <strong class="source-inline">skip()</strong>, and <strong class="source-inline">noSkip()</strong> methods or using a custom <strong class="source-inline">SkipPolicy</strong>. In our example, we can add a fault tolerance to the <strong class="source-inline">processFile</strong> method of the <strong class="source-inline">ProcessFileConfiguration</strong> class and skip certain kinds of exceptions while ensuring few other types of exceptions cause a step failure. An example is shown in the following code:</p>
+<p class="callout"><strong class="source-inline">return stepBuilderFactory.get("processFile")</strong></p>
+<p class="callout"><strong class="source-inline">        .&lt;EventLogODL, DeviceEventLogFact&gt;chunk(chunkSize)</strong></p>
+<p class="callout"><strong class="source-inline">        .reader(csvRecordReader)</strong></p>
+<p class="callout"><strong class="source-inline">.faultTolerant().skipLimit(20).skip(SAXException.class).noSkip(AccessDeniedException.class)</strong></p>
+<p class="callout"><strong class="source-inline">        .processor(deviceEventProcessor)</strong></p>
+<p class="callout"><strong class="source-inline">        .writer(jdbcWriter)</strong></p>
+<p class="callout"><strong class="source-inline">        .build();</strong></p>
+<p class="callout">As we can see, we can add fault tolerance by chaining the <strong class="source-inline">faultTolerant()</strong> method in <strong class="source-inline">stepBuilderFactory.build()</strong>. Then, we can chain the <strong class="source-inline">skip()</strong> method so that it skips 20 errors of the <strong class="source-inline">SAXException</strong> type and use the <strong class="source-inline">noSkip()</strong> method to ensure <strong class="source-inline">AccessDeniedException</strong> will always cause a <strong class="bold">Step Failure</strong>.</p>
+<p>Now, let’s <a id="_idIndexMarker535"/>see how we can develop our custom <strong class="source-inline">ItemProcessor</strong>. The source code of the custom <strong class="source-inline">ItemProcessor</strong>, called <strong class="source-inline">DeviceEventProcessor</strong>, is shown in the following block:</p>
+<pre class="source-code">@Component
+public class DeviceEventProcessor implements ItemProcessor&lt;EventLogODL, DeviceEventLogFact&gt; {
+    @Autowired
+    DeviceEventLogMapper deviceEventLogMapper;
+    @Override
+    public DeviceEventLogFact process(EventLogODL eventLogODL) throws Exception {
+        return deviceEventLogMapper.map(eventLogODL);
+    }
+}</pre>
+<p>As <a id="_idIndexMarker536"/>you can see, we have implemented the <strong class="source-inline">ItemProcessor</strong> interface, where we need to implement the <strong class="source-inline">process()</strong> method. To <a id="_idIndexMarker537"/>convert the <strong class="source-inline">EventLogODL</strong> POJO into a <strong class="source-inline">DeviceEventLogFact</strong> POJO, we have created a delegate component called <strong class="source-inline">DeviceEventLogMapper</strong>. The source code of <strong class="source-inline">DeviceEventLogMapper</strong> is as follows:</p>
+<pre class="source-code">@Component
+public class DeviceEventLogMapper {
+    @Autowired
+    JdbcTemplate jdbcTemplate;
+    public DeviceEventLogFact map(EventLogODL eventLogODL){
+        String sqlForMapper = createQuery(eventLogODL);
+        return jdbcTemplate.queryForObject(sqlForMapper,new BeanPropertyRowMapper&lt;&gt;(DeviceEventLogFact.class));
+    }
+    private String createQuery(EventLogODL eventLogODL){
+        return String.format("WITH DEVICE_DM AS\n" +
+                "\t(SELECT '%s' AS eventLogId "+ ...,eventLogODL.getIncidentNumber(),eventLogODL.getDeviceSerialNum(),...);
+    }</pre>
+<p>Since <a id="_idIndexMarker538"/>we are developing<a id="_idIndexMarker539"/> the code for the fact table, we need various primary keys to be fetched from different dimension tables to populate our <strong class="source-inline">DeviceEventLogFact</strong> POJO. Here, we are dynamically creating a query by using <strong class="source-inline">jdbcTemplate</strong> to fetch the dimension primary keys from the data warehouse and populating the <strong class="source-inline">DeviceEventLogFact</strong> POJO from its <strong class="source-inline">resultset</strong>. The complete source code for <strong class="source-inline">DeviceEventLogMapper</strong> is available on GitHub at <a href="https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/blob/main/Chapter04/SpringBatchApp/EtlDatawarehouse/src/main/java/com/scalabledataarchitecture/etl/steps/DeviceEventLogMapper.java">https://github.com/PacktPublishing/Scalable-Data-Architecture-with-Java/blob/main/Chapter04/SpringBatchApp/EtlDatawarehouse/src/main/java/com/scalabledataarchitecture/etl/steps/DeviceEventLogMapper.java</a>.</p>
+<p>Finally, we will create an <strong class="source-inline">ItemWriter</strong> called <strong class="source-inline">jdbcwriter</strong> in the <strong class="source-inline">ProcessFileConfiguration</strong> class, as follows:</p>
+<pre class="source-code">@Bean
+public JdbcBatchItemWriter&lt;DeviceEventLogFact&gt; jdbcWriter() {
+    JdbcBatchItemWriter&lt;DeviceEventLogFact&gt; writer = new JdbcBatchItemWriter&lt;&gt;();
+    writer.setItemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider&lt;&gt;());
+    writer.setSql("INSERT INTO chapter4.device_event_log_fact(eventlogid,deviceid,eventid,hourid,monthid,quarterid,eventtimestamp,closurestatus,closureduration) VALUES (:eventLogId, :deviceId, :eventId, :hourId, :monthId, :quarterId, :eventTimestamp, :closureStatus, :closureDuration)");
+    writer.setDataSource(this.dataSource);
+    return writer;
+}</pre>
+<p>Finally, our source code for the <strong class="source-inline">ProcessFileConfiguration</strong> class looks as follows:</p>
+<pre class="source-code">@Configuration
+@SuppressWarnings("SpringJavaAutowiringInspection")
+public class ProcessFileConfiguration {
+    private final static Logger LOGGER = LoggerFactory.getLogger(ProcessFileConfiguration.class);
+    
+    @Value("${process.chunk_size:1}")
+    int chunkSize;
+    @Autowired
+    DataSource dataSource;
+    @Autowired
+    DeviceEventProcessor deviceEventProcessor;
+    
+    @Bean
+    @StepScope
+    public FlatFileItemReader&lt;EventLogODL&gt; csvRecordReader(@Value("#{jobExecutionContext['filepathName']}")  String filePathName)
+            throws UnexpectedInputException, ParseException {
+        // Source code as shown in previous discussion ...
+    }
+    @Bean
+    public JdbcBatchItemWriter&lt;DeviceEventLogFact&gt; jdbcWriter() {
+// Source code as shown in previous discussion ...
+   
+ }
+    @Bean
+    public Step processFile(StepBuilderFactory stepBuilderFactory, ItemReader&lt;EventLogODL&gt; csvRecordReader, JdbcBatchItemWriter&lt;DeviceEventLogFact&gt; jdbcWriter) {
+        
+    // Source code as shown in previous discussion ...
+    }
+}</pre>
+<p>Now that we <a id="_idIndexMarker540"/>have built our code, we <a id="_idIndexMarker541"/>will configure our properties in the <strong class="source-inline">application.yaml</strong> file, which is present in the <strong class="source-inline">resource</strong> folder, as follows:</p>
+<pre class="source-code">spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/sinchan
+    username: postgres
+    driverClassName: org.postgresql.Driver
+  batch:
+    initialize-schema: always
+env:
+  folder:
+    read: /Users/sinchan/Documents/Personal_Docs/Careers/Book-Java_Data_Architect/chapter_4_pgrm/landing
+    process: /Users/sinchan/Documents/Personal_Docs/Careers/Book-Java_Data_Architect/chapter_4_pgrm/process
+    archive: /Users/sinchan/Documents/Personal_Docs/Careers/Book-Java_Data_Architect/chapter_4_pgrm/archive
+    error: /Users/sinchan/Documents/Personal_Docs/Careers/Book-Java_Data_Architect/chapter_4_pgrm/error</pre>
+<p>As <a id="_idIndexMarker542"/>shown in the <strong class="source-inline">.yaml</strong> file, we <a id="_idIndexMarker543"/>have to mention the <strong class="source-inline">spring.datasource</strong> properties so that Spring JDBC can automatically auto-wire the data source component.</p>
+<p>Our final code structure will look as follows:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer069">
+<img alt="Figure 4.14 – Project structure of the code " height="915" src="image/B17084_04_014.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.14 – Project structure of the code</p>
+<p>We <a id="_idIndexMarker544"/>can run and test our program by running our Spring Boot application from our favorite IDE by running the <strong class="source-inline">Main</strong> class – that is, <strong class="source-inline">EtlDataWarehouseApplication</strong>. We must install Postgres, create the schema and the database tables, and populate all the dimension tables before we run our Spring Batch application here. Detailed run instructions can be found in this book’s GitHub repository.</p>
+<p>Once we have run our application and placed our data in the landing zone, it gets ingested into our data warehouse fact table, and the CSV files get moved to the archival zone, as shown<a id="_idIndexMarker545"/> in the following screenshot: </p>
+<div>
+<div class="IMG---Figure" id="_idContainer070">
+<img alt="Figure 4.15 – Data ingested in the fact table after the Spring Batch job runs " height="1181" src="image/B17084_04_015.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.15 – Data ingested in the fact table after the Spring Batch job runs</p>
+<p>We can also see the batch-related tables, which contain various run statistics, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer071">
+<img alt="Figure 4.16 – Batch job execution log " height="521" src="image/B17084_04_016.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.16 – Batch job execution log</p>
+<p>The <a id="_idIndexMarker546"/>preceding screenshot shows the batch execution log for the different batch jobs that have run. We can learn more about a specific job by looking at the batch step execution log, as shown in the following screenshot:</p>
+<div>
+<div class="IMG---Figure" id="_idContainer072">
+<img alt="Figure 4.17 – Step execution log for the batch jobs " height="616" src="image/B17084_04_017.jpg" width="1650"/>
+</div>
+</div>
+<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 4.17 – Step execution log for the batch jobs</p>
+<p>With that, we <a id="_idIndexMarker547"/>have analyzed, architected, designed, developed, and tested a batch-based ETL data ingestion pipeline successfully. As mentioned in the <em class="italic">Technical requirements</em> section, the detailed source code is available in this book’s GitHub repository.</p>
+<h1 id="_idParaDest-74"><a id="_idTextAnchor073"/>Summary</h1>
+<p>In this chapter, we learned how to analyze a data engineering requirement from scratch, draw a definite conclusion, and extract facts that will help us in our architectural decision-making process. Next, we learned how to profile source data and how such an analysis helps us build better data engineering solutions. Going further, we used facts, requirements, and our analysis to build a robust and effective architecture for a batch-based data engineering problem with a low or medium volume of data. Finally, we mapped the design to build an effective ETL batch-based data ingestion pipeline using Spring Batch and test it. Along the way, you learned how to analyze a data engineering problem from scratch and how to build similar pipelines effectively for when you are presented with a similar problem next time around.</p>
+<p>Now that we have successfully architected and developed a batch-based solution for medium- and low-volume data engineering problems, in the next chapter, we will learn how to build an effective data engineering solution for dealing with huge data volumes. In the next chapter, we will discuss an interesting use case for building an effective batch-based big data solution.</p>
+</div>
+</div>
+</body></html>
