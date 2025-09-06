@@ -1,0 +1,1708 @@
+- en: '7'
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Finding Bottlenecks and Optimizing Your Application
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Finding what makes your application perform below your expectations can be difficult
+    if you don’t follow a systematic approach. When optimizing an application, it’s
+    important to focus your efforts on facts, not guesses. For that reason, in this
+    chapter, we’ll leverage the tools and learnings from [*Chapter 3*](B21646_03.xhtml#_idTextAnchor103),
+    and we’ll tackle some common challenges by analyzing the footprints of the changes
+    applied.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, you will learn how to use observability tools to find the bottlenecks
+    of your application and apply some common techniques of application optimization,
+    such as caching and runtime tuning. You will also learn how to improve your application’s
+    startup time and resource consumption by using native applications, which have
+    been supported since Spring Boot 3’s release.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We’ll run some load tests to apply stress to our application, and we’ll learn
+    how to analyze the results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will go through the following recipes:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tuning the database connection pool
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Caching dependencies
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using shared cache
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using Testcontainers with Redis cache
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating a native image using Spring Boot
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using GraalVM Tracing Agent to configure the native application
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating a native executable using Spring Boot
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating a native executable from a JAR
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Technical requirements
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: I created an application that we’ll optimize during this chapter. This application
+    provides some RESTful APIs to manage football data. The application uses PostgreSQL
+    as a data repository. You can find it on https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/,
+    in the `chapter7/football` folder. This application is already configured for
+    observability, exposing a Prometheus endpoint with Actuator. To monitor the application,
+    you can use Prometheus and Grafana.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Prometheus configuration
+  prefs: []
+  type: TYPE_NORMAL
+- en: You will need to configure Prometheus, as explained in the *Integrating your
+    application with Prometheus and Grafana* recipe in [*Chapter 3*](B21646_03.xhtml#_idTextAnchor103).
+    I have already prepared the `prometheus.yml` file. You will need to get the IP
+    address of your computer and set the value in the `prometheus.yml` file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'I created a Grafana dashboard to monitor the application’s performance. To
+    make it, I used the following dashboard as a starting point and adapted it for
+    our purposes: [https://grafana.com/grafana/dashboards/12900-springboot-apm-dashboard/](https://grafana.com/grafana/dashboards/12900-springboot-apm-dashboard/).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In addition to PostgreSQL, Prometheus, and Grafana, we’ll also use Redis for
+    some recipes. As usual, the simplest way to run all these services on your computer
+    is using Docker. You can get Docker from the product page: [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/).
+    I will explain how to deploy each tool in its corresponding recipe.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: You may need a tool to execute SQL scripts in PostgreSQL. You can use the `psql`
+    command-line tool or the more user-friendly *PgAdmin* tool. You can check the
+    *Connect your application to PostgreSQL* recipe in [*Chapter 5*](B21646_05.xhtml#_idTextAnchor203)
+    for more details.
+  prefs: []
+  type: TYPE_NORMAL
+- en: I prepared some JMeter tests to generate some load over the application. You
+    can download JMeter from the project website at [https://jmeter.apache.org](https://jmeter.apache.org).
+  prefs: []
+  type: TYPE_NORMAL
+- en: For some of the recipes related to native applications, you will need the **GraalVM**
+    JDK. You can follow the instructions to install it from the official website at
+    [https://www.graalvm.org/downloads/](https://www.graalvm.org/downloads/).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'All the recipes that will be demonstrated in this chapter can be found at:
+    [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/tree/main/chapter7](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/tree/main/chapter7)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tuning the database connection pool
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Database connections are an expensive resource that can take some time when
+    they’re created for the first time. For that reason, Spring Boot uses a technique
+    known as connection pooling. When a connection pool is used, the application doesn’t
+    create a direct connection to the database; instead, it requests an available
+    connection to the connection pool. When the application doesn’t need a connection,
+    it returns it to the pool. The connection pool usually creates some connections
+    at the start of the application. When the connections are returned to the pool,
+    they are not closed but reused by other parts of the application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A common challenge when operating applications is deciding on the connection
+    pool size. If the size is too small, under a certain load, some requests will
+    take longer as they wait for a connection to become available in the pool. If
+    the connection pool is too large, it will waste resources in the database server,
+    as open connections are expensive.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll learn how to monitor the database connection pool in a
+    Spring Boot application using standard metrics and monitoring tools. We’ll use
+    the techniques and tools learned in [*Chapter 3*](B21646_03.xhtml#_idTextAnchor103).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this recipe, you will optimize an application that I have already prepared
+    for this purpose. You can find the application in the book’s GitHub repository
+    at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/),
+    in the `chapter7/football` folder. I recommend copying the folder’s content to
+    your working directory, as we’ll apply different optimizations over the base project
+    on each recipe.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The application uses PostgreSQL as a database engine and is configured for
+    monitoring using Zipkin, Prometheus, and Grafana. You can run all these dependent
+    services in Docker; for that purpose, I have prepared a `docker-compose-base.yml`
+    file that you can find in the `chapter7/docker` folder. You can run this `docker-compose-base.yml`
+    file by opening a terminal in the directory containing the file and executing
+    the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: The Prometheus service has a configuration file named `prometheus.yml` that
+    contains the application scrapping configuration. It points to my computer’s IP,
+    but you will need to change it to your IP configuration. You should configure
+    the Prometheus data source and the *SpringBoot APM Dashboard*. See the *Integrating
+    your application with Prometheus and Grafana* recipe in [*Chapter 3*](B21646_03.xhtml#_idTextAnchor103),
+    for more details.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'I have prepared a JMeter test to generate workload on the application. You
+    can find it in `chapter7/jmeter/Football.jmx`. This test simulates a common use
+    case for the sample Football Trading application. The test performs the following
+    steps:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: One user buys some cards.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Another user buys some cards.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Both users try to use the cards in their albums.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Then, the first user gets all available cards from the second user and vice
+    versa, the second user gets all available cards from the first user.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Both users examine the players on the cards from the other user.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: They trade between them their available cards.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The test has 10 threads running simultaneously with no think time between requests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We’ll launch the application and ensure we see the application metrics in Grafana.
+    Ready to find the application bottleneck and optimize it? Let’s go for it!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First, we’ll start the application, and we’ll check that we see the application
+    metrics in Grafana. I’ll assume you have already started all dependent services
+    as explained in the *Getting* *ready* section:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Open Grafana at `http://localhost:3000`, then open the SpringBoot APM Dashboard.
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Check that you can see data in the **Basic Statics** and **HikariCP** **Statics**
+    sections.
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Start the JMeter application and open the `football.jmx` file, which you can
+    find in the `chapter7/jmeter` folder.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Execute the JMeter test and wait until it finishes. The test execution can
+    take some minutes to complete:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: During the execution of the test, check the connection metrics in the **HikariCP
+    Statistics** section in Grafana.
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'You will see that there are pending connections:'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '![Figure 7.1: Hikari connection metrics](img/B21646_07_1.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.1: Hikari connection metrics'
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can also see that the **Connection Acquire Time** value is over 4 ms all
+    the time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 7.2: Connection Acquire Time](img/B21646_07_2.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.2: Connection Acquire Time'
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can see the results summary by opening the **Summary** **Report** item.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '![Figure 7.3: Summary Report](img/B21646_07_3.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.3: Summary Report'
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can also see them while the test runs, but the baseline will be taken once
+    completed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 7.4: Summary Report results – baseline results](img/B21646_07_4.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.4: Summary Report results – baseline results'
+  prefs: []
+  type: TYPE_NORMAL
+- en: In my environment, the total throughput is 987.5 **requests per second** (**RPS**),
+    and the most used request is **get-user-player**, with a total of 145,142 requests
+    and a throughput of 798 RPS. Note that the average time of the **get-user-player**
+    operation is 6 milliseconds. Save the results of executing this test on your computer,
+    as we’ll compare them after the optimizations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now, we’ll change the HikariCP settings by increasing the maximum number of
+    database connections. For that, open the `application.yml` file in the `resources`
+    folder and modify the `spring.datasource.hikari.maximum-pool-size` setting by
+    increasing it to `10`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Let’s repeat the same performance test and see the difference. But before that,
+    let’s do a clean-up of the data to execute the test in the same conditions:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: I prepared a script named `cleanup.sql` that you can run to clean up the database.
+    You can find it in the `chapter7/dbscripts` folder.
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: In JMeter, use the **Clear all** button to reset the results.
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Once the test is done, compare the results with the baseline. The results on
+    my computer are the following:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The total throughput is 1,315 RPS. That is approximately a 33% performance increase
+    compared to the baseline 987.5 RPS.
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The **get-user-player** request throughput is 1,085.3 RPS. That is approximately
+    a 36% performance increase compared to the baseline 798 RPS.
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The average response time of the **get-user-player** operation is 2 milliseconds.
+    In the baseline, it was 6 milliseconds. That is three times faster.
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If you look at **HikariCP Statistics** in Grafana, you will see that there are
+    no connections pending and the connection-acquire time has reduced. The connection
+    acquire time metric on my computer is always below 10 microseconds.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Spring Boot uses HikariCP as a JDBC data source connection pool. If you don’t
+    specify any pool size, the default is 10\. I configured the initial example with
+    a maximum of four connections for learning purposes. During the initial load test,
+    we observed in Grafana that the number of pending connections remained consistently
+    above zero throughout the entire testing period. That means that there is always
+    a request that is waiting for an available database connection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we saw with the connection acquire time metric, on average, the time waited
+    to acquire a connection is 4 milliseconds. That means that for every request,
+    we need to add 4 milliseconds for each database operation involved. For fast operations,
+    such as **get-user-player**, that is two times the time required when there’s
+    a connection available. Once we increased the size of the connection pool, this
+    operation boosted its performance, and it was the most used operation in this
+    scenario.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The rest of the operations also benefited from this new configuration, but as
+    the request time with available connections is longer, the relative performance
+    improvement is not that high.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we focused on the number of database connections. But the same
+    approach can be applied to other types of application metrics, for instance, the
+    number of Tomcat concurrent threads. You can use the observability data exposed
+    by the application and tune your settings accordingly to adjust to your workload.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There’s more…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this recipe, we fixed the connection availability by adding the maximum number
+    of connections used simultaneously at a given moment, that is, 10 connections.
+    As mentioned, database connections are an expensive resource that should be used
+    wisely. Let’s consider a scenario with multiple instances of your service. Every
+    additional connection for your application should be multiplied by the number
+    of instances. Say you have 10 application instances; then, any additional connection
+    should be multiplied by 10.
+  prefs: []
+  type: TYPE_NORMAL
+- en: During the execution of the baseline test, we detected a maximum of six pending
+    connections, so we added those six connections to the four initial connections.
+    If the maximum number of pending connections happens only during a few spikes,
+    we can adjust the number of maximum connections to 1 or 2 fewer connections than
+    the maximum detected. For instance, in our scenario, we could adjust the number
+    of maximum connections to 9, repeat the load test, and observe the impact.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another potential adjustment is configuring the minimum and maximum number of
+    connections. Then, if there is a spike and no available connections, HikariCP
+    will create a connection to the database. Remember the time required to create
+    the connection to the database and the time this connection will be idle. When
+    the minimum and maximum connections are defined, HikariCP can close physical connections
+    when idle. If the spike is too short, you may create a connection that will take
+    longer than just waiting for an available connection, and then you will have an
+    idle connection consuming resources in the database server.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Caching dependencies
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The most common flow in the Football Trading application that we want to optimize
+    is the following: sometimes, the users buy some cards, and after using them in
+    their albums, they try to exchange the redundant cards they already have with
+    other users. Before starting the exchange process, the users see which players
+    are available from other users. There can be thousands and even millions of cards,
+    but the total number of football players is around 700, and they are constantly
+    retrieved from the Football Trading application.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now, you want to optimize the application’s performance. So, you are considering
+    using a cache mechanism to avoid retrieving data from the database that is accessed
+    frequently but changes very infrequently.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, you will learn how to identify a database bottleneck and how
+    to apply the caching mechanisms provided by Spring Boot. You will learn how to
+    measure the improvement using the observability tools you learned about in [*Chapter
+    3*](B21646_03.xhtml#_idTextAnchor103).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this recipe, you will continue optimizing the application that I prepared
+    for this purpose. You can use the version resulting from the *Tuning the database
+    connection pool* recipe. You can find the application in the book’s GitHub repository
+    at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/),
+    in the `chapter7/recipe7-2/start` folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As we explained in the previous recipe, you can run all dependent services
+    in Docker by running the `docker-compose-base.yml` Docker Compose file that you
+    can find in the `chapter7/docker` folder. For that, open a terminal and execute
+    the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: We’ll use the same JMeter test we used in the previous recipe. You can find
+    it in `chapter7/jmeter/football.jmx`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Let’s start by executing the JMeter load test to determine the performance
+    baseline. Then, we’ll apply caching on different parts of the application, and
+    we’ll measure the improvements:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can use the results of the JMeter execution from the *Tuning database connection
+    pool* recipe test.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![Figure 7.5: JMeter summary report – baseline requests throughput detail](img/B21646_07_5.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.5: JMeter summary report – baseline requests throughput detail'
+  prefs: []
+  type: TYPE_NORMAL
+- en: In my environment, the total throughput is 1,340.3 RPS, and the most used request
+    is **get-user-player**, with a total of 145,683 requests and a throughput of 1,085.3
+    RPS. Save the results of executing this test on your computer, as we’ll compare
+    them after the optimizations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now that we have our application baseline, we’ll enable caching:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'First, add the *Spring Cache Abstraction* starter to the `pom.xml` file:'
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Next, in the `FootballApplication` class, add the `@``EnableCaching` annotation:'
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Next, we’ll modify the `getPlayer` method of the `FootballService` class to
+    cache the responses. This is the method called in the `@Cacheable` as follows:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Let’s execute the JMeter test again. But before that, let’s do a cleanup of
+    the data to execute the test in the same conditions:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: I prepared a script named `cleanup.sql` that you can run to clean up the database.
+    You can find it in the `chapter7/dbscripts` folder.
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: In JMeter, use the **Clear all** button to reset the results.
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Once the test is done, check the results and compare them with the baseline.
+    The results on my computer are the following:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![Figure 7.6: Summary report after applying caching on the FootballService](img/B21646_07_6.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.6: Summary report after applying caching on the FootballService'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The total throughput jumped to 1,806.7 RPS from 1,340.3 RPS, approximately a
+    34% performance increase.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**get-user-player** requests are 1,458.5 RPS, and the baseline was 1,085.3
+    RPS, which means around a 34% performance increase as well.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The rest of the requests also increased by around 34% of the overall throughput.
+    For instance, **get-user-cards** rose to 100.1 RPS from 74.5 RPS, and the other
+    requests went from 37.2 RPS to 50.1 RPS.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Let’s use the caching in a different place in our application. Instead of applying
+    the `@Cacheable` annotation in `FootballService`, apply the annotation in the
+    `PlayersController` class in the `getPlayer` method:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: By adding the *Spring Cache Abstraction* starter and using the `@EnableCaching`
+    annotation, Spring Boot inspects the Beans for the presence of caching annotations
+    on public methods, and a proxy is created to intercept the method call and handle
+    the caching behavior accordingly; in our case, the methods annotated with `@Cacheable`.
+    Spring Boot registers a `CacheManager` Bean to handle the cached items, as we
+    didn’t specify any specific `CacheManager`. Spring Boot uses the default implementation,
+    a `ConcurrentHashMap` object, and it’s handled in the process. This approach is
+    valid for elements that do not change and where the dataset is small. Otherwise,
+    you may want to use an external shared cache. In the next recipe, we’ll tackle
+    this scenario.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we optimized only `get-user-player`. It’s the best candidate
+    for all operations performed in this recipe. The reason is that the operations
+    that modify data frequently are not candidates for caching, so `buy-cards`, `use-cards`,
+    and `trade-cards` cannot be cached as they modify the data and are frequently
+    used. The only operations that read just data are `get-user-cards` and `get-user-player`.
+    `get-user-cards` is not a good candidate as the cards available owned by a user
+    change every time they buy cards, exchange cards, or use them in an album. That
+    means that the cache will be updated frequently. In addition, the number of users
+    is high, around 100,000, so adding all those elements to the application memory
+    can be counterproductive. On the other hand, `get-user-player` just retrieves
+    the player’s information. That information changes very infrequently, and there
+    are just a few hundred players. For that reason, `get-user-player` is the best
+    candidate for caching.
+  prefs: []
+  type: TYPE_NORMAL
+- en: By adding the cache in the `FootballService` class, the throughput of that operation
+    improved significantly, but it also benefited the rest of the operations. The
+    reason is that even though it is a quick request on the database, it is the most
+    frequent operation. The number of database connections available is defined by
+    the `hikaricp` connection pool; we configured 10 connections. All operations should
+    acquire a connection from `hikaricp`. As the most frequent operation is reduced,
+    it’s easier for the rest of the operations to acquire a connection faster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There’s more…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'I recommend you check the metrics exposed by the application in Grafana while
+    you run the tests. There are two main areas to observe in this scenario:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Basic statistics**: Here we can find the classic metrics for every application:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**CPU Usage**: This is often the limiting factor for demanding computing applications.
+    During the tests on my computer, it was always under 70%.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Heap Used**: This is the heap memory used by our application. It could limit
+    the performance of our application.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Non-heap Used**: This is all other memory used by our application. It usually
+    accounts for less than 30% of the total memory used by the application, and its
+    usage remains more stable than heap memory.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**HikariCP** **S****tatistics**: As we saw in the previous recipe, HikariCP
+    is the default database connection pool in Spring Boot. Creating a database connection
+    to PostgreSQL or any other database engine is expensive. You can check the following
+    metrics related to HikariCP:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Active**: This is the number of connections out of the pool actively used
+    to perform an operation in the database.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Idle**: This is the number of available connections in the pool ready to
+    be used when needed.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Pending**: This is the number of operations waiting for an available connection
+    to access the database. Ideally, this metric should be 0.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Connection creation time**: This is the time spent creating the physical
+    connection to the database.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Connection usage time**: This is how long a connection is used before being
+    returned to the pool.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Connection acquire time**: This is the time required to get a connection.
+    When there are idle connections, the time required will be very low. When there
+    are pending connections, the time required will be higher.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '![Figure 7.7: HikariCP metrics in Grafana](img/B21646_07_7.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.7: HikariCP metrics in Grafana'
+  prefs: []
+  type: TYPE_NORMAL
+- en: You may want to cache operations, as we did in this recipe, to reduce the number
+    of connections to the database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next recipe, we’ll learn how to use Redis as an external cache and how
+    to update it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using shared cache
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The sample Football Trading application needs to cover a new scenario. Some
+    football players can play in different positions, sometimes as defenders and sometimes
+    as midfielders. Players do not change their position frequently, but it may happen.
+    As we learned in the previous recipe, caching the players can improve the application’s
+    performance significantly. We assume it’s possible and recommended to have more
+    than one application instance running simultaneously. When a player is updated,
+    all the application instances should return the latest version of the player.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll learn how to use an external cache shared among all application
+    instances and how to update the cache when the underlying data is modified.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll reuse the application resulting from the previous recipe,
+    as it has already been configured for caching. I have prepared a working version
+    in the GitHub repository at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/).
+    It is in the `chapter7/recipe7-3/start` folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application uses PostgreSQL as a database engine, configured for observability
+    with Zipkin, Prometheus, and Grafana.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we’ll add support for caching using Redis, we’ll need a Redis server. The
+    easiest way to run Redis on your computer is using Docker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'I prepared a Docker Compose file named `docker-compose-redis.yml`, with all
+    dependent services, that is, PostgreSQL, Zipkin, Prometheus, Grafana, and Redis.
+    You can find that file in the `chapter7/docker` folder. To run all dependent services,
+    open a terminal in the `chapter7/docker` folder and run the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: I prepared a JMeter test to generate load for this recipe. You can find it in
+    `chapter7/jmeter/Football-updates.jmx`. In addition to the flow implemented in
+    the previous recipe, it updates the position of a football player from time to
+    time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'We’ll start by preparing the application to use Redis, and later, we’ll ensure
+    that the cache is updated when the players are modified:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First, we’ll add the *Spring Data Redis* starter dependency. For that, just
+    add the following dependency in the `pom.xml` file:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'You will need to add the following dependency to manage `LocalDate` fields:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Next, we need to configure Redis. For that, we will register a `RedisCacheConfiguration`
+    Bean. Let’s create a new configuration class; you can name it `RedisConfig`:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Finally, you must ensure that the cache is updated when the underlying data
+    is updated. Let’s modify the `updatePlayerPosition` method in the `FootballService`
+    class by adding the `@``CacheEvict` annotation:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Now, you can run the JMeter test to validate the application and measure the
+    performance footprint. I prepared a test named `Football-updates.jmx` for that
+    purpose. You can find it in the `chapter7/jmeter` folder. This test updates the
+    player’s position randomly but very infrequently, then retrieves the player to
+    validate that it has the position updated.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![Figure 7.8: JMeter test, showing the details of the player update](img/B21646_07_8.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.8: JMeter test, showing the details of the player update'
+  prefs: []
+  type: TYPE_NORMAL
+- en: On my computer, the total throughput is 1,497.5 RPS, and `get-user-players`
+    is 1,210.6 RPS. The performance of Redis caching is slightly lower than in-process
+    caching. However, externalizing the cache makes it possible to scale horizontally
+    by adding additional instances.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: When adding an external caching implementation, the application needs to serialize
+    the objects to be cached to send them over the network and save them in Redis.
+    The default Redis configuration can manage basic types such as `String` or `int`
+    with no additional configuration. However, in this sample application, we need
+    to cache `Player` objects. To use the default configuration, the `Player` class
+    should implement the `Serializable` interface.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To avoid modifying our domain classes, we configured a `Jackson2JsonRedisSerializer`
+    serializer. This serializer represents the objects as JSON strings. The player
+    has a catch with the `birthDate` field, as it is of the `LocalDate` type and cannot
+    be managed with the default implementation. That is the reason we added the `com.fasterxml.jackson.datatype:jackson-datatype-jsr310`
+    dependency and registered `JavaTimeModule` in `ObjectMapper` for `RedisCacheConfiguration`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It’s important to consider the implications of using an external cache repository:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we just learned, we must ensure the cached objects can be serialized.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: You need to consider the network latency as well. I executed all load tests
+    locally on my computer, so there was no network latency. In real environments,
+    it can also impact the performance of the application.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The caching server may become the new bottleneck. Redis is very performant,
+    but it may imply adding new resources to your solution, such as new servers.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: I didn’t notice significant performance differences in my load test results
+    because everything ran on the same computer; however, you may expect slight differences
+    in a production environment with services distributed across different servers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You must configure the server address if you run Redis on a different server.
+    By default, the *Spring Data Redis* starter assumes that Redis runs on `localhost`
+    and listens to port `6379`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this recipe, we used the `@CacheEvict` annotation to update the cache. This
+    annotation deletes the entry using a key. By default, this annotation uses all
+    method parameters as the cache entry key. However, the `updatePlayerPosition`
+    method has two parameters: the player `id` and the new `position`. As the key
+    is just the player `id`, we specified that in the `position` field of the `@CacheEvict`
+    annotation. Other options, such as clearing all entries, don’t apply to our scenario.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using Testcontainers with Redis cache
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: If you have executed the automated tests available in the sample project in
+    the previous recipe, you may have noticed that the tests using methods that require
+    Redis are failing. The reason is that Redis is not available during the execution
+    of the tests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll learn how to set up a Redis server hosted as a Docker
+    container using Testcontainers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll create the tests for the project created in the *Using
+    shared cache* recipe. If you haven’t completed it yet, use the version I prepared
+    as a starting point for this recipe. You can find it in the book’s GitHub repository
+    at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook),
+    in the `chapter7/recipe7-4/start` folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we use Testcontainers, you will need Docker installed on your computer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We like reliable applications. Let’s make our tests work!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We’ll make all changes in the `FootballServiceTest` class. So, open it and
+    add a new static field of type `GenericContainer`. We’ll expose the default Redis
+    port at `6379`, and we’ll use the latest `redis` image:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: static class Initializer
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: implements ApplicationContextInitializer<ConfigurableApplicationContext> {
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: public void initialize(ConfigurableApplicationContext configurableApplicationContext)
+    {
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: TestPropertyValues.of(
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '"spring.datasource.url=" + postgreSQLContainer.getJdbcUrl(),'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '"spring.datasource.username=" + postgreSQLContainer.getUsername(),'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '"spring.datasource.password=" + postgreSQLContainer.getPassword(),'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '"spring.data.redis.host=" + redisContainer.getHost(),'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '"spring.data.redis.port=" + redisContainer.getMappedPort(6379))'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: .applyTo(configurableApplicationContext.getEnvironment());
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '}'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '}'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Finally, start the container before executing the tests:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: You can run the tests now. They should work fine!
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: To integrate Redis into our tests, we only need an available Redis server. There
+    is a specialized Redis module in Testcontainers. You can find it at [https://testcontainers.com/modules/redis/](https://testcontainers.com/modules/redis/).
+    As the integration is pretty simple, we can use just `GenericContainer` instead
+    of the specialized `RedisContainer`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As we learned in previous recipes, by adding the `@Testcontainers` annotation
+    in our test class, it automatically scans all container fields and integrates
+    them into the test. `FootballServiceTest` was already annotated with `@Testcontainers`
+    as it integrated PostgreSQL. We only needed to add a new container, in this case
+    just `GenericContainer`, and perform the basic configuration to set it up. That
+    is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Configure the container with the minimum configuration: image and exposed port.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Set the Redis configuration connection data in the application context. We did
+    this in the `FootballServiceTest.Initializer` class. The Redis starter expects
+    the configuration under `spring.data.redis`. We added the host and port, but only
+    the port is required. By default, it expects the host on `localhost`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Start the container before the test execution. We did it in the method annotated
+    with `@BeforeAll`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating a native image using Spring Boot
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Usually, when we design solutions using a microservice-oriented approach, we
+    imagine that we can easily scale our applications by adding and removing new instances
+    of our application, and we also imagine that this process happens immediately.
+    However, starting new instances of our application can take longer than we initially
+    expected. Spring Boot orchestrates Bean initialization, dependency injection,
+    and event handling during application startup, and most of these steps happen
+    dynamically. This is not a major issue for small applications, but for complex
+    applications, this process can take up to minutes to complete.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another important factor when designing applications is the efficient use of
+    computing resources. We want the applications to consume as little memory as possible
+    and process the workload efficiently.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For this kind of scenario, we can consider creating native applications, that
+    is, applications that are built as final binaries for a specific processor family
+    and operating system. A normal Java application generates intermediate code that
+    is processed by the **Java Virtual Machine** (**JVM**) and converted into binary
+    code during the application runtime. In a native application, this process happens
+    during build time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll learn how to create a new Spring Boot native application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: For this recipe, we’ll need Docker. You can check the *Technical requirements*
+    section of this chapter for more information.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Let’s create a native application using Spring Boot!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Open the *Spring Boot Initializr* tool at [https://start.spring.io](https://start.spring.io)
+    and use the same options as you did in the *Create a RESTful API* recipe in [*Chapter
+    1*](B21646_01.xhtml#_idTextAnchor020), and use the same parameters, except the
+    following options:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: For `footballnative`
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: For **Dependencies**, select **Spring Web** and **GraalVM** **Native Support**
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Next, create a sample RESTful controller; for instance, create a `TeamController`
+    controller and a method that returns a list of teams:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'You can run the application on the JVM as usual, but what we’ll do now is create
+    a native Docker image. For that, open your terminal and execute the following
+    Maven command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Be patient, as this step can take up to a few minutes to complete depending
+    on the resources of your computer.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Once the build completes, you can run the Docker image with our native application
+    by executing the following command in your terminal:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Now, you can perform a request to the RESTful application normally; for instance,
+    you can use the following `curl` command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The GraalVM Native Support dependency adds a new `native` profile that can be
+    used with the standard Spring Boot `build-image` goal to generate an image that
+    targets **GraalVM**. GraalVM is a Java runtime that can compile your applications
+    **Ahead of Time** (**AOT**) into native executables with low resource usage, fast
+    startup, and improved security. To create the native image, the Maven plugin builds
+    the native GraalVM executable in a Docker container using **Paketo Buildpacks**.
+    Paketo Buildpacks are a set of community-driven tools that simplify the process
+    of building and deploying applications as container images. That is the reason
+    you don’t need to download GraalVM tools on your computer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The result is a Docker image that contains our application as a native executable.
+    Just as a reference for performance improvements, the application takes around
+    1.5 seconds to start on my computer running on the JVM, while the native image
+    takes 0.07 seconds to do the same. That is around 21 times faster. However, when
+    running 10,000 requests, the total throughput of both versions is pretty similar,
+    with the JVM version being a bit better performant. That could be because the
+    native version runs on Docker, while the JVM runs directly on my computer. I prepared
+    a JMeter test that you can use to compare the results on your computer. You can
+    find a test named `teams-native.jmx` in the book’s GitHub repository at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook),
+    in the `chapter7/jmeter` folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A native application is not a silver bullet that fits all scenarios. You need
+    to consider that some features require dynamic processing during runtime, and
+    they are difficult to handle with native applications. If your application doesn’t
+    have a quick boot-time requirement, native applications do not add many benefits
+    and there can be many inconveniences. In terms of performance, a JVM application
+    performs as well as a native application in the long term. That is, after warming
+    up, it works as well as a native one; there can be some gains in terms of memory
+    management, but in terms of performance, they are quite similar.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using GraalVM Tracing Agent to configure the native application
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The small native application we created in the previous recipe looks so promising
+    that we’ve decided to build a bigger football application as a native app.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application we created in the *Creating a native image using Spring Boot*
+    recipe didn’t require any special configuration. But native applications are built
+    AOT. That means the compiler needs to analyze all code statically and detect the
+    code reached during runtime. There are some Java technologies, such as the **Java
+    Native Interface** (**JNI**), **Reflection**, **dynamic proxy** objects, and class-path
+    resources, that are very difficult to detect just by using static code analysis.
+    The native compiler can use configuration files to include the required components
+    in the final binary. As you may have figured out, the difficult part is configuring
+    those files by detecting the components to be included in the final binary. For
+    that purpose, GraalVM provides an agent that traces all usages to those types
+    of technologies during the execution of an application on a regular JVM application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we will build as a native image the sample application provided
+    in this chapter. If you try to build the application as a native image as is,
+    you will find some errors during runtime. In this recipe, we’ll learn how to use
+    GraalVM Tracing Agent to find all the required components and build a native image
+    for an existing application. Then, you will be able to run your application in
+    Docker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll adapt the application you created in the *Using Testcontainers
+    with Redis cache* recipe. If you haven’t finished it yet, you can use a functional
+    project I’ve provided as a starting point for this recipe. You can find it in
+    the book’s GitHub repository at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook)
+    in the `chapter7/recipe7-6/start` folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You will need the GraalVM JDK installed on your computer. You can install it
+    following the instructions from the official website at [https://www.graalvm.org/downloads/](https://www.graalvm.org/downloads/).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application depends on PostgreSQL, Redis, and other services. As we’ll see
+    in the *How to do it…* section, we’ll run the application as a Docker container.
+    To facilitate the execution in your development computer, I prepared a Docker
+    Compose file named `docker-compose-all.yml` with the application and all dependent
+    services.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Let’s build a native executable image of our Spring Boot application. We’ll
+    see how fast it runs now! Remember that we initially created this application
+    as a regular JVM application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First, we’ll add the *GraalVM Native Support* plugin to our `pom.xml` application.
+    You should include the following configuration in the `build/plugins` element:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Next, we’ll need to add the Hibernate Enhance plugin as well. You should include
+    the following configuration in the `build/plugins` element:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'In this step, we’ll run the application using the GraalVM JVM with a special
+    setting to trace the components that our application uses at runtime. The native
+    compiler will use these traces to include those components in the final binary
+    executable:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'This step requires that you use the GraalVM JVM. Depending on which installation
+    method you used, switching Java versions may differ. I used the *SDKMAN!* tool,
+    which just executes the following command in your terminal:'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs:
+  - PREF_IND
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'To ensure you use the right JVM version, execute the following command in your
+    terminal:'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs:
+  - PREF_IND
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Check that the response includes GraalVM. As a reference, this is the output
+    when I execute this command on my computer:'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '![Figure 7.9: Sample java -version output for GraalVM JVM](img/B21646_07_9.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.9: Sample java -version output for GraalVM JVM'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Build the application normally, that is, by executing the `package` goal in
+    Maven. Execute this command on a terminal in the application root folder:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: This command creates the JAR file for your application. By default, the filename
+    will be `football-0.0.1-SNAPSHOT.jar`, and it will be created in the `target`
+    directory.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Now, run the GraalVM tracing tool. That is achieved by executing the application
+    specifying an agent for the JVM, that is, specifying the `-agentlib:native-image-agent`
+    parameter and passing the folder to save the configuration output. We’ll set the
+    folder where the native compiler expects the special configuration, that is, in
+    `src/main/resources/META-INF/native-image`. This is how to execute your application
+    specifying the GraalVM tracing tool:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Now that our application is up and running, let’s make sure that we cover all
+    our bases. It’s important that we execute every path of the application so that
+    we can trace all the dynamic components and ensure everything is ready to build
+    the native application. You’ll see that the `src/main/resources/META-INF/native-image`
+    folder contains several JSON files.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When you complete the execution of all application paths, you can stop the application.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'It’s time to build the native application! You can do it by executing the following
+    Maven command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As explained in the *Creating a native image using Spring Boot* recipe, adding
+    *GraalVM Native Support* to our application creates a new Spring Boot profile
+    that we can use to build a Docker image with a native version of our application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Some Hibernate operations generate Hibernate Proxy instances at runtime. If
+    we don’t include the Hibernate Enhance plugin, the native compiler doesn’t have
+    the required references at build time. For that reason, we need to include this
+    plugin in our application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In a simple application like the one created in the *Creating a native image
+    using Spring Boot* recipe, we could skip *steps 3* and *4* and build the native
+    application directly. However, we would realize that many operations do not work.
+    That happens because the static build analysis doesn’t detect some dynamic loading
+    components, mostly related to Hibernate. To tackle this issue, GraalVM provides
+    the Tracing Agent tool. This tool traces all usages of JNI, Java Reflection, dynamic
+    proxy objects (`java.lang.reflect.Proxy`), or class-path resources and saves them
+    in the specified folder. The files generated are the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`jni-config.json`: This contains JNI-related information'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`reflect-config.json`: This contains reflection-related details'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`proxy-config.json`: This contains dynamic proxy object details'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`resource-config.json`: This contains class-path resource information'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`predefined-classes-config.json`: This contains metadata for predefined classes'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`serialization-config.json`: This contains serialization-related data'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Then, the native compiler can use this configuration to include the referenced
+    components in the final native executable. With this approach, we may find most
+    of the components used at runtime, but some components may not be detected. In
+    that case, we will need to include them manually.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we run the application as a container, it’s executed in the context of Docker.
+    This means that to locate the dependent services, such as PostgreSQL, it’s necessary
+    to specify the internal Docker DNS name. In the previous recipes, all dependent
+    services were accessible using `localhost`. For that reason, it’s necessary to
+    specify the address of all dependent components, for instance, by setting the
+    environment variables, and the easiest way to set these environment variables
+    is by creating a Docker Compose file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There’s more…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'I executed the same JMeter tests we used in the *Using shared cache* recipe
+    to compare the results of executing the same application running on a JVM and
+    as a native application. In the following figure, you can see the results of running
+    as a native application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 7.10: JMeter throughput for native image running on Docker](img/B21646_07_10.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.10: JMeter throughput for native image running on Docker'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The results may seem surprising, as the application running as a native application
+    performs significantly worse than the JVM version.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are two factors to keep in mind:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application now runs on Docker, while the application running on a JVM was
+    executed directly on my computer
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Once the application running on a JVM did the **Just-in-Time** (**JIT**) compilation,
+    there were no significant gains in performance compared to running
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In the next recipe, we’ll build the application natively instead of running
+    on a container. Then, we’ll be able to compare the applications running with similar
+    conditions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating a native executable using Spring Boot
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the previous recipes, we built the native application to run as a container.
+    Even if that is a convenient solution for most modern cloud-native scenarios,
+    we may need to build a native executable to be executed directly without a container
+    engine.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll learn how to configure our computer to build native applications
+    using the GraalVM JDK.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll reuse the result of the *Using GraalVM Tracing Agent to
+    configure the native application* recipe. I prepared a version of the application
+    that you can use as a starting point for this recipe. You can find it in the book’s
+    GitHub repository at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/),
+    in the `chapter7/recipe7-6/start` folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You will need the GraalVM JDK version 21 installed on your computer. You can
+    follow the instructions from the official website at [https://www.graalvm.org/downloads/](https://www.graalvm.org/downloads/).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application depends on some services, such as PostgreSQL and Redis. To facilitate
+    the execution of these services on your computer, you can reuse the `docker-compose-redis.yml`
+    file prepared in the *Using shared* *cache* recipe.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Now, we’ll build our application as a native image that can be executed directly
+    on our computer:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Ensure that you are using the GraalVM JVM for this process. For that, execute
+    the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Verify that the message contains GraalVM, as shown in *Figure 7**.5*.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Next, we’ll build the native executable. For that, open a terminal, change
+    the directory to the root application folder, and execute the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: The native build takes longer than a regular JVM build, even up to a few minutes.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Now, we have our binary executable in the `target` folder. Its name is the
+    same as the project, this time without a version suffix. If you use Windows, it
+    will be `football.exe`; in Unix-like systems, it will be just `football`. It’s
+    time to run the application. As I’m using Linux, I’ll execute the following commands
+    in my terminal:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Be sure that the dependent services, such as PostgreSQL and Redis, are up and
+    running. As explained in the *Getting ready* section, you can use the `docker-compose-redis.yml`
+    Docker Compose file to run all dependent services.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As we did in the *Using GraalVM Tracing Agent to configure the native application*
+    recipe, we must prepare our application for the native build. In this recipe,
+    we reused the application, and we already had the hints for the dynamic components
+    that GraalVM needs to generate the native application. However, if you start from
+    scratch, you will need to prepare the configuration as we did in the *Using GraalVM
+    Tracing Agent to configure the native* *application* recipe.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Spring Boot *GraalVM Native Support* starter includes the native profile
+    and the `native:compile` goal. This starter was already included in the application
+    we reused in this recipe. This time, the compilation process runs on your computer
+    instead of being executed in a container.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There’s more…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'We can execute the load test using JMeter. This scenario is comparable to the
+    one tested in the *Using Testcontainers with Redis cache* recipe, as both applications
+    run directly on the computer and the dependent services run on Docker. These are
+    the results of executing the same JMeter test on my computer:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 7.11: JMeter summary for a native application](img/B21646_07_11.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 7.11: JMeter summary for a native application'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The throughput for `get-user-player` is 622.1 RPS, compared to the 566.3 RPS
+    achieved using a JVM version. That is approximately a 9.86% increase. For the
+    total requests, it is 773.5 RPS compared to 699.2 RPS, which is approximately
+    a 10.6% increase.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You must consider the benefits and trade-offs of using a native image. The main
+    benefits are quick start-up time and better memory management and performance.
+    The main trade-offs are the complexities of preparing the build image with all
+    hints required to avoid runtime errors due to dynamic components. This configuration
+    can be very painful and difficult to detect. You also need to consider the time
+    required to build your application, which can be significantly longer than the
+    JVM counterpart.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating a native executable from a JAR
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As we realized during the completion of the previous recipes, building a native
+    image takes way more time than building a regular JVM application. Another important
+    consideration in certain environments is that GraalVM currently doesn’t support
+    cross-platform builds. That means if we need to build an application for Linux,
+    as it’s the most popular platform for server environments, but our development
+    computer is a Windows or macOS computer, we cannot build the application directly.
+    For these reasons, it could be a good choice to keep working with a regular JVM
+    development process and create the native executable in a **Continuous Integration**
+    (**CI**) platform. For instance, you can create a GitHub action for the native
+    executable creation. In that way, we maintain the productivity for our development
+    processes, we don’t need to change our development platform, and we can target
+    platforms for our application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this recipe, we’ll generate a native executable for our football application
+    using the *native-image* tool from the GraalVM JDK.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: For this recipe, we’ll use the outcome from the *Creating a native executable
+    using Spring Boot* recipe. Creating a native executable using a *native-image*
+    tool requires an AOT-processed JAR. If you plan to convert another application
+    into a native executable, follow the instructions from the previous recipe to
+    generate the AOT-processed JAR file. If you haven’t completed the previous recipe
+    yet, I prepared a working version that you can use as the starting point for this
+    recipe. You can find it in the book’s GitHub repository at [https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/](https://github.com/PacktPublishing/Spring-Boot-3.0-Cookbook/),
+    in the `chapter7/recipe7-8/start` folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You will need the *native-image* tool. This tool is part of the GraalVM JDK.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: You can work normally with a JVM and keep the native build for CI. Let’s see
+    what you will need to do then!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The first step is ensuring that you generate a JAR with AOT processed. For
+    that, open your terminal at the root of your project and package the JAR file
+    using the `native` profile with Maven. To do so, execute the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Next, we’ll create a new directory for our native executable. Let’s name it
+    `native`. We’ll create this directory inside the `target` directory:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Change your current directory to the new directory created:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Now, we’ll extract the classes from the JAR file created in *step 1*. We’ll
+    use the JAR tool, which is part of the JDK:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'We can build the native application. For that, we’ll use the `native-image`
+    tool. We need to set the following arguments:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '`-H:name=football`: This is the executable filename; in our case, it will be
+    `football`.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`@META-INF/native-image/argfile`: The `@` symbol indicates that the argument
+    is read from a file. The specified file (`argfile`) likely contains additional
+    configuration options or arguments for the native image generation process.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-cp`: This argument sets the class path for the native image. We must pass
+    the current directory, the `BOOT-INF/classes` directory, and all files contained
+    in `BOOT-INF/lib`. This argument will look like this: ``-cp .:BOOT-INF/classes:`find
+    BOOT-INF/lib | tr ''\[PRE32]'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: native-image -H:Name=football @META-INF/native-image/argfile \
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: -cp .:BOOT-INF/classes:`find BOOT-INF/lib | tr '\n' ':'`
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: ./football
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '```'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: How it works…
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As we reused the application from the previous recipes, we have already defined
+    the hints. See the *Using GraalVM Tracing Agent to configure the native application*
+    recipe for more details. To make them available for the native build, we must
+    package our application using the `native` profile.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A JAR file contains the classes and resources of our application in a ZIP file.
+    We could use a standard ZIP tool, but the JAR tool is more convenient for our
+    purposes. We passed the `-xvf` arguments with the JAR file to be processed. The
+    `x` argument instructs the tool to extract the content. `f` means that it will
+    get the content from a file that is passed as an argument as well. Finally, `v`
+    is just to generate a verbose output; we could get rid of this parameter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For the `native-image` tool, we need to pass all files contained in the `BOOT-INF/lib`
+    directory. Unfortunately, the `cp` argument doesn’t admit wildcards. In Unix-like
+    systems, you can use the `find` and `tr` tools. `find` lists the files in the
+    directory, and `tr` removes `\n` and`:` characters. `\n` is the new line character.
+  prefs: []
+  type: TYPE_NORMAL

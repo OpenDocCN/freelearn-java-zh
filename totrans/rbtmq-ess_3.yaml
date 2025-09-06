@@ -1,0 +1,431 @@
+- en: Sending Messages to Multiple Taxi Drivers
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[Chapter 2](377ec533-342d-4a08-9011-7176de197886.xhtml), *Creating a Taxi Application*,
+    included information on how to connect to and consume messages from RabbitMQ.
+    This chapter demonstrates setting the prefetch value, which specifies the number
+    of messages being sent to the consumer at the same time. It also covers how consumers
+    can either manually acknowledge messages or receive the messages without acknowledgment,
+    the former allowing a zero-message loss design.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A new feature is requested of the** Complete Car** (**CC**) team, as the back
+    office wants to be able to send information messages to all taxis at once. This
+    is a prime opportunity to introduce the fanout exchange, which routes messages
+    to all queues bound to them irrespective of the routing keys.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This chapter will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Working with channels and queues
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Specifying a consumer prefetch count
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Acknowledging messages
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Publishing to all queues
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Technical requirements
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The code files of this chapter can be found on GitHub at [https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter03](https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter03).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Working with channels and queues
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: CC's drivers and customers are enjoying the **request taxi** feature that was
+    rolled out in [*Chapter 2*](377ec533-342d-4a08-9011-7176de197886.xhtml), *Creating
+    a Taxi Application*. First, publishing messages to the direct exchange for customers
+    ordering a single taxi was explained, and then instructions were given on implementing
+    the topic exchange, which customers use when ordering a taxi with specific requirements.
+    In both cases, the consumer is bound to the channel that was used to consume a
+    particular queue. If this channel was closed, the consumer would stop receiving
+    messages. Because a channel cannot be reopened and has to be recreated from scratch,
+    both the channel and its consumption must be re-established if there are any problems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s walk through some important points about consumers and queues in RabbitMQ:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A queue can have multiple consumers (unless the exclusive tag is used).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Each channel can have multiple consumers.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Each consumer uses server resources, so it is best to make sure not to use too
+    many consumers.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Channels are full-duplex, meaning that one channel can be used to both publish
+    and consume messages.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: There is no logical limit to the number of channels or consumers a RabbitMQ
+    broker can handle. There are, however, limiting factors, such as available memory,
+    broker CPU power, and network bandwidth.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As each channel mobilizes memory and consumes CPU power, limiting the number
+    of channels or consumers may be a consideration in some environments. The administrator
+    can configure a maximum number of channels per connection by using the `channel_max`
+    parameter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It's now time to look into how to get as much out of the consumers as possible
+    by setting a prefetch count.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Specifying a consumer prefetch count
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The number of messages sent to the consumer at the same time can be specified
+    through the **prefetch** count value. The prefetch count value is used to get
+    as much out of the consumers as possible.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If the prefetch count is too small, it could negatively affect the performance
+    of RabbitMQ, since the platform is usually waiting for permission to send more
+    messages. The following diagram shows an example of a long idle time. The example
+    has the prefetch set to one, meaning that RabbitMQ will not send the next message
+    until after the delivery, processing, and acknowledgment of the message is complete.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the example, the processing time is only 5 ms, with a round-trip time of
+    125 ms (60 ms + 60 ms + 5 ms):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/7252f49c-fb63-406f-a7aa-fec309ad89fe.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Fig 3.1: Round-trip time is 125 ms with a processing time of only 5 ms'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A large prefetch count makes RabbitMQ send many messages from one queue to
+    one consumer. If all messages are sent to a single consumer, it may be overwhelmed
+    and leave the other consumers idle. The following diagram shows the consumer as
+    they receive lots of messages while the other consumer is idle:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/5d7e7aa7-b7d4-4df2-a065-32ee302fd53d.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Fig 3.2: Consumer in an idling state'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In [*Chapter 2*](377ec533-342d-4a08-9011-7176de197886.xhtml), *Creating a Taxi
+    Application*, a connection, channel, and consumer were created in Ruby. The following
+    code block shows how to configure a prefetch value in Ruby:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that the example shows the prefetch value at one `(1)`. This means that
+    just one message will be delivered to the consumer until the consumer has **ack:ed/nack:ed**
+    it. The default RabbitMQ prefetch setting provides an unlimited buffer for sending
+    as many messages as possible to consumers that are ready to accept them. In the
+    consumer, the client library caches the messages until processed. Prefetch settings
+    limit the number of messages the client is able to receive before acknowledging
+    them, rendering them invisible to other consumers, and removing them from the
+    queue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: RabbitMQ supports channel-level, message-based prefetch counts, not connection
+    or byte size-based prefetching.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Next, we'll look at how to set the correct prefetch value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Setting the correct prefetch value
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In a scenario of one or a few consumers who are quickly processing messages,
+    it is recommended to prefetch many messages at once to keep the client as busy
+    as possible. It is possible to divide the total round-trip time by the processing
+    time for each message to get an estimated prefetch value – if the processing time
+    stays the same and the network behavior is stable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A low prefetch value is recommended in situations where there are many consumers
+    and a short processing time. If the prefetch value is set too low, the consumers
+    will be idle much of the time, waiting for messages to arrive. On the other hand,
+    if the prefetch value is too high, one consumer may be very busy while the others
+    are idle.
+  prefs: []
+  type: TYPE_NORMAL
+- en: One typical mistake is to allow unlimited prefetch where one client receives
+    all the messages, leading to high memory consumption and crashes, which cause
+    all messages to be re-delivered.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In scenarios where there are many consumers and/or a longer time to process
+    messages, it is recommended that the prefetch value is set to one (1) to evenly
+    distribute messages among all consumers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If the client is set to auto-ack messages, prefetch settings will have no effect.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As mentioned in [*Chapter 2*](377ec533-342d-4a08-9011-7176de197886.xhtml), *Creating
+    a Taxi Application*, a consumer can acknowledge message delivery back to the broker.
+    It's now time to look into how that can be done.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Acknowledging messages
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: A message that is in transit between the broker and the consumer might get lost
+    in the event of a connection failure, and important messages probably need to
+    be retransmitted. Acknowledgments let the server and clients know when to retransmit
+    messages.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are two possible ways to acknowledge message delivery – once a consumer
+    receives the message (an automatic acknowledgment, auto-ack), and when a consumer
+    sends back an acknowledgment (explicit/manual acknowledge). With auto-ack, the
+    message is acknowledged as soon as it leaves the queue (and is thereby removed
+    from the queue). It is best to auto-ack when high message speeds are required,
+    if the connections are reliable, and if lost messages aren't a concern.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using manual acknowledgments on messages can have a performance impact on the
+    system, compared to an automatic acknowledgment. If aiming for fast throughput,
+    manual acknowledgments should be disabled, and auto acknowledgments should be
+    used instead.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In CC''s case, the risk of losing a message is not acceptable, so the preceding
+    code has been changed to set the acknowledgment to `manual`, making it possible
+    to determine when to acknowledge the message:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The message also has to be acknowledged once it has been fully processed:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: As demonstrated, the method to manually acknowledge takes two arguments – the
+    first is `delivery tag`, and the second is needed in case more than one message
+    must be acknowledged at once. A delivery tag is a channel-specific number that
+    the server uses to identify deliveries. It is of crucial importance that the consumer
+    acknowledges the messages on the same channel as they were received because not
+    doing so will raise an error.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After changing the code and running the application, the ack column rate is
+    shown as non-zero. This is because manual acknowledgment is now used and the RabbitMQ
+    client now sends ack messages over the wire to the broker. This has a cost in
+    terms of bandwidth usage and general performance; however, if the priority is
+    the guarantee of successful message processing over speed, it is perfectly acceptable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Use manual acknowledgment if there is a risk that the processing of a message
+    may fail and the broker needs to eventually redeliver it. Redelivery of unacknowledged
+    messages doesn't happen immediately unless the message is rejected or the channel
+    is closed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: CC's journey with RabbitMQ is getting more exciting, causing the team to request
+    a new feature to send important information to all taxi drivers directly. Let's
+    see how to implement this new feature!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Publishing to all queues
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'With the new feature request in hand, the CC programming team came up with
+    the new overall messaging architecture shown in the following diagram. The back-office
+    application will be connected to RabbitMQ in order to publish information messages
+    to all taxi drivers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/966ed4da-f77c-4c89-acee-32a1e47dd8a6.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Fig 3.3: Back-office application in the architecture'
+  prefs: []
+  type: TYPE_NORMAL
+- en: To roll this out, one way could be to use the topic messaging that's already
+    in place and create a special topic to which all drivers would be subscribed.
+    However, there is an even cleaner and simpler approach offered by the AMQP protocol
+    – fanout exchange.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Fanout exchange
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Fanout exchange takes all messages that are coming in and delivers them to all
+    queues that are bound to it. An easy-to-understand example of where to use a fanout
+    is when messages need to be spread between many participants, like in a chat (however,
+    there are probably better choices for pure chat applications).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Other examples include the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Score board or leaderboard updates from sports news to mobile clients, or other
+    global events
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Broadcasting various state and configuration updates in distributed systems
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'As shown in the following diagram, the fanout exchange routes a copy of each
+    message it receives to all the queues bound to it. This model fits perfectly with
+    the public address behavior that CC aims for in the new feature, the option to
+    send a single message to all drivers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/0b369565-ce6e-4fa0-b3bc-228e1c0738a1.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Fig 3.4: The fanout exchange routes to all bound queues'
+  prefs: []
+  type: TYPE_NORMAL
+- en: It's time to add the fanout exchange into CC's application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Binding to the fanout
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The back office should be able to publish a single message to all taxi drivers.
+    This message could include current traffic information or information about a
+    party that will happen during the evening. Because this new broadcast system will
+    be infrequently used, the CC team was not as concerned about efficient connection
+    management as they were with the main application. In fact, it's fine to connect
+    and disconnect for each interaction with the fanout exchange because, in the case
+    of temporary issues with the RabbitMQ broker, retries from the back office application
+    will eventually succeed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To start using the new fanout exchange in the back office, two steps must be
+    performed: first, declare the fanout exchange when the application starts, and
+    then bind the queue to it when a user logs in.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Number five in the following example shows the code added to the back office
+    service in order to publish messages on this new exchange:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: The logic in this code should feel familiar. An empty string is used as the
+    routing key when binding the queue. The value doesn't really matter because the
+    fanout exchange doesn't care about routing keys.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Notice that `exchange` is declared right before using it. This avoids relying
+    on the implicit pre-existence of the exchange. Not doing that would mean that
+    the main application would have to run once to create the exchange before the
+    back office service can use it. Since the exchange declaration is idempotent,
+    it can and should be declared at all times.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Be particularly careful with AMQP client libraries that may use different default
+    values for exchange and queue parameters; it's better to be explicit and to specify
+    all values.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The same queues as in the direct and topic exchange example are not used since
+    the taxi inbox queue only includes information messages. Two new queues (`taxi-inbox.1`
+    and `taxi-inbox.2`) are instead declared and bounded to the exchange.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unless there is a strong guarantee that an exchange or a queue will pre-exist,
+    assume it doesn't exist and declare it. It is better to be safe than sorry, especially
+    when AMQP encourages it and provides the necessary means to do so.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With this code in place, the back office application can now send public information
+    messages to all drivers. This is a great success, one that again reinforces CC
+    in its decision to deploy RabbitMQ and build on it. Now, let's run the application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the application
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: There's nothing spectacular to note when running the application; messages from
+    the back office successfully flow to the drivers' inbox queues and the only visible
+    change is the newly created driver fanout exchange.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This is visible in the management console shown in the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/66699092-b5ce-4f3b-a402-dcb3986c68f9.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Fig 3.5: The fanout exchange for user queues is visible in the management console'
+  prefs: []
+  type: TYPE_NORMAL
+- en: At this point, it is interesting to take a look at the bindings of any particular
+    queue. To do this, click on the Queues tab and then scroll down and click on Bindings
+    to display the hidden window.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This will show what is reproduced, as in the following screenshot where each
+    queue has multiple bindings – one for the user-to-taxi messaging feature, one
+    for the topics messages, and a final one for the public address fanout feature:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/17132d85-a996-4e16-86ea-236db35e0f71.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Fig 3.6: Each taxi queue has multiple bindings'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before concluding, let's pause for a second and relish the fact that there is
+    now a successful taxi request integration that works across platforms. This may
+    not seem important to anyone with a little experience in messaging systems; however,
+    it is nothing short of a small miracle. Thanks to AMQP and RabbitMQ, the message
+    broker can be replaced with any other AMQP-based message broker, and more services
+    can be added in any chosen language.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This chapter talked about prefetch and manual acknowledgment from the consumer.
+    The fanout exchange was introduced, to be able to broadcast a single message to
+    all active queues. Up next, CC has new plans for its RabbitMQ system – they want
+    to be able to clean up old messages in a smooth way and tweak the message delivery.
+    They also want to be able to send messages to individual drivers from the back
+    office service.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Continue on to the next chapter to find out what CC is up to!
+  prefs: []
+  type: TYPE_NORMAL

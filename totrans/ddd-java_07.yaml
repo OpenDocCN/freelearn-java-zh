@@ -1,0 +1,1190 @@
+- en: '*Chapter 5*: Implementing Domain Logic'
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: To communicate effectively, the code must be based on the same language used
+    to write the requirements – the same language that the developers speak with each
+    other and with domain experts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: – Eric Evans
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the *Command Query Responsibility Segregation (CQRS)* section of the book,
+    we described how DDD and CQRS complement each other and how the command side (write
+    requests) is the home of business logic. In this chapter, we will implement the
+    command-side API for the **Letter of Credit** (**LC**) application using Spring
+    Boot, Axon Framework, JSR-303 bean validations, and persistence options by contrasting
+    between state-stored and event-sourced aggregates. The list of topics to be covered
+    is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Identifying aggregates
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Handling commands and emitting events
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Test-driving the application
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Persisting aggregates
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Performing validations
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: By the end of this chapter, you will have learned how to implement the core
+    of your system (the domain logic) in a robust, well-encapsulated manner. You will
+    also learn how to decouple your domain model from persistence concerns. Finally,
+    you will be able to appreciate how to perform DDD’s tactical design, using services,
+    repositories, aggregates, entities, and value objects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Technical requirements
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To follow the examples in this chapter, you will need access to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: JDK 1.8+ (we have used Java 16 to compile sample sources)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Maven 3.x
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Spring Boot 2.4.x
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JUnit 5.7.x (included with Spring Boot)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Axon Framework 4.4.7 (DDD and CQRS framework)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Project Lombok (to reduce verbosity)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Moneta 1.4.x (money and currency reference implementation – JSR 354)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Continuing our design journey
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the previous chapter, we discussed eventstorming as a lightweight method
+    to clarify business flows. As a reminder, this is the output produced from our
+    eventstorming session:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.1 – Recap of the eventstorming session'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_02.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.1 – Recap of the eventstorming session
+  prefs: []
+  type: TYPE_NORMAL
+- en: As mentioned previously, the *blue* stickies in this diagram represent *commands*.
+    We will be using the **Command Query Responsibility Segregation** (**CQRS**) pattern
+    as a high-level architecture approach to implement the domain logic for our LC
+    issuance application. Let’s examine the mechanics of using CQRS and how it can
+    result in an elegant solution. For a recap of what CQRS is and when it is appropriate
+    to apply this pattern, please refer to the *When to use CQRS* section in [*Chapter
+    2*](B16716_02_Final_NM_ePub.xhtml#_idTextAnchor037), *Where and How Does DDD Fit?*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Important Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: CQRS is by no means a silver bullet. Although it is general-purpose enough to
+    be used in a variety of scenarios, it is a paradigm shift as applied to mainstream
+    software problems. Like any other architecture decision, you should apply due
+    diligence when choosing to adopt CQRS to your situation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let’s look at how this works in practice by implementing a representative sliver
+    of the command side of the LC application using the Spring and Axon frameworks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing the command side
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In this section, we will focus on implementing the command side of the application.
+    This is where we expect all the business logic of the application to be implemented.
+    Logically, it looks like the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.2 – Traditional versus CQRS architecture'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_01.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.2 – Traditional versus CQRS architecture
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The high-level sequence on the command side is described here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A request to mutate state (command) is received.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: In an event-sourced system, the command model is constructed by replaying existing
+    events that have occurred for that instance. In a state-stored system, we would
+    simply restore state by reading state from the persistence store.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: If business invariants (validations) are satisfied, one or more domain events
+    are readied with the intention to be published.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: In an event-sourced system, the domain event is persisted on the command side.
+    In a state-stored system, we would update the state of the instance in the persistence
+    store.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The external world is notified by publishing these domain events onto an event
+    bus. The event bus is an infrastructure component to which events are published.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Let’s look at how we can implement this in the context of our LC issuance application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Important Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: We depict multiple read models because it is possible (but not necessary) to
+    create more than one read model, depending on the kinds of query use cases that
+    need to be supported.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For this to work predictably, the read model(s) need to be kept in sync with
+    the write models (we will examine some of the techniques to do that in detail
+    later).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tooling choices
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Implementing CQRS does not require the use of any framework. Greg Young, who
+    is considered the father of the CQRS pattern, advises against rolling our own
+    CQRS framework in the essay found at [https://ordina-jworks.github.io/domain-driven%20design/2016/02/02/A-Decade-Of-DDD-CQRS-And-Event-Sourcing.html](https://ordina-jworks.github.io/domain-driven%20design/2016/02/02/A-Decade-Of-DDD-CQRS-And-Event-Sourcing.html),
+    which is worth taking a look at. Using a good framework can help enhance developer
+    effectiveness and accelerate the delivery of business functionality, while abstracting
+    the low-level plumbing and non-functional requirements without limiting flexibility.
+    In this book, we will make use of Axon Framework ([http://axonframework.org/](http://axonframework.org/))
+    to implement application functionality, as we have real-world experience in using
+    it in large-scale enterprise development. There are other frameworks that work
+    comparably, such as the Lagom framework ([https://www.lagomframework.com/](https://www.lagomframework.com/))
+    and Eventuate ([https://eventuate.io/](https://eventuate.io/)), which are worth
+    exploring as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Bootstrapping the application
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: To get started, let’s create a simple Spring Boot application. There are several
+    ways to do this. You can always use the Spring starter application at [https://start.spring.io](https://start.spring.io)
+    to create this application. Here, we will make use of the Spring CLI to bootstrap
+    the application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Important Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: To install the Spring CLI for your platform, please refer to the detailed instructions
+    at [https://docs.spring.io/spring-boot/docs/current/reference/html/getting-started.html#getting-started.installing](https://docs.spring.io/spring-boot/docs/current/reference/html/getting-started.html#getting-started.installing).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To bootstrap the application, use the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-1.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'This should create a file named `lc-issuance-api.zip` in the current directory.
+    Unzip this file to a location of your choice and add a dependency on Axon Framework
+    in the `dependencies` section of the `pom.xml` file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-2.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: You may need to change the version. We are at version 4.5.3 at the time of writing
+    this book.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Also, add the following dependency on the `axon-test` library to enable unit
+    testing of aggregates:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-3.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: With the preceding setup, you should be able to run the application and start
+    implementing the LC issuance functionality.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let’s look at how to implement these commands using Axon Framework.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Identifying commands
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'From the eventstorming session in the previous chapter, we have the following
+    commands to start with:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.3 – Identified commands'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_03.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.3 – Identified commands
+  prefs: []
+  type: TYPE_NORMAL
+- en: Commands are always directed to an aggregate (the root entity) for processing
+    (handling). This means that we need to resolve each of these commands to be handled
+    by an aggregate. While the sender of the command does not care which component
+    within the system handles it, we need to decide which aggregate will handle each
+    command. It is also important to note that any given command can only be handled
+    by a single aggregate within the system. Let’s look at how to group these commands
+    and assign them to aggregates. To be able to do that, we need to identify the
+    aggregates in the system first.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Identifying aggregates
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Looking at the output of the eventstorming session of our LC application, one
+    potential grouping can be as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.4 – First cut attempt at aggregate design'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_04.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.4 – First cut attempt at aggregate design
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Some or all of these entities may be aggregates (For a more detailed explanation
+    on the difference between aggregates and entities , please refer to [*Chapter
+    1*](B16716_01_Final_NM_ePub.xhtml#_idTextAnchor015), *The Rationale for Domain-Driven
+    Design*). At first glance, it appears that we have four potential entities to
+    handle these commands:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.5 – Potential aggregates at first glance'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_05.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.5 – Potential aggregates at first glance
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'At first glance, each of these entities may be classified as aggregates in
+    our solution. Here, `LC Application` feels like a reasonably good choice for an
+    aggregate, given that we are building a solution to manage LC applications. However,
+    do the others make sense to be classified as such? `Product` and `Applicant` look
+    like potential entities, but we need to ask ourselves whether we will need to
+    operate on these outside of the purview of `LC Application`. If the answer is
+    *yes*, then `Product` and `Applicant` *may* be classified as aggregates. But both
+    `Product` and `Applicant` do not seem to require being operated on without an
+    enveloping `LC Application` aggregate within this bounded context. It feels that
+    way because both product and applicant details are required to be provided as
+    part of the LC application process. At least from what we know of the process
+    thus far, this seems to be true. This means that we are left with two potential
+    aggregates – `LC` and `LC` `Application`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.6 – Relationship between bounded contexts'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_06.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.6 – Relationship between bounded contexts
+  prefs: []
+  type: TYPE_NORMAL
+- en: When we look at the output of our eventstorming session, the `LC Application`
+    aggregate transitions to become an `LC` aggregate much later in the life cycle.
+    Let’s work on the `LC Application` right now and suspend further analysis on the
+    need for an `LC` aggregate to a later time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Important Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: Colloquially, the terms aggregate and aggregate root are sometimes used interchangeably
+    to mean the same thing. Aggregates can be hierarchical, and it is possible for
+    aggregates to contain child aggregates. While both aggregates and aggregate roots
+    handle commands, only one aggregate can exist as the root in a given context,
+    and it encapsulates access to its child aggregates, entities and value objects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It is important to note that entities may be required to be treated as aggregates
+    in a different bounded context and this kind of treatment is entirely context
+    dependent.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When we look at the output of our eventstorming session, the LC Application
+    transitions to become an LC much later in the lifecycle in the Issuance context.
+    Our focus right now is to optimize and automate the LC application flow of the
+    overall issuance process. Now that we have settled on working with the LC Application
+    aggregate (root), let’s start writing our first command to see how this manifests
+    itself in code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Test-driving the system
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: While we have a reasonably good conceptual understanding of the system, we are
+    still in the process of refining this understanding. Test-driving the system allows
+    us to exercise our understanding by acting as the first client of the solution
+    that we are producing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Important Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: The practice of test-driving the system is very well illustrated in the best-selling
+    book *Growing Object-Oriented Software, Guided by Tests* by authors Nat Price
+    and Steve Freeman. This is worth looking at to gain a deeper understanding of
+    this practice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'So, let’s start with the first test. To the external world, an event-driven
+    system typically works in a manner depicted in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.7 – An event-driven system'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_07.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.7 – An event-driven system
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This figure can be explained as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: An optional set of domain events may have occurred in the past.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: A command is received by the system (initiated manually by a user or automatically
+    by a part of the system), which acts as a stimulus.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The command is handled by an aggregate, which then proceeds to validate the
+    received command to enforce invariants (structural and domain validations).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The system then reacts in one of two ways:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Emit one or more events.
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Throw an exception.
+  prefs:
+  - PREF_IND
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Important Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: The code snippets shown in this chapter are excerpts to highlight significant
+    concepts and techniques. For the full working example, please refer to the accompanying
+    source code for this chapter (included in the `ch05` directory).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Axon Framework allows us to express tests in the following form:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-4.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: '`FixtureConfiguration` is an Axon Framework utility to aid the testing of aggregate
+    behavior using a BDD-style given-when-then syntax.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '`AggregateTestFixture` is a concrete implementation of `FixtureConfiguration`
+    where you need to register your aggregate class – in our case, `LCApplication`
+    is the candidate to handle commands directed to our solution.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Since this is the start of the business process, there are no events that have
+    occurred thus far. This is signified by the fact that we do not pass any arguments
+    to the given method. In other examples we will discuss later, there will likely
+    be events that have already occurred prior to receiving this command.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This is where we instantiate a new instance of the command object. Command objects
+    are usually similar to data transfer objects, carrying a set of information. This
+    command will be routed to our aggregate for handling. We will take a look at how
+    this works in detail shortly.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Here, we are declaring that we expect events matching an exact sequence.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Here, we are expecting an event of the `LCApplicationCreated` type to be emitted
+    as a result of successfully handling the command.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We are finally saying that we do not expect any more events, which means that
+    we expect exactly one event to be emitted.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implementing the command
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: '`CreateLCApplicationCommand` in the previous simplistic example does not carry
+    any state. Realistically, the command will likely look something like what is
+    depicted as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-5.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: This is the command class. When naming commands, we typically use an imperative
+    style; that is, they usually begin with a verb denoting the action required. Note
+    that this is a data transfer object. In other words, it is simply a bag of data
+    attributes. Also note how it is devoid of any logic (at least at the moment).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This is the identifier for the LC application. We are assuming client-generated
+    identifiers in this case. The topic of using server-generated versus client-generated
+    identifiers is out of scope for the subject of this book. You may use either,
+    depending on what is advantageous in your context. Also note that we are using
+    a strong type for the `LCApplicationId` identifier as opposed to a primitive type,
+    such as a numeric or a string value. It is also common in some cases to use UUIDs
+    as an identifier. However, we prefer using strong types to be able to differentiate
+    between identifier types. Note how we are using a `ClientId` type to represent
+    the creator of the application.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The `Party` and `AdvisingBank` types are complex types to represent those concepts
+    in our solution. Care should be taken to consistently use names that are relevant
+    in the problem (business) domain as opposed to using names that only make sense
+    in the solution (technology) domain. Note the attempt to make use of the ubiquitous
+    language of the domain experts in both cases. This is a practice that we should
+    always be conscious of when naming things in the system.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: It is worth noting that `merchandiseDescription` is left as a primitive `String`
+    type. This may feel contradictory to the commentary we presented previously. We
+    will address this in the upcoming *Structural validations* section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now, let’s see what the event we will emit as a result of successfully processing
+    the command will look like.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing the event
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In an event-driven system, mutating system state by successfully processing
+    a command usually results in a domain event being emitted to signal the state
+    mutation to the rest of the system. A simplified representation of a real-world
+    `LCApplicationCreatedEvent` event is shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-6.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: When naming events, we typically use names in the past tense to denote things
+    that have already occurred and are to be accepted unconditionally as empirical
+    facts that cannot be changed.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: You will likely notice that the structure of the event is currently identical
+    to that of the command. While this is true in this case, it may not always be
+    that way. The amount of information that we choose to disclose in an event is
+    context-dependent. It is important to consult with domain experts when publishing
+    information as part of events. You may choose to withhold certain information
+    in the event payload. For example, consider `ChangePasswordCommand`, which contains
+    the newly changed password. It might be prudent to not include the changed password
+    in the resulting `PasswordChangedEvent`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have looked at the command and the resulting event in the previous test.
+    Let’s look at how this is implemented under the hood by looking at the aggregate
+    implementation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Designing the aggregate
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'The aggregate is the place where commands are handled and events are emitted.
+    The good thing about the test that we have written is that it is expressed in
+    a manner that hides the implementation details. But let’s look at the implementation
+    to be able to appreciate how we can get our tests to pass and meet the business
+    requirement:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-7.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: This is the aggregate identifier for the `LCApplication` aggregate. For an aggregate,
+    the identifier uniquely identifies one instance from another. For this reason,
+    all aggregates are required to declare an identifier and mark it to use the `@AggregateIdentifier`
+    annotation provided by the framework.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The method that is handling the command needs to be annotated with the `@CommandHandler`
+    annotation. In this case, the command handler happens to be the constructor of
+    the class, given that this is the first command that can be received by this aggregate.
+    We will see examples of subsequent commands being handled by other methods later
+    in the chapter.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The `@CommandHandler` annotation marks a method as being a command handler.
+    The exact command that this method can handle needs to be passed as a parameter
+    to the method. Note that there can only be one command handler in the entire system
+    for any given command.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Here, we are emitting `LCApplicationCreatedEvent` using the `AggregateLifecycle`
+    utility provided by the framework. In this very simple case, we are emitting an
+    event unconditionally on receipt of the command. In a real-world scenario, it
+    is conceivable that a set of validations will be performed before deciding to
+    either emit one or more events, or failing the command with an exception. We will
+    look at more realistic examples later in the chapter.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The need for `@EventSourcingHandler` and its role is likely very unclear at
+    this time. We will explain the need for this in detail in an upcoming section
+    of this chapter.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This was a whirlwind introduction to a simple event-driven system. We still
+    need to understand the role of `@EventSourcingHandler`. To understand that, we
+    will need to appreciate how aggregate persistence works and the implications it
+    has on our overall design.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Persisting aggregates
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'When working with any system of even moderate complexity, we are required to
+    make interactions durable; that is, interactions need to outlast system restarts,
+    crashes, and so on. So the need for persistence is a given. While we should always
+    endeavor to abstract persistence concerns from the rest of the system, our persistence
+    technology choices can have a significant impact on the way we architect our overall
+    solution. We have a couple of choices in terms of how we choose to persist aggregate
+    state that are worth mentioning:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: State-stored
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Event-sourced
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Let’s examine each of these techniques in more detail in the following sections.
+  prefs: []
+  type: TYPE_NORMAL
+- en: State-stored aggregates
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Saving current values of entities is by far the most popular way to persist
+    state – thanks to the immense popularity of relational databases and `LCApplication`,
+    it is conceivable that we could use a relational database with a structure that
+    would look something like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.8 – Typical entity relationship model'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_08.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.8 – Typical entity relationship model
+  prefs: []
+  type: TYPE_NORMAL
+- en: Irrespective of whether we choose to use a relational database or a more modern
+    NoSQL store – for instance, a document store, key-value store, column family store,
+    and so on – the style we use to persist information remains more or less the same,
+    which is to store the current values of the attributes of the said aggregate/entity.
+    When the values of attributes change, we simply overwrite old values with newer
+    ones; that is, we store the current state of aggregates and entities – hence the
+    name *state-stored*. This technique has served us very well over the years, but
+    there is at least one more mechanism that we can use to persist information. We
+    will look at this in more detail next.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Event-sourced aggregates
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Developers have also been relying on logs for a variety of diagnostic purposes
+    for a very long time. Similarly, relational databases have been employing commit
+    logs to store information durably almost since their inception. However, developers’
+    use of logs as a first-class persistence solution for structured information in
+    mainstream systems remains extremely rare.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A log is an extremely simple, append-only sequence of immutable records ordered
+    by time. The diagram here illustrates the structure of a log where records are
+    written sequentially. In essence, a log is an append-only data structure, as depicted
+    here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.9 – The log data structure'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_09.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.9 – The log data structure
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Writing to a log compared to a more complex data structure such as a table
+    is a relatively simple and fast operation, and can handle extremely high volumes
+    of data while providing predictable performance. Indeed, a modern event-streaming
+    platform such as Apache Kafka makes use of this pattern to scale to support extremely
+    high volumes. We do feel that this can be applied to act as a persistence store
+    when processing commands in mainstream systems because this has benefits beyond
+    the technical advantages listed previously. Consider the example of an online
+    order flow shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/B16716_05_Table_01.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: As you can see, in the event store, we continue to have full visibility of all
+    user actions performed. This allows us to reason about these behaviors more holistically.
+    In the traditional store, we lost the information that the user replaced white
+    with wheat bread. While this does not impact the order itself, we lose the opportunity
+    to gather insights from this user behavior. We recognize that this information
+    can be captured in other ways using specialized analytical solutions; however,
+    the event log mechanism provides a natural way to do this without requiring any
+    additional effort. It also acts as an audit log, providing a full history of all
+    events that have occurred thus far. This fits well with the essence of domain-driven
+    design, where we are constantly exploring ways in which to reduce complexity.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, there are implications to persisting data in the form of a simple
+    event log. Before processing any command, we will need to hydrate past events
+    in the exact order of occurrence and reconstruct the aggregate state to allow
+    us to perform validations. For example, when confirming checkout, just having
+    the ordered set of elapsed events will not suffice. We still need to compute the
+    exact items that are in the cart before allowing the order to be placed. This
+    *event replay* to restore aggregate state (at least those attributes that are
+    required to validate said command) is necessary before processing that command.
+    For example, we need to know which items are in the cart currently before processing
+    `RemoveItemFromCartCommand`. This is illustrated in the following table:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/B16716_05_Table_02.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The corresponding source code for the whole scenario is illustrated in the
+    following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-8.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Before processing any command, the aggregate loading process commences by first
+    invoking the no-args constructor. For this reason, we need the no-args constructor
+    to be `state`. Restoration of `state` *must* happen only in those methods that
+    trigger an event replay. In the case of Axon Framework, this translates to methods
+    embellished with the `@EventSourcingHandler` annotation.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: It is important to note that it is possible (but not necessary) to emit `AddItemCommand`
+    in the previous code where we emit `CartCreatedEvent` and `ItemAddedEvent`. Command
+    handlers do not mutate the state of the aggregate. They only make use of the existing
+    aggregate state to enforce invariants (validations) and emit events if those invariants
+    hold `true`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The loading process continues through the invocation of event-sourcing handler
+    methods in exactly the order of occurrence for that aggregate instance. Event-sourcing
+    handlers are only needed to hydrate aggregate state on the basis of past events.
+    This means that they usually are devoid of any business (conditional) logic. It
+    goes without saying that these methods do not emit any events. Event emission
+    is restricted to happen within command handlers when invariants are successfully
+    enforced.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'When working with event-sourced aggregates, it is very important to be disciplined
+    about the kind of code that one can write:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/B16716_05_Table_03.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: If there is a large number of historic events to restore state, the aggregate
+    loading process can become a time-consuming operation – directly proportional
+    to the number of elapsed events for that aggregate. There are techniques (such
+    as event snapshotting) we can employ to overcome this.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Persistence technology choices
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: If you are using a state store to persist your aggregates, using your usual
+    evaluation process for choosing your persistence technology should suffice. However,
+    if you are looking at event-sourced aggregates, the decision can be a bit more
+    nuanced. In our experience, even a simple relational database can do the trick.
+    Indeed, we once made use of a relational database to act as an event store for
+    a high-volume transactional application with billions of events. This setup worked
+    just fine for us. It is worth noting that we were only using the event store to
+    insert new events and loading events for a given aggregate in sequential order.
+    However, there is a multitude of specialized technologies that have been purpose-built
+    to act as an event store that supports several other value-added features, such
+    as time travel, full event replay, event payload introspection, and so on. If
+    you have such requirements, it might be worth considering other options, such
+    as NoSQL databases (document stores such as MongoDB or column family stores such
+    as Cassandra) or purpose-built commercial offerings, such as EventStoreDB and
+    Axon Server, to evaluate feasibility in your context.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Which persistence mechanism should we choose?
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Now that we have a reasonably good understanding of the two types of aggregate
+    persistence mechanisms (state-stored and event-sourced), it begs the question
+    of which one we should choose. We list a few benefits of using event sourcing
+    here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: We get to use the events as a **natural audit log** in high-compliance scenarios.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It provides the ability to perform **more insightful analytics** on the basis
+    of the fine-grained events data.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It arguably produces more flexible designs when we work with a system based
+    on **immutable events**, because the complexity of the persistence model is capped.
+    Also, there is no need to deal with complex ORM impedance mismatch problems.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The domain model is much more **loosely coupled** with the persistence model,
+    enabling it to evolve mostly independently from the persistence model.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It enables going back in time to be able to create **ad hoc views and reports**
+    without having to deal with upfront complexity.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'On the flip side, these are some challenges that you might have to consider
+    when implementing an event-sourced solution:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Event sourcing requires a **paradigm shift**, which means that development and
+    business teams will have to spend time and effort understanding how it works.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The persistence model does not store state directly. This means that **ad hoc
+    querying** directly on the persistence model can be a lot more **challenging**.
+    This can be alleviated by materializing new views; however, there is added complexity
+    in doing that.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Event sourcing usually tends to work very well when implemented in conjunction
+    with CQRS, which arguably may add more complexity to the application. It also
+    requires applications to pay closer attention to **strong versus eventual consistency**
+    concerns.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Our experiences indicate that event-sourced systems bring a lot of benefits
+    in modern event-driven systems. However, you will need to be cognizant of the
+    considerations presented previously in the context of your own ecosystems when
+    making persistence choices.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Enforcing policies
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'When processing commands, we need to enforce policies or rules. Policies come
+    in two broad categories:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Structural rules – those that enforce that the syntax of the dispatched command
+    is valid
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Domain rules – those that enforce that business rules are adhered to
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It may also be prudent to perform these validations in different layers of the
+    system. And it is also common for some or all of these policy enforcements to
+    be repeated in more than one layer of the system. However, the important thing
+    to note is that before a command is successfully handled, all these policy enforcements
+    are uniformly applied. Let’s look at some examples of these in the upcoming section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Structural validations
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Currently, to create an LC application, you are required to dispatch `CreateLCApplicationCommand`.
+    While the command dictates a structure, none of it is enforced at the moment.
+    Let’s correct that.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To be able to enable validations declaratively, we will make use of the JSR-303
+    bean validation libraries. We can add that easily, using the `spring-boot-starter-validation`
+    dependency in our `pom.xml` file, as shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-9.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Now, we can add validations to the command object using the JSR-303 annotations,
+    as depicted here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-10.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Most structural validations can be accomplished using built-in validator annotations.
+    It is also possible to create custom validators for individual fields or to validate
+    the entire object (for example, to validate interdependent attributes). For more
+    details on how to do this, please refer to the bean validation specification at
+    [https://beanvalidation.org/2.0/](https://beanvalidation.org/2.0/) and the reference
+    implementation at [http://hibernate.org/validator/](http://hibernate.org/validator/).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Business rule enforcements
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Structural validations can be accomplished using information that is already
+    available in the command. However, there is another class of validations that
+    requires information that is not present in the incoming command itself. This
+    kind of information can be present in one of two places – within the aggregate
+    that we are operating on or outside of the aggregate itself, but made available
+    within the bounded context.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let’s look at an example of a validation that requires state to be present
+    within the aggregate. Consider the example of submitting an LC. While we can make
+    several edits to the LC when it is in a draft state, no changes can be made after
+    it is submitted. This means that we can only submit an LC once. This act of submitting
+    the LC is achieved by issuing `SubmitLCApplicationCommand`, as shown in the artifact
+    from the eventstorming session:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 5.10 – Validations during the Submit LC Application process'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_05_10.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.10 – Validations during the Submit LC Application process
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let’s begin with a test to express our intent:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-11.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: It is given that `LCApplicationCreatedEvent` has already occurred – in other
+    words, the LC application is already created.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This is when we try to submit the application by issuing `SubmitLCApplicationCommand`
+    for the same application.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect `LCApplicationSubmittedEvent` to be emitted.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The corresponding implementation will look something like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-12.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The preceding implementation allows us to submit an LC application unconditionally
+    – more than once. However, we want to restrict users to be able to submit only
+    once. To be able to do that, we need to remember that the LC application has already
+    been submitted. We can do that in the `@EventSourcingHandler` handler of the corresponding
+    events, as shown next:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-13.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: When `LCApplicationSubmittedEvent` is replayed, we set the state of the LC application
+    to `SUBMITTED`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'While we have remembered that the application has changed to be in the `SUBMITTED`
+    state, we are still not preventing more than one submit attempt. We can fix that
+    by writing a test, as shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-14.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: '`LCApplicationCreatedEvent` and `LCApplicationSubmittedEvent` have already
+    happened, which means that `LCApplication` has been submitted once.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We now dispatch another `SubmitLCApplicationCommand` command to the system.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect `AlreadySubmittedException` to be thrown.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We also expect no events to be emitted.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The implementation of the command handler to make this work is shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-15.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Note how we are using the state attribute from the `LCApplication` aggregate
+    to perform the validation. If the application is not in the `DRAFT` state, we
+    fail with the `AlreadySubmittedException` domain exception.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Let’s also look at an example where information needed to perform the validation
+    is not part of either the command or the aggregate. Let’s consider the scenario
+    where country regulations prohibit transacting with a set of so-called *sanctioned*
+    countries. Changes to this list of countries may be affected by external factors.
+    Hence it does not make sense to pass this list of sanctioned countries as part
+    of the command payload. Neither does it make sense to maintain it as part of every
+    single aggregate’s state – given that it can change (albeit very infrequently).
+    In such a case, we may want to consider making use of a command handler that is
+    outside the confines of the aggregate class. Thus far, we have only seen examples
+    of `@CommandHandler` methods within the aggregate. But the `@CommandHandler` annotation
+    can appear on any other class external to the aggregate. However, in such a case,
+    we need to load the aggregate ourselves. Axon Framework provides an `org.axonframework.modelling.command.Repository`
+    interface to allow us to do that. It is important to note that this repository
+    is distinct from the Spring Framework interface that is part of the Spring data
+    libraries. An example of how this works is shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-16.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We are injecting the Axon `Repository` interface to allow us to load aggregates.
+    This was not required previously because the `@CommandHandler` annotation appeared
+    on aggregate methods directly.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We are using the `Repository` interface to load aggregates and work with them.
+    The `Repository` interface supports other convenient methods to work with aggregates.
+    Please refer to the Axon Framework documentation for more usage examples.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Coming back to the sanctioned countries example, let’s look at how we need
+    to set up the test slightly differently:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-17.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We are creating a new aggregate fixture as usual.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We are using the fixture to obtain an instance of the Axon `Repository` interface.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We instantiate the custom command handler passing in the `Repository` instance.
+    Also, note how we inject the collection of sanctioned countries into the handler
+    using simple dependency injection. In real life, this set of sanctioned countries
+    will likely be obtained from the external configuration.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We finally need to register the command handler with the fixture so that it
+    can route commands to this handler as well.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The tests for this look fairly straightforward:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-18.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: For the purposes of the test, we mark the country `SOKOVIA` as a sanctioned
+    country. In a more realistic scenario, this will likely come from some form of
+    external configuration (for example, a lookup table or form of external configuration).
+    However, this is appropriate for our unit test.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We then inject this set of sanctioned countries into the command handler.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When the LC application is created for the sanctioned country, we expect no
+    events to be emitted and, furthermore, the `CannotTradeWithSanctionedCountryException`
+    exception to be thrown.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Finally, when the beneficiary belongs to a non-sanctioned country, we emit `LCApplicationCreatedEvent`
+    to be emitted.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The implementation of the command handler is shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-19.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We mark the class as `@Service` to mark it as a component devoid of encapsulated
+    state and enable auto-discovery when using annotation-based configuration or classpath
+    scanning. As such, it can be used to perform any “plumbing” activities.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Do note that the validation for the beneficiary’s country being sanctioned could
+    have been performed on line 18 as well. Some would argue that this would be ideal
+    because we could avoid a potentially unnecessary invocation of the Axon `Repository`
+    method if we did that. However, we prefer encapsulating business validations within
+    the confines of the aggregate as much as possible, so that we don’t suffer from
+    the problem of creating an anemic domain model.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We use an aggregate repository to act as a factory to create a new instance
+    of the `LCApplication` domain object.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Finally, the aggregate implementation along with the validation is shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch5-20.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The validation itself is fairly straightforward. We throw `CannotTradeWithSanctionedCountryException`
+    when the validation fails.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: With these examples, we looked at different ways to implement the policy enforcements
+    encapsulated within the boundaries of the aggregate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we used the outputs of the eventstorming session and used it
+    as a primary aid to create a domain model for our bounded context. We looked at
+    how to implement this using the CQRS architecture pattern. We looked at persistence
+    options and the implications of using event-sourced versus state-stored aggregates.
+    Finally, we rounded off by looking at a variety of ways in which to perform business
+    validations. We looked at all this through a set of code examples, using Spring
+    Boot and Axon Framework. With this knowledge, we should be able to implement robust,
+    well-encapsulated, event-driven domain models.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will look at implementing a UI for these domain capabilities
+    and examine a few options, such as CRUD-based versus task-based UIs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Further reading
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '![](img/B16716_05_Table_04.jpg)'
+  prefs: []
+  type: TYPE_IMG

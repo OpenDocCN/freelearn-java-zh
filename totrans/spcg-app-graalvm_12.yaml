@@ -1,0 +1,907 @@
+- en: '*Chapter 9*: GraalVM Polyglot – LLVM, Ruby, and WASM'
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the previous chapter, we covered Truffle interpreters for Java, Python,
+    and R and interoperability between languages. In this chapter, we will cover other
+    languages'' implementations, such as the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**LLVM**: The LLVM Truffle interpreter'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**TruffleRuby**: The Ruby language interpreter implementation'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**WebAssembly** (**WASM**): WebAssembly implementation'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: All of these language implementations are still in the *experimental* phase
+    and are not released for production, at the time of writing this book. However,
+    we will explore the features and build some code to understand the various concepts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding LLVM, Ruby, and WASM interpreters and their polyglot features
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Understanding the compatibility and limitations of these various language interpreters
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: By the end of this chapter, you will have had hands-on experience in building
+    polyglot applications with LLVM, Ruby, and WASM interpreters.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Technical requirements
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'This chapter requires the following to follow along with the various coding/hands-on
+    sections:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The latest version of GraalVM.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Various language Graal runtimes. We will cover in the chapter how to install
+    and run these runtimes.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Access to GitHub. There are some sample code snippets that are available on
+    the Git repository. The code can be downloaded from the following link: [https://github.com/PacktPublishing/Supercharge-Your-Applications-with-GraalVM/tree/main/Chapter09](https://github.com/PacktPublishing/Supercharge-Your-Applications-with-GraalVM/tree/main/Chapter09).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The Code in Action video for this chapter can be found at [https://bit.ly/3hT7Z1A](https://bit.ly/3hT7Z1A).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Understanding LLVM – the (Sulong) Truffle interface
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: LLVM is a compiler infrastructure that provides a modular, reusable set of compiler
+    components that can form a toolchain to compile source code to machine code. The
+    toolchain provides various levels of optimization, on an **intermediate representation**
+    (**IR**). Any source language can use this toolchain, as long as the source code
+    can be represented as an LLVM IR. Once the source code is represented as an LLVM
+    IR, that language can utilize the advanced optimization techniques that LLVM provides.
+    You can refer to the LLVM project at [https://llvm.org/](https://llvm.org/). There
+    are various compilers that are already built on this infrastructure. Some of the
+    most popular ones are Clang (for C, C++, and Objective C), Swift (used extensively
+    by Apple), Rust, and Fortran.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Sulong is an LLVM interpreter that is written in Java and internally uses the
+    Truffle language implementation framework. This enables all language compilers
+    that can generate LLVM IR to directly run on GraalVM. The following diagram shows
+    how Sulong enables LLVM languages to run on GraalVM:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 9.1 – LLVM compilation pipeline'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16878_Figure_9.1.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 9.1 – LLVM compilation pipeline
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The preceding figure shows how LLVM works at a very high level. C/C++ source
+    code is compiled to LLVM IR. Let''s understand this diagram better:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: C/C++ code is compiled by Clang to LLVM IR.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The `lli` GraalVM LLVM IR interpreter has two versions: *native* and *managed*.
+    Native is the default `lli` version that comes both in Community Edition and Enterprise
+    Edition. Managed `lli` is only available in Enterprise Edition and provides a
+    managed mode of execution, which we will be covering in the *Understanding the
+    LLVM managed environment* section.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The LLVM IR interpreter performs the initial optimization and integrates with
+    Truffle and Graal for further optimizations at runtime.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To understand how LLVM IR looks, here is some example C code where we are adding
+    two numbers and returning the result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'When we pass this through Clang, the following LLVM IR is generated. We can
+    generate the LLVM IR using the `clang -S -emit-llvm cfile.c` command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: The preceding IR clearly shows how the code gets converted into `a` variable
+    (`%0`), which is passed as a parameter, and `b` (`%1`) is allocated `%3` and `%4`
+    respectively. The values are then loaded into `%5` and `%6` respectively and added
+    to `%7`. The value in `%7` is returned. SSA makes the optimization algorithms
+    easy to implement, as the algorithms don't have to keep track of the value changes
+    in a single variable, since every change in the variable is assigned to a single
+    static value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The LLVM IR can be passed to Sulong, which is the LLVM IR interpreter, which
+    internally uses the Truffle language implementation framework to run the code
+    on GraalVM. This takes advantage of the advanced optimization features of GraalVM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Installing the LLVM toolchain
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'LLVM is available as an optional runtime, and can be installed using Graal
+    Updater, with the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'LLVM gets installed in `$GRAALVM_HOME/languages/llvm/native/bin`. We can check
+    the path by using the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: This will print the path where LLVM is installed. Enterprise Edition also comes
+    with a managed LLVM. We will cover that later in this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The GraalVM LLVM runtime can execute language code that is converted to LLVM
+    bitcode. The GraalVM `lli` tool interprets bit code and then compiles dynamically
+    using Graal `lli` also enables interoperability with dynamic languages. The syntax
+    for the `lli` command is shown next:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`lli` can execute plain bitcode or native executables with embedded bitcode
+    (Linux: ELF and macOS: Mach-O).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s quickly verify the installation with some simple code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s compile the code with Clang:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This runs the `hellograal` application. Let''s run it using `lli`. `lli` is
+    the LLVM interpreter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The following shows the output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can directly execute `/hellograal` and get the same output. This is called
+    native execution. Sometimes native executions run faster than `lli`, but we don''t
+    get the polyglot features that GraalVM provides with `lli`. Let''s take something
+    more complex; let''s convert `FibonacciCalculator.java` to C. Here is the source
+    code in C:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s create an executable by running the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We have to make sure we use the right version of Clang. We have to use the
+    Clang that is provided with the GraalVM LLVM toolchain; otherwise, we won''t be
+    able to use `lli`. If we use normal Clang and try to execute the generated binary
+    with `lli`, we get the following error:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Once the binary file is created, we execute it with `lli` to use the GraalVM
+    JIT compilation capabilities. Here is the output when executed with `lli`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s plot these results on a graph and see how the performance improved over
+    iterations. The following is the graph:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 9.2 – GraalVM LLVM performance graph'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16878_Figure_9.2.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 9.2 – GraalVM LLVM performance graph
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can see a significant improvement over iterations. We can see that initially,
+    it runs slow, but after the third iteration, it improves by almost sixfold.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exploring LLVM interoperability
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this section, we will explore the interoperability features of LLVM and see
+    how we can interact between Java, LLVM (C), and JavaScript.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java and LLVM interoperability
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Let''s first try to call the `FibonacciCalculator.c` executable from Java.
+    Here is the source code for `FibonacciCalculatorLLVMEmbed.java`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: The source code is very similar to what we did with JavaScript. We are creating
+    a `Context` object, loading the compiled file with a `Source` object, and building
+    the `Source` object from a binary using `SourceBuilder`. The `Context` object
+    is then used to evaluate the `Source` object and is finally executed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s compile this Java file and run it with GraalVM Java. The following code
+    shows the output of the file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see that we are able to call C code from Java. In this case, we just
+    executed the C application. Let's now try to call the member function directly
+    and pass an integer, and get the total as a `long` type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is the modified C code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: The preceding code implements the `FibonacciCalculator` logic that we had previously
+    done using Java.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this section, we looked at how to invoke a C method from Java. Let's now
+    understand how to invoke C code from a dynamic language such as JavaScript.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exploring JavaScript and LLVM interoperability
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Let''s check the interoperability with JavaScript. JavaScript provides a very
+    simple snippet. Here is the JavaScript code (`FibonacciCaller.js`):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s run this JavaScript as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see that we are now able to pass data to C code and execute the C method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding the LLVM managed environment
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: GraalVM Enterprise Edition provides a managed environment of LLVM. We can find
+    a version of the LLVM managed toolchain under the `/languages/llvm/managed` directory,
+    while the default, unmanaged toolchain can be found under `/languages/llvm/native`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When the managed version of `lli` is used, the managed environment or managed
+    mode of execution can be enabled with the `--llvm.managed` flag. In this section,
+    let's understand what the managed mode of execution is, and why it is specifically
+    required for LLVM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To understand the problems we typically face, let''s take some very simple
+    code, `ManagedLLVM.c`. In the following code, we are intentionally trying to copy
+    a character array to an uninitialized `char` pointer:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s compile this code; Clang actually warns us about incorrectly initializing
+    `valueStr`. `valueStr` is only defined to take 10 characters, but we are assigning
+    more than 10 characters. Let''s assume that we ignore the warnings and proceed.
+    The application is still built and can be executed. The following is the output
+    of compiling the `ManagedLLVM.c` file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If we ignore the warnings and still run the application binary, we obviously
+    get a page fault. This kills the host process and stops the application completely.
+    Such problems cause a core dump and crash the application, and there are a lot
+    of such instances with languages such as C/C++ where we face these kinds of issues.
+    The following is the output when we run the code in native mode (directly native
+    and native `lli`):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'GraalVM LLVM managed execution mode provides a graceful way of handling these
+    issues. Let''s take the same code and compile it this time with the managed version
+    of Clang and run it with the managed version of `lli`. Let''s run the application
+    binary with the managed version of `lli`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: It still fails, but this time it is not a segmentation fault or crash; it is
+    throwing an exception. Exceptions can be caught and handled gracefully.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To understand how to handle this better, lets create a Java class (`ManagedLLVM.java`)
+    that calls the `managedllvm` executable from Java and handles the exception gracefully:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note that we are now creating a `Context` object with the `llvm.manage` option
+    as `true`. That is very critical for us to run the executable in managed execution
+    mode. Let''s compile and run this Java application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see that the Java application is now able to catch the exception and
+    we could be writing exception handling code here. Moreover, it is not stopping
+    the application. This is one of the greatest features of running LLVM in managed
+    execution mode, and it is supported even in polyglot environments.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Ruby is another language that has a high-performance interpreter implementation
+    in GraalVM. Let's explore and understand TruffleRuby, the Ruby Truffle implementation,
+    in the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding TruffleRuby – the Ruby Truffle interpreter
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: TruffleRuby is a high-performance implementation of the Ruby programming language
+    on GraalVM that is built on Truffle. In this section, we will explore some of
+    the language-specific concepts, with code examples, to gain a good understanding
+    of Ruby implementation on GraalVM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Installing TruffleRuby
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'TruffleRuby, too, does not come by default with GraalVM installation. You''ll
+    have to download and install it using the Graal updater tool. To install TruffleRuby,
+    use the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After installing Ruby, we have to run some post-install scripts to make `OpenSSL`
+    C extensions work. We need to run `post_install_hook.sh`, which you will find
+    under the `ruby/lib/truffle` directory. Let''s test the installation with a simple
+    Ruby application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The preceding code accepts the values of `a` and `b` as integers from the user,
+    adds the numbers, and prints the result as a string. This is a very simple Ruby
+    application to test Ruby. Let''s run this program on TruffleRuby. The following
+    is the terminal output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: Now that we know that TruffleRuby is installed and working, let's understand
+    how the TruffleRuby interpreter works.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding the TruffleRuby interpreter/compiler pipeline
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'TrufflyRuby, like any other guest language, is a Truffle interpreter implementation.
+    The following figure shows the TruffleRuby interpreter/compiler pipeline:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 9.3 – TruffleRuby compiler/interpreter pipeline'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16878_Figure_9.3.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 9.3 – TruffleRuby compiler/interpreter pipeline
+  prefs: []
+  type: TYPE_NORMAL
+- en: The interpreter/compiler pipeline is very similar to other guest languages.
+    The preceding diagram does not capture all the details. Refer to the *Exploring
+    the Truffle interpreter/compiler pipeline* section in [*Chapter 6*](B16878_06_Final_SK_ePub.xhtml#_idTextAnchor120),
+    *Truffle – An Overview*, for a more detailed explanation on how Truffle interpreters
+    and Graal JIT executes the code. The TruffleRuby interpreter builds the AST after
+    parsing and performs optimizations and submits the code to Graal JIT, like any
+    other guest language. However, one of the key differences is the way it handles
+    C extensions. C extensions are an integral part of Ruby programming, and traditionally,
+    C extensions are plugged into the Ruby interpreter. TruffleRuby handles this using
+    the LLVM interpreter. This naturally provides polyglot interoperability and we
+    can use other LLVM languages such as C++, Rust, and Swift, not just C. TruffleRuby
+    brings in polyglot interoperability as it's built on Truffle. Let's explore the
+    polyglot interoperability features of TruffleRuby.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exploring Polyglot interoperability with TruffleRuby
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'TruffleRuby brings all the polyglot interoperability features of Truffle and
+    implements similar APIs. Let''s explore these features in this section. Let''s
+    write some simple Ruby code that calls the JavaScript file we built in previous
+    sections that exports simple math functions and variables:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The following is the Ruby code that demonstrates the polyglot capabilities:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the preceding code, we are calling JavaScript code that creates an array
+    of three elements: an integer, a float, and a string. We are evaluating this JavaScript
+    code in line with `Polyglot.eval()`. We are then iterating through the array and
+    printing the values. In the following code, we are loading `math.js` and importing
+    the `message` variable and the `add()`, `subtract()`, and `multiply()` functions.
+    We are then invoking those functions and printing the results:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now let''s run this code. The following is the output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see that we are able to iterate through the JavaScript array, and also
+    call the functions in the `math.js` JavaScript code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s now explore how to interoperate with Java. We use the `Java.type()`
+    method to load the Java class. Let''s use a slightly modified version of `FibonacciCalculator`.
+    Here''s the Java source code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We have defined two methods: `findFibonacci()` and `iterateFibonacci()`. The
+    `findFibonacci()` method takes an integer and returns the Fibonacci numbers, as
+    per the requested count. `iterateFibonacci()` iterates and generates a large number
+    of Fibonacci numbers, and times it to check how the code performs.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following code is the Ruby script to load the `FibonacciCalculator` class
+    and call the `findFibonacci(int count)` method. We pass an integer value to this
+    method and we get an array of integers. We then go through the array and print
+    the values. We are also calling `iterateFibonacci()` to compare how it performs
+    with running directly with Java:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To run this Ruby script, we need to pass `--jvm` in the command line along
+    with `--vm.cp` to point to the path where the Java class is available. The following
+    is the output of running TruffleRuby:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can see how we are able to call the Java class and go through the Java array
+    in Ruby, and even `iterateFibonacci()` performed reasonably well. Let''s try to
+    compare this with running this Java class directly with Java. Here''s the output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see that the performance of Ruby is on par with running Java directly.
+    TruffleRuby is one of the best-performing Ruby runtimes. TruffleRuby is in the
+    experimental phase, while writing this book; for the latest information, refer
+    to [https://www.graalvm.org/reference-manual/ruby/](https://www.graalvm.org/reference-manual/ruby/).
+  prefs: []
+  type: TYPE_NORMAL
+- en: One of the biggest advantages of using Ruby is RubyGems. Ruby has a vast library,
+    which the developer community has built over a period of time. All Gems are hosted
+    in https://rubygems.org/. With GraalVM Polyglot, this opens up a huge opportunity
+    to use these gems in Java or any other language, supported by GraalVM. To illustrate
+    this, let's use a gem in a Java program. There is a gem called math_engine ([https://rubygems.org/gems/math_engine](https://rubygems.org/gems/math_engine)).
+    This has a very interesting method to evaluate complex mathematical expressions.
+    Let's assume that we are building a complex algebra calculator that can be used
+    to evaluate complex expressions. Let's use this gem in a Ruby program, and invoke
+    it from Java.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s first install the gem. To install the gem, let''s use Bundler (https://bundler.io/).
+    Bundler is a package manager (equivalent to npm in Node.js). To install Bundler,
+    use the gem install command. The following is the output of installing Bundler:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s now create a Gemfile. Bundler uses the configuration in a Gemfile to
+    install all the packages/gems. (This is equivalent to package.json in npm.) Here
+    is the source of the Gemfile:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: We are providing the source of the Gem repository and specifying the gems that
+    depend on our Ruby module. Let's now run Bundler to install these gems. (The bundle
+    install command should be executed in the folder where we have the Ruby program
+    and Gemfile.)
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The bundle install command will install all the gems. Let''s now use the math_engine
+    gem, and define a method called eval() in Ruby that takes in the expression, evaluates
+    it, and returns the result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding source code, we are exporting the method using Polyglot.export_method(),
+    so that it can be accessed by other languages. Let's now call this eval() method
+    from a Java program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following is the Java source code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the previous Java code, we are using the Context object to load the Ruby
+    runtime and our Ruby program. We are then binding the eval() method and executing
+    it with the passed expression. The value is then captured and converted to a string
+    for printing. In the main() method, we are passing a complex mathematical expression.
+    Let''s now compile and run this Java code. The following is the output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: The first output comes from Ruby put_s() and the next output is coming from
+    Java. This opens up a huge opportunity to use the vast library of gems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding TruffleRuby Vs CRuby Vs JRuby
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Ruby has a lot of implementations on the market. JRuby and CRuby are two popular
+    implementations of Ruby.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'JRuby is the Ruby programming language implemented in Java. CRuby is the Ruby
+    programming language implemented in C. The following diagram shows the high-level
+    compilation pipeline of JRuby and CRuby. JRuby is one of the highest-performing
+    implementations of Ruby, as it brings in the optimizations and JIT compilation.
+    JRuby also does not have a global interpreter lock, like in CRuby, and this allows
+    concurrent execution, and hence is faster. However, JRuby starts slow but performs
+    better over a period of time:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 9.4 – JRuby and CRuby compilation pipeline'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16878_Figure_9.4.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 9.4 – JRuby and CRuby compilation pipeline
+  prefs: []
+  type: TYPE_NORMAL
+- en: TruffleRuby outperforms JRuby and CRuby. Please refer to [https://www.graalvm.org/ruby/](https://www.graalvm.org/ruby/)
+    for more detailed optcarrot and Rubycon benchmark results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding GraalWasm – the WASM Truffle interpreter
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: GraalVM provides an interpreter and compiler for WASM code called GraalWasm.
+    GraalWasm opens up possibilities of building polyglot web applications that perform
+    close to natively. Before we get into the details of GraalWasm, let's have a quick
+    overview of WASM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding WASM
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**WASM** is a binary format that can run on most modern browsers at near-native
+    speeds. Web applications have become more and more sophisticated and demand a
+    high-performance, near-native experience. JavaScript can only get to a certain
+    level, and we have seen a lot of very good applications built on JavaScript that
+    provide almost native experience. WASM augments JavaScript and other technologies
+    to allow us to compile C, C++, and Rust programs on the web. The following figure
+    shows a very simple pipeline of building WASM applications:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 9.5 – WASM compilation pipeline flow'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16878_Figure_9.5.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 9.5 – WASM compilation pipeline flow
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the preceding figure, we can see how C/C++ code can be compiled to WASM using
+    Emscripten, and it coexists with the other web technologies and runs on web browsers.
+    Both JavaScript and WASM execute logic on the browser. The main difference is
+    WASM is delivered as a binary that is already optimized at compile time. There
+    is no need for abstract syntax trees and type specializations and speculations
+    (refer to the *Exploring the Truffle interpreter/compiler pipeline* section in
+    [*Chapter 6*](B16878_06_Final_SK_ePub.xhtml#_idTextAnchor120), *Truffle – An Overview*,
+    to understand more about AST and speculative optimization).
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is one of the reasons why WASM has a smaller footprint and faster performance.
+    Modern web application architectures leverage WASM to perform more advanced computational
+    logic in the browser, while JavaScript is used to run the user interface and simple
+    application logic. GraalWasm opens up even more possibilities by bringing in polyglot
+    interoperability and embedding. Let's explore that in the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding GraalWasm architecture
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Let''s understand how GraalWasm works. The following figure shows the compilation
+    pipeline for GraalWasm. The diagram does not capture all the details. Refer to
+    the *Exploring the Truffle interpreter/compiler pipeline* section in [*Chapter
+    6*](B16878_06_Final_SK_ePub.xhtml#_idTextAnchor120), *Truffle – An Overview*,
+    for a more detailed explanation on how Truffle interpreters and Graal JIT execute
+    code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 9.6 – GraalWasm compilation/interpreter pipeline'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16878_Figure_9.6.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 9.6 – GraalWasm compilation/interpreter pipeline
+  prefs: []
+  type: TYPE_NORMAL
+- en: C/C++ source code is compiled using Emscripten (`emcc`). Emscripten is a drop-in
+    replacement for `gcc` or Clang, built on LLVM. Emscripten compiles the source
+    to a WASM (`.wasm`) file. The GraalWasm interpreter creates the AST and performs
+    optimizations. There is not much optimization that is required, as the WASM is
+    generated from a strongly typed language, and so already a lot of optimization
+    is performed. Since the WASM format is a sequence of instructions, to reduce the
+    memory footprint, GraalWasm builds an AST, where each node is pointing to a block
+    in WASM (this is called the WASM block node), instead of creating a node for each
+    instruction. The GraalWasm interpreter then optimizes the AST and passes it to
+    Graal for execution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Installing and running GraalWasm
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'GraalWasm is an optional component; it does not come with the GraalVM installation.
+    We have to install it using Graal Updater. To install GraalWasm, we can use the
+    following command to download and install it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: Let's now build a WASM binary and run it with GraalWasm. To compile C code to
+    WASM, we have to install `emcc`. The following section walks through the steps
+    to install `emcc`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Installing Emscripten (emcc)
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Emscripten is installed using Emscripten SDK. We can download the SDK from
+    the Git repository. Let''s execute the following command on a terminal:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This downloads `emsdk`, which also has all the required installation scripts.
+    `git clone` will create an `emsdk` directory. Let''s move that to the `cd emsdk`
+    folder and perform `git pull` to make sure it is up to date. We can install the
+    `emcc` toolchain by executing the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This will download all the required toolchains and SDKs. Once it''s downloaded,
+    we need to activate `emsdk` and then set the environment, using the following
+    commands in sequence:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: Once all of these commands are successfully executed, we should be able to check
+    whether Emscripten is installed by running the `emcc` command on the terminal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now let''s build a WASM of the following C code. This is a slight modification
+    of the code that we have already used in the *Exploring LLVM interoperability*
+    section:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We have defined a method that calculates Fibonacci numbers, sums them up, and
+    returns the sum of the Fibonacci numbers. In the following code snippet of the
+    `main()` method, we are looping through and calling this `fib()` method in interactions,
+    just to test the method, and printing the total and time taken for executing each
+    iteration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s compile this code with `emcc` with the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the previous command, the `-o` option is used to specify the name of the
+    output file; in this case, `fibonacci.wasm` is the binary file that is generated,
+    after successful compilation. Let''s run this file with GraalWasm by executing
+    the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the preceding command, we used `--Builtins` to pass the `wasi_snapshot_preview1`
+    module that the Emscripten toolchain requires. The following shows the output
+    after executing:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see the output generated instantly and is quite fast for the number of
+    Fibonacci numbers we wanted to create and add up. Also, we can see a huge performance
+    improvement from 6,519 ms to 247 ms.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we went into the details of how LLVM, Ruby, and WASM, Java
+    on Truffle and Ruby interpreters are implemented on Truffle. We also explored
+    the polyglot interoperability features that these languages provide, along with
+    coding examples. We understood the differences in the way each of these languages
+    is interpreted. The chapter provided a hands-on walkthrough of how to run code
+    and write polyglot applications in these various languages.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You should be able to use this knowledge to write polyglot applications on GraalVM.
+    Though most of these languages are still in the experimental phase at the time
+    of writing the book, they provide great opportunities to build high-performance
+    polyglot applications. In the next chapter, we will see how the new frameworks
+    such as Quarkus and Micronaut implement Graal for most optimum microservices architecture.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Questions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: What is Sulong?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What is the LLVM managed mode of execution?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: How does TruffleRuby implement C extensions?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What is WASM?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What is `emcc`?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Further reading
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'GraalVM Enterprise Edition: [https://docs.oracle.com/en/graalvm/enterprise/19/index.html](https://docs.oracle.com/en/graalvm/enterprise/19/index.html)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'GraalVM language reference: [https://www.graalvm.org/reference-manual/languages/](https://www.graalvm.org/reference-manual/languages/)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'GraalWasm announcement blog post: [https://medium.com/graalvm/announcing-graalwasm-a-webassembly-engine-in-graalvm-25cd0400a7f2](https://medium.com/graalvm/announcing-graalwasm-a-webassembly-engine-in-graalvm-25cd0400a7f2)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '*WASM engine in GraalVM: Introducing Oracle''s GraalWasm*: [https://jaxenter.com/graalvm-webassembly-graalwasm-165111.html](https://jaxenter.com/graalvm-webassembly-graalwasm-165111.html)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL

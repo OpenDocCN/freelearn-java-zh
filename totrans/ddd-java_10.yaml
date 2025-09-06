@@ -1,0 +1,796 @@
+- en: '*Chapter 8*: Implementing Long-Running Workflows'
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the long run, the pessimist may be proven right, but the optimist has a better
+    time on the trip.
+  prefs: []
+  type: TYPE_NORMAL
+- en: — Daniel Reardon
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the previous chapters, we looked at handling commands and queries within
+    the context of a single aggregate. All the scenarios we have looked at thus far
+    have been limited to a single interaction. However, not all capabilities can be
+    implemented in the form of a simple request-response interaction, requiring coordination
+    across multiple external systems or human-centric operations, or both. In other
+    cases, there may be a need to react to triggers that are non-deterministic (occur
+    conditionally or not at all) and/or are time-bound (based on a deadline). This
+    may require managing business transactions across multiple bounded contexts that
+    may run over a long duration of time while continuing to maintain consistency
+    (**saga**).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are at least two common patterns to implement the saga pattern:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Explicit orchestration**: A designated component acts as a centralized coordinator—where
+    the system relies on the coordinator to react to domain events to manage the flow.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Implicit choreography**: No single component is required to act as a centralized
+    coordinator—where the components simply react to domain events in other components
+    to manage the flow.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'We’ll cover the following main topics in this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing sagas
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Deciding between orchestration and choreography
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Handling deadlines
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: By the end of this chapter, you will have learned how to implement sagas using
+    both techniques. You will also have learned how to work with deadlines when no
+    explicit events occur within the system. You will finally be able to appreciate
+    when/whether to choose an explicit orchestrator or simply stick to implicit choreography
+    without resorting to the use of potentially expensive distributed transactions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Technical requirements
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To follow the examples in this chapter, you will need access to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: JDK 1.8+ (we have used Java 17 to compile sample sources)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Spring Boot 2.4.x
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Axon Framework 4.5.3
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JUnit 5.7.x (included with Spring Boot)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Project Lombok (to reduce verbosity)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Maven 3.x
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Please refer to the `Chapter08` directory of the book’s accompanying source
+    code repository for complete working examples on GitHub at [https://github.com/PacktPublishing/Domain-Driven-Design-with-Java-A-Practitioner-s-Guide/tree/master/Chapter08](https://github.com/PacktPublishing/Domain-Driven-Design-with-Java-A-Practitioner-s-Guide/tree/master/Chapter08).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Continuing our design journey
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In [*Chapter 4*](B16716_04_Final_NM_ePub.xhtml#_idTextAnchor065), *Domain Analysis
+    and Modeling*, we discussed eventstorming as a lightweight method to clarify business
+    flows. As a reminder, this is the output produced from our eventstorming session:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 8.1 – Recap of the eventstorming session'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_Figure_8.1.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 8.1 – Recap of the eventstorming session
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As depicted in the preceding diagram, some aspects of **Letter of Credit**
+    (**LC**) application processing happen outside our current bounded context, before
+    the trade finance manager makes a decision to either approve or decline the application,
+    as listed here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Product value is validated.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Product legality is validated.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Applicant’s creditworthiness is validated.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Currently, the final approval is a manual process. It is pertinent to note that
+    the product value and legality checks happen as part of the work done by the product
+    analysis department, whereas applicant creditworthiness checks happen in the credit
+    analysis department. Both departments make use of their own systems to perform
+    these functions and notify us through the respective events. An LC application
+    is **not ready** to be either approved or declined until **each** of these checks
+    is completed. Each of these processes happens mostly independently of the others
+    and may take a non-deterministic amount of time (typically in the order of a few
+    days). After these checks have happened, the trade finance manager manually reviews
+    the application and makes the final decision.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Given the growing volumes of LC applications received, the bank is looking to
+    introduce a process optimization to automatically approve applications with an
+    amount below a certain threshold (*USD 10,000* at this time). The business has
+    deemed that the three preceding checks are sufficient and that no further human
+    intervention is required when approving such applications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: From an overall system perspective, it is pertinent to note that the product
+    analyst system notifies us through `ProductValueValidatedEvent` and `ProductLegalityValidatedEvent`,
+    whereas the credit analyst system does the same through the `ApplicantCreditValidatedEvent`
+    event. Each of these events can, and indeed do, happen independently of the others.
+    For us to be able to auto-approve applications, our solution needs to wait for
+    all of these events to occur. Once these events have occurred, we need to examine
+    the outcome of each of these events to finally make a decision.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this context, we are using the term long-running to denote a complex business
+    process that takes several steps to complete. As these steps occur, the process
+    transitions from one state to another. In other words, we are referring to a state
+    machine. This is not to be confused with a long-running software process (for
+    example, a complex SQL query or an image-processing routine) that is computationally
+    intensive.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As is evident from the preceding diagram, the LC auto-approval functionality
+    is an example of a long-running business process where *something* in our system
+    needs to keep track of the fact that these independent events have occurred before
+    proceeding further. Such functionality can be implemented using the saga pattern.
+    Let’s look at how we can do this.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing sagas
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Before we delve into how we can implement this auto-approval functionality,
+    let’s take a look at how this works from a logical perspective, as shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 8.2 – Auto-approval process—logical view'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_Figure_8.2.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 8.2 – Auto-approval process—logical view
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As depicted in the preceding diagram, there are three bounded contexts in play:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**LC Application** (the bounded context we have been implementing thus far)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The **Applicant** bounded context
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The **Product** bounded context
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The flow gets triggered when the LC application is submitted. This in turn
+    sets in motion three independent functions that establish the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Value of the product being transacted
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Legality of the product being transacted
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creditworthiness of the applicant
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: LC approval can proceed only after **all** of these functions have been completed.
+    Furthermore, to **auto-approve**, all of these checks have to complete **favorably**
+    and, as mentioned earlier, the LC amount has to be less than the *USD 10,000*
+    threshold.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As shown in the eventstorming artifact, the `LC Application` aggregate is able
+    to handle `ApproveLCApplicationCommand`, which results in `LCApplicationApprovedEvent`.
+    To auto-approve, this command needs to be invoked automatically when all the conditions
+    mentioned earlier are satisfied. We are building an event-driven system, and we
+    can see that each of these validations produces events when their respective actions
+    are complete. There are at least two ways to implement this functionality:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Orchestration**: Where a single component in the system coordinates the state
+    of the flow and triggers subsequent actions as necessary'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Choreography**: Where actions in the flow are triggered without requiring
+    an explicit coordinating component'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Let’s examine these methods in more detail.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Orchestration
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'When implementing sagas using an orchestrating component, the system looks
+    similar to the one depicted here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 8.3 – Saga implementation using an orchestrator'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_Figure_8.3.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 8.3 – Saga implementation using an orchestrator
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The orchestrator starts tracking the flow when the LC application is submitted.
+    It will then need to wait for each of the `ProductValueValidatedEvent`, `ProductLegalityValidatedEvent`,
+    and `ApplicantCreditValidatedEvent` events to occur and decide whether it is appropriate
+    to trigger `ApproveLCApplicationCommand`. Finally, the saga life cycle ends unconditionally
+    when the LC application is approved. There are other conditions that may cause
+    the saga to end abruptly. We will examine those scenarios in detail later. It
+    is pertinent to note that there will be a **distinct** auto-approval saga instance
+    for each LC application that gets submitted. Let’s look at how to implement this
+    functionality using the Axon Framework. As usual, let’s test-drive this functionality
+    that a new auto-approval saga instance is created when an LC application is submitted:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-1.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We make use of the Axon-provided `FixtureConfiguration` and `SagaTestFixture`,
+    which allow us to test saga functionality.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Given no prior activity has occurred (from the perspective of the saga).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When `LCApplicationSubmittedEvent` is published.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect one active saga to exist.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The implementation to make this test pass looks as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-2.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: When working with Axon and Spring, the orchestrator is annotated with the `@Saga`
+    annotation to mark it as a Spring bean. In order to track each submitted LC application,
+    the `@Saga` annotation is prototype-scoped (as opposed to singleton-scoped), to
+    allow the creation of multiple saga instances. Please refer to the Axon and Spring
+    documentation for more information.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The saga listens to `LCApplicationSubmittedEvent` to keep track of the flow
+    (as denoted by the `@SagaEventHandler` annotation). Conceptually, the `@SagaEventHandler`
+    annotation is very similar to the `@EventHandler` annotation that we discussed
+    in the previous chapter. However, the `@SagaEventHandler` annotation is used specifically
+    for event listeners within a saga. The `associationProperty` attribute on the
+    `@SagaEventHandler` annotation causes this event handler method to get invoked
+    only for the saga with a matching value of the `lcApplicationId` attribute in
+    the event payload. Also, `@SagaEventHandler` is a transaction boundary. Every
+    time such a method completes successfully, the Axon Framework commits a transaction,
+    thereby allowing it to keep track of the state stored in the saga. We will look
+    at this in more detail shortly.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Every saga needs to have at least one `@SagaEventHandler` method that is also
+    annotated with the `@StartSaga` annotation to denote the beginning of the saga.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'We have a requirement that an LC cannot be auto-approved if its amount exceeds
+    the threshold (*USD 10,000* in our case). The test for this scenario looks like
+    this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-3.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: When the LC amount exceeds the auto-approval threshold amount.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect no active sagas to exist for that LC.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The implementation to satisfy this condition looks like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-4.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We check for the condition of the LC amount being greater than the threshold
+    amount.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: If so, we end the saga using the framework-provided `SagaLifecycle.end()` method.
+    Here, we end the saga programmatically. It is also possible to declaratively end
+    the saga as well using the `@EndSaga` annotation when `LCApplicationApprovedEvent`
+    occurs. Please refer to the full code examples included in this chapter’s repository
+    for more information.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'We need to auto-approve the saga if `ApplicantCreditValidatedEvent`, `ProductLegalityValidatedEvent`,
+    and `ProductValueValidatedEvent` have all occurred successfully. The test to verify
+    this functionality is shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-5.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Given that the LC application has been submitted and `ProductValueValidatedEvent`
+    and `ProductLegalityValidatedEvent` have occurred successfully.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When `ApplicantCreditValidatedEvent` is published.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect one active saga instance and the following.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect `ApproveLCApplicationCommand` to be dispatched for that LC.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The implementation for this looks as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-6.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: As mentioned previously, sagas can maintain state. In this case, we are maintaining
+    three Boolean variables, each to denote the occurrence of the respective event.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We have declared the Axon `CommandGateway` as a transient member because we
+    need it to dispatch commands, but not be persisted along with other saga states.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This event handler intercepts `ApplicantCreditValidatedEvent` for the specific
+    LC application (as denoted by `associationProperty` in the `@SagaEventHandler`
+    annotation).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: If the decision from `ApplicantCreditValidatedEvent` is rejected, we end the
+    saga immediately.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Otherwise, we remember the fact that the applicant’s credit has been validated.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We then check to see whether the product’s value and legality have already been
+    validated.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: If so, we issue the command to auto-approve the LC.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: The logic in `ProductValueValidatedEvent` and `ProductLegalityValidatedEvent`
+    is very similar to that in the saga event handler for `ApplicantCreditValidatedEvent`.
+    We have omitted it here for brevity. Please refer to the source code for this
+    chapter for the full example along with the tests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Finally, we can end the saga when we receive `LCApplicationApprovedEvent` for
+    this application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-7.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Given that the LC has been submitted and all the validations have been completed
+    successfully.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When `LCApplicationApprovedEvent` is published.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect zero active sagas to be running.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We also expect to not dispatch any commands.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Now that we have looked at how to implement sagas using an orchestrator, let’s
+    examine some design decisions that we may need to consider when working with them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here are the pros of orchestration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Complex workflows**: Having an explicit orchestrator can be very helpful
+    when dealing with flows that involve multiple participants and have a lot of conditionals
+    because the orchestrator can keep track of the overall progress in a fine-grained
+    manner.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Testing**: As we have seen in the preceding implementation, testing flow
+    logic in isolation is relatively straightforward.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Debugging**: Given that we have a single coordinator, debugging the current
+    state of the flow can be relatively easier.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Handling exceptions**: Given that the orchestrator has fine-grained control
+    of the flow, recovering gracefully from exceptions can be easier.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**System knowledge**: Components in different bounded contexts do not need
+    to have knowledge of each other’s internals (for example, commands and events)
+    to progress the flow.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Cyclic dependencies**: Having a central coordinator allows avoiding accidental
+    cyclic dependencies between components.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Here are the cons of orchestration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Single point of failure**: From an operational perspective, orchestrators
+    can become single points of failure because they are the only ones that have knowledge
+    of the flow. This means that these components need to exhibit higher-resilience
+    characteristics as compared to other components.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Leaking of domain logic**: In an ideal world, the aggregate will remain the
+    custodian of all domain logic. Given that the orchestrator is also stateful, business
+    logic may inadvertently shift to the orchestrator. Care should be taken to ensure
+    that the orchestrator only has flow control logic while business invariants remain
+    within the confines of the aggregate.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The preceding implementation should give you a good idea of how to implement
+    a saga orchestrator. Now let’s look at how we can do this without the use of an
+    explicit orchestrator.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Choreography
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Saga orchestrators keep track of the current state of the flow, usually making
+    use of some kind of data store. Another way to implement this functionality is
+    without using any stateful component. Logically, this looks like the setup shown
+    in the diagram here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Figure 8.4 – Saga implementation using choreography'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '](img/B16716_Figure_8.4.jpg)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 8.4 – Saga implementation using choreography
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As you can see, there is no single component that tracks the saga life cycle.
+    However, to make the auto-approval decision, each of these stateless event handlers
+    needs to have knowledge of the same three events occurring:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Product value is validated.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Product legality is validated.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Applicant’s creditworthiness is validated.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Given that the event listeners themselves are stateless, there are at least
+    three ways to provide this information to them:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Each of the events carries this information in their respective payloads.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The event listeners query the source systems (in this case, the product- and
+    applicant-bounded contexts, respectively).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The LC application-bounded context maintains a query model to keep track of
+    these events occurring.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Just like in the orchestrator example, when all events have occurred and the
+    LC amount is below the specified threshold, these event listeners can issue `ApproveLCApplicationCommand`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will skip covering code examples for the choreography implementation because
+    this is no different from the material we have covered previously in this and
+    prior chapters.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now that we have looked at how to implement both styles of sagas, let’s examine
+    some design decisions that we may need to consider when working with them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The pros of the choreography implementation are listed here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Simple workflows**: For simple flows, the choreography approach can be relatively
+    straightforward because it does not require the overhead of an additional coordinating
+    component.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**No single points of failure**: From an operational perspective, there is
+    one less high-resilience component to worry about.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'These are the cons of the choreography implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Workflow tracking**: Especially with complex workflows that involve numerous
+    steps and conditionals, tracking and debugging the current state of the flow may
+    become challenging.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Cyclic dependencies**: It is possible to inadvertently introduce cyclic dependencies
+    among components when workflows become gnarly.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Sagas enable applications to maintain data and transactional consistency when
+    more than one bounded context is required to complete the business functionality
+    without having to resort to using *distributed transactions*. However, it does
+    introduce a level of complexity to the programming model, especially when it comes
+    to handling failures. We will look at exception handling in a lot more detail
+    when we discuss working with distributed systems in upcoming chapters. Let’s look
+    at how to progress flows when there are no explicit stimuli by looking at how
+    deadlines work.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Handling deadlines
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Thus far, we have looked at events that are caused by human (for example, the
+    applicant submitting an LC application) or system (for example, the auto-approval
+    of an LC application) action. However, in an event-driven system, not all events
+    occur due to an explicit human or system stimulus. Events may need to be emitted
+    either due to inactivity over a period of time or on a recurring schedule based
+    on prevailing conditions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For example, let’s examine the case where the bank needs *submitted LC applications*
+    to be decided on as quickly as possible. When applications are not acted upon
+    by the trade finance managers within 10 calendar days, the system should send
+    them reminders.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To deal with such inactivity, we need a means by which to trigger system actions
+    (read: emit events) based on the passage of time—in other words, perform actions
+    when a *deadline* expires. In a happy path scenario, we expect either the user
+    or the system to take a certain action. In such cases, we will also need to account
+    for cases where we will need to cancel the trigger scheduled to occur on deadline
+    expiry. Let’s look at how to test-drive this functionality:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-8.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: When the LC application is submitted.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect a deadline for the reminder to be scheduled.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The implementation for this is fairly straightforward:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-9.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: To allow working with deadlines, the Axon Framework provides a `DeadlineManager`
+    that allows working with deadlines. This is injected into the command handler
+    method.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We use `deadlineManager` to schedule a named deadline (`"LC_APPROVAL_REMINDER"`
+    in this case) that will expire in 10 days.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When the deadline is met, it will result in `LCApprovalPendingNotification`,
+    which can be handled just like a command. Except, in this case, the behavior is
+    triggered by the passage of time.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'If no action is taken for 10 days, this is what we expect:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-10.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Given that the LC application is submitted.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When the period of 10 days elapses.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The deadline should be met.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '`LCApprovalPendingEvent` should be emitted.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Let’s look at how to implement this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-11.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Deadlines are handled by annotating handler methods with the `@DeadlineHandler`
+    annotation. Note that the same deadline name used previously is being referenced
+    here.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This is the deadline handler method and uses the same payload that was passed
+    along when it was scheduled.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We emit `LCApprovalPendingEvent` when the deadline expires.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The deadline handling logic should only be triggered if no action is taken.
+    However, if the LC is either approved or rejected within a duration of 10 days,
+    none of this behavior should be triggered:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-12.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Given that the LC application is submitted.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: When it is approved within a duration of 10 days (in this case, almost immediately).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We expect no scheduled deadlines.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The implementation for this looks as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ch8-13.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We cancel all the deadlines with the name `LC_APPROVAL_REMINDER` (in this case,
+    we only have one deadline with that name) within the scope of this aggregate.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we examined how to work with long-running workflows using sagas
+    and the different styles we can use to implement them. We also looked at the implications
+    of using explicit orchestration versus implicit choreography. We finally looked
+    at how we can handle deadlines when there are no user-initiated actions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You have learned how sagas can act as a first-class citizen in addition to aggregates
+    when designing a system that makes use of domain-driven design principles.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will look at how we can interact with external systems
+    while respecting bounded context boundaries between core and peripheral systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Further reading
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '![](img/B16716_08_Table_01.jpg)'
+  prefs: []
+  type: TYPE_IMG

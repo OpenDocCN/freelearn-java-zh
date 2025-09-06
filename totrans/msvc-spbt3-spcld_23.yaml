@@ -1,0 +1,1922 @@
+- en: '23'
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Native-Complied Java Microservices
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we will learn how to compile the Java source code in our microservices
+    into binary executable files, known as **Native Images**. A Native Image starts
+    up significantly faster compared to using a Java VM and is also expected to consume
+    less memory. We will be introduced to the **Spring AOT** engineintroduced in Spring
+    Framework 6 and the **GraalVM** project and its **Native Image compiler**, learning
+    how to use them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: When to natively compile Java source code
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Introducing the GraalVM project and Spring’s AOT engine
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Handling problems with native compilation
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Testing and compiling Native Images
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Testing with Docker Compose
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Testing with Kubernetes
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Even though Spring Framework 6 and Spring Boot 3 come with **General Availability**
+    (**GA**) support for building native executables of Spring Boot applications,
+    it must be considered as being in an early stage. At the time of writing this
+    chapter, a lot of pitfalls were discovered while natively compiling the microservices
+    in this book. Since natively compiling the microservices is not required for the
+    rest of the material in this book, this chapter is placed at the end of the book
+    as an extra chapter, describing an exciting but not yet fully mature technology.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Technical requirements
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'For instructions on how to install the tools used in this book and how to access
+    the source code for this book, see:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '*Chapter 21*, *Installation Instructions for macOS*'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '*Chapter 22*, *Installation Instructions for Microsoft Windows with WSL 2 and
+    Ubuntu*'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The code examples in this chapter all come from the source code in `$BOOK_HOME/Chapter23`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you want to view the changes applied to the source code in this chapter so
+    you can natively compile the microservices, you can compare it with the source
+    code for *Chapter 20*, *Monitoring Microservices*. You can use your favorite `diff`
+    tool and compare the two folders `$BOOK_HOME/Chapter20` and `$BOOK_HOME/Chapter23`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When to native-compile Java source code
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java has always been known for its **build-once-run-anywhere** capability, providing
+    excellent cross-platform support. The Java source code is compiled once into bytecode.
+    At runtime, a Java VM transforms the bytecode into executable code for the target
+    platform using a **Just in Time** compiler, also known as **JIT** compilation.
+    This takes some time, slowing down the startup of Java programs. Before the era
+    of microservices, Java components typically ran on an application server, like
+    a Java EE server. After being deployed, the Java component ran for a long time,
+    making the longer startup time less of a problem.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With the introduction of microservices, this perspective changed. With microservices,
+    there comes the expectation of being able to upgrade them more frequently and
+    quickly scale instances for a microservice up and down based on its usage. Another
+    expectation is to be able to **scale to zero**, meaning that when a microservice
+    is not used, it should not run any instances at all. An unused microservice should
+    not allocate any hardware resources and, even more importantly, should not create
+    any runtime cost, for example, in a cloud deployment. To be able to meet these
+    expectations, it is important that a microservice instance can be started swiftly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Also, with the use of containers, the importance of cross-platform support built
+    into the application itself has faded. Instead, Docker can be used to build Docker
+    images that contain support for multiple platforms, for example, Linux on both
+    `arm64` and `amd64` (also known as `x86_64`), or Docker images that can be run
+    on Windows and Linux. For more information, see [https://docs.docker.com/build/building/multi-platform/](https://docs.docker.com/build/building/multi-platform/).
+    For an example of a Docker image that contains multi-platform support, see the
+    OpenJDK Docker image used in this book, [https://hub.docker.com/_/eclipse-temurin/tags](https://hub.docker.com/_/eclipse-temurin/tags).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Given that the startup time for Java programs can be significantly reduced,
+    other use cases also come to mind; for example, developing Java-based **Function-as-a-Service**
+    (**FaaS**) solutions using AWS Lambda, Azure Functions, or Google Cloud Functions,
+    to mention some of the major platforms. Also, developing CLI tools in Java becomes
+    a feasible option.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Together, these lead to a situation where faster startup becomes a more critical
+    requirement than cross-platform support. This requirement can be achieved by compiling
+    the Java source code into the target platform’s binary format at build time, in
+    the same way as C or Go programs are compiled. This is known as **Ahead of Time**
+    compilation or **AOT** compilation. The GraalVM Native Image compiler will be
+    used to perform the AOT compilation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we will see in the next section, the GraalVM Native Image compiler comes
+    with a few restrictions, for example, relating to the use of reflection and dynamic
+    proxies. It also takes quite some time to compile Java code into a binary Native
+    Image. This technology has its strengths and weaknesses.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With a better understanding of when it might be of interest to natively compile
+    Java source code, let’s learn about the tooling: first, the GraalVM project, and
+    then, the Spring AOT engine.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Introducing the GraalVM project
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Oracle has worked for several years on a high-performance Java VM and associated
+    tools, known together as the **GraalVM** project ([https://www.graalvm.org](https://www.graalvm.org)).
+    It was launched back in April 2018 ([https://medium.com/graalvm/graalvm-in-2018-b5fa7ff3b917](https://medium.com/graalvm/graalvm-in-2018-b5fa7ff3b917)),
+    but work can be traced back to, for example, a research paper from Oracle Labs
+    in 2013 on the subject: *Maxine: An approachable virtual machine for, and in,
+    java*; see [https://dl.acm.org/doi/10.1145/2400682.2400689](https://dl.acm.org/doi/10.1145/2400682.2400689).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Fun Fact**: The Maxine VM is known as a **metacircular** Java VM implementation,
+    meaning that it is, itself, written in Java.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: GraalVM’s VM is polyglot, supporting not only traditional Java VM languages
+    such as Java, Kotlin, and Scala but also languages such as JavaScript, C, C++,
+    Ruby, Python, and even programs compiled into a WebAssembly. The part of GraalVM
+    that we will focus on is its **Native Image** compiler, which can be used to compile
+    Java bytecode into a Native Image containing binary executable code for a specific
+    **operating system** (**OS**) and HW platform, for example, macOS on Apple silicon
+    (`arm64`) or Linux on Intel (`amd64`).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Native Image can run without a Java VM, including binary compiled application
+    classes and other classes required from the application’s dependencies. It also
+    includes a runtime system called **Substrate VM**, which handles garbage collection,
+    thread scheduling, and more.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To be able to build a Native Image, the native compiler runs static code analysis
+    based on a closed-world assumption, meaning that all bytecode that can be called
+    at runtime must be reachable during build time. Therefore, it is not possible
+    to load or create classes on the fly in runtime that was not available during
+    the AOT compilation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To overcome these restrictions, the GraalVM project provides configuration options
+    for the native compiler where we can provide **reachability metadata**. With this
+    configuration, we can describe the use of dynamic features like reflection and
+    the generation of proxy classes at runtime. For more information, see [https://www.graalvm.org/22.3/reference-manual/Native
+    Image/metadata/](https://www.graalvm.org/22.3/reference-manual/native-image/metadata/).
+    We will learn later in this chapter various ways to create the required reachability
+    metadata.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The GraalVM Native Image compiler can be launched using a CLI command, `Native
+    Image`, or as part of a Maven or Gradle build. GraalVM provides a plugin for both
+    Maven and Gradle. In this chapter, the Gradle plugin will be used.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With GraalVM introduced, it is time to learn about Spring’s AOT engine.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Introducing the Spring’s AOT engine
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The Spring team has also worked on supporting the native compilation of Spring
+    applications for some time. In March 2021, after 18 months of work, the experimental
+    **Spring Native** project launched a beta release; see [https://spring.io/blog/2021/03/11/announcing-spring-native-beta](https://spring.io/blog/2021/03/11/announcing-spring-native-beta).
+    Based on the experiences from the Spring Native Project, official support for
+    building Native Images was added in Spring Framework 6 and Spring Boot 3; see
+    [https://spring.io/blog/2023/02/23/from-spring-native-to-spring-boot-3](https://spring.io/blog/2023/02/23/from-spring-native-to-spring-boot-3).
+    To perform the actual native compilation, Spring uses GraalVM’s Native Image compiler
+    under the hood.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The most important feature is Spring’s new **AOT engine**, which analyzes the
+    Spring Boot application at build time and generates initialization source code
+    and reachability metadata required by the GraalVM Native Image compiler. The generated
+    initialization source code, also known as **AOT-generated code**, replaces the
+    reflection-based initialization performed when using a Java VM, eliminating most
+    of the requirements of dynamic features like reflection and the generation of
+    proxy classes at runtime.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When this AOT processing is performed, a closed-world assumption is made in
+    the same way as for the GraalVM Native Image compiler. This means that only Spring
+    beans and classes reachable at build time will be represented in the AOT-generated
+    code and reachability metadata. Special attention must be given to Spring beans
+    that only are created if some profiles are set or if some conditions are met,
+    using `@Profile` or `@ConditionalOnProperty` annotations. These profiles and conditions
+    must be set at build time; otherwise, these Spring beans will not be represented
+    in the Native Image.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To perform the analysis, the AOT engine creates bean definitions for all Spring
+    beans it can find by scanning the source code of the application. But instead
+    of instantiating the Spring beans, meaning starting the application, it generates
+    the corresponding initialization code that will instantiate the Spring beans when
+    executed. For all uses of the dynamic features, it will also generate the required
+    reachability metadata.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The process of creating a Native Image from the source code of a Spring Boot
+    application is summarized by the following data flow diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![A picture containing text, screenshot, diagram, line  Description automatically
+    generated](img/B19825_23_01.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 23.1: Data flow diagram explaining the creation of a Native Image'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The creation of a Native Image goes through the following steps:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application’s source code is compiled into bytecode by the Java compiler.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Spring’s AOT engine analyzes the code under a closed-world assumption and generates
+    AOT source code and reachability metadata.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The AOT-generated code is compiled into bytecode using the Java compiler.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The application’s bytecode, together with the reachability metadata and bytecode
+    created by the AOT engine, is sent to GraalVM’s Native Image compiler, which creates
+    the Native Image.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: For more information on how the creation of GraalVM Native Images is supported
+    in Spring Boot 3, see [https://docs.spring.io/spring-boot/docs/current/reference/html/Native
+    Image.html](https://docs.spring.io/spring-boot/docs/current/reference/html/native-image.html).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Building a Native Image can be done in two ways:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Creating a Native Image for the current OS:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The first option uses Gradle’s `nativeImage` task. It will use the installed
+    GraalVM’s Native Image compiler to create an executable file for the current OS
+    and hardware architecture. The nativeImage task is available given that GraalVM’s
+    Gradle-plugin is declared in the build file.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Creating a Native Image as a Docker image
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The second option is to use the existing Gradle task, `bootBuildImage`, to create
+    a Docker image. Given that GraalVM’s Gradle plugin is declared in the build file,
+    the bootBuildImage task will create a Docker image that contains the Native Image
+    instead of a Java VM with the application’s JAR file that is used otherwise. The
+    Native Image will be built in a Docker container so that it will be built for
+    Linux. This also means that the GraalVM’s Native Image compiler does not need
+    to be installed when the bootBuildImage task is used. Under the hood, this task
+    uses **buildpacks**, instead of a Dockerfile, to create the Docker image.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: The concept of buildpacks was introduced by Heroku back in 2011\. In 2018, the
+    **Cloud Native Buildpacks** project ([https://buildpacks.io](https://buildpacks.io))
+    was created by Pivotal and Heroku, and later that year, it joined CNCF.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To be a bit more formal, a buildpack creates an **OCI image**, according to
+    the OCI Image Format Specification: [https://github.com/opencontainers/image-spec/blob/master/spec.md](https://github.com/opencontainers/image-spec/blob/master/spec.md).
+    Since the OCI specification is based on Docker’s image format, the formats are
+    very similar and are both supported by container engines.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To create the OCI images, Spring Boot uses buildpacks from the **Paketo** project;
+    for more information, see [https://docs.spring.io/spring-boot/docs/3.0.5/reference/html/container-images.html#container-images.buildpacks](https://docs.spring.io/spring-boot/docs/3.0.5/reference/html/container-images.html#container-images.buildpacks)
+    and [https://paketo.io/docs/builders](https://paketo.io/docs/builders). Unfortunately,
+    Paketo’s buildpacks did not support `arm64`, including Apple silicon, at the time
+    of writing this chapter. The `amd64` (Intel)-based buildpacks technically works
+    on a MacBook with Apple silicon but runs painfully slowly. As suggested here,
+    [https://www.cloudfoundry.org/blog/arm64-paketo-buildpacks/](https://www.cloudfoundry.org/blog/arm64-paketo-buildpacks/),
+    unofficial Docker images for `arm64` can be used as a temporary workaround. They
+    are available here: [https://hub.docker.com/r/dashaun/builder-arm](https://hub.docker.com/r/dashaun/builder-arm).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating Native Images with the `nativeImage` task for the local OS is faster
+    than creating Docker images. Therefore, the `nativeImage` task can be used for
+    a quick feedback loop when initially trying to build a Native Image successfully.
+    But once that has been worked out, creating Docker images containing the Native
+    Image is the most useful alternative for testing natively compiled microservices,
+    together with either Docker Compose or Kubernetes. In this chapter, we will use
+    the unofficial Docker images mentioned above, named `dashaun/builder:tiny`. Docker
+    images for both `arm64` and `amd64` are provided.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Several tools and projects are available to help eliminate challenges with native
+    compilation. The next section will give an overview of them, and in the *Testing
+    and compiling Native Images* section, we will learn how to use them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Handling problems with native compilation
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Natively compiling Spring Boot applications is, as already mentioned, not yet
+    mainstream. Therefore, you will probably run into problems when trying it out
+    on your own applications. This section will go through a few projects and tools
+    that can be used to handle these problems. Examples of how to use these tools
+    will be provided in the sections below.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following project and tools can be used to handle problems with native
+    compilation of Spring Boot applications:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Spring AOT smoke tests:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'This project contains a suite of tests verifying that the various Spring projects
+    work when natively compiled. Whenever you encounter issues with natively compiling
+    a Spring feature, you should start looking into this project for a working solution.
+    Also, if you want to report a problem with natively compiling a Spring project,
+    you can use tests from this project as a boilerplate to demonstrate the problem
+    in a reproducible way. The project is available at [https://github.com/spring-projects/spring-aot-smoke-tests](https://github.com/spring-projects/spring-aot-smoke-tests).
+    Test results can be found in Spring’s CI environment. For example, the tests of
+    the various Spring Cloud projects can be found here: [https://ci.spring.io/teams/spring-aot-smoke-tests/pipelines/spring-aot-smoke-tests-3.0.x?group=cloud-app-tests](https://ci.spring.io/teams/spring-aot-smoke-tests/pipelines/spring-aot-smoke-tests-3.0.x?group=cloud-app-tests).'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'GraalVM reachability metadata repository:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This project contains reachability metadata for various open-source projects
+    that do not yet support native compilation themselves. The GraalVM community can
+    submit reachability metadata, which is approved after a review by the project’s
+    team. GraalVM’s Gradle plugin automatically looks up reachability metadata from
+    this project and adds it when natively compiling. For more information, see [https://graalvm.github.io/native-build-tools/0.9.18/gradle-plugin.html#metadata-support](https://graalvm.github.io/native-build-tools/0.9.18/gradle-plugin.html#metadata-support).
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Testing AOT-generated code with the Java VM:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Since natively compiling a Spring Boot application takes a few minutes, an interesting
+    alternative can be to try out the initialization code generated by the Spring
+    AOT engine on the Java VM. Normally the AOT-generated code is ignored when using
+    a Java VM, but this can be changed by setting the system property `spring.aot.enabled`
+    to `true`. This means that the normal reflection-based initialization of the application
+    is replaced by executing the generated initialization code. This can be used as
+    a quick verification that the generated initialization code works as expected.
+    Another positive effect is that the application starts slightly faster.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Providing custom hints:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If an application requires custom reachability metadata for the GraalVM Native
+    Image compiler to create a Native Image, they can be provided as JSON files as
+    described in the *Introducing the GraalVM project* section. Spring provides an
+    alternative to the JSON files by either using an annotation named `@RegisterReflectionForBinding`
+    or implementing the `RuntimeHintsRegistrar` interface in a class, which can be
+    activated by using the `@ImportRuntimeHints` annotation. The `RegisterReflectionForBinding`
+    annotation is easier to use, but implementing the `RuntimeHintsRegistrar` interface
+    gives full control of the hints specified.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: One important benefit of using Spring’s custom hints over using GraalVM JSON
+    files is that the custom hints are type-safe and checked by the compiler. If an
+    entity referred to in a GraalVM JSON file is renamed, but the JSON file is not
+    updated, that metadata is lost. This will result in the GraalVM Native Image compiler
+    failing to create a Native Image.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: When using custom hints, the source code will not even compile; typically, the
+    IDE will complain as soon as the entity is renamed that the custom hint is no
+    longer valid.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Running native tests:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Even though testing AOT-generated code with the Java VM can give a quick indication
+    of whether the native compilation will work, we still need to create the Native
+    Image of the application to test it fully. A feedback loop based on creating a
+    Native Image, starting the application, and finally running some tests by hand
+    is very slow and error-prone. A compelling alternative to this process is to run
+    **native tests**, where Spring’s Gradle plugin automatically will create a Native
+    Image and then run JUnit tests defined in the application’s project using the
+    Native Image. This still will take time due to the native compilation, but the
+    process is fully automated and repeatable. After ensuring the native tests run
+    as expected, they can be placed in a CI build pipeline for automated execution.
+    Native tests can be started using Gradle with this command:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Using GraalVM’s tracing agent:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If it turns out to be hard to determine what reachability metadata and/or custom
+    hints are required to create a working Native Image for an application, GraalVM’s
+    tracing agent can help out. If the tracing agent is enabled when running the application
+    in the Java VM, it can gather the required reachability metadata based on how
+    the application uses reflection, resources, and proxies. This is specifically
+    useful if run together with JUnit tests since gathering the required reachability
+    metadata will be automated and repeatable.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: With the tooling introduced and explained for how to handle the main expected
+    challenges, let’s see what changes are required in the source code to be able
+    to natively compile the microservices.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Changes in the source code
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Before compiling the Java source code in the microservices into native executable
+    images, the source code needs to be updated a bit. To be able to natively compile
+    the microservices, the following changes have been applied to the source code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Gradle build files, `build.gradle`, have been updated by adding the GraalVM
+    plugin, adjusting some dependencies, and configuring the `bootBuildImage` command.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Required reachability metadata and custom hints have been added.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Build time property files have been added to ensure that required Spring beans
+    are reachable during the AOT processing at build time.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some properties used at runtime have been added to the `config-repo` to make
+    the natively compiled microservices operate successfully.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The configuration to be able to run the GraalVM Native Image tracing agent has
+    been added.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The verification script, `test-em-all.bash`, has been updated since the Docker
+    images no longer include the `curl` command.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Native tests have been disabled using the annotation `@DisabledInNativeImage`
+    at the class level as described in the *Running native tests* section.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Two new Docker Compose files for using the Docker images containing the Native
+    Images have been added.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'A system property has been added to the microservices’ `Dockerfile` to simplify
+    toggling AOT mode. The `ENVIRONMENT` command has been updated to disable AOT mode
+    when run with the Java VM. It looks like this:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Note that it doesn’t work to specify `spring.aot.enabled` as an environment
+    variable or in a property file; it has to be set as a system property on the `java`
+    command.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let’s go through the changes one by one and start with changes applied to the
+    build files.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Updates to the Gradle build files
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The changes described in this section have been applied to the `build.gradle`
+    files in each microservice project unless stated otherwise.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following updates have been applied:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To enable Spring AOT tasks, the GraalVM plugin has been added:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'The `bootBuildImage` task is configured to specify the name of the Docker image
+    that is created. The same naming conventions are used as in earlier chapters,
+    but the name of the image is prefixed with `native-` to separate it from the existing
+    Docker images. Also, a Docker image for the builder that supports `arm64`, `dashaun/builder:tiny`,
+    is specified. For the `product` microservice, the configuration looks like this:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: To get around some problems with native compilation, Spring Boot has been upgraded
+    from v3.0.4, as used in the other chapters, to v3.0.5\. For the same reason, `springdoc-openapi`
+    has been upgraded from v2.0.2 to v2.1.0.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Due to the issue described at [https://github.com/spring-projects/spring-boot/issues/33238](https://github.com/spring-projects/spring-boot/issues/33238),
+    the `jar` task is no longer disabled.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: To recap why the `jar` task was disabled, see the *Implementing our API* section
+    in *Chapter 3*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: These are all the changes required for the build files. In the next section,
+    we will learn about how we need to help the native compiler to compile our source
+    code in some cases.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Providing reachability metadata and custom hints
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: There are a few cases in the source code where the GraalVM native compiler needs
+    help to be able to compile the source code correctly. The first case is the JSON-based
+    APIs and messages that the microservices use. The JSON parser, Jackson, must be
+    able to create Java objects based on the JSON documents that the microservices
+    receive. Jackson uses reflection to perform this work, and we need to tell the
+    native compiler about the classes to which Jackson will apply reflection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For example, a native hint for the `Product` class looks like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: All necessary custom hint annotations have been added to each microservice’s
+    main class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'When this chapter was written, the Resilience4J annotations did not work properly
+    when natively compiled. In issue `#1882`, a solution for this problem is proposed
+    by providing an implementation of the `RuntimeHintsRegistrar` interface. For details,
+    see [https://github.com/resilience4j/resilience4j/issues/1882](https://github.com/resilience4j/resilience4j/issues/1882).
+    This solution has been applied to the `NativeHintsConfiguration` class in the
+    `product-service` project. The most central parts of the class look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: From the source code above, we can see that hints are registered for the three
+    annotations used in the `product-composite` microservice, the circuit breaker,
+    retry, and time limiter. The class also provides the necessary configuration by
+    importing itself using the `ImportRuntimeHints` annotation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A final corner case is that we must provide reachability metadata for Resilience4J’s
+    use of reflection in the declaration of the `retry` mechanism. The configuration
+    looks like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This configuration will enable the `retry` mechanism to retry errors of type
+    `InternalServerError`. To let the GraalVM Native Image compiler know that reflection
+    must be enabled for this class, the third way of supplying reachability metadata
+    has been used: by providing a GraalVM config file. See `src/main/resources/META-INF/Native
+    Image/reflect-config.json` in the `product-composite` project.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: We now know how to provide metadata and custom hints for our own source code.
+    Next, we will learn how we can ensure that Spring beans required at runtime also
+    exist at build time so that the AOT processing can introspect them and generate
+    proper AOT code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Enabling Spring beans at build time in application.yml files
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As mentioned above, due to the closed-world assumption that the static analysis
+    uses at build time, all Spring beans required at runtime must be reachable at
+    build time. Otherwise, they cannot be activated at runtime. Given that they are
+    reachable at build time, they can be configured at runtime. To summarize, this
+    means that if you are using Spring beans that are only created if some profiles
+    are set or if some conditions are met (using the `@Profile` or `@ConditionalOnProperty`
+    annotations), you must ensure that these profiles and conditions are met at build
+    time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For example, the possibility to specify a separate management port at runtime
+    when using a natively compiled microservice is only possible if the management
+    port was set to a random port (different from the standard port) at build time.
+    Therefore, each microservice has an `application.yml` file in its `src/main/resources`
+    folder that specifies:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: With this specified at build time, when the Native Image is created, the management
+    port can be set to any value at runtime using property files in the `config-repo`
+    folder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Below is a list of all properties set at build time in the `application.yml`
+    files to avoid these types of problems for various Spring beans used by the four
+    microservices:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: As reported in issue `#2255`, the Swagger UI does not display the **Authorize**
+    button when natively compiled. See [https://github.com/springdoc/springdoc-openapi/issues/2255](https://github.com/springdoc/springdoc-openapi/issues/2255).
+  prefs: []
+  type: TYPE_NORMAL
+- en: There can also exist cases where natively compiled microservices also require
+    slightly different configurations at runtime; this will be covered in the next
+    section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Updated runtime properties
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In one case, a runtime property also needs to be updated when using natively
+    compiled images. That is the connection string for the MySQL database used by
+    the `review` microservice. Since not all character sets are represented in the
+    Native Image by default, we must specify one as available in the Native Image.
+    We will use the UTF-8 character set. This is done for all MySQL connection properties
+    in the review config file `config-repo/review.yml`. It looks like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: With the required changes of properties both at build time and runtime covered,
+    let’s learn how to configure the GraalVM Native Image tracing agent.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Configuration of the GraalVM Native Image tracing agent
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In cases where it is hard to determine what reachability metadata and/or custom
+    hints are required, we can use the GraalVM Native Image tracing agent. As previously
+    mentioned, it can, at runtime, detect the usage of reflection, resources, and
+    proxies and create the required reachability metadata based on that.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To enable the tracing agent to observe the execution of JUnit tests, the following
+    `jvmArgs` can be added to the `build.gradle` file in the `test` section:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: Since the tracing agent is not required to make native compilation work for
+    the microservices in this book, this configuration is commented out in the build
+    files.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The parameter `Native Image-agent=access-filter-file` specifies a file listing
+    Java packages and classes that the tracing agent should exclude, typically test-related
+    classes that we have no use for at runtime.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For example, for the `product` microservice, the file `src/test/resources/access-filter.json`
+    looks like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: The folder specified by the `config-output-dir` parameter will contain the generated
+    configuration files. The specified folder, `src/main/resources/META-INF/Native
+    Image`, is where the GraalVM native compiler looks for reachability metadata.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, let’s learn how the verification script has been adopted to be able
+    to test the Native Images.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Updates to the test-em-all.bash verification script
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In the previous chapters, `eclipse-temurin` was used as the base image for the
+    Docker images. The verification script, `test-em-all.bash`, uses the `curl` command
+    that comes with that base image for running circuit breaker tests inside the `product-composite`
+    container.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The verification script runs the `curl` command inside the `product-composite`
+    container since the endpoints used to verify the functionality of the circuit
+    breaker are not exposed outside of the internal network in Docker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With natively compiled microservices, the Docker image will no longer contain
+    utility tools like the `curl` command. To overcome this problem, the `curl` commands
+    are executed from the `auth-server`'s container, whose Docker image still is based
+    on `eclipse-temurin` and therefore contains the required `curl` command.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Since the tests of the circuit breaker are executed from the `auth-server`,
+    the hostname, `localhost`, is replaced with `product-composite`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For details, see the verification script `test-em-all.bash`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With the required changes in the source code explained, let’s learn how to use
+    the various tools mentioned in the previous sections to test and create Native
+    Images for the microservices.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing and compiling Native Images
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Now, it is time to try out the tools for testing and building Native Images!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following tools will be covered in this section:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the tracing agent
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Executing native tests
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating a Native Image for the current OS
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating a Native Image as a Docker image
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Since the first three tools require that the GraalVM and its `Native Image`
+    compiler are installed locally, we must install them first. Next, we will go through
+    the tools one by one.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Installing GraalVM and its Native Image compiler
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: If you want to try out native tests, the tracing agent, or the native compiler
+    without using Docker, you must first install the GraalVM JDK together with the
+    Native Image compiler.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It can be done by the following steps:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To install GraalVM, **SDKman** ([https://sdkman.io](https://sdkman.io)) will
+    be used. If not already installed, it can be installed with the following commands:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Verify that SDKman was installed correctly with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect it to return something like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'On Linux, GraalVM’s Native Image compiler requires GCC to be installed. If
+    you are running an Ubuntu instance under WSL 2 on Windows, you can install GCC
+    with the required dependencies with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Now GraalVM can be installed. Version 22.3.1 for Java 17 is used in this book.
+    It can be installed and set to the default Java version with the following commands:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Finally, the Native Image compiler can be installed with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'To verify the installation, run the following commands:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect a response from the `java -version` command like:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'For the `gu list` command, expect:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Now we are ready to try out the tools; let’s start with the tracing agent!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the tracing agent
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'For the microservices in this book, the tracing agent is not required. But
+    it can be of interest to see how to use it for other cases: if, for example, one
+    of your own microservices will require help from the tracing agent to generate
+    the required reachability metadata.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you want to try out the tracing agent, you can do so with the following
+    steps:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Activate the `jvmArgs` parameter in the section of the `build.gradle` file for
+    the selected microservice by removing the preceding comment characters `//`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Run a `gradle test` command, in this case for the `product` service:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: This is a normal `gradle test` command, but to avoid running out of memory,
+    we disable the use of the Gradle daemon. By default, the daemon is limited to
+    using 512 MB for its heap, which is insufficient for the tracing agent in most
+    cases.
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'After the tests are complete, you should find the following files in the `microservices/product-service/src/main/resources/META-INF/Native
+    Image` folder:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: After browsing through the generated files, wrap up by adding back the comment
+    before the `jvmArgs` parameter in the build file to disable the tracing agent
+    and remove the created files.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Next, we move on to how to use native tests!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running native tests
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Running native tests can, as described earlier, be very useful for automating
+    the process of finding issues with creating Native Images. Unfortunately, a couple
+    of problems currently prevent us from using native tests with the microservices
+    in this book:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tests that use Testcontainers can’t be used with native tests.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: For details, see [https://github.com/spring-projects/spring-boot/issues/35663](https://github.com/spring-projects/spring-boot/issues/35663).
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Tests that use Mockito cannot be used with native tests either.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: For details, see [https://github.com/spring-projects/spring-boot/issues/32195](https://github.com/spring-projects/spring-boot/issues/32195)
+    and [https://github.com/mockito/mockito/issues/2435](https://github.com/mockito/mockito/issues/2435).
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Therefore, all tests have been disabled using native tests using the annotation
+    `@DisabledInNativeImage` at the class level. This means that we still can run
+    the native test command; all Native Images will be created but no tests will currently
+    be executed in the Native Images. As these problems are resolved, the `@DisabledInNativeImage`
+    annotation can be removed step by step and more and more tests will be run by
+    the native test command.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To run the native tests on all four microservices, run the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To test a specific microservice, run a command like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After each test of a microservice, the native testing tool creates a test report
+    that looks like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: As can be seen in the report above, currently all tests are skipped.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After covering the test agent and native tests, let’s see how we can create
+    Native Images.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating a Native Image for the current OS
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The first option for creating a Native Image is to use Gradle’s `nativeImage`
+    command. It will use the installed GraalVM `Native Image` compiler to create an
+    executable file for the current OS and hardware architecture.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Since we will only test our microservices using Docker and Kubernetes, we will
+    not use Native Images created by this command. But to try it out on the `product-composite`
+    microservice, run the following commands:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Create the Native Image with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: The executable file will be created in the `build/native/nativeCompile` folder
+    with the name `product-composite-service`.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'The executable file can be inspected using the `file` command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'It will respond with something like:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Here, `Mach-O` indicates that the file is compiled for macOS, and `arm64` indicates
+    it is compiled for Apple silicon.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'To try it out, we need to start up the resources it needs manually. In this
+    case, it is only RabbitMQ that is required to make it start up successfully. Start
+    it up with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'The Native Image can now be started in the terminal by specifying the same
+    environment variables that are supplied in the `docker-compose` files:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'It should start up quickly and print something like the following in the log
+    output:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Try it out by calling its liveness probe:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect it to answer with:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Stop the execution by pressing *Ctrl* + *C* and stop the RabbitMQ container
+    with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Even though this is the fastest way to create a Native Image, it is not very
+    useful for the scope of this book. Instead, it needs to be built for Linux and
+    placed in a Docker container. Let’s jump into the next section and learn how to
+    do that.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating a Native Image as a Docker image
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Now, it is time to build Docker images containing Native Images of our microservices.
+    Go through the following steps:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is a very resource-demanding process. Therefore, first, ensure that Docker
+    Desktop is allowed to consume at least 10 GB of memory to avoid out-of-memory
+    faults.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: If a build fails with an error message that looks like `<container-name> exited
+    with code 137`, you have run out of memory in Docker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If your computer has less than 32 GB of memory, it could be a good idea to
+    stop the `minikube` instance at this time to avoid running out of memory in the
+    computer. Use the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Ensure that the Docker client talks to Docker Desktop and not to the `minikube`
+    instance:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Run the following command to compile the `product` service:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Expect it to take some time. The command will start a Docker container to perform
+    the native compilation. The first time it runs, it will also download the GraalVM
+    native compiler to be used in Docker, making the compilation time even longer.
+    On my MacBook, the first compilation takes a few minutes, mainly depending on
+    my network’s capacity; after that, it takes just around a minute or two.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Expect a lot of output during the compilation, including all sorts of warning
+    and error messages. A successful compilation ends with a log output like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Natively compile the three remaining microservices with the following commands:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'To verify that the Docker images were successfully built, run the following
+    command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect output like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![Graphical user interface, text  Description automatically generated](img/B19825_23_02.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 23.2: Docker images containing the natively compiled executables'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now that we’ve created the Docker images containing the natively compiled executables,
+    we are ready to try them out! We will start with Docker Compose and, after that,
+    try them out with Kubernetes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing with Docker Compose
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We are ready to try out the natively compiled microservices. To use the Docker
+    images that contain the natively compiled microservices, two new Docker Compose
+    files have been created, `docker-compose-native.yml` and `docker-compose-partitions-native.yml`.
+    They are copies of `docker-compose.yml`, and `docker-compose-partitions.yml`,
+    where the `build` option has been removed from the definitions of the microservices.
+    Also, the names of the Docker images to use have been changed, so the ones we
+    created in the previous section are used, with names that start with `native-`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will only use `docker-compose-native.yml`.; feel free to
+    try out `docker-compose-partitions-native.yml` on your own.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We’ll first get a benchmark using the Java VM-based microservices to compare
+    the startup times and initial memory consumption. We will run the following tests:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Use the Java VM-based microservices with AOT mode disabled.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Use the Java VM-based microservices with AOT mode enabled.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Use the Docker images that contain the natively compiled microservices.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To avoid port collisions, we first must stop the `minikube` instance with the
+    following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: Testing Java VM-based microservices with AOT mode disabled
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'We will start the tests by ignoring the AOT-generated code, starting the Java
+    VM-based microservices as we did in the previous chapters. Run through the following
+    commands to test the Java VM-based microservices:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Start by compiling the source code and building the Java VM-based Docker images
+    in Docker Desktop:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Use the default Docker Compose file for the Java VM-based microservices:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Start all containers, except the microservices’ containers:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Wait for the containers to start up until the CPU load goes down.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Start up the microservices using the Java VM:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Wait for the microservices to start up, again monitoring the CPU load.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'To find out how long time it took to start the microservices, we can look for
+    a log output containing `: Started`. Run the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect an output like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![A screen shot of a computer  Description automatically generated with medium
+    confidence](img/B19825_23_03.png)'
+  prefs:
+  - PREF_IND
+  type: TYPE_IMG
+- en: 'Figure 23.3: Startup times for Java VM-based microservices'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: In the output, we can see startup times varying from 5.5 to 7 seconds. Remember
+    that all four microservice instances were started simultaneously, resulting in
+    longer startup times compared to if they were started up one by one.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Run through the tests to verify that the system landscape works as expected:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect the output we have seen in previous chapters from the tests:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![A screenshot of a computer  Description automatically generated with medium
+    confidence](img/B19825_23_04.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Figure 23.4: Output from the test script'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Finally, to find out how much memory is used after starting up and running
+    the tests, run the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect a response like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![A screenshot of a computer program  Description automatically generated with
+    medium confidence](img/B19825_23_05.png)'
+  prefs:
+  - PREF_IND
+  type: TYPE_IMG
+- en: 'Figure 23.5: Memory usage for Java VM-based microservices'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: From the preceding output, we can see that the microservices consume around
+    240-310 MB.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Bring down the system landscape:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Now we know how long the microservices take to start up without using the AOT-generated
+    code; let’s test them in AOT mode.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing Java VM-based microservices with AOT mode enabled
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Now we will enable AOT mode, using the AOT-generated code to start the Java
+    VM-based microservices. We expect them to start a bit faster in AOT mode. Run
+    through the following commands:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Start all containers, except the microservices’ containers:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Enable AOT mode by editing each microservice’s Dockerfile and set “`-Dspring.aot.enabled=true`"
+    in the `ENVIRONMENT` command so it looks like this:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Rebuild the microservices:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Start the microservices:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Check AOT mode:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Expect four lines containing “`Starting AOT-processed`".
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Check the startup times:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Expect the same type of output as when running without AOT mode in the section
+    above but with slightly shorter startup times. In my case, the startup times vary
+    from 4.5 to 5.5 seconds. Compared to the normal Java VM startup times, this is
+    1 to 1.5 seconds faster.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Run `test-em-all.bash`:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Expect an output like when running without AOT mode in the section above.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Revert the changes in the Dockerfiles and perform a rebuild of the Docker images
+    to disable AOT mode.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Bring down the system landscape:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE57]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: In this test, we verified that Java VM-based microservices start up a bit faster
+    using the AOT-generated code. Now it’s time to try out the natively compiled microservices.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing natively compiled microservices
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Now, we are ready to repeat the same procedure, but this time using the Docker
+    images with the natively compiled microservices:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Change to the new Docker Compose file:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE58]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Start all containers, except for the microservices’ containers:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE59]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Wait for the containers to start up until the CPU load goes down.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Start up the microservices using the Java VM:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE60]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Wait for the microservices to start up, again monitoring the CPU load.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'To find out how long time it took to start the natively compiled microservices,
+    run the same command we ran previously:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE61]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect output like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![A screen shot of a computer  Description automatically generated with medium
+    confidence](img/B19825_23_06.png)'
+  prefs:
+  - PREF_IND
+  type: TYPE_IMG
+- en: 'Figure 23.6: Startup times for natively compiled microservices'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: In the above output, we can see startup times varying from 0.2-0.5 seconds.
+    Considering that all microservices instances were started up at the same time,
+    these are rather impressive figures compared to the 5.5 to 7 seconds it took for
+    the Java VM-based tests!
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Run through the tests to verify that the system landscape works as expected:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE62]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Expect the same output as from the test above using the Java VM-based Docker
+    images.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Finally, to find out how much memory is used after starting up and running
+    the tests, run the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE63]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect a response like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![A screenshot of a computer program  Description automatically generated with
+    medium confidence](img/B19825_23_07.png)'
+  prefs:
+  - PREF_IND
+  type: TYPE_IMG
+- en: 'Figure 23.7: Memory usage for natively compiled microservices'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: From the preceding output, we can see that the microservices consume around
+    80-130 MB. Again, this is a noticeable reduction compared to the 240-310 MB that
+    the Java VM containers used!
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Bring down the system landscape:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE64]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: To get a better understanding of both the memory and CPU consumption of the
+    natively compiled microservices, a more realistic load test needs to be performed,
+    but that is beyond the scope of this book.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After seeing how much faster and less memory-consuming the natively compiled
+    microservices are when starting up compared to Java VM-based alternatives, let’s
+    see how we can run them using Kubernetes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing with Kubernetes
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To be able to deploy the natively compiled microservices in Kubernetes, a new
+    environment Helm chart has been added, which has been configured to use the Docker
+    images that contain the natively compiled microservices. The Helm charts can be
+    found in the following folders:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE65]'
+  prefs: []
+  type: TYPE_PRE
+- en: Another thing we need to consider before deploying the natively compiled microservices
+    to Kubernetes is how to provision the Docker images. We don’t want to run the
+    lengthy native compilation commands again to get new Docker images created in
+    the `minikube` instance. If we used a Docker registry in this book, we could have
+    pushed the images to the registry, but we haven’t. Instead, we will extract the
+    Docker images from Docker Desktop and import them into the `minikube` instance,
+    as a workaround for not using a Docker registry.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Move the Docker images from Docker Desktop to the `minikube` instance with
+    the following commands:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Export the Docker images from Docker Desktop:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE66]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Start up the `minikube` instance again:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE67]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'In a separate terminal, start the `minikube tunnel` command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE68]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Note that this command requires that your user has `sudo` privileges and that
+    you enter your password during startup. It can take a couple of seconds before
+    the command asks for the password, so it is easy to miss!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Import the Docker images into the `minikube` instance:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE69]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Finally, delete the exported `.tar` files:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE70]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Building, deploying, and verifying the deployment on Kubernetes is done in
+    the same way as in the previous chapters. Run the following commands:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Build the Docker image for the `auth-server` with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE71]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Recreate the namespace, `hands-on`, and set it as the default Namespace:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE72]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Resolve the Helm chart dependencies with the following commands.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'First, we update the dependencies in the `components` folder:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE73]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Next, we update the dependencies in the `environments` folder:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE74]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'We are now ready to deploy the system landscape using Helm. Run the following
+    command and wait for all the deployments to complete:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE75]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: In the previous chapters, we used the `helm install` command. The `helm upgrade
+    -install` command used here is a better alternative for scripting since it performs
+    an `insert` if the chart is not installed, but an `upgrade` if the chart is already
+    installed. It’s a bit like an `upsert` command in the relational database world.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Run the normal tests to verify the deployment with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE76]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Expect the output to be like what we’ve already seen in the previous tests.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Check the startup time for one of the Pods. To measure the actual startup time
+    for a specific microservice, let’s delete it and then measure the time it takes
+    to start up once Kubernetes recreates it:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE77]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect a response like this:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![](img/B19825_23_08.png)'
+  prefs:
+  - PREF_IND
+  type: TYPE_IMG
+- en: 'Figure 23.8: Startup time when running as a Pod in Kubernetes'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Expect a startup time around what we noticed when using Docker Compose, 0.4
+    seconds in the example above. Since we also start an Istio proxy as a sidecar,
+    there might be some extra delay.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Check the Docker images used with the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE78]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Expect the following response:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![A screenshot of a computer program  Description automatically generated with
+    low confidence](img/B19825_23_09.png)'
+  prefs:
+  - PREF_IND
+  type: TYPE_IMG
+- en: 'Figure 23.9: Docker images with natively compiled code'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: From the output, we can see that all containers, except the `auth-server`, use
+    Docker images with the same prefix `native`, meaning we are running natively compiled
+    executables inside the Docker containers.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: This completes this chapter on using Spring’s AOT engine and the GraalVM project
+    to create natively compiled executables for our microservices.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we were introduced to the new *Spring AOT engine* and underlying
+    *GraalVM* project, along with its Native Image compiler. After declaring GraalVM’s
+    plugin in the build file and providing the Native Image compiler with some reachability
+    metadata and custom hints, it can be used to create Native Images. Spring Boot’s
+    Gradle task `buildBootImage` packages these standalone executable files into ready-to-use
+    Docker images.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The main benefit of compiling Java-based source code into Native Images is significantly
+    faster startup time and less memory usage. In a test where we started up the microservice
+    instances at the same time, we observed 0.2-0.5 seconds startup times for the
+    natively compiled microservices, compared with the 5.5 to 7 seconds required for
+    the Java VM-based microservices for the same test. Also, the natively compiled
+    microservices required less than half of the memory compared to the Java VM-based
+    microservices after running through the verifications in the script, `test-em-all.bash`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Most libraries and frameworks in this book already support GraalVM’s `Native
+    Image` compiler. For those that don’t, *GraalVM Reachability Metadata Repository*
+    can help out by providing reachability metadata from the community. GraalVM’s
+    build plugin can automatically detect and download reachability metadata from
+    this repository. As a last resort, the GraalVM Native Image *tracing agent* can
+    be used to create reachability metadata to help the native compiler. The tracing
+    agent is configured to run together with the existing JUnit tests, creating reachability
+    metadata based on the execution of the tests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If we find it problematic to get the Native Image creation to work properly
+    for a specific Spring feature, we can reach out to the *Spring AOT Smoke Tests*
+    project for working examples per Spring feature. To verify that the microservices
+    will work once natively compiled, we can run the unit tests in a Native Image
+    using Spring Boot’s Gradle task `nativeTest`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For the time being, the `nativeTest` task is not very useful with the source
+    code in this book due to the described problems that existed when this chapter
+    was written.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have also seen how easy it is to replace the Docker images running a Java
+    VM with Docker images containing the natively compiled images. By running the
+    Java VM Docker images in *AOT mode*, the startup times can be reduced a bit and,
+    at the same time, we ensure that the generated AOT code works as expected. Finally,
+    we tested the natively compiled images, both using Docker Compose and Kubernetes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With this, we have reached the end of the book. I hope it has helped you learn
+    how to develop microservices using all the amazing features of Spring Boot, Spring
+    Cloud, Kubernetes, and Istio and that you feel encouraged to try them out!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Questions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: How are the Spring’s AOT engine and the GraalVM projects related to each other?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: How is the tracing agent used?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What is the difference between JIT and AOT compilation?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What is AOT mode, and how can it be beneficial to use?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What is a native custom hint?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What is a native test, and why is it useful?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: How are initial memory usage and startup times affected by natively compiling
+    Java code?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Join our community on Discord
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Join our community’s Discord space for discussion with the author and other
+    readers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[https://packt.link/SpringBoot3e](https://packt.link/SpringBoot3e)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/QR_Code1849216352344398875.png)'
+  prefs: []
+  type: TYPE_IMG
