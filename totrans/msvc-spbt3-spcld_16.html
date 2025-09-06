@@ -1,0 +1,1179 @@
+<html><head></head><body>
+<div id="book-content">
+<div id="sbo-rt-content"><div id="_idContainer391" class="Basic-Text-Frame">
+    <h1 class="chapterNumber">16</h1>
+    <h1 id="_idParaDest-393" class="chapterTitle">Deploying Our Microservices to Kubernetes</h1>
+    <p class="normal">In this chapter, we will deploy the microservices in this book to Kubernetes. To bundle and configure the microservices for Deployments in different runtime environments, <strong class="keyWord">Helm</strong>, a package manager for Kubernetes, will be used. Before doing that, we need to review how Service discovery is used. Since Kubernetes comes with built-in support for Service discovery, it seems unnecessary to deploy Netflix Eureka for that purpose. Finally, we will also try out some Spring Boot features that facilitate the Deployment of microservices in Kubernetes.</p>
+    <p class="normal">The following topics will be covered in this chapter:</p>
+    <ul>
+      <li class="bulletList">Replacing Netflix Eureka with Kubernetes Service objects and <code class="inlineCode">kube-proxy</code> for Service discovery</li>
+      <li class="bulletList">Introducing how Kubernetes will be used</li>
+      <li class="bulletList">Using Spring Boot’s support for graceful shutdown and probes for liveness and readiness</li>
+      <li class="bulletList">Using Helm to package, configure, and deploy the microservices in different environments</li>
+      <li class="bulletList">Verifying the Deployments with the test script, <code class="inlineCode">test-em-all.bash</code></li>
+    </ul>
+    <h1 id="_idParaDest-394" class="heading-1">Technical requirements</h1>
+    <p class="normal">For instructions on how to install the tools used in this book and how to access the source code for this book, see:</p>
+    <ul>
+      <li class="bulletList"><em class="chapterRef">Chapter 21</em>, <em class="italic">Installation Instructions for macOS</em></li>
+      <li class="bulletList"><em class="chapterRef">Chapter 22</em>, <em class="italic">Installation Instructions for Microsoft Windows with WSL 2 and Ubuntu</em></li>
+    </ul>
+    <p class="normal">The code examples in this chapter all come from the source code in <code class="inlineCode">$BOOK_HOME/Chapter16</code>.</p>
+    <p class="normal">If you want to view the changes applied to the source code in this chapter, that is, see what it took to deploy the microservices on Kubernetes, you can compare this source code with that in <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>. You can use your favorite <code class="inlineCode">diff</code> tool and compare the two folders, <code class="inlineCode">$BOOK_HOME/Chapter15</code> and <code class="inlineCode">$BOOK_HOME/Chapter16</code>.</p>
+    <h1 id="_idParaDest-395" class="heading-1">Replacing Netflix Eureka with Kubernetes Services</h1>
+    <p class="normal">As shown in the<a id="_idIndexMarker1109"/> previous chapter, <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>, Kubernetes comes with a built-in discovery <strong class="keyWord">service</strong> based on Kubernetes Service objects and the <code class="inlineCode">kube-proxy</code> runtime component. This makes it unnecessary to deploy a <a id="_idIndexMarker1110"/>separate discovery Service such as Netflix Eureka, which we used in the previous chapters.</p>
+    <p class="normal">An advantage of using the Kubernetes discovery Service is that it doesn’t require a client library such as Spring Cloud LoadBalancer, which we have used together with Netflix Eureka. This makes the Kubernetes discovery Service easy to use, independent of which language or framework a microservice is based on.</p>
+    <p class="normal">A drawback of using the Kubernetes discovery Service is that it only works in a Kubernetes environment. However, since the discovery Service is based on <code class="inlineCode">kube-proxy</code>, which accepts requests to the DNS name or IP address of a Service object, it should be fairly simple to replace it with a similar discovery Service, for example, one that comes bundled with another container orchestrator.</p>
+    <p class="normal">To summarize this, we will remove the discovery server based on Netflix Eureka from our microservice landscape, as illustrated in the following diagram:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_16_01.png" alt="Diagram  Description automatically generated" width="825" height="414"/></figure>
+    <p class="packt_figref">Figure 16.1: Replacing Netflix Eureka with the Kubernetes built-in discovery Service</p>
+    <p class="normal">To replace the discovery server based on Netflix Eureka with the built-in discovery Service in Kubernetes, we need to make some changes in our build and configuration files. We do not need to make any changes in the Java source code, except for some of the test classes, where a property is no longer required and, therefore, will be removed. The following changes have been applied to the source code:</p>
+    <ul>
+      <li class="bulletList">Netflix Eureka and the Spring Cloud LoadBalancer-specific configuration (client and server) have been removed from the configuration repository, <code class="inlineCode">config-repo</code>.</li>
+      <li class="bulletList">Routing rules in the gateway Service to the Eureka server have been removed from the <code class="inlineCode">config-repo/gateway.yml</code> file.</li>
+      <li class="bulletList">The Eureka server project, in the <code class="inlineCode">spring-cloud/eureka-server</code> folder, has been removed.</li>
+      <li class="bulletList">The Eureka server has been removed from the Docker Compose files and the <code class="inlineCode">settings.gradle</code> Gradle file.</li>
+      <li class="bulletList">The dependency on <code class="inlineCode">spring-cloud-starter-netflix-eureka-client</code> has been removed in all of Eureka’s client build files, <code class="inlineCode">build.gradle</code>.</li>
+      <li class="bulletList">The property setting <code class="inlineCode">eureka.client.enabled=false</code> has been removed from all integration tests of former Eureka clients.</li>
+      <li class="bulletList">The gateway Service no longer uses routing based on the client-side load balancer in Spring Cloud LoadBalancer, using the <code class="inlineCode">lb</code> protocol. For example, the <code class="inlineCode">lb://product-composite</code> routing destination <a id="_idIndexMarker1111"/>has been replaced with <code class="inlineCode">http://product-composite</code> in the <code class="inlineCode">config-repo/gateway.yml</code> file.</li>
+      <li class="bulletList">The HTTP port used<a id="_idIndexMarker1112"/> by the microservices and the authorization server has been changed from port <code class="inlineCode">8080</code> (<code class="inlineCode">9999</code> in the case of the authorization server) to the default HTTP port, <code class="inlineCode">80</code>. This has been configured in <code class="inlineCode">config-repo</code> for each affected Service, like so:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spring.config.activate.on-profile:</span> <span class="hljs-string">docker</span>
+<span class="hljs-attr">server.port:</span> <span class="hljs-number">80</span>
+</code></pre>
+      </li>
+    </ul>
+    <p class="normal">None of the HTTP addresses that we will use are affected by the replacement of Netflix Eureka with Kubernetes Services. For example, addresses used by the composite Service are unaffected:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">productServiceUrl</span> <span class="hljs-operator">=</span> <span class="hljs-string">"http://product"</span>;
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">recommendationServiceUrl</span> <span class="hljs-operator">=</span> <span class="hljs-string">"http://recommendation"</span>;
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">reviewServiceUrl</span> <span class="hljs-operator">=</span> <span class="hljs-string">"http://review"</span>;
+</code></pre>
+    <p class="normal">This is because we changed the HTTP port used by the microservices and the authorization server to the default HTTP port, <code class="inlineCode">80</code>, as described previously.</p>
+    <div class="packt_tip">
+      <p class="normal">Using Docker Compose still works, even though Netflix Eureka has been removed. The main reason that this works is that the container names in the Docker Compose files are the same as the corresponding Service names used in Kubernetes, meaning that the microservices’ DNS names are the same in both environments. This can be used to run functional tests of the microservices without deploying them to Kubernetes, for example, running <code class="inlineCode">test-em-all.bash</code> together with Docker Desktop in the same way we did in the previous chapters. Removing Netflix Eureka, however, means that we no longer have a discovery Service in place when using plain Docker and Docker Compose. Therefore, scaling microservices will only work when deploying to Kubernetes.</p>
+      <p class="normal">In <em class="chapterRef">Chapter 17</em>, <em class="italic">Implementing Kubernetes Features to Simplify the System Landscape</em>, in the section <em class="italic">Verifying that microservices work without Kubernetes</em>, we will discuss the importance of avoiding the source code of the microservices being dependent on the Kubernetes platform, thus avoiding vendor lock-in. We will also use the test script <code class="inlineCode">test-em-all.bash</code>, together with Docker Compose, to verify that the microservices don’t require Kubernetes from a functional perspective.</p>
+    </div>
+    <p class="normal">Now that we’ve <a id="_idIndexMarker1113"/>familiarized ourselves with how Netflix <a id="_idIndexMarker1114"/>Eureka will be replaced with Kubernetes Services, let’s introduce the other Kubernetes objects we will use.</p>
+    <h1 id="_idParaDest-396" class="heading-1">Introducing how Kubernetes will be used</h1>
+    <p class="normal">Later on in the chapter, we will see in detail how various Kubernetes objects are used to deploy the microservices and the <a id="_idIndexMarker1115"/>resource managers they depend on, like databases and queue managers. Before delving into all the details, let’s get an overview of the Kubernetes objects that will be used:</p>
+    <ul>
+      <li class="bulletList">For each microservice, database, and queue manager that will be deployed in Kubernetes, one Deployment object and one Service object will be created. For all components, except for the edge server named <code class="inlineCode">gateway</code>, the Service object will be of type <code class="inlineCode">ClusterIP</code>. For the gateway, the Service object will be of type <code class="inlineCode">NodePort</code>, accepting external HTTPS requests on port <code class="inlineCode">30433</code>.</li>
+      <li class="bulletList">The config server will use a ConfigMap, containing the configuration files in the <code class="inlineCode">config-repo</code>.</li>
+      <li class="bulletList">To hold credentials for the config server and its clients, two Secrets will be created: one for the config server and one for its clients.</li>
+    </ul>
+    <p class="normal">Now that we’ve seen what Kubernetes objects will be created, let’s learn about the Spring Boot features that facilitate deployment to Kubernetes.</p>
+    <h1 id="_idParaDest-397" class="heading-1">Using Spring Boot’s support for graceful shutdown and probes for liveness and readiness</h1>
+    <p class="normal">Back in Spring Boot v2.3, a couple of useful features were added to support Deployments to Kubernetes:</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Graceful shutdown:</strong></li>
+    </ul>
+    <p class="normal">Whenever a microservice instance <a id="_idIndexMarker1116"/>needs to be stopped, for example, in a rolling upgrade scenario, there is a risk that active requests are affected when the instance is stopped. To minimize this risk, Spring Boot has added support for graceful shutdown. When applying graceful shutdown, a microservice stops accepting new requests and waits for a configurable time for active requests to complete before it shuts down the application. Requests that take a longer time to complete than the shutdown wait period will be aborted. These requests will be seen as exceptional cases that a shutdown procedure can’t wait for before it stops the application.</p>
+    <p class="normal">Graceful shutdown has been enabled with a waiting period of 10 seconds for all microservices by adding<a id="_idIndexMarker1117"/> the following to the common file <code class="inlineCode">application.yml</code> in the <code class="inlineCode">config-repo</code> folder:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">server.shutdown:</span> <span class="hljs-string">graceful</span>
+<span class="hljs-attr">spring.lifecycle.timeout-per-shutdown-phase:</span> <span class="hljs-string">10s</span>
+</code></pre>
+    <p class="normal">For more information, see <a href="https://docs.spring.io/spring-boot/docs/3.0.4/reference/htmlsingle/#features.graceful-shutdown"><span class="url">https://docs.spring.io/spring-boot/docs/3.0.4/reference/htmlsingle/#features.graceful-shutdown</span></a>.</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Liveness and readiness probes:</strong></li>
+    </ul>
+    <p class="normal">As described in <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>, proper <a id="_idIndexMarker1118"/>implementations of liveness and readiness probes are essential for Kubernetes to be able to manage our Pods. </p>
+    <p class="normal">To briefly recap, a liveness probe tells Kubernetes if a Pod needs to be replaced, and a readiness probe tells Kubernetes if its Pod is ready to accept requests. To simplify this work, Spring Boot has added support to implement liveness and readiness probes. The probes are exposed on the URLs <code class="inlineCode">/actuator/health/liveness</code> and <code class="inlineCode">/actuator/health/readiness</code> respectively. They can either be declared by configuration or implementation in source code, if increased control is required compared to what configuration gives. When declaring the probes by<a id="_idIndexMarker1119"/> configuration, a <strong class="keyWord">health group</strong> can be declared for each probe, specifying what existing health indicators it should include. For example, a readiness probe should report <code class="inlineCode">DOWN</code> if a microservice can’t access its MongoDB database. In this case, the health group for the readiness probe should include the <code class="inlineCode">mongo</code> health indicator. For available health indicators, see <a href="https://docs.spring.io/spring-boot/docs/3.0.4/reference/htmlsingle/#actuator.endpoints.health.auto-configured-health-indicators"><span class="url">https://docs.spring.io/spring-boot/docs/3.0.4/reference/htmlsingle/#actuator.endpoints.health.auto-configured-health-indicators</span></a>.</p>
+    <p class="normal">In this chapter, we will declare the probes using the following configuration in the common file <code class="inlineCode">application.yml</code> in the <code class="inlineCode">config-repo</code> folder:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">management.endpoint.health.probes.enabled:</span> <span class="hljs-literal">true</span>
+<span class="hljs-attr">management.endpoint.health.group.readiness.include:</span> readinessState, 
+<span class="hljs-string">rabbit,</span> <span class="hljs-string">db,</span> <span class="hljs-string">mongo</span>
+</code></pre>
+    <p class="normal">The first line of the configuration enables the liveness and readiness probes. The second line declares that readiness probes will include health indicators for RabbitMQ, MongoDB, and SQL databases, if available. For the liveness probe, we don’t need to add any extra health indicators. For the scope of this chapter, it is sufficient that the liveness probe reports <code class="inlineCode">UP</code> given that the Spring Boot application is up and running.</p>
+    <p class="normal">For more information, see <a href="https://docs.spring.io/spring-boot/docs/3.0.4/reference/htmlsingle/#actuator.endpoints.kubernetes-probes"><span class="url">https://docs.spring.io/spring-boot/docs/3.0.4/reference/htmlsingle/#actuator.endpoints.kubernetes-probes</span></a>.</p>
+    <p class="normal">We will try out these features once we have deployed our microservices in Kubernetes. Before we do that, we need to learn about Helm and see how it helps us bundle, configure, and deploy microservices to Kubernetes.</p>
+    <h1 id="_idParaDest-398" class="heading-1">Introducing Helm</h1>
+    <p class="normal">As described above, deploying a microservice to Kubernetes requires writing manifest files that declare the desired state of a Deployment object and a Service object. If we also need to add some configuration for the<a id="_idIndexMarker1120"/> microservices, manifests for ConfigMaps and Secrets must be added. The approach of declaring a desired state and handing over the responsibility to Kubernetes to ensure that the actual state is always as close as possible to the desired state is very useful.</p>
+    <p class="normal">However, writing and maintaining these manifest files can become a significant maintenance overhead. The files will contain a lot of boilerplate code, meaning duplicated manifests that will look the same for all microservices. It is also cumbersome to handle environment-specific settings without duplicating the whole set of manifest files, even though only a fraction of the content needs to be updated.</p>
+    <p class="normal">In the case of a few microservices that will only be deployed to a few environments, like a test, QA, and production environment, this might not be a major issue to handle. </p>
+    <p class="normal">When the number of microservices grows to tens and hundreds and it must be possible to deploy different groups of microservices to different test, QA, and production environments, this quickly becomes an unmanageable maintenance problem.</p>
+    <p class="normal">To address these shortcomings, we<a id="_idIndexMarker1121"/> will use Helm (<a href="https://helm.sh"><span class="url">https://helm.sh</span></a>), an open source-based package manager for Kubernetes. With Helm comes a templating language that can be used to extract settings specific to a microservice or an environment from generic definitions of the various Kubernetes objects used.</p>
+    <div class="packt_tip">
+      <p class="normal">For smaller system landscapes with only a few Deployment objects, simpler templating tools can be sufficient. For example, if you are already familiar with <strong class="keyWord">Ansible</strong> and its <strong class="keyWord">Jinja2</strong> templates, they can be used instead. Also, <code class="inlineCode">kubectl</code> itself comes with built-in <a id="_idIndexMarker1122"/>support for <strong class="keyWord">Kustomize</strong>, offering a template-free alternative to customize Kubernetes manifest files.</p>
+    </div>
+    <p class="normal">A package is known as a <strong class="keyWord">chart</strong> in Helm. A chart contains templates, default values for the templates, and optional dependencies <a id="_idIndexMarker1123"/>on definitions in other charts. Each component that needs to be deployed, meaning the microservices and the resource managers they depend on like databases and queue managers, will have its own chart describing how to deploy it.</p>
+    <p class="normal">To extract boilerplate definitions from the components’ charts, a special type of chart, a <strong class="keyWord">library chart</strong>, will be used. A<a id="_idIndexMarker1124"/> library chart doesn’t contain any deployable definitions but only templates expected to be used by other charts for Kubernetes manifests – in our case, for Deployment, Service, ConfigMap, and Secret objects.</p>
+    <p class="normal">Finally, to be able to describe how to deploy all components into different types of environments, for example, for <a id="_idIndexMarker1125"/>development and testing or staging and production, the concept of <strong class="keyWord">parent charts</strong> and <strong class="keyWord">subcharts</strong> will be <a id="_idIndexMarker1126"/>used. We will define two types of environments, <code class="inlineCode">dev-env</code> and <code class="inlineCode">prod-env</code>. Each environment will be implemented as a parent chart that depends on different sets of subcharts, for example, the microservice charts. The environment charts will also provide environment-specific default values, such as for the requested number of Pods, Docker image versions, credentials, and resource requests and limits.</p>
+    <p class="normal">In summary, we will have one reusable library chart, named <code class="inlineCode">common</code>; a set of microservice- and resource manager-specific<a id="_idIndexMarker1127"/> charts, placed in the <code class="inlineCode">components</code> folder; and two environment-specific parent charts, placed in the <code class="inlineCode">environments</code> folder. The file structure looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">|-- common
+|   |-- Chart.yaml
+|   |-- templates
+|   |-- templates_org
+|   `-- values.yaml
+|-- components
+|   |-- auth-server
+|   |-- config-server
+|   |-- gateway
+|   |-- mongodb
+|   |-- mysql
+|   |-- product
+|   |-- product-composite
+|   |-- rabbitmq
+|   |-- recommendation
+|   |-- review
+|   `-- zipkin-server
+`-- environments
+    |-- dev-env
+    `-- prod-env
+</code></pre>
+    <p class="normal">The files can be found in the folder <code class="inlineCode">$BOOK_HOME/Chapter16/kubernetes/helm</code>.</p>
+    <p class="normal">To share Helm charts with others, they can be published to a Helm <strong class="keyWord">chart repository</strong>. In this book we will not publish any charts, but in <em class="italic">Chapter 17</em>, <em class="italic">Implementing Kubernetes Features to Simplify the System Landscape</em>, we will install a component named <strong class="keyWord">cert-manager</strong> using a Helm chart from a chart repository.</p>
+    <p class="normal">Before we learn about how charts are constructed, let’s learn about the most frequently used Helm commands and how to run them.</p>
+    <h2 id="_idParaDest-399" class="heading-2">Running Helm commands</h2>
+    <p class="normal">To make Helm <a id="_idIndexMarker1128"/>do something for us, we will use its CLI tool, <code class="inlineCode">helm</code>.</p>
+    <p class="normal">Some of the most frequently used Helm commands are:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">create</code>: Used to create new charts.</li>
+      <li class="bulletList"><code class="inlineCode">dependency update</code> (<code class="inlineCode">dep up</code> for short): Resolves dependencies on other charts. Charts are placed in the <code class="inlineCode">charts</code> folder and the file <code class="inlineCode">Chart.lock</code> is updated.</li>
+      <li class="bulletList"><code class="inlineCode">dependency build</code>: Rebuilds the dependencies based on the content in the file <code class="inlineCode">Chart.lock</code>.</li>
+      <li class="bulletList"><code class="inlineCode">template</code>: Renders the definition files created by the templates.</li>
+      <li class="bulletList"><code class="inlineCode">install</code>: Installs a chart. This command can override the values supplied by a chart, either using the <code class="inlineCode">--set</code> flag to override a single value or using the <code class="inlineCode">--values</code> flag to supply its own <code class="inlineCode">yaml</code> file with values.</li>
+      <li class="bulletList"><code class="inlineCode">install --Dry-run</code>: simulates a Deployment without performing it; it’s useful for verifying a Deployment before executing it.</li>
+      <li class="bulletList"><code class="inlineCode">list</code>: Lists installations in the current n amespace.</li>
+      <li class="bulletList"><code class="inlineCode">upgrade</code>: Updates an existing installation.</li>
+      <li class="bulletList"><code class="inlineCode">uninstall</code>: Removes an installation.</li>
+    </ul>
+    <p class="normal">For full documentation<a id="_idIndexMarker1129"/> of the commands that Helm provides, see <a href="https://helm.sh/docs/helm/"><span class="url">https://helm.sh/docs/helm/</span></a>.</p>
+    <p class="normal">Let’s put these Helm commands in context and see what files a chart consists of.</p>
+    <h2 id="_idParaDest-400" class="heading-2">Looking into a Helm chart</h2>
+    <p class="normal">A Helm chart has a<a id="_idIndexMarker1130"/> predefined structure of files. We will use the following files:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">Chart.yaml</code>, which contains general information about the chart and a list of other charts it might depend on.</li>
+      <li class="bulletList"><code class="inlineCode">templates</code>, a folder that contains the templates that will be used to deploy the chart.</li>
+      <li class="bulletList"><code class="inlineCode">values.yaml</code>, which contains default values for the variables used by the templates.</li>
+      <li class="bulletList"><code class="inlineCode">Chart.lock</code>, a file created by Helm when resolving the dependencies described in the <code class="inlineCode">Chart.yaml</code> file. This information describes in more detail what dependencies are actually used. It is used by Helm to track the entire dependency tree, making it possible to recreate the dependency tree exactly as it looked the last time the chart worked.</li>
+      <li class="bulletList"><code class="inlineCode">charts</code>, a folder that will contain the charts this chart depends on after Helm has resolved the dependencies.</li>
+      <li class="bulletList"><code class="inlineCode">.helmignore</code>, an ignore file similar to <code class="inlineCode">.gitignore</code>. It can be used to list files that should be excluded when building the chart.</li>
+    </ul>
+    <p class="normal">Now that we understand the structure inside a Helm chart, let’s learn about one of the core features of Helm: its template mechanism, and how to pass values to it.</p>
+    <h2 id="_idParaDest-401" class="heading-2">Helm templates and values</h2>
+    <p class="normal">Helm templates are<a id="_idIndexMarker1131"/> used to parameterize Kubernetes manifest files. Using templates, we no longer need to maintain long-winded Deployment manifests for each microservice. Instead, we can define a common template that contains placeholders for where microservice-specific values will be placed in the template, when a manifest is rendered for a specific microservice. Let’s see an example, extracted from <code class="inlineCode">kubernetes/helm/common/templates/_deployment.yaml</code>:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Deployment</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">replicas:</span> {{ <span class="hljs-string">.Values.replicaCount</span> }}
+  <span class="hljs-attr">template:</span>
+    <span class="hljs-attr">spec:</span>
+      <span class="hljs-attr">containers:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> {{ <span class="hljs-string">.Chart.Name</span> }}
+</code></pre>
+    <p class="normal">It looks very similar to the Deployment manifest we saw in <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>, with the exception of the use of the <code class="inlineCode">{{ ... }}</code> constructs, used to insert microservice-specific values into the template. The construct <code class="inlineCode">{{ include "common.fullname" . }}</code> is used to invoke other templates, as explained below. The other two constructs are used to insert values using one of the <strong class="keyWord">built-in objects</strong> in Helm. </p>
+    <p class="normal">The <a id="_idIndexMarker1132"/>most frequently used parts of the built-in objects are:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">Values</code>: Used to refer to values in the chart’s <code class="inlineCode">values.yaml</code> file or values supplied when running a Helm <a id="_idIndexMarker1133"/>command like <code class="inlineCode">install</code>.</li>
+      <li class="bulletList"><code class="inlineCode">Release</code>: Used to provide metadata regarding the current release that is installed. It contains fields like:<ul>
+          <li class="bulletList"><code class="inlineCode">Name</code>: The name of the release</li>
+          <li class="bulletList"><code class="inlineCode">Namespace</code>: The name of the namespace where the installation is performed</li>
+          <li class="bulletList"><code class="inlineCode">Service</code>: The name of the installation Service, always returning <code class="inlineCode">Helm</code></li>
+        </ul>
+      </li>
+      <li class="bulletList"><code class="inlineCode">Chart</code>: Used to access information from the <code class="inlineCode">Chart.yaml</code> file. Examples of fields that can be useful for providing metadata for a Deployment are:<ul>
+          <li class="bulletList"><code class="inlineCode">Name</code>: The name of the chart</li>
+          <li class="bulletList"><code class="inlineCode">Version</code>: The chart’s version number</li>
+        </ul>
+      </li>
+      <li class="bulletList"><code class="inlineCode">Files</code>: Containing functions for accessing chart-specific files. In this chapter we will use the following two functions in the <code class="inlineCode">Files</code> object:<ul>
+          <li class="bulletList"><code class="inlineCode">Glob</code>: Returns files in a chart<a id="_idIndexMarker1134"/> based on a <strong class="keyWord">glob pattern</strong>. For example, the pattern <code class="inlineCode">"</code><code class="inlineCode">config-repo/*"</code> will return all files found in the folder <code class="inlineCode">config-repo</code></li>
+          <li class="bulletList"><code class="inlineCode">AsConfig</code>: Returns the content of files as a YAML map appropriate for declaring values in a <code class="inlineCode">ConfigMap</code></li>
+        </ul>
+      </li>
+      <li class="bulletList"><code class="inlineCode">Capabilities</code>: Can be used to find information regarding the capabilities of the Kubernetes cluster that the installation is performed on. For example, a template can use information in this object to adopt a manifest based on what API versions the actual Kubernetes cluster supports. We will not use this object in this chapter, but I think it is in our interest to be aware of it for more advanced use cases.</li>
+    </ul>
+    <p class="normal">For further details on built-in objects, see <a href="https://helm.sh/docs/chart_template_guide/builtin_objects"><span class="url">https://helm.sh/docs/chart_template_guide/builtin_objects</span></a>.</p>
+    <p class="normal">All objects are accessible in a tree where the <code class="inlineCode">root</code> context, in most cases, can be addressed using the current scope, represented<a id="_idIndexMarker1135"/> by a period, <code class="inlineCode">.</code>, also known as the <strong class="keyWord">dot</strong>. From the examples above we can see the use of the dot, for example, in <code class="inlineCode">.Values.replicaCount</code> and <code class="inlineCode">.Chart.Name</code>, where we can see that the built-in objects <code class="inlineCode">Values</code> and <code class="inlineCode">Chart</code> are accessible directly under the current scope. In the <code class="inlineCode">include</code> directive above, we can also see the dot being used as a parameter sent to the template named <code class="inlineCode">common.fullname</code>, meaning the whole tree is sent to the template. Instead of sending the whole tree to a template, a sub-tree can be passed.</p>
+    <p class="normal">When using some of the Helm functions, the current scope will be changed and no longer point to the <code class="inlineCode">root</code> context. We will, for example, meet the <code class="inlineCode">range</code> function later on, which can be used to iterate through collections of values. If we need to access the <code class="inlineCode">root</code> context inside the scope of a <code class="inlineCode">range</code> function, we <a id="_idIndexMarker1136"/>can use the predefined variable <code class="inlineCode">$</code>.</p>
+    <p class="normal">Helm templates also support the declaration of variables to reference other objects. For example:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-variable">$name</span> := <span class="hljs-selector-class">.Release.Name</span>
+</code></pre>
+    <p class="normal">In this example, a variable, <code class="inlineCode">name</code>, has been declared to hold the value of the Helm release that is currently being processed. We will see later on how variables are used in more advanced constructs.</p>
+    <div class="packt_tip">
+      <p class="normal">If you recognize the format of using the <code class="inlineCode">{{ ... }}</code> constructs from using <code class="inlineCode">kubectl</code>, you are right. They are, in both cases, based on Go templates. For more information, see <a href="https://golang.org/pkg/text/template/"><span class="url">https://golang.org/pkg/text/template/</span></a>.</p>
+    </div>
+    <p class="normal">With the templating mechanism introduced, let’s learn about how the three types of charts are constructed. We will start with the most important chart, the <code class="inlineCode">common</code> chart, explaining the <code class="inlineCode">components</code> and <code class="inlineCode">environments</code> charts after that.</p>
+    <h2 id="_idParaDest-402" class="heading-2">The common library chart</h2>
+    <p class="normal">This chart contains reusable <a id="_idIndexMarker1137"/>templates, also known as <strong class="keyWord">named templates</strong>, for the four types of Kubernetes <a id="_idIndexMarker1138"/>manifests we will use in this chapter: <code class="inlineCode">Deployment</code>, Service, <code class="inlineCode">ConfigMap</code>, and <code class="inlineCode">Secret</code>. The structure and content of the common chart are based on the output from a <code class="inlineCode">helm create</code> command. Specifically, the template file <code class="inlineCode">_helpers.tpl</code> has been retained to reuse best practices for naming conventions. It declares the following templates that encapsulate naming conventions:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">common.name</code>: Based on the chart name.</li>
+      <li class="bulletList"><code class="inlineCode">common.fullname</code>: Based on a combination of the name of the release and the chart. In this book, we will override this naming convention and simply using the name of the chart.</li>
+      <li class="bulletList"><code class="inlineCode">common.chart</code>: Based on the chart name and version.</li>
+    </ul>
+    <p class="normal">For details, see the implementation in the <code class="inlineCode">_helpers.tpl</code> file.</p>
+    <p class="normal">Named templates, which will only be used by other templates and not used to create manifests themselves, must have a name that starts with an underscore, <code class="inlineCode">_</code>. This is used to prevent Helm from trying to create manifests using them alone.</p>
+    <p class="normal">Since the named templates for the Kubernetes manifests mentioned previously contain the main part of the logic and, therefore, most of the complexity in the Helm charts, we will go through them one by one.</p>
+    <h3 id="_idParaDest-403" class="heading-3">The ConfigMap template</h3>
+    <p class="normal">This template is designed to create <a id="_idIndexMarker1139"/>ConfigMaps from files in the folder <code class="inlineCode">config-repo</code>. Each ConfigMap will contain all non-sensitive configurations required by a specific Deployment. The Deployment manifest will map the content of the ConfigMap as a volume in its Pod template. This will result in Pods created by the Deployment being able<a id="_idIndexMarker1140"/> to access the configuration as files in their local filesystem. See the section <em class="italic">The Deployment template</em> below for details. The <code class="inlineCode">config-repo</code> folder needs to be placed in the charts that use the common chart.</p>
+    <div class="packt_tip">
+      <p class="normal">In this chapter, this template will be used only by the config server chart in the <code class="inlineCode">components</code> folder. In the next chapter, all other microservices will also use this template to define their own ConfigMaps, since the config server will be removed.</p>
+    </div>
+    <p class="normal">The templates file is named <code class="inlineCode">_configmap_from_file.yaml</code>, and it looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">define</span> <span class="hljs-string">"common.configmap_from_file"</span> <span class="hljs-string">-</span>}}
+<span class="hljs-attr">apiVersion:</span> <span class="hljs-string">v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">ConfigMap</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.name"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">helm.sh/chart:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.chart"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">app.kubernetes.io/managed-by:</span> {{ <span class="hljs-string">.Release.Service</span> }}
+<span class="hljs-attr">data:</span>
+{{ <span class="hljs-string">(.Files.Glob</span> <span class="hljs-string">"config-repo/*").AsConfig</span> <span class="hljs-string">|</span> <span class="hljs-string">indent</span> <span class="hljs-number">2</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">An explanation of the template is as follows:</p>
+    <ul>
+      <li class="bulletList">The first line, <code class="inlineCode">{{- define "common.configmap_from_file " -}}</code>, is used to declare the name of the reusable template. The scope of the template ends with a matching <code class="inlineCode">{{- end -}}</code>, the last line in this example.</li>
+      <li class="bulletList">To set the name of the ConfigMap, the template <code class="inlineCode">common.fullname</code> from the file <code class="inlineCode">_helpers.tpl</code> is used.</li>
+      <li class="bulletList">Next, a number of labels are defined to make it easier to identify the ConfigMap later on. Again, templates from the <code class="inlineCode">_helpers.tpl</code> file are used to set the <code class="inlineCode">name</code> and specify the <code class="inlineCode">chart</code> used. To mark that this Service has been created using Helm, the label <code class="inlineCode">app.kubernetes.io/managed-by</code> is set to the value for the field <code class="inlineCode">.Release.Service</code>. From the earlier description of the <code class="inlineCode">Release</code> object, we know that it always returns the value <code class="inlineCode">Helm</code>.</li>
+      <li class="bulletList">Next comes the core part of the ConfigMap, its <code class="inlineCode">data</code> section. To specify the actual configuration in the ConfigMap, the <code class="inlineCode">Glob</code> function in the <code class="inlineCode">Files</code> object is used to get all files in the folder <code class="inlineCode">config-repo</code>. Next, the function <code class="inlineCode">AsConfig</code> is applied to the content in the files to form a proper YAML map. The result is piped to the <code class="inlineCode">indent</code> function, which ensures a proper indentation is rendered, in this case, using two characters.</li>
+    </ul>
+    <p class="normal">The hyphens in <code class="inlineCode">{{-</code> and <code class="inlineCode">-}}</code> are used to remove preceding and trailing whitespace remaining after the processing of the<a id="_idIndexMarker1141"/> directive inside the curly braces.</p>
+    <h4 class="heading-4">Example of using the ConfigMap template</h4>
+    <p class="normal">In this chapter, only the <a id="_idIndexMarker1142"/>config server will use a ConfigMap. See the section on <em class="italic">The component charts</em> for a description of how this template is used.</p>
+    <p class="normal">To see the ConfigMap that will be created by Helm using this template, run the following commands:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16/kubernetes/helm/components/config-server
+helm dependency update .
+helm template . -s templates/configmap_from_file.yaml
+</code></pre>
+    <p class="normal">Expect output from the <code class="inlineCode">helm template</code> command like the following:</p>
+    <pre class="programlisting con"><code class="hljs-con">---
+<span class="hljs-con-meta"># </span>Source: config-server/templates/configmap_from_file.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-server
+  labels:
+    app.kubernetes.io/name: config-server
+    helm.sh/chart: config-server-1.0.0
+    app.kubernetes.io/managed-by: Helm
+data:
+  application.yml: |-
+    app:
+      auth-server: localhost
+  ...
+  auth-server.yml: |-
+    server.port: 9999
+  ...
+</code></pre>
+    <p class="normal">The <code class="inlineCode">data</code> field contains the content of all files in the <code class="inlineCode">config-repo</code> folder.</p>
+    <h3 id="_idParaDest-404" class="heading-3">The Secrets template</h3>
+    <p class="normal">This template is designed to<a id="_idIndexMarker1143"/> create Secrets defined by values like credentials provided by the environments <code class="inlineCode">dev-env</code> and <code class="inlineCode">prod-env</code>. The Secrets will be mapped as <a id="_idIndexMarker1144"/>environment variables in the Pods. See the section <em class="italic">The Deployment template</em> below for details. Since an environment must be able to define multiple Secrets, this template is designed to create multiple Secret manifests using the <code class="inlineCode">range</code> function in Helm. The template file is named <code class="inlineCode">_secrets.yaml</code>, and it looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">define</span> <span class="hljs-string">"common.secrets"</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">range</span> <span class="hljs-string">$secretName</span>, <span class="hljs-string">$secretMap</span> <span class="hljs-string">:=</span> <span class="hljs-string">.Values.secrets</span> }}
+<span class="hljs-attr">apiVersion:</span> <span class="hljs-string">v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Secret</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> {{ <span class="hljs-string">$secretName</span> }}
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">$secretName</span> }}
+    <span class="hljs-attr">helm.sh/chart:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.chart"</span> <span class="hljs-string">$</span> }}
+    <span class="hljs-attr">app.kubernetes.io/managed-by:</span> {{ <span class="hljs-string">$.Release.Service</span> }}
+<span class="hljs-attr">type:</span> <span class="hljs-string">Opaque</span>
+<span class="hljs-attr">data:</span>
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">range</span> <span class="hljs-string">$key</span>, <span class="hljs-string">$val</span> <span class="hljs-string">:=</span> <span class="hljs-string">$secretMap</span> }}
+  {{ <span class="hljs-string">$key</span> }}<span class="hljs-string">:</span> {{ <span class="hljs-string">$val</span> <span class="hljs-string">|</span> <span class="hljs-string">b64enc</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+<span class="hljs-meta">---</span>
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">An explanation of the template is as follows:</p>
+    <ul>
+      <li class="bulletList">After the declaration of the template in line 1 comes the use of the <code class="inlineCode">range</code> function in line 2. The function <a id="_idIndexMarker1145"/>assumes that the field <code class="inlineCode">.Values.secrets</code> contains a map of Secret names and a map of the Secret’s key/value pairs. A declaration of the <code class="inlineCode">Secrets</code> field in one of the environment’s <code class="inlineCode">values.yaml</code> files will look like this:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">secrets:</span>
+  <span class="hljs-attr">a-secret:</span>
+    <span class="hljs-attr">key-1:</span> <span class="hljs-string">secret-value-1</span>
+    <span class="hljs-attr">key-2:</span> <span class="hljs-string">secret-value-2</span>
+  <span class="hljs-attr">another-secret:</span>
+    <span class="hljs-attr">key-3:</span> <span class="hljs-string">secret-value-3</span>
+</code></pre>
+      </li>
+    </ul>
+    <p class="normal">This definition will render two Secrets, named <code class="inlineCode">a-secret</code> and <code class="inlineCode">another-secret</code>. The <code class="inlineCode">range</code> function assigns the current Secret name and its map to the variables <code class="inlineCode">$secretName</code> and <code class="inlineCode">$secretMap</code>.</p>
+    <ul>
+      <li class="bulletList">Since the <code class="inlineCode">range</code> function changes the current scope, we can no longer use the dot notation to pass the <code class="inlineCode">root</code> context to the <code class="inlineCode">common.chart</code> template. Instead, the variable <code class="inlineCode">$</code> has to be used.</li>
+      <li class="bulletList">In the <code class="inlineCode">data</code> section of the manifest, a second <code class="inlineCode">range</code> function is applied a second time to traverse the current Secret’s key/value pairs. Each key/value pair is assigned by the <code class="inlineCode">range</code> function to the variables <code class="inlineCode">$key</code> and <code class="inlineCode">$val</code>.</li>
+      <li class="bulletList">Finally, the Secret’s key/value pairs are defined as a map entry in the <code class="inlineCode">data</code> section. The value in the <code class="inlineCode">$val</code> variable is piped to the <code class="inlineCode">b64enc</code> function to get it properly <strong class="keyWord">Base64</strong>-encoded as required by a Secret manifest.</li>
+    </ul>
+    <p class="normal">The <code class="inlineCode">---</code> is used to separate the rendered Secret manifests from each other so that they are processed as separate YAML documents.</p>
+    <h4 class="heading-4">Example of using the Secrets template</h4>
+    <p class="normal">Secrets are only defined by the environment charts <code class="inlineCode">dev-env</code> and <code class="inlineCode">prod-env</code>. They are used to create environment-specific <a id="_idIndexMarker1146"/>credentials. See the section on <em class="italic">The environment charts</em> for a description of how this template is used.</p>
+    <p class="normal">To see the Secrets that will be created for the <code class="inlineCode">dev-env</code> by Helm using this template, run the following commands:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16/kubernetes/helm
+for f in components/*; do helm dependency update $f; done
+helm dependency update environments/dev-env
+helm template environments/dev-env -s templates/secrets.yaml
+</code></pre>
+    <p class="normal">Expect output from the <code class="inlineCode">helm template</code> command like this:</p>
+    <pre class="programlisting con"><code class="hljs-con">---
+<span class="hljs-con-meta"># </span>Source: dev-env/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: config-client-credentials
+  labels:
+    app.kubernetes.io/name: config-client-credentials
+    helm.sh/chart: dev-env-1.0.0
+    app.kubernetes.io/managed-by: Helm
+type: Opaque
+data:
+  CONFIG_SERVER_PWD: ZGV2LXB3ZA==
+  CONFIG_SERVER_USR: ZGV2LXVzcg==
+---
+<span class="hljs-con-meta"># </span>Source: dev-env/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: config-server-secrets
+  labels:
+    app.kubernetes.io/name: config-server-secrets
+    helm.sh/chart: dev-env-1.0.0
+    app.kubernetes.io/managed-by: Helm
+type: Opaque
+data:
+  ENCRYPT_KEY: bXktdmVyeS1zZWN1cmUtZW5jcnlwdC1rZXk=
+  SPRING_SECURITY_USER_NAME: ZGV2LXVzcg==
+  SPRING_SECURITY_USER_PASSWORD: ZGV2LXB3ZA==
+</code></pre>
+    <h3 id="_idParaDest-405" class="heading-3">The Service template</h3>
+    <p class="normal">The Service template introduces support for overriding default values from the common chart, with values specific to the charts that <a id="_idIndexMarker1147"/>use the common chart. The<a id="_idIndexMarker1148"/> common chart will, for example, provide default values for the Service <code class="inlineCode">type</code> and what <code class="inlineCode">ports</code> the Service will expose. This will be useful for most of the microservices, but some of them need to be able to override these default values in their own <code class="inlineCode">values.yaml</code> file.</p>
+    <p class="normal">The template file is named <code class="inlineCode">_service.yaml</code> and starts like the other named templates, with the declaration of its name, followed by the implementation of the override mechanism. It looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">define</span> <span class="hljs-string">"common.service"</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$common</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">.Values.common</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.Values</span> <span class="hljs-string">"common"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">with</span> <span class="hljs-string">merge</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">$common</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">This construct can be explained in the following way:</p>
+    <ul>
+      <li class="bulletList">When the <code class="inlineCode">_service.yaml</code> template is used by a microservice to render its Service manifest, the values from the microservice <code class="inlineCode">values.yaml</code> file will be available in the <code class="inlineCode">.Values</code> object, and the common chart’s values will be available under the field <code class="inlineCode">.Values.common</code>.</li>
+      <li class="bulletList">So, the variable <code class="inlineCode">$common</code> will refer to a dictionary, created by the <code class="inlineCode">dict</code> function, with one key, <code class="inlineCode">Values</code>, and its value will be the default values from the common chart. These values are taken from the <code class="inlineCode">common</code> key in the <code class="inlineCode">.Values</code> object.</li>
+      <li class="bulletList">The <code class="inlineCode">$noCommon</code> variable will hold all values from the microservice except values under the <code class="inlineCode">common</code> key, specified using the <code class="inlineCode">omit</code> function.</li>
+      <li class="bulletList">The <code class="inlineCode">$overrides</code> variable will refer to a dictionary, also with one key, <code class="inlineCode">Values</code>, but its value will be the values from the microservice’s values, except the <code class="inlineCode">common</code> values. It gets the values from the <code class="inlineCode">$noCommon</code> variable declared on the previous line.</li>
+      <li class="bulletList">The <code class="inlineCode">$noValues</code> variable will hold all other built-in objects, except for the <code class="inlineCode">Values</code> object.</li>
+      <li class="bulletList">Now, here is where the <a id="_idIndexMarker1149"/>override will happen; the <code class="inlineCode">merge</code> function will create one dictionary based on the dictionaries referred to by the variables <code class="inlineCode">$noValues</code>, <code class="inlineCode">$overrides</code>, and <code class="inlineCode">$common</code>. In this case, values found in the <code class="inlineCode">$overrides</code> dictionary will take precedence over values in the <code class="inlineCode">$common</code> dictionary, thereby overriding its values.</li>
+      <li class="bulletList">Finally, the <code class="inlineCode">with</code> function will change the scope for the template code that follows until its <code class="inlineCode">{{- end -}}</code> definition is reached. So, the current scope, <code class="inlineCode">.</code>, will now refer to the merged dictionary.</li>
+    </ul>
+    <p class="normal">Let’s take an example to see how this will work out. The <code class="inlineCode">common</code> chart’s <code class="inlineCode">values.yaml</code> file contains the following default settings for the Service type and exposed ports:</p>
+    <pre class="programlisting code"><code class="hljs-code"> Service<span class="hljs-attr">:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">ClusterIP</span>
+  <span class="hljs-attr">ports:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-attr">port:</span> <span class="hljs-number">80</span>
+    <span class="hljs-attr">targetPort:</span> <span class="hljs-string">http</span>
+    <span class="hljs-attr">protocol:</span> <span class="hljs-string">TCP</span>
+    <span class="hljs-attr">name:</span> <span class="hljs-string">http</span>
+</code></pre>
+    <p class="normal">This setting will render Service objects that are of type <code class="inlineCode">ClusterIP</code>. The Service objects will expose port <code class="inlineCode">80</code> and forward requests to the Pods on their port, named <code class="inlineCode">http</code>.</p>
+    <p class="normal">The gateway Service needs to expose a <code class="inlineCode">NodePort</code> and use other port settings. To override the above default values, it <a id="_idIndexMarker1150"/>declares the following in its chart’s <code class="inlineCode">values.yaml</code> file:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">service:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">NodePort</span>
+  <span class="hljs-attr">ports:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-attr">port:</span> <span class="hljs-number">443</span>
+    <span class="hljs-attr">targetPort:</span> <span class="hljs-number">8443</span>
+    <span class="hljs-attr">nodePort:</span> <span class="hljs-number">30443</span>
+</code></pre>
+    <p class="normal">The gateway’s <code class="inlineCode">values.yaml</code> file can be found in the folder <code class="inlineCode">$BOOK_HOME/Chapter16/kubernetes/helm/components/gateway/values.yaml</code>.</p>
+    <p class="normal">The rest of the Service template file looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">v1</span>
+<span class="hljs-attr">kind:</span> Service
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+  <span class="hljs-attr">labels:</span> 
+    <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.name"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">helm.sh/chart:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.chart"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">app.kubernetes.io/managed-by:</span> {{ <span class="hljs-string">.Release.Service</span> }}
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">type:</span> {{ <span class="hljs-string">.Values.service.type</span> }}
+  <span class="hljs-attr">ports:</span>
+{{ <span class="hljs-string">toYaml</span> <span class="hljs-string">.Values.service.ports</span> <span class="hljs-string">|</span> <span class="hljs-string">indent</span> <span class="hljs-number">4</span> }}
+  <span class="hljs-attr">selector:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.name"</span> <span class="hljs-string">.</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">An explanation of the template is as follows:</p>
+    <ul>
+      <li class="bulletList">The metadata fields for <code class="inlineCode">name</code> and <code class="inlineCode">labels</code> are defined in the same way as already seen for the previous templates.</li>
+      <li class="bulletList">The <code class="inlineCode">type</code> of the Service is set by the field <code class="inlineCode">.Values.service.type</code>.</li>
+      <li class="bulletList">The <code class="inlineCode">ports</code> exposed by the Service are specified using the field <code class="inlineCode">.Values.service.ports</code>. The built-in function <code class="inlineCode">toYaml</code> is used to format its value as <code class="inlineCode">yaml</code>, and the result is piped to the <code class="inlineCode">indent</code> function, which ensures a proper indentation is rendered, in this case, <code class="inlineCode">4</code> characters.</li>
+      <li class="bulletList">Finally, the Pod <code class="inlineCode">selector</code> is defined. It is based on the label <code class="inlineCode">app.kubernetes.io/name</code> and is given the name using the template <code class="inlineCode">common.name</code>.</li>
+    </ul>
+    <h4 class="heading-4">Example of using the Service template</h4>
+    <p class="normal">The Service template is<a id="_idIndexMarker1151"/> used by each component to create its Service manifest. As described above, the core microservices reuse the configuration in the common chart’s <code class="inlineCode">values.yaml</code> file, while the other components override these values in their own <code class="inlineCode">values.yaml</code> file.</p>
+    <p class="normal">To see the Service manifest generated for a core component, for the <code class="inlineCode">product</code> microservice, run the following commands:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16/kubernetes/helm
+helm dependency update components/product
+helm template components/product -s templates/service.yaml
+</code></pre>
+    <p class="normal">Expect output from the <code class="inlineCode">helm template</code> command like this:</p>
+    <pre class="programlisting con"><code class="hljs-con"><span class="hljs-con-meta"># </span>Source: product/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: product
+  labels:
+    app.kubernetes.io/name: product
+    helm.sh/chart: product-1.0.0
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: product
+</code></pre>
+    <p class="normal">To see the Service <a id="_idIndexMarker1152"/>manifest generated for a component that overrides the settings in the common chart, for the <code class="inlineCode">gateway</code> component, run the following commands:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16/kubernetes/helm
+helm dependency update components/gateway
+helm template components/gateway -s templates/service.yaml
+</code></pre>
+    <p class="normal">Expect output from the <code class="inlineCode">helm template</code> command like this:</p>
+    <pre class="programlisting con"><code class="hljs-con">---
+<span class="hljs-con-meta"># </span>Source: gateway/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    app.kubernetes.io/name: gateway
+    helm.sh/chart: gateway-1.0.0
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: NodePort
+  ports:
+    - nodePort: 30443
+      port: 443
+      targetPort: 8443
+  selector:
+    app.kubernetes.io/name: gateway
+</code></pre>
+    <h3 id="_idParaDest-406" class="heading-3">The Deployment template</h3>
+    <p class="normal">Finally, we have the template for rendering<a id="_idIndexMarker1153"/> Deployment manifests. This is the most complex template, since it must handle many parts of the Deployment manifest optionally<a id="_idIndexMarker1154"/>. Different components will use different parts of a Deployment manifest. The common chart’s <code class="inlineCode">values.yaml</code> file contains default values for these settings that are applicable to most of the components, minimizing the need to override these settings in each component’s own chart’s <code class="inlineCode">values.yaml</code> file. The following parts of the Deployment manifest are optional for use by the components:</p>
+    <ul>
+      <li class="bulletList">Arguments given to the container when it starts up</li>
+      <li class="bulletList">Environment variables</li>
+      <li class="bulletList">Environment variables from Secrets</li>
+      <li class="bulletList">The liveness probe</li>
+      <li class="bulletList">The readiness probe</li>
+      <li class="bulletList">A ConfigMap and a corresponding volume</li>
+    </ul>
+    <p class="normal">The template file is named <code class="inlineCode">_deployment.yaml</code>, and its first lines look very similar to the Service template, utilizing the same type of override mechanism:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">define</span> <span class="hljs-string">"common.deployment"</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$common</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">.Values.common</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.Values</span> <span class="hljs-string">"common"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">with</span> <span class="hljs-string">merge</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">$common</span> <span class="hljs-string">-</span>}}
+<span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Deployment</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"</span><span class="hljs-string">common.name"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">helm.sh/chart:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.chart"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">app.kubernetes.io/managed-by:</span> {{ <span class="hljs-string">.Release.Service</span> }}
+</code></pre>
+    <p class="normal">For an explanation of this part of the template, see the description of the Service template above.</p>
+    <p class="normal">When it comes to the <code class="inlineCode">spec</code> part of the manifest, it starts with:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">replicas:</span> {{ <span class="hljs-string">.Values.replicaCount</span> }}
+  <span class="hljs-attr">selector:</span>
+    <span class="hljs-attr">matchLabels:</span>
+      <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.name"</span> <span class="hljs-string">.</span> }}
+  <span class="hljs-attr">template:</span>
+    <span class="hljs-attr">metadata:</span>
+      <span class="hljs-attr">labels:</span>
+        <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.name"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">spec:</span>
+      <span class="hljs-attr">containers:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> {{ <span class="hljs-string">.Chart.Name</span> }}
+          <span class="hljs-attr">image:</span> <span class="hljs-string">"</span><span class="hljs-template-variable">{{ .Values.image.repository }}</span><span class="hljs-string">/</span><span class="hljs-template-variable">{{ .Values.image.name }}</span><span class="hljs-string">:</span><span class="hljs-template-variable">{{ .Values.image.tag }}</span><span class="hljs-string">"</span>
+          <span class="hljs-attr">imagePullPolicy:</span> {{ <span class="hljs-string">.Values.image.pullPolicy</span> }}
+</code></pre>
+    <p class="normal">Here we can see how the core parts of the spec are defined: the requested number of <code class="inlineCode">replicas</code>, the <code class="inlineCode">selector</code> for the Pods, and the <code class="inlineCode">template</code> used to create new Pods. The template defines <code class="inlineCode">labels</code> that match the<a id="_idIndexMarker1155"/> selector and the <code class="inlineCode">name</code>, Docker <code class="inlineCode">image</code>, and <code class="inlineCode">imagePullPolicy</code> to use when starting a container.</p>
+    <p class="normal">Next comes the various optional parts of the manifest, as described above:</p>
+    <pre class="programlisting code"><code class="hljs-code">          <span class="hljs-attr">args:</span>
+            {{<span class="hljs-bullet">-</span> <span class="hljs-string">toYaml</span> <span class="hljs-string">.</span> <span class="hljs-string">|</span> <span class="hljs-string">nindent</span> <span class="hljs-number">12</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">if</span> <span class="hljs-string">.Values.env</span> }}
+          <span class="hljs-attr">env:</span>
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">range</span> <span class="hljs-string">$key</span>, <span class="hljs-string">$val</span> <span class="hljs-string">:=</span> <span class="hljs-string">.Values.env</span> }}
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> {{ <span class="hljs-string">$key</span> }}
+            <span class="hljs-attr">value:</span> {{ <span class="hljs-string">$val</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">if</span> <span class="hljs-string">.Values.envFromSecretRefs</span> }}
+          <span class="hljs-attr">envFrom:</span>
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">range</span> <span class="hljs-string">.Values.envFromSecretRefs</span> }}
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">secretRef:</span>
+              <span class="hljs-attr">name:</span> {{ <span class="hljs-string">.</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">if</span> <span class="hljs-string">.Values.livenessProbe_enabled</span> }}
+          <span class="hljs-attr">livenessProbe:</span>
+{{ <span class="hljs-string">toYaml</span> <span class="hljs-string">.Values.livenessProbe</span> <span class="hljs-string">|</span> <span class="hljs-string">indent</span> <span class="hljs-number">12</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">if</span> <span class="hljs-string">.Values.readinessProbe_enabled</span> }}
+          <span class="hljs-attr">readinessProbe:</span>
+{{ <span class="hljs-string">toYaml</span> <span class="hljs-string">.Values.readinessProbe</span> <span class="hljs-string">|</span> <span class="hljs-string">indent</span> <span class="hljs-number">12</span> }}
+          {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+</code></pre>
+    <p class="normal">For the environment variables and Secrets that are mapped to environment variables, the <code class="inlineCode">range</code> function is used in the same way the <code class="inlineCode">secrets</code> template uses it. The environment variables can either be specified on a component or environment level, depending on their use case. Secrets are always specified by an environment chart. See the following sections regarding the component and environment charts.</p>
+    <p class="normal">The manifest is concluded by the declaration of the <code class="inlineCode">ports</code> the container exposes, <code class="inlineCode">resource</code> requests and limits, and finally, the optional declaration of a ConfigMap and a corresponding volume to map the files in the ConfigMap to:</p>
+    <pre class="programlisting code"><code class="hljs-code">          <span class="hljs-attr">ports:</span>
+{{ <span class="hljs-string">toYaml</span> <span class="hljs-string">.Values.ports</span> <span class="hljs-string">|</span> <span class="hljs-string">indent</span> <span class="hljs-number">12</span> }}
+          <span class="hljs-attr">resources:</span>
+{{ <span class="hljs-string">toYaml</span> <span class="hljs-string">.Values.resources</span> <span class="hljs-string">|</span> <span class="hljs-string">indent</span> <span class="hljs-number">12</span> }}
+      {{<span class="hljs-bullet">-</span> <span class="hljs-string">if</span> <span class="hljs-string">.Values.configmap.enabled</span> }}
+          <span class="hljs-attr">volumeMounts:</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+            <span class="hljs-attr">mountPath:</span> {{ <span class="hljs-string">.Values.configmap.volumeMounts.mountPath</span> }}
+      <span class="hljs-attr">volumes:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+          <span class="hljs-attr">configMap:</span>
+            <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+      {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">From the common chart’s <code class="inlineCode">values.yaml</code> file we can find some default values of interest, for example, how default<a id="_idIndexMarker1156"/> values for the liveness and readiness probes are defined:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">livenessProbe_enabled:</span> <span class="hljs-literal">false</span>
+<span class="hljs-attr">livenessProbe:</span>
+  <span class="hljs-attr">httpGet:</span>
+    <span class="hljs-attr">scheme:</span> <span class="hljs-string">HTTP</span>
+    <span class="hljs-attr">path:</span> <span class="hljs-string">/actuator/health/liveness</span>
+    <span class="hljs-attr">port:</span> <span class="hljs-number">80</span>
+  <span class="hljs-attr">initialDelaySeconds:</span> <span class="hljs-number">10</span>
+  <span class="hljs-attr">periodSeconds:</span> <span class="hljs-number">10</span>
+  <span class="hljs-attr">timeoutSeconds:</span> <span class="hljs-number">2</span>
+  <span class="hljs-attr">failureThreshold:</span> <span class="hljs-number">20</span>
+  <span class="hljs-attr">successThreshold:</span> <span class="hljs-number">1</span>
+<span class="hljs-attr">readinessProbe_enabled:</span> <span class="hljs-literal">false</span>
+<span class="hljs-attr">readinessProbe:</span>
+  <span class="hljs-attr">httpGet:</span>
+    <span class="hljs-attr">scheme:</span> <span class="hljs-string">HTTP</span>
+    <span class="hljs-attr">path:</span> <span class="hljs-string">/actuator/health/readiness</span>
+    <span class="hljs-attr">port:</span> <span class="hljs-number">80</span>
+  <span class="hljs-attr">initialDelaySeconds:</span> <span class="hljs-number">10</span>
+  <span class="hljs-attr">periodSeconds:</span> <span class="hljs-number">10</span>
+  <span class="hljs-attr">timeoutSeconds:</span> <span class="hljs-number">2</span>
+  <span class="hljs-attr">failureThreshold:</span> <span class="hljs-number">3</span>
+  <span class="hljs-attr">successThreshold:</span> <span class="hljs-number">1</span>
+</code></pre>
+    <p class="normal">From these declarations, we can see that:</p>
+    <ul>
+      <li class="bulletList">The probes are by default disabled, since not all Deployments use probes.</li>
+      <li class="bulletList">The probes are based on HTTP <code class="inlineCode">GET</code> requests sent to the endpoints exposed by Spring Boot, as described in the section <em class="italic">Using Spring Boot’s support for graceful shutdown and probes for liveness and readiness</em> above.<ul>
+          <li class="bulletList">As long as the endpoint responds with a <code class="inlineCode">2xx</code> or a <code class="inlineCode">3xx</code> response code, the probe is considered to be successful.</li>
+        </ul>
+      </li>
+      <li class="bulletList">The probes can be configured using the following parameters:<ul>
+          <li class="bulletList"><code class="inlineCode">initialDelaySeconds</code> specifies how long Kubernetes waits to probe a container after it’s started up.</li>
+          <li class="bulletList"><code class="inlineCode">periodSeconds</code> specifies the time between probe requests sent by Kubernetes.</li>
+          <li class="bulletList"><code class="inlineCode">timeoutSeconds</code> specifies how long Kubernetes waits on a response before it treats the probe as failed.</li>
+          <li class="bulletList"><code class="inlineCode">failureThreshold</code> specifies how many failed attempts Kubernetes makes before giving up. In the case of a liveness probe, this means restarting the Pod. In the case of a readiness probe, it means that Kubernetes will not send any more requests to the container until the readiness probes are successful again.</li>
+          <li class="bulletList"><code class="inlineCode">successThreshold</code> specifies the number of successful attempts that are required for a probe to be considered successful again after a failure. This only applies to<a id="_idIndexMarker1157"/> readiness probes, since it must be set to <code class="inlineCode">1</code> if specified for liveness probes.</li>
+        </ul>
+      </li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">Finding optimal settings for the probes can be challenging, that is, finding a proper balance between getting a swift reaction from Kubernetes when the availability of a Pod changes and not overloading the Pods with probe requests.</p>
+      <p class="normal">Specifically, configuring a liveness probe with values that are too low can result in Kubernetes restarting Pods that don’t need to be restarted; they just need some extra time to start up. Starting a large number of Pods at the same time, also resulting in extra-long startup times, can similarly result in a lot of unnecessary restarts.</p>
+      <p class="normal">Setting the configuration values too high on the probes (except for the <code class="inlineCode">successThreshold</code> value) makes Kubernetes react more slowly, which can be annoying in a development environment. Proper values also depend on the available hardware, which affects the startup times for the Pods. For the scope of this book, <code class="inlineCode">failureThreshold</code> for the liveness probes is set to a high value, <code class="inlineCode">20</code>, to avoid unnecessary restarts on computers with limited hardware resources.</p>
+    </div>
+    <h4 class="heading-4">Example of using the Deployment template</h4>
+    <p class="normal">The Deployment template is <a id="_idIndexMarker1158"/>used by each component to create its Deployment manifest. The core microservices reuse most of the configuration in the common chart’s <code class="inlineCode">values.yaml</code> file, minimizing the need for component-specific configuration, while the other components override more of these values in their own <code class="inlineCode">values.yaml</code> file.</p>
+    <p class="normal">To see the Deployment manifest generated for a core component, run the following commands for the <code class="inlineCode">product</code> microservice:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16/kubernetes/helm
+helm dependency update components/product
+helm template components/product -s templates/deployment.yaml
+</code></pre>
+    <p class="normal">To see the Deployment manifest generated for a component that overrides the settings in the common chart, run the following commands for the MongoDB component:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16/kubernetes/helm
+helm dependency update components/mongodb
+helm template components/mongodb -s templates/deployment.yaml
+</code></pre>
+    <p class="normal">Expect output from the <code class="inlineCode">helm template</code> command like this:</p>
+    <pre class="programlisting con"><code class="hljs-con">---
+<span class="hljs-con-meta"># </span>Source: mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+  labels:
+    app.kubernetes.io/name: mongodb
+    helm.sh/chart: mongodb-1.0.0
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mongodb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: "registry.hub.docker.com/library/mongo:6.0.4"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 27017
+          resources:
+            limits:
+              memory: 350Mi
+</code></pre>
+    <p class="normal">This concludes the walkthrough of the reusable named templates in the common chart. The files can be found in the <a id="_idIndexMarker1159"/>folder <code class="inlineCode">$BOOK_HOME/Chapter16/kubernetes/helm/common</code>.</p>
+    <p class="normal">Next, let’s see how the component-specific charts are defined.</p>
+    <h2 id="_idParaDest-407" class="heading-2">The component charts</h2>
+    <p class="normal">The charts for the microservices<a id="_idIndexMarker1160"/> and the resource managers are stored in the <code class="inlineCode">components</code> folder, and they all share the same file structure:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">Chart.yaml</code> expresses a dependency on the <code class="inlineCode">common</code> library chart.</li>
+      <li class="bulletList">The <code class="inlineCode">template</code> folder contains two templates, <code class="inlineCode">deployment.yaml</code> and <code class="inlineCode">Service.yaml</code>. Both templates apply the corresponding named template from the common chart. For example, the <code class="inlineCode">Service.yaml</code> template looks like this:
+        <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">template</span> <span class="hljs-string">"common.service"</span> <span class="hljs-string">.</span> <span class="hljs-string">-</span>}}
+</code></pre>
+      </li>
+      <li class="bulletList">The <code class="inlineCode">values.yaml</code> file contains settings specific to the microservice. For example, the <code class="inlineCode">values </code>file for the <code class="inlineCode">auth-server</code> chart looks like this:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">fullnameOverride:</span> <span class="hljs-string">auth-server</span>
+<span class="hljs-attr">image:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">auth-server</span>
+<span class="hljs-attr">env:</span>
+  <span class="hljs-attr">SPRING_PROFILES_ACTIVE:</span> <span class="hljs-string">"docker"</span>
+<span class="hljs-attr">livenessProbe_enabled:</span> <span class="hljs-literal">true</span>
+<span class="hljs-attr">readinessProbe_enabled:</span> <span class="hljs-literal">true</span>
+</code></pre>
+      </li>
+    </ul>
+    <p class="normal">The <code class="inlineCode">auth-server</code> only needs to declare its name, Docker image, Spring profile, and that it wants to use the default configuration of the liveness and readiness probes.</p>
+    <p class="normal">The config server differs from the other charts in that it uses a ConfigMap to store the <code class="inlineCode">config-repo</code> containing the configuration files for all the other microservices. In its <code class="inlineCode">template</code> folder, it defines a template for a ConfigMap that is based on the named template in the common chart for ConfigMaps that we have already been introduced to:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">template</span> <span class="hljs-string">"</span><span class="hljs-string">common.configmap_from_file"</span> <span class="hljs-string">.</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">The template expects to<a id="_idIndexMarker1161"/> find the property files in the charts folder, <code class="inlineCode">config-repo</code>. To avoid duplicating the <code class="inlineCode">config-repo</code> from <code class="inlineCode">$BOOK_HOME/Chapter16/config-repo</code>, a <strong class="keyWord">soft link</strong>, also<a id="_idIndexMarker1162"/> known as a <strong class="keyWord">symbolic link</strong>, has <a id="_idIndexMarker1163"/>been created with the command:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16/kubernetes/helm/components/config-server
+ln -s ../../../../config-repo config-repo
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">Since Git preserves soft links, you don’t need to recreate the soft link – the <code class="inlineCode">git clone</code> command makes it for you!</p>
+    </div>
+    <p class="normal">As already mentioned in the walkthrough of the common chart, the gateway Service differs from the other microservices, since it needs to expose a Service of type <code class="inlineCode">NodePort</code>.</p>
+    <p class="normal">Besides the charts for the microservices, the <code class="inlineCode">components</code> folder also contains charts for the databases, message broker, and Zipkin server we use. They are structured in the same way as the microservices. Since the common templates have been designed to streamline the charts for the microservices, the other charts need to override more default values in <code class="inlineCode">values.yaml</code> files compared to the microservices. For more details, look at the <code class="inlineCode">values.yaml</code> files in the following folders: <code class="inlineCode">mongodb</code>, <code class="inlineCode">mysql</code>, <code class="inlineCode">rabbitmq</code>, and <code class="inlineCode">zipkin-server</code>.</p>
+    <h2 id="_idParaDest-408" class="heading-2">The environment charts</h2>
+    <p class="normal">Finally, the <code class="inlineCode">dev-env</code> and <code class="inlineCode">prod-env</code> charts in the <code class="inlineCode">environments</code> folder tie everything together to complete installation packages for a<a id="_idIndexMarker1164"/> typical development/test or staging/production environment. Their <code class="inlineCode">Charts.yaml</code> file contains dependencies on both the <code class="inlineCode">common</code> chart and the charts in the <code class="inlineCode">components</code> folder, and the <code class="inlineCode">template</code> folder contains a <code class="inlineCode">secrets.yaml</code> template to create environment-specific credentials as Secrets. It is based on the named template for Secrets from the common chart and looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">template</span> <span class="hljs-string">"common.secrets"</span> <span class="hljs-string">.</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">Looking at the <code class="inlineCode">dev-env</code> chart’s <code class="inlineCode">values.yaml</code> file, we can find the following Secret values defined for the Secret <code class="inlineCode">config-server-secrets</code>:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">secrets:</span>
+  <span class="hljs-attr">config-server-secrets:</span>
+    <span class="hljs-attr">ENCRYPT_KEY:</span> <span class="hljs-string">my-very-secure-encrypt-key</span>
+    <span class="hljs-attr">SPRING_SECURITY_USER_NAME:</span> <span class="hljs-string">dev-usr</span>
+    <span class="hljs-attr">SPRING_SECURITY_USER_PASSWORD:</span> <span class="hljs-string">dev-pwd</span>
+</code></pre>
+    <p class="normal">This will result in the Secret <code class="inlineCode">config-server-secrets</code> containing three Secret values, all Base64-encoded. Its manifest will look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Secret</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">config-server-secrets</span>
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-string">...</span>
+<span class="hljs-attr">type:</span> <span class="hljs-string">Opaque</span>
+<span class="hljs-attr">data:</span>
+  <span class="hljs-attr">ENCRYPT_KEY:</span> <span class="hljs-string">bXktdmVyeS1zZWN1cmUtZW5jcnlwdC1rZXk=</span>
+  <span class="hljs-attr">SPRING_SECURITY_USER_NAME:</span> <span class="hljs-string">ZGV2LXVzcg==</span>
+  <span class="hljs-attr">SPRING_SECURITY_USER_PASSWORD:</span> <span class="hljs-string">ZGV2LXB3ZA==</span>
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">Note that this <code class="inlineCode">values.yaml</code> file contains sensitive information, for example, the encrypt key used by the config server and the password used to access the config server. This file must be stored securely. An alternative, if it is inappropriate to store this file securely, is to remove the sensitive information from this file and supply it when the <code class="inlineCode">helm install</code> command is executed.</p>
+    </div>
+    <p class="normal">To use the Secret in the <a id="_idIndexMarker1165"/>Deployment manifest for the config server, the following is defined in the <code class="inlineCode">dev-env</code> chart’s <code class="inlineCode">values.yaml</code> file:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">config-server:</span>
+  <span class="hljs-attr">envFromSecretRefs:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">config-server-secrets</span>
+</code></pre>
+    <p class="normal">This will be used by the Deployment template described above to add the Secret as environment variables in the Deployment manifest for the config server.</p>
+    <p class="normal">The <code class="inlineCode">prod-env</code> chart overrides more values than the <code class="inlineCode">dev-env</code> chart. For example, the <code class="inlineCode">values.yaml</code> file in the <code class="inlineCode">prod-env</code> chart specifies that an extra Spring profile, <code class="inlineCode">prod</code>, should be used and what version to use for the Docker images. This looks like the following for the <code class="inlineCode">product</code> microservice:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">product:</span>
+  <span class="hljs-attr">image:</span>
+    <span class="hljs-attr">tag:</span> <span class="hljs-string">v1</span>
+  <span class="hljs-attr">env:</span>
+    <span class="hljs-attr">SPRING_PROFILES_ACTIVE:</span> <span class="hljs-string">"docker,prod"</span>
+</code></pre>
+    <p class="normal">With this introduction to what the various types of charts contain, let’s move on and use them together with the Helm commands we learned about to deploy our microservices in Kubernetes!</p>
+    <h1 id="_idParaDest-409" class="heading-1">Deploying to Kubernetes for development and test</h1>
+    <p class="normal">In this section, we will deploy <a id="_idIndexMarker1166"/>the microservices in an environment to be used for development and test activities, for example, system integration tests. This type of environment is used primarily for functional tests and is, therefore, configured to use minimal system resources and the latest available versions of the microservices’ Docker images.</p>
+    <p class="normal">To be able to run functional tests, we will deploy the microservices together with the resource managers they require in the same Namespace, which we will call <code class="inlineCode">hands-on</code>. This makes it easy to set up a test environment and also to remove it once we are done with it. We can simply delete the Namespace to get rid of all resources used by the test environment. </p>
+    <p class="normal">This Deployment scenario is illustrated by the following diagram:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_16_02.png" alt="Diagram  Description automatically generated" width="878" height="284"/></figure>
+    <p class="packt_figref">Figure 16.2: Resource managers deployed in the same Kubernetes namespace as the microservices in the dev environment</p>
+    <p class="normal">Before we can deploy the system landscape, we need to build our Docker images and resolve the dependencies for our Helm charts.</p>
+    <h2 id="_idParaDest-410" class="heading-2">Building Docker images</h2>
+    <p class="normal">Normally, we have to push images to a Docker registry and configure Kubernetes to pull images from the registry. In our case, where <a id="_idIndexMarker1167"/>we have a local single node cluster, we can shortcut this process by pointing our Docker client to the Docker engine in Minikube and then running the <code class="inlineCode">docker-compose build</code> command. This will result in the Docker images being immediately available to Kubernetes. For development, we will use <code class="inlineCode">latest</code> as the Docker image version for the microservices.</p>
+    <p class="normal">You can build Docker images from the source as follows:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter16
+./gradlew build
+eval $(minikube docker-env)
+docker-compose build
+</code></pre>
+    <p class="normal">The <code class="inlineCode">eval $(minikube docker-env)</code> command directs the local Docker client to communicate with the Docker engine in Minikube.</p>
+    <p class="normal">The <code class="inlineCode">docker-compose.yml</code> file has been updated to specify a name for the Docker images it builds. For example, for the <code class="inlineCode">product</code> Service, we have the following:</p>
+    <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-attr">product:</span>
+    <span class="hljs-attr">build:</span> <span class="hljs-string">microservices/product-service</span>
+    <span class="hljs-attr">image:</span> <span class="hljs-string">hands-on/product-service</span>
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal"><code class="inlineCode">latest</code> is the default tag for a Docker image name, so it is not specified.</p>
+    </div>
+    <p class="normal">With the Docker images <a id="_idIndexMarker1168"/>built, it’s time to build the Helm charts.</p>
+    <h2 id="_idParaDest-411" class="heading-2">Resolving Helm chart dependencies</h2>
+    <p class="normal">First, we update the<a id="_idIndexMarker1169"/> dependencies in the <code class="inlineCode">components</code> folder:</p>
+    <pre class="programlisting con"><code class="hljs-con">for f in kubernetes/helm/components/*; do helm dep up $f; done
+</code></pre>
+    <p class="normal">Next, we update the dependencies in the <code class="inlineCode">environments</code> folder:</p>
+    <pre class="programlisting con"><code class="hljs-con">for f in kubernetes/helm/environments/*; do helm dep up $f; done
+</code></pre>
+    <p class="normal">Finally, we verify that the dependencies for the <code class="inlineCode">dev-env</code> folder look good:</p>
+    <pre class="programlisting con"><code class="hljs-con">helm dep ls kubernetes/helm/environments/dev-env/
+</code></pre>
+    <p class="normal">Expect the command to respond with:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_16_03.png" alt="" role="presentation" width="878" height="365"/></figure>
+    <p class="packt_figref">Figure 16.3: Helm chart dependencies resolved</p>
+    <p class="normal">With both Docker images built and Helm dependencies resolved, we can start deploying to Kubernetes!</p>
+    <h2 id="_idParaDest-412" class="heading-2">Deploying to Kubernetes</h2>
+    <p class="normal">A deploy to Kubernetes<a id="_idIndexMarker1170"/> means creating or updating Kubernetes objects. We will use Helm to perform the Deployment, per the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To avoid a slow Deployment process due to Kubernetes downloading Docker images (potentially causing the liveness probes we described previously to restart our Pods), run the following <code class="inlineCode">docker pull</code> commands to download the images in advance:
+        <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env)
+docker pull mysql:8.0.32 
+docker pull mongo:6.0.4
+docker pull rabbitmq:3.11.8-management
+docker pull openzipkin/zipkin:2.24.0
+</code></pre>
+      </li>
+      <li class="numberedList">Before using the Helm charts, render the templates using the <code class="inlineCode">helm template</code> command to see what the manifests will look like:
+        <pre class="programlisting con"><code class="hljs-con">helm template kubernetes/helm/environments/dev-env
+</code></pre>
+        <p class="normal">Note that no interaction was performed with the Kubernetes cluster, so cluster information will be faked, and no tests are run to verify whether the rendered manifest will be accepted by the cluster.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">To also verify that the Kubernetes cluster will actually accept the rendered manifest, a <strong class="keyWord">dry run</strong> of the installation can be performed by passing <code class="inlineCode">–-dry-run</code> to the <code class="inlineCode">helm install</code> command. Passing the <code class="inlineCode">--debug</code> flag will also show which user-supplied and calculated values Helm will use when rendering the manifests. Run the following command to perform a dry run:
+        <pre class="programlisting con"><code class="hljs-con">helm install --dry-run --debug hands-on-dev-env \
+ kubernetes/helm/environments/dev-env
+</code></pre>
+      </li>
+      <li class="numberedList">To initiate the Deployment of the complete system landscape, including creating the Namespace, <code class="inlineCode">hands-on</code>, run the following command:
+        <pre class="programlisting con"><code class="hljs-con">helm install hands-on-dev-env \
+  kubernetes/helm/environments/dev-env \
+  -n hands-on \
+  --create-namespace
+</code></pre>
+        <div class="packt_tip">
+          <p class="normal">Note that here is where the Helm machinery kicks in. It will use the charts we walked through in the <em class="italic">Introducing Helm</em> section above to render and apply the Kubernetes manifests, resulting in the required Kubernetes objects for the Deployment being created.</p>
+        </div>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">Set the newly created namespace as the default namespace for <code class="inlineCode">kubectl</code>:
+        <pre class="programlisting con"><code class="hljs-con">kubectl config set-context $(kubectl config current-context) --namespace=hands-on
+</code></pre>
+      </li>
+      <li class="numberedList">To see the Pods starting up, run the command:
+        <pre class="programlisting con"><code class="hljs-con">kubectl get pods --watch
+</code></pre>
+        <p class="normal">This command will continuously report when new Pods are <strong class="keyWord">Running</strong>, and if something goes<a id="_idIndexMarker1171"/> wrong it will report the status, for example, <strong class="keyWord">Error</strong> and <strong class="keyWord">CrashLoopBackOff</strong>. After a while, you might see that errors are reported for the <strong class="keyWord">gateway</strong>, <strong class="keyWord">product-composite</strong>, and <strong class="keyWord">zipkin-server</strong> Pods. The reason for this is that they all depend on external resources that they require to be accessible during the startup. If not, they will crash. The gateway and product composite Service depend on the auth server, and the Zipkin server depends on access to RabbitMQ. Typically, they start up faster than the resources they rely on, causing this situation. However, Kubernetes will detect the crashed Pods, and they will restart. Once the resources are up and running, all Pods will start up and be reported as ready, showing <strong class="keyWord">1/1</strong> in the <strong class="keyWord">READY</strong> column. A sample output from the command looks like this:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_16_04.png" alt="A picture containing text  Description automatically generated" width="812" height="333"/></figure>
+        <p class="packt_figref">Figure 16.4: Pods restarted until external dependencies are ready</p>
+        <p class="normal">After seeing some output like the above, interrupt the command with <em class="keystroke">Ctrl</em>+<em class="keystroke">C</em>.</p>
+        <ol class="numberedList" style="list-style-type: decimal;">
+          <li class="numberedList" value="7">Wait for all the Pods in the Namespace to be ready with the command:
+            <pre class="programlisting con"><code class="hljs-con">kubectl wait --timeout=600s --for=condition=ready pod --all
+</code></pre>
+          </li>
+        </ol>
+        <p class="normal">Expect the command to respond with 11 log lines like <code class="inlineCode">pod/... condition met</code>, where the three dots (<code class="inlineCode">...</code>) are replaced with the name of the actual Pod that is reported to be ready.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="8">To see the Docker images that are used, run the following command:
+        <pre class="programlisting con"><code class="hljs-con">kubectl get pods -o json | jq .items[].spec.containers[].image
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">The response should look like the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_16_05.png" alt="Text, chat or text message  Description automatically generated" width="654" height="315"/></figure>
+    <p class="packt_figref">Figure 16.5: Docker images used in a test environment</p>
+    <p class="normal">Note that the Docker images have the version tag set to <strong class="keyWord">latest</strong> for the microservices.</p>
+    <p class="normal">We are now ready to test<a id="_idIndexMarker1172"/> our Deployment! However, before we can do that, we need to go through changes that are required in the test script for use with Kubernetes.</p>
+    <h2 id="_idParaDest-413" class="heading-2">Changes in the test script for use with Kubernetes</h2>
+    <p class="normal">To verify the <a id="_idIndexMarker1173"/>Deployment, we will, as usual, run the test script, <code class="inlineCode">test-em-all.bash</code>. To work with Kubernetes, the circuit breaker tests have been slightly modified. The circuit breaker tests call the <code class="inlineCode">actuator</code> endpoints on the <code class="inlineCode">product-composite</code> Service to check their health state and get access to circuit breaker events. Since this endpoint isn’t exposed externally, the previous chapters used the <code class="inlineCode">docker-compose exec</code> command to run a <code class="inlineCode">curl</code> command inside of the <code class="inlineCode">product-composite</code> Service to perform the tests.</p>
+    <p class="normal">Starting with this chapter, the test script can either use the <code class="inlineCode">docker-compose exec</code> command or the corresponding <code class="inlineCode">kubectl</code> command, <code class="inlineCode">kubectl exec</code>, depending on whether we run the microservices using Docker Compose or Kubernetes.</p>
+    <p class="normal">To know which command to use, a new parameter has been added to the script, <code class="inlineCode">USE_K8S</code>. It defaults to <code class="inlineCode">false</code>. For details, see the <code class="inlineCode">testCircuitBreaker()</code> function in the test script.</p>
+    <h2 id="_idParaDest-414" class="heading-2">Testing the Deployment</h2>
+    <p class="normal">When launching the test script, we have to give it the address of the host that runs Kubernetes, that is, our Minikube instance, and the <code class="inlineCode">NodePort</code> where our gateway Service listens for external requests. The gateway is <a id="_idIndexMarker1174"/>accessible using port <code class="inlineCode">30443</code>. As mentioned in <em class="chapterRef">Chapter 15</em>, since we use Minikube’s <code class="inlineCode">docker</code> driver, the hostname is always <code class="inlineCode">localhost</code>. Since the hostname is the same as when running tests with Docker Compose, we don’t have to specify it; only the port has to be specified, together with the <code class="inlineCode">USE_K8S</code> parameter.</p>
+    <p class="normal">Start the tests with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">PORT=30443 USE_K8S=true ./test-em-all.bash
+</code></pre>
+    <p class="normal">In the output from the script, we can see how the <code class="inlineCode">NodePort</code> is used, but besides that, everything looks the same as when we used Docker Compose in the previous chapters:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_16_06.png" alt="Text  Description automatically generated" width="660" height="367"/></figure>
+    <p class="packt_figref">Figure 16.6: Output from the automated tests of the system landscape</p>
+    <p class="normal">With the system landscape validations performed, let’s see how we can test the new features in Spring Boot, graceful <a id="_idIndexMarker1175"/>shutdown, and the probes for liveness and readiness.</p>
+    <h3 id="_idParaDest-415" class="heading-3">Testing Spring Boot’s support for graceful shutdown and probes for liveness and readiness</h3>
+    <p class="normal">In this section, we will test out the<a id="_idIndexMarker1176"/> new Spring Boot features and see how they interact with other components in Kubernetes.</p>
+    <p class="normal">Let’s start by testing Spring Boot’s support for graceful shutdown, where the application during its shutdown phase will wait a configurable length of time for active requests to complete. Remember that no new requests are allowed during the shutdown phase.</p>
+    <p class="normal">To test the graceful shutdown mechanism, we will run a client that continuously sends requests to the composite Service. First, we will use it to send requests that take 5 seconds, a shorter amount of time than the shutdown wait period. The waiting period is configured to be 10 seconds. Next, we will use it to send requests that take a longer time, 15 seconds, to see how they are handled. As the test client, we will use <strong class="keyWord">Siege</strong>, a command-line-based-load test tool.</p>
+    <p class="normal">To be able to test run requests that take this long to complete, we need to temporarily increase the timeout in the <code class="inlineCode">product-composite</code> Service. Otherwise, its circuit breaker will kick in and prevent us from running the long requests. </p>
+    <p class="normal">To increase the timeout in the composite Service, perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Add the following under the <code class="inlineCode">product-composite</code> section in the <code class="inlineCode">values</code> file for the <code class="inlineCode">dev-env</code>, <code class="inlineCode">kubernetes/helm/environments/dev-env/values.yaml</code>:
+        <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-attr">env:</span>
+    <span class="hljs-attr">RESILIENCE4J_TIMELIMITER_INSTANCES_PRODUCT_TIMEOUTDURATION:</span> <span class="hljs-string">20s</span>
+</code></pre>
+        <p class="normal">After the change, the configuration file should look like this:</p>
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">product-composite:</span>
+  <span class="hljs-attr">env:</span>
+    <span class="hljs-attr">RESILIENCE4J_TIMELIMITER_INSTANCES_PRODUCT_TIMEOUTDURATION:</span> <span class="hljs-string">20s</span>
+  <span class="hljs-attr">envFromSecretRefs:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">config-client-credentials</span>
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">As long as this setting is active, the circuit breaker tests in <code class="inlineCode">test-em-all.bash</code> will no longer work, since they assume a timeout of 2 seconds.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Update the Helm installation with Helm’s <code class="inlineCode">upgrade</code> command, using the <code class="inlineCode">--wait</code> flag to ensure that the update is completed when the command terminates:
+        <pre class="programlisting con"><code class="hljs-con">helm upgrade hands-on-dev-env -n hands-on \
+  kubernetes/helm/environments/dev-env --wait
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Now we can run the tests, proceeding with the following steps to test with requests that are shorter than the shutdown wait period:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Get an access token:
+        <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN=$(curl -d grant_type=client_credentials \
+ -ks https://writer:secret-writer@localhost:30443/oauth2/token \
+ -d scope="product:read product:write" \
+ | jq .access_token -r)
+</code></pre>
+        <p class="normal">Ensure you got an access token by issuing the command <code class="inlineCode">echo $ACCESS_TOKEN</code>. If it’s empty, you have to check the <code class="inlineCode">curl</code> command above and the logs from the gateway and the auth server.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Make a test request and ask for a delay of 5 seconds using the <code class="inlineCode">delay</code> query parameter:
+        <pre class="programlisting con"><code class="hljs-con">time curl -kH "Authorization: Bearer $ACCESS_TOKEN" \
+  https://localhost:30443/product-composite/1?delay=5
+</code></pre>
+        <p class="normal">If you get a normal response and the <code class="inlineCode">time</code> command reports a 5-second response time, the config changes of the increased timeout worked!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Use Siege to start requests that take 5 seconds to complete, with five concurrent users sending requests with <a id="_idIndexMarker1177"/>a random delay between 0 and 2 seconds to spread out the requests slightly:
+        <pre class="programlisting con"><code class="hljs-con">siege -c5 -d2 -v -H "Authorization: Bearer $ACCESS_TOKEN" \
+  https://localhost:30443/product-composite/1?delay=5
+</code></pre>
+        <p class="normal">Expect output from the tool for each completed request like this:</p>
+        <pre class="programlisting con"><code class="hljs-con">HTTP/1.1 200 5.04 secs: 771 bytes ==&gt; GET /product-composite/1?delay=5
+</code></pre>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Watch log output from the <code class="inlineCode">product</code> Service in a separate terminal window with the command:
+        <pre class="programlisting con"><code class="hljs-con">kubectl logs -f --tail=0 -l app.kubernetes.io/name=product
+</code></pre>
+      </li>
+      <li class="numberedList">We will now ask Kubernetes to restart the <code class="inlineCode">product</code> Deployment. The restart will first start a new Pod before the old one is shut down, meaning that none of the requests sent by Siege should be affected by the restart. Of specific interest are the few requests that are processed by the old Pod when it starts to shut down. If the graceful shutdown works as expected, none of the active requests should fail. Perform the restart by running the following command in a separate window:
+        <pre class="programlisting con"><code class="hljs-con">kubectl rollout restart deploy/product
+</code></pre>
+      </li>
+      <li class="numberedList">Ensure that there are only successful requests reported in the output from the load-test tool, Siege, reporting <strong class="keyWord">200</strong> <strong class="keyWord">(OK).</strong></li>
+      <li class="numberedList">In the log output from the now-stopped <code class="inlineCode">product</code> Pod, you should see that all requests were allowed to terminate gracefully before the application was stopped. Expect log output like the following, at the end of the log output:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_16_07.png" alt="Text  Description automatically generated" width="812" height="264"/></figure>
+    <p class="packt_figref">Figure 16.7: Graceful shutdown where all requests are allowed to complete</p>
+    <p class="normal">Specifically, note the time between the two log messages (4 seconds, in this case), indicating that the shutdown procedure actually waited for the last request to complete.</p>
+    <p class="normal">Now let’s run the<a id="_idIndexMarker1178"/> second test, with requests taking a longer time to complete than the shutdown wait period:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Restart Siege, requesting longer response times, above the wait limit of 10 seconds. Start five concurrent users, asking for a 15-second response time and a random delay between the requests of 0–5 seconds. Stop Siege with <em class="keystroke">Ctrl</em>+<em class="keystroke">C</em> and run the following command:
+        <pre class="programlisting con"><code class="hljs-con">siege -c5 -d5 -v -H "Authorization: Bearer $ACCESS_TOKEN" \
+  https://localhost:30443/product-composite/1?delay=15 
+</code></pre>
+      </li>
+      <li class="numberedList">Watch the log output from the <code class="inlineCode">product</code> Pod with the command:
+        <pre class="programlisting con"><code class="hljs-con">kubectl logs -f --tail=0 -l app.kubernetes.io/name=product
+</code></pre>
+      </li>
+      <li class="numberedList">Restart the <code class="inlineCode">product</code> Deployment:
+        <pre class="programlisting con"><code class="hljs-con">kubectl rollout restart deploy/product
+</code></pre>
+      </li>
+      <li class="numberedList">Follow the log output from the <code class="inlineCode">product</code> Pod. Once it has shut down, you should be able to see that not all requests were allowed to terminate gracefully before the application was stopped. Expect log output like the following, at the end of the log output: <figure class="mediaobject"><img src="../Images/B19825_16_08.png" alt="Text  Description automatically generated" width="812" height="365"/></figure>
+        <p class="packt_figref">Figure 16.8: Graceful shutdown where some long-running requests are aborted</p>
+        <p class="normal">The log message <strong class="keyWord">Graceful shutdown aborted with one or more requests still active</strong> indicates that at least<a id="_idIndexMarker1179"/> one request was not allowed to complete before the application was stopped.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">In the output from the load-test tool, Siege, there should now appear one or a few failing requests reporting <strong class="keyWord">500</strong> <strong class="keyWord">(Internal Server Error)</strong> like this:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_16_09.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="98"/></figure>
+    <p class="packt_figref">Figure 16.9: Long-running requests fail during shutdown</p>
+    <p class="normal">This demonstrates how the shutdown procedure proceeds after the configured wait time and that the remaining long-running requests are aborted, as expected.</p>
+    <p class="normal">This completes the tests of Spring Boot’s graceful shutdown mechanism, which is clearly useful to avoid normal client requests being affected by Pods being stopped, for example, as a result of scaling down or a rolling upgrade being performed.</p>
+    <p class="normal">Clean up after the tests:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Stop the Siege load-test tool with <em class="keystroke">Ctrl</em>+<em class="keystroke">C</em>.</li>
+      <li class="numberedList">Roll back the latest Helm release to get rid of the increased timeout:
+        <pre class="programlisting con"><code class="hljs-con">helm rollback hands-on-dev-env -n hands-on --wait
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">The <code class="inlineCode">helm rollback</code> command is also useful to roll back a failed upgrade.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Also remove the increased timeout setting in the file <code class="inlineCode">kubernetes/helm/environments/dev-env/values.yaml</code>.</li>
+      <li class="numberedList">Run <code class="inlineCode">test-em-all.bash</code> to verify that the configuration is rolled back:
+        <pre class="programlisting con"><code class="hljs-con">PORT=30443 USE_K8S=true ./test-em-all.bash
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Finally, let’s see what information the Spring Boot liveness and readiness probes report. We will use the <code class="inlineCode">product</code> Service, but<a id="_idIndexMarker1180"/> feel free to also try out the probes for other Services:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Run the following command to get output from the <code class="inlineCode">product</code> Service’s liveness probe:
+        <pre class="programlisting con"><code class="hljs-con">kubectl exec -it deploy/product -- \
+  curl localhost/actuator/health/liveness -s | jq .
+</code></pre>
+        <p class="normal">Expect it to respond with:</p>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_16_10.png" alt="Graphical user interface, text, application  Description automatically generated" width="317" height="205"/></figure>
+    <p class="packt_figref">Figure 16.10: Response from a liveness probe</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Run the following command to get output from the <code class="inlineCode">product</code> Service’s readiness probe:
+        <pre class="programlisting con"><code class="hljs-con">kubectl exec -it deploy/product -- \
+  curl localhost/actuator/health/readiness -s | jq .
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Expect its response to be a bit more extensive:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_16_11.png" alt="A screenshot of a computer screen  Description automatically generated with medium confidence" width="309" height="482"/></figure>
+    <p class="packt_figref">Figure 16.11: Response from a readiness probe</p>
+    <p class="normal">From the output above, we can confirm that the readiness of the <code class="inlineCode">product</code> now depends on its access to both MongoDB and RabbitMQ. This is expected, since we configured the<a id="_idIndexMarker1181"/> readiness health group to include health indicators for RabbitMQ, MongoDB, and SQL databases, if available. See the section <em class="italic">Using Spring Boot’s support for graceful shutdown and probes for liveness and readiness</em> to recap, if required.</p>
+    <p class="normal">Before we move on, let’s clean up what we have installed in the development environment. We can do this by simply deleting the namespace. Deleting the namespace will recursively delete the resources that exist in the namespace, including information regarding the Helm installation.</p>
+    <p class="normal">Delete the namespace with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">kubectl delete namespace hands-on
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">If you just want to uninstall what the <code class="inlineCode">helm install</code> command installed, you can run the command <code class="inlineCode">helm uninstall hands-on-dev-env</code>.</p>
+    </div>
+    <p class="normal">With the development environment removed, we can move on and set up an environment targeting staging and production.</p>
+    <h1 id="_idParaDest-416" class="heading-1">Deploying to Kubernetes for staging and production</h1>
+    <p class="normal">In this section, we<a id="_idIndexMarker1182"/> will deploy the microservices in an environment for staging and production usage. A staging environment is used to<a id="_idIndexMarker1183"/> perform <strong class="keyWord">quality assurance</strong> (<strong class="keyWord">QA</strong>) and <strong class="keyWord">user acceptance tests</strong> (<strong class="keyWord">UATs</strong>) as the last step before taking a new release into production. To be able to verify that a new release not only meets functional<a id="_idIndexMarker1184"/> requirements but also non-functional requirements, for example, in terms of performance, robustness, scalability, and resilience, a staging environment is configured to be as similar as possible to the production environment.</p>
+    <p class="normal">When deploying to an environment for staging or production, there are a number of changes required compared to when deploying for development or tests:</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Resource managers should run outside of the Kubernetes cluster</strong>: It is technically feasible to run databases and queue managers for production use on Kubernetes as stateful containers, using <code class="inlineCode">StatefulSets</code> and <code class="inlineCode">PersistentVolumes</code>. At the time of writing, I recommend against it, mainly because the support for stateful containers is relatively new and unproven in Kubernetes. Instead, I recommend using the existing database and queue manager Services on-premises or as managed Services in the cloud, leaving Kubernetes to do what it is best at: running stateless containers. For the scope of this book, to simulate a production environment, we will run MySQL, MongoDB, and RabbitMQ as plain Docker containers outside of Kubernetes, using the already existing Docker Compose files.</li>
+      <li class="bulletList"><strong class="keyWord">Lockdown</strong>:<ul>
+          <li class="bulletList">For security reasons, things like <code class="inlineCode">actuator</code> endpoints and log levels need to be constrained in a production environment.</li>
+          <li class="bulletList">Externally exposed <a id="_idIndexMarker1185"/>endpoints should also be reviewed from a security perspective. For example, access to the configuration server should probably be locked down in a production environment, but we will keep it exposed in this book for convenience.</li>
+          <li class="bulletList">Docker image tags must be specified to be able to track which versions of the microservices have been deployed.</li>
+        </ul>
+      </li>
+      <li class="bulletList"><strong class="keyWord">Scale up available resources</strong>: To meet the requirements of both high availability and higher load, we need to run at least two Pods per Deployment. We might also need to increase the amount of memory and CPU that are allowed to be used per Pod. To avoid running out of memory in the Minikube instance, we will keep one Pod per Deployment but increase the maximum memory allowed in the production environment.</li>
+      <li class="bulletList"><strong class="keyWord">Set up a production-ready Kubernetes cluster</strong>: This is outside the scope of this book, but, if feasible, I recommend using one of the managed Kubernetes Services provided by the leading cloud providers. For the scope of this book, we will deploy to our local Minikube instance.</li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">This is not meant to be an exhaustive list of things that have to be considered when setting up an environment for production, but it’s a good start.</p>
+    </div>
+    <p class="normal">Our simulated production environment will look as follows:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_16_12.png" alt="Diagram  Description automatically generated" width="877" height="384"/></figure>
+    <p class="packt_figref">Figure 16.12: Resource managers deployed outside of Kubernetes</p>
+    <h2 id="_idParaDest-417" class="heading-2">Changes in the source code</h2>
+    <p class="normal">The following changes<a id="_idIndexMarker1186"/> have been applied to the source code to prepare for Deployment in an environment that’s used for staging and production:</p>
+    <ul>
+      <li class="bulletList">A Spring profile named <code class="inlineCode">prod</code> has been added to the configuration files in the <code class="inlineCode">config-repo</code> configuration repository:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spring.config.activate.on-profile:</span> <span class="hljs-string">prod</span>
+</code></pre>
+      </li>
+      <li class="bulletList">In the <code class="inlineCode">prod</code> profiles, the following have been added:<ul>
+          <li class="bulletList">URLs to the resource managers that run as plain Docker containers:
+            <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spring.rabbitmq.host:</span> <span class="hljs-number">172.17.0.1</span>
+<span class="hljs-attr">spring.data.mongodb.host:</span> <span class="hljs-number">172.17.0.1</span>
+<span class="hljs-attr">spring.datasource.url:</span> <span class="hljs-string">jdbc:mysql://172.17.0.1:3306/review-db</span>
+</code></pre>
+          </li>
+        </ul>
+      </li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">We use the <code class="inlineCode">172.17.0.1</code> IP address to address the Docker engine in the Minikube instance. This is the default IP address for the Docker engine when creating it with Minikube, at least for Minikube up to version 1.18.</p>
+      <p class="normal">There is work ongoing to establish a standard DNS name for containers to use if they need to access the Docker host they run on, but at the time of writing, this work effort hasn’t been completed.</p>
+    </div>
+    <ul>
+      <li class="bulletList">Log levels have been set to warning or higher, that is, error or fatal. For example:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">logging.level.root:</span> <span class="hljs-string">WARN</span>
+</code></pre>
+      </li>
+      <li class="bulletList">The only <code class="inlineCode">actuator</code> endpoints that are exposed over HTTP are the <code class="inlineCode">info</code> and <code class="inlineCode">health</code> endpoints that are used by the liveness and readiness probes in Kubernetes, as well as the <code class="inlineCode">circuitbreakerevents</code> endpoint that’s used by the test script, <code class="inlineCode">test-em-all.bash</code>:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">management.endpoints.web.exposure.include:</span> <span class="hljs-string">health,info,circuitbreakerevents</span>
+</code></pre>
+      </li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">In a real-world production environment, we should also have changed the <code class="inlineCode">imagePullPolicy: Never</code> setting to <code class="inlineCode">IfNotPresent</code>, to download Docker images from a Docker registry. However, since we will deploy the production setup to the Minikube instance where we manually build and tag the Docker images, we will not update this setting.</p>
+    </div>
+    <h2 id="_idParaDest-418" class="heading-2">Deploying to Kubernetes</h2>
+    <p class="normal">To simulate the use of<a id="_idIndexMarker1187"/> production-grade resource managers, MySQL, MongoDB, and RabbitMQ will run outside of Kubernetes using Docker Compose. We will start them up as we did in the previous chapters:</p>
+    <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env)
+docker-compose up -d mongodb mysql rabbitmq
+</code></pre>
+    <p class="normal">We also need to tag the existing Docker images with <code class="inlineCode">v1</code>, using the following commands:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker tag hands-on/auth-server hands-on/auth-server:v1
+docker tag hands-on/config-server hands-on/config-server:v1
+docker tag hands-on/gateway hands-on/gateway:v1 
+docker tag hands-on/product-composite-service hands-on/product-composite-service:v1 
+docker tag hands-on/product-service hands-on/product-service:v1
+docker tag hands-on/recommendation-service hands-on/recommendation-service:v1
+docker tag hands-on/review-service hands-on/review-service:v1
+</code></pre>
+    <p class="normal">From here, the commands are very similar to how we deployed to the development environment:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Deploy using Helm:
+        <pre class="programlisting con"><code class="hljs-con">helm install hands-on-prod-env \ kubernetes/helm/environments/prod-env \
+-n hands-on --create-namespace
+</code></pre>
+      </li>
+      <li class="numberedList">Wait for the Deployments to be up and running:
+        <pre class="programlisting con"><code class="hljs-con">kubectl wait --timeout=600s --for=condition=ready pod --all
+</code></pre>
+      </li>
+      <li class="numberedList">To see the Docker images that are currently used in the production environment, run the following command:
+        <pre class="programlisting con"><code class="hljs-con">kubectl get pods -o json | jq .items[].spec.containers[].image
+</code></pre>
+        <p class="normal">The response should look something like the following:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_16_13.png" alt="Text  Description automatically generated" width="503" height="219"/></figure>
+        <p class="packt_figref">Figure 16.13: Docker images used in a production environment</p>
+        <p class="normal">Note the <code class="inlineCode">v1</code> version of the Docker images!</p>
+        <p class="normal">Also note that the resource manager Pods for MySQL, MongoDB, and RabbitMQ are gone; these <a id="_idIndexMarker1188"/>can be found with the <code class="inlineCode">docker-compose ps</code> command.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Run the test script, <code class="inlineCode">test-em-all.bash</code>, to verify the simulated production environment:
+        <pre class="programlisting con"><code class="hljs-con">CONFIG_SERVER_USR=prod-usr \
+CONFIG_SERVER_PWD=prod-pwd \
+PORT=30443 USE_K8S=true ./test-em-all.bash
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">Expect the same type of output that we got when the test script was run against the development environment.</p>
+    </div>
+    <p class="normal">That completes the tests; let’s clean up so that the Kubernetes environment is ready for the next chapter.</p>
+    <h2 id="_idParaDest-419" class="heading-2">Cleaning up</h2>
+    <p class="normal">To delete the<a id="_idIndexMarker1189"/> resources that we used, run the following commands:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Delete the namespace:
+        <pre class="programlisting con"><code class="hljs-con">kubectl delete namespace hands-on
+</code></pre>
+      </li>
+      <li class="numberedList">Shut down the resource managers that run outside of Kubernetes:
+        <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env)
+docker-compose down
+eval $(minikube docker-env -u)
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">The <code class="inlineCode">eval $(minikube docker-env -u)</code> command directs the local Docker client to communicate with the local Docker engine and no longer communicate with the Docker engine in Minikube.</p>
+    </div>
+    <p class="normal">As already described earlier in this chapter, the <code class="inlineCode">kubectl delete namespace</code> command will recursively delete all Kubernetes resources that existed in the namespace, and the <code class="inlineCode">docker-compose down</code> command will <a id="_idIndexMarker1190"/>stop MySQL, MongoDB, and RabbitMQ. With the production environment removed, we have reached the end of this chapter.</p>
+    <h1 id="_idParaDest-420" class="heading-1">Summary</h1>
+    <p class="normal">In this chapter, we learned how to deploy the microservices in this book on Kubernetes using Helm. We have seen how Helm can be used to create reusable templates, minimizing the boilerplate code required to create the Kubernetes manifests. Reusable templates are stored in a common chart, while microservice-specific charts provide values specific to each microservice. At the top level, we have parent charts that describe how a development/test and stage/production environment should be deployed using the microservice charts, optionally together with charts for resource managers such as databases and queue managers.</p>
+    <p class="normal">We have also seen how we can benefit from using Spring Boot features to facilitate Deployments to Kubernetes. Spring Boot’s support for graceful shutdown can be used to allow active requests to complete before a Spring Boot-based microservice is stopped, for example, during a rolling upgrade. The support for liveness and readiness probes makes it easy to declare probes that are aware of the availability of external resources that a specific microservice depends on.</p>
+    <p class="normal">Finally, to be able to deploy our microservices in Kubernetes, we had to replace Netflix Eureka with the built-in discovery Service in Kubernetes. Changing the discovery Service was done without any changes in the Java source code – all we had to do was apply changes to the build dependencies and some of the configuration.</p>
+    <p class="normal">In the next chapter, we will see how we can further utilize Kubernetes to reduce the number of supporting Services we need to deploy in Kubernetes. Head over to the next chapter to see how we can eliminate the need for the configuration server and how our edge server can be replaced by a Kubernetes Ingress controller.</p>
+    <h1 id="_idParaDest-421" class="heading-1">Questions</h1>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Why did we remove the Eureka server from the microservice landscape when deploying it on Kubernetes?</li>
+      <li class="numberedList">What did we replace the Eureka server with and how was the source code of the microservices affected by this change?</li>
+      <li class="numberedList">What’s the purpose of liveness and readiness probes?</li>
+      <li class="numberedList">How is Spring Boot’s mechanism for graceful shutdown useful?</li>
+      <li class="numberedList">What is the purpose of the following Helm template directives?
+        <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">$common</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">.Values.common</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.Values</span> <span class="hljs-string">"common"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">with</span> <span class="hljs-string">merge</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">$common</span> <span class="hljs-string">-</span>}}
+</code></pre>
+      </li>
+      <li class="numberedList">Why would the following named Helm template fail?
+        <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">define</span> <span class="hljs-string">"common.secrets"</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">range</span> <span class="hljs-string">$secretName</span>, <span class="hljs-string">$secretMap</span> <span class="hljs-string">:=</span> <span class="hljs-string">.Values.secrets</span> }}
+<span class="hljs-attr">apiVersion:</span> <span class="hljs-string">v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Secret</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> {{ <span class="hljs-string">$secretName</span> }}
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">$secretName</span> }}
+<span class="hljs-attr">type:</span> <span class="hljs-string">Opaque</span>
+<span class="hljs-attr">data:</span>
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">range</span> <span class="hljs-string">$key</span>, <span class="hljs-string">$val</span> <span class="hljs-string">:=</span> <span class="hljs-string">$secretMap</span> }}
+  {{ <span class="hljs-string">$key</span> }}<span class="hljs-string">:</span> {{ <span class="hljs-string">$val</span> <span class="hljs-string">|</span> <span class="hljs-string">b64enc</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+</code></pre>
+      </li>
+      <li class="numberedList">Why would the following manifests not work together?
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">v1</span>
+<span class="hljs-attr">kind:</span> Service
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">review</span>
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> <span class="hljs-string">review</span>
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">type:</span> <span class="hljs-string">ClusterIP</span>
+  <span class="hljs-attr">ports:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">http</span>
+      <span class="hljs-attr">port:</span> <span class="hljs-number">80</span>
+      <span class="hljs-attr">protocol:</span> <span class="hljs-string">TCP</span>
+      <span class="hljs-attr">targetPort:</span> <span class="hljs-string">http</span>
+  <span class="hljs-attr">selector:</span>
+    <span class="hljs-attr">app.kubernetes.io/pod-name:</span> <span class="hljs-string">review</span>
+<span class="hljs-meta">---</span>
+<span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Deployment</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">review</span>
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> <span class="hljs-string">review</span>
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">replicas:</span> <span class="hljs-number">1</span>
+  <span class="hljs-attr">selector:</span>
+    <span class="hljs-attr">matchLabels:</span>
+      <span class="hljs-attr">app.kubernetes.io/name:</span> <span class="hljs-string">review</span>
+  <span class="hljs-attr">template:</span>
+    <span class="hljs-attr">metadata:</span>
+      <span class="hljs-attr">labels:</span>
+        <span class="hljs-attr">app.kubernetes.io/name:</span> <span class="hljs-string">review</span>
+    <span class="hljs-attr">spec:</span>
+      <span class="hljs-attr">containers:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">review</span>
+          <span class="hljs-attr">image:</span> <span class="hljs-string">"hands-on/review-service:latest"</span>
+          <span class="hljs-attr">ports:</span>
+            <span class="hljs-bullet">-</span> <span class="hljs-attr">containerPort:</span> <span class="hljs-number">80</span>
+              <span class="hljs-attr">name:</span> <span class="hljs-string">http-port</span>
+              <span class="hljs-attr">protocol:</span> <span class="hljs-string">TCP</span>
+</code></pre>
+      </li>
+    </ol>
+  </div>
+</div>
+</div>
+</body></html>

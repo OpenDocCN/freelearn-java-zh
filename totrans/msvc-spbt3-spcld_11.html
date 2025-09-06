@@ -1,0 +1,976 @@
+<html><head></head><body>
+<div id="book-content">
+<div id="sbo-rt-content"><div id="_idContainer279" class="Basic-Text-Frame">
+    <h1 class="chapterNumber">11</h1>
+    <h1 id="_idParaDest-272" class="chapterTitle">Securing Access to APIs</h1>
+    <p class="normal">In this chapter, we will see how we can secure access to the APIs and web pages exposed by the edge server introduced in the previous chapter. We will learn how to use HTTPS to protect against eavesdropping on external access to our APIs, and how to use OAuth 2.0 and OpenID Connect to authenticate and authorize users and client applications to access our APIs. Finally, we will use HTTP Basic authentication to secure access to the discovery server, Netflix Eureka.</p>
+    <p class="normal">The following topics will be covered in this chapter:</p>
+    <ul>
+      <li class="bulletList">An introduction to the OAuth 2.0 and OpenID Connect standards</li>
+      <li class="bulletList">A general discussion on how to secure the system landscape</li>
+      <li class="bulletList">Protecting external communication with HTTPS</li>
+      <li class="bulletList">Securing access to the discovery server, Netflix Eureka</li>
+      <li class="bulletList">Adding a local authorization server to our system landscape</li>
+      <li class="bulletList">Authenticating and authorizing API access using OAuth 2.0 and OpenID Connect</li>
+      <li class="bulletList">Testing with the local authorization server</li>
+      <li class="bulletList">Testing with an external OpenID Connect provider, Auth0</li>
+    </ul>
+    <h1 id="_idParaDest-273" class="heading-1">Technical requirements</h1>
+    <p class="normal">For instructions on how to install the tools used in this book and how to access the source code for this book, see:</p>
+    <ul>
+      <li class="bulletList"><em class="chapterRef">Chapter 21</em>, <em class="italic">Installation Instructions for macOS</em></li>
+      <li class="bulletList"><em class="chapterRef">Chapter 22</em>, <em class="italic">Installation Instructions for Microsoft Windows with WSL 2 and Ubuntu</em></li>
+    </ul>
+    <p class="normal">The code examples in this chapter all come from the source code in <code class="inlineCode">$BOOK_HOME/Chapter11</code>.</p>
+    <p class="normal">If you want to view the changes applied to the source code in this chapter, that is, see what it took to secure access to the APIs in the microservice landscape, you can compare it with the source code for <em class="chapterRef">Chapter 10</em>, <em class="italic">Using Spring Cloud Gateway to Hide Microservices behind an Edge Server</em>. You can use your favorite <code class="inlineCode">diff</code> tool and compare the two folders, <code class="inlineCode">$BOOK_HOME/Chapter10</code> and <code class="inlineCode">$BOOK_HOME/Chapter11</code>.</p>
+    <h1 id="_idParaDest-274" class="heading-1">Introduction to OAuth 2.0 and OpenID Connect</h1>
+    <p class="normal">Before introducing OAuth 2.0 and OpenID Connect, let’s clarify what we mean by authentication and authorization. <strong class="keyWord">Authentication</strong> means<a id="_idIndexMarker713"/> identifying a user by validating credentials supplied by the user, such as a username and password. <strong class="keyWord">Authorization</strong> is <a id="_idIndexMarker714"/>about giving access to various parts of, in our case, an API to an authenticated user.</p>
+    <p class="normal"><strong class="keyWord">OAuth 2.0</strong> is an open<a id="_idIndexMarker715"/> standard for <strong class="keyWord">authorization delegation</strong>, and <strong class="keyWord">OpenID Connect</strong> is an <a id="_idIndexMarker716"/>add-on to OAuth 2.0 that enables client applications to verify the identity of users based on the authentication performed by the authorization server. Let’s look briefly at OAuth 2.0 and OpenID Connect separately to get an initial understanding of their purposes!</p>
+    <h2 id="_idParaDest-275" class="heading-2">Introducing OAuth 2.0</h2>
+    <p class="normal">OAuth 2.0 is a widely <a id="_idIndexMarker717"/>accepted open standard for authorization that enables a user to give consent for a third-party client application to access protected resources in the name of the user. Giving a third-party client application the right to <a id="_idIndexMarker718"/>act in the name of a user, for example, calling an API, is known as <strong class="keyWord">authorization delegation</strong>.</p>
+    <p class="normal">So, what does this mean?</p>
+    <p class="normal">Let’s start by sorting out the concepts used:</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Resource owner</strong>: The end user.</li>
+      <li class="bulletList"><strong class="keyWord">Client</strong>: The third-party client application, for example, a web app or a native mobile app, that wants to call some protected APIs in the name of the end user.</li>
+      <li class="bulletList"><strong class="keyWord">Resource server</strong>: The server that exposes the APIs that we want to protect.</li>
+      <li class="bulletList"><strong class="keyWord">Authorization server</strong>: The authorization server issues tokens to the client after the resource owner, that is, the end user, has been authenticated. The management of user information and the authentication of users are typically delegated, behind the scenes, to an <strong class="keyWord">Identity Provider</strong> (<strong class="keyWord">IdP</strong>).</li>
+    </ul>
+    <p class="normal">A client is registered in the<a id="_idIndexMarker719"/> authorization server and is given a <strong class="keyWord">client ID</strong> and a <strong class="keyWord">client secret</strong>. The client secret must be protected by the client, like a password. A client also gets registered with a set of allowed <strong class="keyWord">redirect URIs</strong> that the authorization server will use after a user has been authenticated to send <strong class="keyWord">authorization codes</strong> and <strong class="keyWord">tokens</strong> that have been issued back to the client application.</p>
+    <p class="normal">The following is an example by way of illustration. Let’s say that a user accesses a third-party client application and the client application wants to call a protected API to serve the user. To be allowed to access these APIs, the client application needs a way to tell the APIs that it is acting in the name of the user. To avoid solutions where the user must share their credentials with the client application for authentication, an <strong class="keyWord">access token</strong> is issued by an authorization server that gives the client application limited access to a selected set of APIs in the name of the user.</p>
+    <p class="normal">This means that the user never has to reveal their credentials to the client application. The user can also give consent to the client application to access specific APIs on behalf of the user. An access token represents a time-constrained set of access rights, expressed as <strong class="keyWord">scopes</strong> in OAuth 2.0 terms. A <strong class="keyWord">refresh token</strong> can also be issued to a client application by the authorization server. A refresh token can be used by the client application to obtain new access tokens without having to involve the user.</p>
+    <p class="normal">The OAuth 2.0 specification defines four authorization grant flows for issuing access tokens, explained as follows:</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Authorization code grant flow</strong>: This is the safest, but also the most complex, grant flow. This grant flow requires that the user interacts with the authorization server<a id="_idIndexMarker720"/> using a web browser for authentication and giving consent to the client application, as illustrated by the following diagram:</li>
+    </ul>
+    <figure class="mediaobject"><img src="../Images/B19825_11_01.png" alt="Diagram  Description automatically generated" width="575" height="733"/></figure>
+    <p class="packt_figref">Figure 11.1: OAuth 2.0 – authorization code grant flow</p>
+    <p class="normal">Here’s what’s going on in this diagram:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">The client application initiates the grant flow by sending the user to the authorization server in the web browser.</li>
+      <li class="numberedList">The authorization server will authenticate the user and ask for the user’s consent.</li>
+      <li class="numberedList">The authorization server will redirect the user back to the client application with an authorization code. The authorization server will use a <strong class="keyWord">redirect URI</strong> specified by the client in <em class="italic">step 1</em> to know where to send the authorization code. Since the authorization code is passed back to the client application using the<a id="_idIndexMarker721"/> web browser, that is, to an unsecure environment where malicious JavaScript code can potentially pick up the authorization code, it is only allowed to be used once and only during a short time period.</li>
+      <li class="numberedList">To exchange the authorization code for an access token, the client application is expected to call the authorization server again. The client application must present its client ID and client secret together with the authorization code for the authorization server. Since the client secret is sensitive and must be protected, this call must be executed from server-side code.</li>
+      <li class="numberedList">The authorization server issues an access token and sends it back to the client application. The authorization server can also, optionally, issue and return a refresh token.</li>
+      <li class="numberedList">Using the access token, the client can send a request to the protected API exposed by the resource server.</li>
+      <li class="numberedList">The resource server validates the access token and serves the request in the event of a successful validation. <em class="italic">Steps 6</em> and <em class="italic">7</em> can be repeated as long as the access token is valid. When the lifetime of the access token has expired, the client can use their refresh token to acquire a new access token.</li>
+    </ol>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Implicit grant flow</strong>: This flow is also web browser-based but intended for client applications that are not able to keep a client secret protected, for example, a single-page web application. The web browser gets an access token back from the authorization server instead of an authorization code. Since the implicit grant flow is less secure than the authorization<a id="_idIndexMarker722"/> code grant flow, the client can’t request a refresh token.</li>
+      <li class="bulletList"><strong class="keyWord">Resource owner password credentials grant flow</strong>: If a client application can’t interact with a web browser, it can fall back on this grant flow. In this grant flow, the user must share their credentials with the client application and the client application will use these credentials to acquire an access token.</li>
+      <li class="bulletList"><strong class="keyWord">Client credentials grant flow</strong>: In the case where a client application needs to call an API unrelated to a specific user, it can use this grant flow to acquire an access token using its own client ID and client secret.</li>
+    </ul>
+    <p class="normal">The full specification can be found here: <a href="https://tools.ietf.org/html/rfc6749"><span class="url">https://tools.ietf.org/html/rfc6749</span></a>. There are also a number of additional specifications that detail various aspects of OAuth 2.0; for an overview, refer to <a href="https://www.oauth.com/oauth2-servers/map-oauth-2-0-specs/"><span class="url">https://www.oauth.com/oauth2-servers/map-oauth-2-0-specs/</span></a>. One additional specification that is worth some extra attention is <em class="italic">RFC 7636 – Proof Key for Code Exchange by OAuth Public Clients</em> (or <strong class="keyWord">PKCE</strong> for short), <a href="https://tools.ietf.org/html/rfc7636"><span class="url">https://tools.ietf.org/html/rfc7636</span></a>. </p>
+    <p class="normal">This specification describes how an otherwise unsecure public client, such as a mobile native app or desktop application, can utilize the authorization code grant flow in a secure way by adding an extra layer of security.</p>
+    <p class="normal">The OAuth 2.0 specification was published in 2012, and over the years, a lot of lessons have been learned about what works and what does not. In 2019, work began to establish OAuth 2.1, consolidating all the best practices and experiences from using OAuth 2.0. A draft version can be found here: <a href="https://tools.ietf.org/html/draft-ietf-oauth-v2-1-08"><span class="url">https://tools.ietf.org/html/draft-ietf-oauth-v2-1-08</span></a>.</p>
+    <p class="normal">In my opinion, the most important improvements in OAuth 2.1 are:</p>
+    <ul>
+      <li class="bulletList">PKCE is integrated into the authorization code grant flow. The use of PKCE will be required by public clients to improve their security, as described above. For confidential clients, where the authorization server can verify their credentials, the use of PKCE is not required, only recommended.</li>
+      <li class="bulletList">The implicit grant flow is deprecated and omitted from the specification, due to its less secure nature.</li>
+      <li class="bulletList">The resource owner password credentials grant flow is also deprecated and omitted from the specification, for the same reasons.</li>
+    </ul>
+    <p class="normal">Given the direction in the upcoming OAuth 2.1 specification, we will only use the authorization code grant flow and the client credentials grant flow in this book.</p>
+    <div class="packt_tip">
+      <p class="normal">When it comes to automating tests against APIs that are protected by OAuth 2.0, the client credentials grant flow is very handy since it doesn’t require manual interaction using a web browser. We will use this grant flow later on in this chapter with our test script; see the <em class="italic">Changes in the test script</em> section.</p>
+    </div>
+    <h2 id="_idParaDest-276" class="heading-2">Introducing OpenID Connect</h2>
+    <p class="normal">OpenID Connect (abbreviated to <strong class="keyWord">OIDC</strong>) is, as<a id="_idIndexMarker723"/> has already been mentioned, an add-on to OAuth 2.0 that enables client applications to verify the identity of users. OIDC adds an extra token, an ID token, that the client application gets back from the authorization server after a completed grant flow.</p>
+    <p class="normal">The ID token is encoded as a <strong class="keyWord">JSON Web Token</strong> (<strong class="keyWord">JWT</strong>) and contains a number of claims, such as the ID and email address of the user. The ID token is digitally signed using JSON web signatures. This makes it possible for a client application to trust the information in the ID token by validating its digital signature using public keys from the authorization server.</p>
+    <p class="normal">Optionally, access tokens can also be encoded and signed in the same way as ID tokens, but it is not mandatory, according to the specification. Also important, OIDC defines a <strong class="keyWord">discovery endpoint</strong>, which is a standardized way to establish URLs to important endpoints, such as requesting authorization codes and tokens or getting the public keys to verify a digitally signed JWT. Finally, it also defines a <strong class="keyWord">user-info endpoint</strong>, which can be used to get extra information about an authenticated user given an access token for that user.</p>
+    <p class="normal">For an overview of the available specifications, see <a href="https://openid.net/developers/specs/"><span class="url">https://openid.net/developers/specs/</span></a>.</p>
+    <div class="packt_tip">
+      <p class="normal">In this book, we will only use authorization servers that comply with the OpenID Connect specification. This will simplify the configuration of resource servers by the use of their discovery endpoints. We will also use the optional support for digitally signed JWT access tokens to simplify how resource servers can verify the authenticity of the access tokens. See the <em class="italic">Changes in both the edge server and the product-composite service</em> section below.</p>
+    </div>
+    <p class="normal">This concludes our introduction to the OAuth 2.0 and OpenID Connect standards. Later on in this chapter, we will learn more about how to use these standards. In the next section, we will get<a id="_idIndexMarker724"/> a high-level view of how the system landscape will be secured.</p>
+    <h1 id="_idParaDest-277" class="heading-1">Securing the system landscape</h1>
+    <p class="normal">To secure the system <a id="_idIndexMarker725"/>landscape as described in the introduction to this chapter, we will perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Encrypt external requests and responses to and from our external API using HTTPS to protect against eavesdropping.</li>
+      <li class="numberedList">Authenticate and authorize users and client applications that access our APIs using OAuth 2.0 and OpenID Connect.</li>
+      <li class="numberedList">Secure access to the discovery server, Netflix Eureka, using HTTP basic authentication.</li>
+    </ol>
+    <p class="normal">We will only apply HTTPS for external communication to our edge server, using plain HTTP for communication inside our system landscape.</p>
+    <div class="packt_tip">
+      <p class="normal">In the chapter on service meshes (<em class="chapterRef">Chapter 18</em>, <em class="italic">Using a Service Mesh to Improve Observability and Management</em>) that will appear later in this book, we will see how we can get help from a service mesh product to automatically provision HTTPS to secure communication inside a system landscape.</p>
+    </div>
+    <p class="normal">For test purposes, we will add a local OAuth 2.0 authorization server to our system landscape. All external communication with the authorization server will be routed through the edge server. The edge server and the <code class="inlineCode">product-composite</code> service will act as OAuth 2.0 resource servers; that is, they will require a valid OAuth 2.0 access token to allow access.</p>
+    <p class="normal">To minimize the overhead of validating access tokens, we will assume that they are encoded as signed JWTs and that the authorization server exposes an endpoint that the resource servers can use to access the public keys, also known as a <strong class="keyWord">JSON Web Key Set</strong>, or <strong class="keyWord">jwk-set</strong> for short, required<a id="_idIndexMarker726"/> to validate the signing.</p>
+    <p class="normal">The system landscape will look like the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_02.png" alt="Diagram  Description automatically generated" width="838" height="378"/></figure>
+    <p class="packt_figref">Figure 11.2: Adding an authorization server to the system landscape</p>
+    <p class="normal">From the preceding diagram, we can note that:</p>
+    <ul>
+      <li class="bulletList">HTTPS is used for external communication, while plain text HTTP is used inside the <a id="_idIndexMarker727"/>system landscape.</li>
+      <li class="bulletList">The local OAuth 2.0 authorization server will be accessed externally through the edge server.</li>
+      <li class="bulletList">Both the edge server and the <code class="inlineCode">product-composite</code> microservice will validate access tokens as signed JWTs.</li>
+      <li class="bulletList">The edge server and the <code class="inlineCode">product-composite</code> microservice will get the authorization server’s public keys from its <code class="inlineCode">jwk-set</code> endpoint and use them to validate the signature of the JWT-based access tokens.</li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">Note that we will focus on securing access to APIs over HTTP, not on covering general best practices for securing web applications, for example, managing web application security risks <a id="_idIndexMarker728"/>pointed out by the <strong class="keyWord">OWASP Top Ten Project</strong>. Refer to <a href="https://owasp.org/www-project-top-ten/"><span class="url">https://owasp.org/www-project-top-ten/</span></a> for more information.</p>
+    </div>
+    <p class="normal">With this overview of how the system landscape will be secured, let’s start to see how we can protect external <a id="_idIndexMarker729"/>communication from eavesdropping using HTTPS.</p>
+    <h1 id="_idParaDest-278" class="heading-1">Protecting external communication with HTTPS</h1>
+    <p class="normal">In this section, we will<a id="_idIndexMarker730"/> learn how to prevent eavesdropping on external communication, for example, from the internet, via the public APIs exposed by the edge server. We will use HTTPS to encrypt communication. To use HTTPS, we need to do the following:</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Create a certificate</strong>: We will <a id="_idIndexMarker731"/>create our own self-signed certificate, sufficient for development purposes.</li>
+      <li class="bulletList"><strong class="keyWord">Configure the edge server</strong>: It has to<a id="_idIndexMarker732"/> be configured to accept only HTTPS-based external traffic using the certificate.</li>
+    </ul>
+    <p class="normal">The self-signed certificate is created with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore edge.p12 -validity 3650
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">The source code comes with a sample certificate file, so you don’t need to run this command to run the following examples.</p>
+    </div>
+    <p class="normal">The command will ask for a number of parameters. When asked for a password, I entered <code class="inlineCode">password</code>. For the rest of the parameters, I simply entered an empty value to accept the default value. The certificate file created, <code class="inlineCode">edge.p12</code>, is placed in the <code class="inlineCode">gateway</code> projects folder, <code class="inlineCode">src/main/resources/keystore</code>. This means that the certificate file will be placed in the <code class="inlineCode">.jar</code> file when it is built and will be available on the classpath at runtime at <code class="inlineCode">keystore/edge.p12</code>.</p>
+    <div class="packt_tip">
+      <p class="normal">Providing certificates using the classpath is sufficient during development, but not applicable to other environments, for example, a production environment. See the <em class="italic">Replacing a self-signed certificate at runtime</em> section below for how we can replace this certificate with an external certificate at runtime!</p>
+    </div>
+    <p class="normal">To configure the edge<a id="_idIndexMarker733"/> server to use the certificate and <a id="_idIndexMarker734"/>HTTPS, the following is added to <code class="inlineCode">application.yml</code> in the <code class="inlineCode">gateway</code> project:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">server.port:</span> <span class="hljs-number">8443</span>
+<span class="hljs-attr">server.ssl:</span>
+ <span class="hljs-attr">key-store-type:</span> <span class="hljs-string">PKCS12</span>
+ <span class="hljs-attr">key-store:</span> <span class="hljs-string">classpath:keystore/edge.p12</span>
+ <span class="hljs-attr">key-store-password:</span> <span class="hljs-string">password</span>
+ <span class="hljs-attr">key-alias:</span> <span class="hljs-string">localhost</span>
+</code></pre>
+    <p class="normal">Some notes from the preceding source code:</p>
+    <ul>
+      <li class="bulletList">The path to the certificate is specified in the <code class="inlineCode">server.ssl.key-store</code> parameter, and is set to <code class="inlineCode">classpath:keystore/edge.p12</code>. This means that the certificate will be picked up on the classpath from the location <code class="inlineCode">keystore/edge.p12</code>.</li>
+      <li class="bulletList">The password for the certificate is specified in the <code class="inlineCode">server.ssl.key-store-password</code> parameter.</li>
+      <li class="bulletList">To indicate that the edge server talks HTTPS and not HTTP, we also change the port from <code class="inlineCode">8080</code> to <code class="inlineCode">8443</code> in the <code class="inlineCode">server.port</code> parameter.</li>
+    </ul>
+    <p class="normal">In addition to these changes in the edge server, changes are also required in the following files to reflect the changes to the port and HTTP protocol, replacing <code class="inlineCode">HTTP</code> with <code class="inlineCode">HTTPS</code> and <code class="inlineCode">8080</code> with <code class="inlineCode">8443</code>:</p>
+    <ul>
+      <li class="bulletList">The three Docker Compose files, <code class="inlineCode">docker-compose*.yml</code></li>
+      <li class="bulletList">The test script, <code class="inlineCode">test-em-all.bash</code></li>
+    </ul>
+    <p class="normal">Providing certificates using the classpath is, as mentioned previously, only sufficient during development. Let’s see how we can replace this certificate with an external certificate at runtime.</p>
+    <h2 id="_idParaDest-279" class="heading-2">Replacing a self-signed certificate at runtime</h2>
+    <p class="normal">Placing a self-signed certificate in the <code class="inlineCode">.jar</code> file is only useful for development. For a working solution in runtime <a id="_idIndexMarker735"/>environments, for example, for test or production, it must be possible to use certificates signed by<a id="_idIndexMarker736"/> authorized <strong class="keyWord">CAs</strong> (short for <strong class="keyWord">Certificate Authorities</strong>).</p>
+    <p class="normal">It must also be possible to specify the certificates to be used during runtime without the need to rebuild the <code class="inlineCode">.jar</code> files and, when using Docker, the Docker image that contains the <code class="inlineCode">.jar</code> file. When using Docker Compose to manage the Docker container, we can map a volume in the Docker container to a certificate that resides on the Docker host. We can also set up environment variables for the Docker container that points to the external certificate in the Docker volume.</p>
+    <div class="packt_tip">
+      <p class="normal">In <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>, we will learn about Kubernetes, where we will see more powerful solutions for how to handle secrets, such as certificates, that are suitable for running Docker containers in a cluster; that is, where containers are scheduled on a group of Docker hosts and not on a single Docker host.</p>
+      <p class="normal">The changes described in this topic have <strong class="keyWord">not</strong> been applied to the source code in the book’s GitHub repository; you need to make them yourself to see them in action!</p>
+    </div>
+    <p class="normal">To replace the certificate packaged in the <code class="inlineCode">.jar</code> file, perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Create a second certificate and set the password to <code class="inlineCode">testtest</code> when asked for it:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter11
+mkdir keystore
+keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore keystore/edge-test.p12 -validity 3650
+</code></pre>
+      </li>
+      <li class="numberedList">Update the Docker Compose file, <code class="inlineCode">docker-compose.yml</code>, with environment variables for the location, the password for the new certificate, and a volume that maps to the folder where the new certificate is placed. The configuration of the edge server will look like the following after the change:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">gateway:</span>
+  <span class="hljs-attr">environment:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_PROFILES_ACTIVE=docker</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SERVER_SSL_KEY_STORE=file:/keystore/edge-test.p12</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SERVER_SSL_KEY_STORE_PASSWORD=testtest</span>
+  <span class="hljs-attr">volumes:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">$PWD/keystore:/keystore</span>
+  <span class="hljs-attr">build:</span> <span class="hljs-string">spring-cloud/gateway</span>
+  <span class="hljs-attr">mem_limit:</span> <span class="hljs-string">512m</span>
+  <span class="hljs-attr">ports:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">"8443:8443"</span>
+</code></pre>
+      </li>
+      <li class="numberedList">If the edge server is up and running, it needs to be restarted with the following commands:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose up -d --scale gateway=0
+docker-compose up -d --scale gateway=1
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">The <code class="inlineCode">docker-compose restart gateway</code> command might look like a good candidate for restarting the gateway service, but it actually does not take changes in <code class="inlineCode">docker-compose.yml</code> into consideration. Hence, it is not a useful command in this case.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">The new certificate is now in use!</li>
+    </ol>
+    <p class="normal">This concludes the section on how to protect external communication with HTTPS. In the next section, we<a id="_idIndexMarker737"/> will learn how to secure access to the discovery server, Netflix Eureka, using HTTP Basic authentication.</p>
+    <h1 id="_idParaDest-280" class="heading-1">Securing access to the discovery server</h1>
+    <p class="normal">Previously, we learned how to protect external communication with HTTPS. Now we will use HTTP Basic authentication<a id="_idIndexMarker738"/> to restrict access to the APIs and web pages on the discovery server, Netflix Eureka. This means that we will require a user to supply a username and password to get access. Changes are required both on the Eureka server and in the Eureka clients, described as follows.</p>
+    <h2 id="_idParaDest-281" class="heading-2">Changes in the Eureka server</h2>
+    <p class="normal">To protect the Eureka server, the<a id="_idIndexMarker739"/> following changes have been applied to the source code:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">In <code class="inlineCode">build.gradle</code>, a dependency has been added for Spring Security:
+        <pre class="programlisting code"><code class="hljs-code">implementation <span class="hljs-string">'org.springframework.boot:spring-boot-starter-security'</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Security configuration has been added to the <code class="inlineCode">SecurityConfig</code> class:<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1">The user is defined as follows:
+            <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Bean</span>
+<span class="hljs-keyword">public</span> InMemoryUserDetailsManager <span class="hljs-title">userDetailsService</span><span class="hljs-params">()</span> {
+  <span class="hljs-type">UserDetails</span> <span class="hljs-variable">user</span> <span class="hljs-operator">=</span> User.withDefaultPasswordEncoder()
+      .username(username)
+      .password(password)
+      .roles(<span class="hljs-string">"USER"</span>)
+      .build();
+  <span class="hljs-keyword">return</span> <span class="hljs-keyword">new</span> <span class="hljs-title">InMemoryUserDetailsManager</span>(user);
+}
+</code></pre>
+          </li>
+          <li class="alphabeticList">The <code class="inlineCode">username</code> and <code class="inlineCode">password</code> are injected into the constructor from the configuration file:
+            <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Autowired</span>
+<span class="hljs-keyword">public</span> <span class="hljs-title">SecurityConfig</span><span class="hljs-params">(</span>
+<span class="hljs-params">  </span><span class="hljs-meta">@Value("${app.eureka-username}")</span><span class="hljs-params"> String username,</span>
+<span class="hljs-params">  </span><span class="hljs-meta">@Value("${app.eureka-password}")</span><span class="hljs-params"> String password</span>
+<span class="hljs-params">)</span> {
+  <span class="hljs-built_in">this</span>.username = username;
+  <span class="hljs-built_in">this</span>.password = password;
+}
+</code></pre>
+          </li>
+          <li class="alphabeticList">All APIs and web pages are protected using HTTP Basic authentication by means of the following definition:
+            <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Bean</span>
+<span class="hljs-keyword">public</span> SecurityFilterChain <span class="hljs-title">configure</span><span class="hljs-params">(HttpSecurity http)</span> <span class="hljs-keyword">throws</span> Exception {
+  http
+    <span class="hljs-comment">// Disable CRCF to allow services to register themselves with Eureka</span>
+    .csrf()
+      .disable()
+    .authorizeRequests()
+      .anyRequest().authenticated()
+      .and()
+      .httpBasic();
+  <span class="hljs-keyword">return</span> http.build();
+}
+</code></pre>
+          </li>
+        </ol>
+      </li>
+      <li class="numberedList">Credentials for the user are set up in the configuration file, <code class="inlineCode">application.yml</code>:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">app:</span>
+ <span class="hljs-attr">eureka-username:</span> <span class="hljs-string">u</span>
+ <span class="hljs-attr">eureka-password:</span> <span class="hljs-string">p</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Finally, the test class, <code class="inlineCode">EurekaServerApplicationTests</code>, uses the credentials from the configuration<a id="_idIndexMarker740"/> file when testing the APIs of the Eureka server:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Value("${app.eureka-username}")</span>
+<span class="hljs-keyword">private</span> String username;
+ 
+<span class="hljs-meta">@Value("${app.eureka-password}")</span>
+<span class="hljs-keyword">private</span> String password;
+ 
+<span class="hljs-meta">@Autowired</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">setTestRestTemplate</span><span class="hljs-params">(TestRestTemplate testRestTemplate)</span> {
+   <span class="hljs-built_in">this</span>.testRestTemplate = testRestTemplate.withBasicAuth(username, password);
+}
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">The above are the steps required for restricting access to the APIs and web pages of the discovery server, Netflix Eureka. It will now use HTTP Basic authentication and require a user to supply a username and password to get access. The last step is to configure Netflix Eureka clients so that they pass credentials when accessing the Netflix Eureka server.</p>
+    <h2 id="_idParaDest-282" class="heading-2">Changes in Eureka clients</h2>
+    <p class="normal">For Eureka clients, the credentials<a id="_idIndexMarker741"/> can be specified in the connection URL for the Eureka server. This is specified in each client’s configuration file, <code class="inlineCode">application.yml</code>, as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">app:</span>
+  <span class="hljs-attr">eureka-username:</span> <span class="hljs-string">u</span>
+  <span class="hljs-attr">eureka-password:</span> <span class="hljs-string">p</span>
+ 
+<span class="hljs-attr">eureka:</span>
+  <span class="hljs-attr">client:</span>
+     <span class="hljs-attr">serviceUrl:</span>
+       <span class="hljs-attr">defaultZone:</span> <span class="hljs-string">"http://${app.eureka-username}:${app.eureka-</span>
+<span class="hljs-string">                     password}@${app.eureka-server}:8761/eureka/"</span>
+</code></pre>
+    <p class="normal">This concludes the section on how to restrict access to the Netflix Eureka server. In the <em class="italic">Testing the protected discovery server </em>section, we will run tests to verify that the access is protected. In the next section, we will learn how to add a local authorization server to the system landscape.</p>
+    <h1 id="_idParaDest-283" class="heading-1">Adding a local authorization server</h1>
+    <p class="normal">To be able to<a id="_idIndexMarker742"/> run tests locally and fully automated with APIs that are secured using OAuth 2.0 and OpenID Connect, we will add an authorization server that is compliant with these specifications to our system landscape. Historically, Spring Security has not provided an authorization server out of the box. But in April 2020, a<a id="_idIndexMarker743"/> community-driven project, <strong class="keyWord">Spring Authorization Server</strong>, led by the Spring Security team, was announced with the goal of delivering an authorization server. In August 2021, the Spring Authorization Server project was moved out of experimental status and became a member of the Spring project’s portfolio. </p>
+    <p class="normal">For more information, see <a href="https://spring.io/blog/2020/04/15/announcing-the-spring-authorization-server"><span class="url">https://spring.io/blog/2020/04/15/announcing-the-spring-authorization-server</span></a> and <a href="https://spring.io/blog/2021/08/17/spring-authorization-server-officially-moves-to-spring-projects"><span class="url">https://spring.io/blog/2021/08/17/spring-authorization-server-officially-moves-to-spring-projects</span></a>.</p>
+    <p class="normal">The Spring Authorization Server supports both the use of the OpenID Connect discovery endpoint and the digital signing of access tokens. It also provides an endpoint that can be accessed using the discovery information to get keys for verifying the digital signature of a token. With support for these features, it can be used as the authorization server in local and automated tests that verify that the system landscape works as expected.</p>
+    <p class="normal">The authorization server in this book is based on the sample authorization server provided by the Spring Authorization Server project; see <a href="https://github.com/spring-projects/spring-authorization-server/tree/main/samples/default-authorizationserver"><span class="url">https://github.com/spring-projects/spring-authorization-server/tree/main/samples/default-authorizationserver</span></a>.</p>
+    <p class="normal">The following changes <a id="_idIndexMarker744"/>have been applied to the sample project:</p>
+    <ul>
+      <li class="bulletList">The build file has been updated to follow the structure of the other projects’ build files in this book.</li>
+      <li class="bulletList">The port is set to <code class="inlineCode">9999</code>.</li>
+      <li class="bulletList">A Dockerfile has been added with the same structure as for the other projects in this book.</li>
+      <li class="bulletList">The authorization server has been integrated with Eureka for service discovery in the same way as the other projects in this book.</li>
+      <li class="bulletList">Public access has been added to the actuator’s endpoints.</li>
+    </ul>
+    <div class="note">
+      <p class="normal"><strong class="screenText">WARNING</strong>: As already warned about in <em class="chapterRef">Chapter 7</em>, <em class="italic">Developing Reactive Microservices</em>, allowing public access to the actuator’s endpoints is very helpful during development, but it can be a security issue to reveal too much information in actuator endpoints in production systems. Therefore, plan for minimizing the information exposed by the actuator endpoints in production!</p>
+    </div>
+    <ul>
+      <li class="bulletList">Unit tests <a id="_idIndexMarker745"/>have been added that verify access to the most critical endpoints according to the OpenID Connect specification.</li>
+      <li class="bulletList">The username and password for the single registered user are set to <code class="inlineCode">u</code> and <code class="inlineCode">p</code>, respectively.</li>
+      <li class="bulletList">Two OAuth clients are registered, <code class="inlineCode">reader</code> and <code class="inlineCode">writer</code>. The <code class="inlineCode">reader</code> client is granted a <code class="inlineCode">product:read</code> scope, and the <code class="inlineCode">writer</code> client is granted both a <code class="inlineCode">product:read</code> and <code class="inlineCode">product:write</code> scope. The clients are configured to have their client secret set to <code class="inlineCode">secret-reader</code> and <code class="inlineCode">secret-writer</code>, respectively.</li>
+      <li class="bulletList">Allowed redirect URIs for the clients are set to <code class="inlineCode">https://my.redirect.uri</code> and <code class="inlineCode">https://localhost:8443/webjars/swagger-ui/oauth2-redirect.html</code>. The first URI will be used in the tests described below, and the second URI will be used by the Swagger UI component. </li>
+      <li class="bulletList">By default, for security reasons, the authorization server does not allow redirect URIs that start with <code class="inlineCode">https://localhost</code>. </li>
+    </ul>
+    <p class="bulletList">The authorization server has been customized to accept <code class="inlineCode">https://localhost</code> for development and testing purposes. The applied customization is described here: <a href="https://docs.spring.io/spring-authorization-server/docs/1.0.0/reference/html/protocol-endpoints.html#oauth2-authorization-endpoint-customizing-authorization-request-validation"><span class="url">https://docs.spring.io/spring-authorization-server/docs/1.0.0/reference/html/protocol-endpoints.html#oauth2-authorization-endpoint-customizing-authorization-request-validation</span></a>.</p>
+    <p class="normal">The source code for the<a id="_idIndexMarker746"/> authorization server is available in <code class="inlineCode">$BOOK_HOME/Chapter11/spring-cloud/authorization-server</code>.</p>
+    <p class="normal">To incorporate the authorization server in the system landscape, changes to the following files have been applied:</p>
+    <ul>
+      <li class="bulletList">The server has been added to the common build file, <code class="inlineCode">settings.gradle</code>.</li>
+      <li class="bulletList">The server has been added to the three Docker Compose files, <code class="inlineCode">docker-compose*.yml</code>.</li>
+      <li class="bulletList">The edge server, <code class="inlineCode">spring-cloud/gateway</code>.</li>
+      <li class="bulletList">A health check has been added for the authorization server in <code class="inlineCode">HealthCheckConfiguration</code>.</li>
+      <li class="bulletList">Routes to the authorization server for the URIs starting with <code class="inlineCode">/oauth</code>, <code class="inlineCode">/login</code>, and <code class="inlineCode">/error</code> have been added in the configuration file, <code class="inlineCode">application.yml</code>. These URIs are used to issue tokens for clients, authenticate users, and show error messages.</li>
+      <li class="bulletList">Since these three URIs<a id="_idIndexMarker747"/> need to be unprotected by the edge server, they are configured in the new class <code class="inlineCode">SecurityConfig</code> to permit all requests.</li>
+    </ul>
+    <p class="normal">With an understanding of how a local authorization server is added to the system landscape, let’s move on and see how to use OAuth 2.0 and OpenID Connect to authenticate and authorize access to APIs.</p>
+    <h1 id="_idParaDest-284" class="heading-1">Protecting APIs using OAuth 2.0 and OpenID Connect</h1>
+    <p class="normal">With the authorization server in place, we can enhance the edge server and the <code class="inlineCode">product-composite</code> service to become OAuth 2.0 resource servers, so that they will require a valid access token to allow<a id="_idIndexMarker748"/> access. The edge server will be configured to accept any <a id="_idIndexMarker749"/>access token it can validate using the digital signature provided by the authorization server. The <code class="inlineCode">product-composite</code> service will also require the access token to contain valid OAuth 2.0 scopes:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">product:read</code> scope will be required for accessing the read-only APIs.</li>
+      <li class="bulletList">The <code class="inlineCode">product:write</code> scope will be required for accessing the create and delete APIs.</li>
+    </ul>
+    <p class="normal">The <code class="inlineCode">product-composite</code> service will also be enhanced with a configuration that allows its Swagger UI component to interact with the authorization server to issue an access token. This will allow users of the Swagger UI web page to test the protected API.</p>
+    <p class="normal">We also need to enhance the test script, <code class="inlineCode">test-em-all.bash</code>, so that it acquires access tokens and uses them when it performs the tests.</p>
+    <h2 id="_idParaDest-285" class="heading-2">Changes in both the edge server and the product-composite service</h2>
+    <p class="normal">The following changes have been <a id="_idIndexMarker750"/>applied in the source code for both the edge server and the <code class="inlineCode">product-composite</code> service:</p>
+    <ul>
+      <li class="bulletList">Spring Security dependencies have been added to <code class="inlineCode">build.gradle</code> to support OAuth 2.0 resource servers:
+        <pre class="programlisting code"><code class="hljs-code">implementation <span class="hljs-string">'org.springframework.boot:spring-boot-starter-security'</span>
+implementation <span class="hljs-string">'org.springframework.security:spring-security-oauth2-resource-server'</span>
+implementation <span class="hljs-string">'org.springframework.security:spring-security-oauth2-jose'</span>
+</code></pre>
+      </li>
+      <li class="bulletList">Security configurations have been added to new <code class="inlineCode">SecurityConfig</code> classes in both projects:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Configuration</span>
+<span class="hljs-meta">@EnableWebFluxSecurity</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title">SecurityConfig</span> {
+ 
+  <span class="hljs-meta">@Bean</span>
+  SecurityWebFilterChain <span class="hljs-title">springSecurityFilterChain</span><span class="hljs-params">(</span>
+<span class="hljs-params">      ServerHttpSecurity http)</span> {
+    http
+      .authorizeExchange()
+        .pathMatchers(<span class="hljs-string">"/actuator/**"</span>).permitAll()
+        .anyExchange().authenticated()
+        .and()
+      .oauth2ResourceServer()
+        .jwt();
+    <span class="hljs-keyword">return</span> http.build();
+  }
+}
+</code></pre>
+      </li>
+    </ul>
+    <p class="normal">Explanations for the <a id="_idIndexMarker751"/>preceding source code are as follows:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">@EnableWebFluxSecurity</code> annotation enables Spring Security support for APIs based on Spring WebFlux.</li>
+      <li class="bulletList"><code class="inlineCode">.pathMatchers("/actuator/**").permitAll()</code> is used to allow unrestricted access to URLs that should be unprotected, for example, the <code class="inlineCode">actuator</code> endpoints, in this case. Refer to the source code for URLs that are treated as unprotected. Be careful about which URLs are exposed unprotected. For example, the <code class="inlineCode">actuator</code> endpoints should be protected before going to production.</li>
+      <li class="bulletList"><code class="inlineCode">.anyExchange().authenticated()</code> ensures that the user is authenticated before being allowed access to all other URLs.</li>
+      <li class="bulletList"><code class="inlineCode">.oauth2ResourceServer().jwt()</code> specifies that authorization will be based on OAuth 2.0 access tokens encoded as JWTs.</li>
+    </ul>
+    <ul>
+      <li class="bulletList">The authorization server’s OIDC discovery endpoint has been registered in the configuration file, <code class="inlineCode">application.yml</code>:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">app.auth-server:</span> <span class="hljs-string">localhost</span>
+<span class="hljs-attr">spring.security.oauth2.resourceserver.jwt.issuer-uri:</span> <span class="hljs-string">http://${app.auth-server}:9999</span>
+<span class="hljs-meta">---</span>
+<span class="hljs-attr">spring.config.activate.on-profile:</span> <span class="hljs-string">docker</span>
+<span class="hljs-attr">app.auth-server:</span> <span class="hljs-string">auth-server</span>
+</code></pre>
+      </li>
+    </ul>
+    <div class="note">
+      <p class="normal">L</p>
+    </div>
+    <div class="note">
+      <p class="normal">Later on in this chapter, when the system landscape is started up, you can test the discovery endpoint. You can, for example, find the endpoint that returns the keys required for verifying the digital signature of a token using this command:</p>
+      <pre class="programlisting con"><code class="hljs-con">docker-compose exec auth-server curl localhost:9999/.well-known/openid-configuration -s | jq -r .jwks_uri
+</code></pre>
+    </div>
+    <p class="normal">We also need to make some <a id="_idIndexMarker752"/>changes that only apply to the <code class="inlineCode">product-composite</code> service.</p>
+    <h2 id="_idParaDest-286" class="heading-2">Changes in the product-composite service only</h2>
+    <p class="normal">In addition to the common changes <a id="_idIndexMarker753"/>applied in the previous section, the following changes have also been applied to the <code class="inlineCode">product-composite</code> service:</p>
+    <ul>
+      <li class="bulletList">The security configuration in the <code class="inlineCode">SecurityConfig</code> class has been refined by requiring OAuth 2.0 scopes in the access token in order to allow access:
+        <pre class="programlisting code"><code class="hljs-code">.pathMatchers(POST, <span class="hljs-string">"/product-composite/**"</span>)
+  .hasAuthority(<span class="hljs-string">"SCOPE_product:write"</span>)
+.pathMatchers(DELETE, <span class="hljs-string">"/product-composite/**"</span>)
+  .hasAuthority(<span class="hljs-string">"SCOPE_product:write"</span>)
+.pathMatchers(GET, <span class="hljs-string">"/product-composite/**"</span>)
+  .hasAuthority(<span class="hljs-string">"SCOPE_product:read"</span>)
+</code></pre>
+      </li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">By convention, OAuth 2.0 scopes need to be prefixed with <code class="inlineCode">SCOPE_</code> when checked for authority using Spring Security.</p>
+    </div>
+    <ul>
+      <li class="bulletList">A method, <code class="inlineCode">logAuthorizationInfo()</code>, has been added to log relevant parts from the JWT-encoded access token upon each call to the API. The access token can be acquired using the standard Spring Security <code class="inlineCode">SecurityContext</code>, which, in a reactive environment, can be acquired using the static helper method, <code class="inlineCode">ReactiveSecurityContextHolder.getContext()</code>. Refer to the <code class="inlineCode">ProductCompositeServiceImpl</code> class for details.</li>
+      <li class="bulletList">The use of OAuth has been disabled when running Spring-based integration tests. To <a id="_idIndexMarker754"/>prevent the OAuth machinery from kicking in when we are running integration tests, we disable it as follows:<ul>
+          <li class="bulletList">A security configuration, <code class="inlineCode">TestSecurityConfig</code>, is added to be used during tests. It permits access to all resources:
+            <pre class="programlisting code"><code class="hljs-code">http.csrf().disable().authorizeExchange().anyExchange().permitAll();
+</code></pre>
+          </li>
+          <li class="bulletList">In each Spring integration test class, we configure <code class="inlineCode">TestSecurityConfig</code> to override the existing security configuration with the following:
+            <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@SpringBootTest( </span>
+<span class="hljs-meta">  classes = {TestSecurityConfig.class},</span>
+<span class="hljs-meta">  properties = {"spring.main.allow-bean-definition-</span>
+<span class="hljs-meta">    overriding=true"})</span>
+</code></pre>
+          </li>
+        </ul>
+      </li>
+    </ul>
+    <h3 id="_idParaDest-287" class="heading-3">Changes to allow Swagger UI to acquire access tokens</h3>
+    <p class="normal">To allow access to the protected APIs<a id="_idIndexMarker755"/> from the Swagger UI component, the following changes have been applied in the <code class="inlineCode">product-composite</code> service:</p>
+    <ul>
+      <li class="bulletList">The web pages exposed by the Swagger UI component have been configured to be publicly available. The following line has been added to the <code class="inlineCode">SecurityConfig</code> class:
+        <pre class="programlisting code"><code class="hljs-code">.pathMatchers(<span class="hljs-string">"/openapi/**"</span>).permitAll()
+.pathMatchers(<span class="hljs-string">"/webjars/**"</span>).permitAll()
+</code></pre>
+      </li>
+      <li class="bulletList">The OpenAPI Specification of the API has been enhanced to require that the security schema <code class="inlineCode">security_auth</code> is applied.</li>
+    </ul>
+    <p class="normal">The following line has been added to the definition of the interface <code class="inlineCode">ProductCompositeService</code> in the <code class="inlineCode">API</code> project:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@SecurityRequirement(name = "security_auth")</span>
+</code></pre>
+    <ul>
+      <li class="bulletList">To define the semantics<a id="_idIndexMarker756"/> of the security schema <code class="inlineCode">security_auth</code>, the class <code class="inlineCode">OpenApiConfig</code> has been added to the <code class="inlineCode">product-composite</code> project. It looks like this:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@SecurityScheme(</span>
+<span class="hljs-meta">  name = "security_auth", type = SecuritySchemeType.OAUTH2,</span>
+<span class="hljs-meta">  flows = @OAuthFlows(</span>
+<span class="hljs-meta">    authorizationCode = @OAuthFlow(</span>
+<span class="hljs-meta">      authorizationUrl = "${springdoc.oAuthFlow.</span>
+<span class="hljs-meta">        authorizationUrl}",</span>
+<span class="hljs-meta">      tokenUrl = "${springdoc.oAuthFlow.tokenUrl}", </span>
+<span class="hljs-meta">      scopes = {</span>
+<span class="hljs-meta">        @OAuthScope(name = "product:read", description =</span>
+<span class="hljs-meta">          "read scope"),</span>
+<span class="hljs-meta">        @OAuthScope(name = "product:write", description = </span>
+<span class="hljs-meta">          "write scope")</span>
+<span class="hljs-meta">      }</span>
+<span class="hljs-meta">)))</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title">OpenApiConfig</span> {}
+</code></pre>
+      </li>
+    </ul>
+    <p class="normal">From the preceding class definition, we can see:</p>
+    <ol class="alphabeticList" style="list-style-type: lower-alpha;">
+      <li class="alphabeticList" value="1">The security schema will be based on OAuth 2.0.</li>
+      <li class="alphabeticList">The authorization code grant flow will be used.</li>
+      <li class="alphabeticList">The required URLs for acquiring an authorization code and access tokens will be supplied by the configuration using the parameters <code class="inlineCode">springdoc.oAuthFlow.authorizationUrl</code> and <code class="inlineCode">springdoc.oAuthFlow.tokenUrl</code>.</li>
+      <li class="alphabeticList">A list of scopes (<code class="inlineCode">product:read</code> and <code class="inlineCode">product:write</code>) that Swagger UI will require to be able to call the APIs.</li>
+    </ol>
+    <ul>
+      <li class="bulletList">Finally, some configuration is added to <code class="inlineCode">application.yml</code>:
+        <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-attr">swagger-ui:</span>
+    <span class="hljs-attr">oauth2-redirect-url:</span> <span class="hljs-string">/swagger-ui/oauth2-redirect.html</span>
+    <span class="hljs-attr">oauth:</span>
+      <span class="hljs-attr">clientId:</span> <span class="hljs-string">writer</span>
+      <span class="hljs-attr">clientSecret:</span> <span class="hljs-string">secret-writer</span>
+      <span class="hljs-attr">useBasicAuthenticationWithAccessCodeGrant:</span> <span class="hljs-literal">true</span>
+  <span class="hljs-attr">oAuthFlow:</span>
+    <span class="hljs-attr">authorizationUrl:</span> <span class="hljs-string">https://localhost:8443/oauth2/authorize</span>
+    <span class="hljs-attr">tokenUrl:</span> <span class="hljs-string">https://localhost:8443/oauth2/token</span>
+</code></pre>
+      </li>
+    </ul>
+    <p class="normal">From the preceding configuration, we can see:</p>
+    <ol class="alphabeticList" style="list-style-type: lower-alpha;">
+      <li class="alphabeticList" value="1">The redirect URL that <a id="_idIndexMarker757"/>Swagger UI will use to acquire the authorization code.</li>
+      <li class="alphabeticList">Its client ID and client secret.</li>
+      <li class="alphabeticList">It will use HTTP Basic authentication when identifying itself for the authorization server.</li>
+      <li class="alphabeticList">The values of the <code class="inlineCode">authorizationUrl</code> and <code class="inlineCode">tokenUrl</code> parameters, used by the <code class="inlineCode">OpenApiConfig</code> class described above. Note that these URLs are used by the web browser and not by the <code class="inlineCode">product-composite</code> service itself. So they must be resolvable from the web browser.</li>
+    </ol>
+    <p class="normal">To allow unprotected access to the Swagger UI web pages, the edge server has also been configured to allow unrestricted access to URLs that are routed to the Swagger UI component. The following is added to the edge server’s <code class="inlineCode">SecurityConfig</code> class:</p>
+    <pre class="programlisting code"><code class="hljs-code">.pathMatchers(<span class="hljs-string">"/openapi/**"</span>).permitAll()
+.pathMatchers(<span class="hljs-string">"/webjars/**"</span>).permitAll()
+</code></pre>
+    <p class="normal">With these changes in place, both the edge server and the <code class="inlineCode">product-composite</code> service can act as OAuth 2.0 resource servers, and the Swagger UI component can act as an OAuth client. The last step we need to take to introduce the usage of OAuth 2.0 and OpenID Connect is to update the test script so it acquires access tokens and uses<a id="_idIndexMarker758"/> them when running the tests.</p>
+    <h2 id="_idParaDest-288" class="heading-2">Changes in the test script</h2>
+    <p class="normal">To start with, we need to acquire an access token before we can call any of the APIs, except the health<a id="_idIndexMarker759"/> API. This is done, as already mentioned above, using the OAuth 2.0 client credentials flow. To be able to call the create and delete APIs, we acquire an access token as the <code class="inlineCode">writer</code> client, as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code">ACCESS_TOKEN=<span class="hljs-constructor">$(</span><span class="hljs-params">curl</span><span class="hljs-constructor"> -</span><span class="hljs-params">k</span><span class="hljs-constructor"> </span><span class="hljs-params">https</span><span class="hljs-constructor">:</span><span class="hljs-operator">//</span><span class="hljs-params">writer</span><span class="hljs-constructor">:</span><span class="hljs-params">secret</span><span class="hljs-constructor">-</span><span class="hljs-params">writer</span><span class="hljs-constructor">@$HOST:$PORT</span><span class="hljs-operator">/</span><span class="hljs-params">oauth2</span><span class="hljs-operator">/</span><span class="hljs-params">token</span><span class="hljs-constructor"> -</span><span class="hljs-params">d</span><span class="hljs-constructor"> </span><span class="hljs-params">grant_type</span><span class="hljs-constructor">=</span><span class="hljs-params">client_credentials</span><span class="hljs-constructor"> -</span><span class="hljs-params">d</span><span class="hljs-constructor"> </span><span class="hljs-params">scope</span><span class="hljs-constructor">=</span><span class="hljs-string">"product:read product:write"</span><span class="hljs-constructor"> -</span><span class="hljs-params">s</span><span class="hljs-constructor"> | </span><span class="hljs-params">jq</span><span class="hljs-constructor"> .</span><span class="hljs-params">access_token</span><span class="hljs-constructor"> -</span><span class="hljs-params">r</span><span class="hljs-constructor">)</span>
+</code></pre>
+    <p class="normal">From the preceding command, we can see that it uses HTTP Basic authentication, passing its client ID and client secret as <code class="inlineCode">writer:secret-writer@</code> before the hostname.</p>
+    <p class="normal">To verify that the scope-based authorization works, two tests have been added to the test script:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-comment"># Verify that a request without access token fails on 401, Unauthorized</span>
+assertCurl 401 <span class="hljs-string">"curl -k https://</span><span class="hljs-variable">$HOST</span><span class="hljs-string">:</span><span class="hljs-variable">$PORT</span><span class="hljs-string">/product-composite/</span><span class="hljs-variable">$PROD_ID_REVS_RECS</span><span class="hljs-string"> -s"</span>
+<span class="hljs-comment"># Verify that the reader client with only read scope can call the read API but not delete API</span>
+READER_ACCESS_TOKEN=$(curl -k https://reader:secret-reader@<span class="hljs-variable">$HOST</span>:<span class="hljs-variable">$PORT</span>/oauth2/token -d grant_type=client_credentials -d scope=<span class="hljs-string">"product:read"</span> -s | jq .access_token -r)
+READER_AUTH=<span class="hljs-string">"-H \"Authorization: Bearer </span><span class="hljs-variable">$READER_ACCESS_TOKEN</span><span class="hljs-string">\""</span>
+assertCurl 200 <span class="hljs-string">"curl -k https://</span><span class="hljs-variable">$HOST</span><span class="hljs-string">:</span><span class="hljs-variable">$PORT</span><span class="hljs-string">/product-composite/</span><span class="hljs-variable">$PROD_ID_REVS_RECS</span><span class="hljs-string"> </span><span class="hljs-variable">$READER_AUTH</span><span class="hljs-string"> -s"</span>
+assertCurl 403 <span class="hljs-string">"curl -k https://</span><span class="hljs-variable">$HOST</span><span class="hljs-string">:</span><span class="hljs-variable">$PORT</span><span class="hljs-string">/product-composite/</span><span class="hljs-variable">$PROD_ID_REVS_RECS</span><span class="hljs-string"> </span><span class="hljs-variable">$READER_AUTH</span><span class="hljs-string"> -X DELETE -s"</span>
+</code></pre>
+    <p class="normal">The test script uses the reader client’s credentials to acquire an access token:</p>
+    <ul>
+      <li class="bulletList">The first test calls an API without supplying an access token. The API is expected to return the <code class="inlineCode">401 Unauthorized</code> HTTP status.</li>
+      <li class="bulletList">The second test verifies that the reader client can call a read-only API.</li>
+      <li class="bulletList">The last test calls an updating API using the <code class="inlineCode">reader</code> client, which is only granted a <code class="inlineCode">read</code> scope. A request sent to the delete API is expected to return the <code class="inlineCode">403 Forbidden</code> HTTP status.</li>
+    </ul>
+    <p class="normal">For the full source code, see <code class="inlineCode">test-em-all.bash</code>.</p>
+    <p class="normal">With the test script<a id="_idIndexMarker760"/> updated to acquire and use OAuth 2.0 access tokens, we are ready to try it out in the next section!</p>
+    <h1 id="_idParaDest-289" class="heading-1">Testing with the local authorization server</h1>
+    <p class="normal">In this section, we will try out the secured system landscape; that is, we will test all the security<a id="_idIndexMarker761"/> components together. We will use the local authorization server to issue access tokens. The following tests will be performed:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First, we build from source and run the test script to ensure that everything fits together.</li>
+      <li class="numberedList">Next, we will test the protected discovery server’s API and web page.</li>
+      <li class="numberedList">After that, we will learn how to acquire access tokens using OAuth 2.0 client credentials and authorization code grant flows.</li>
+      <li class="numberedList">With the issued access tokens, we will test the protected APIs. We will also verify that an access token issued for a reader client can’t be used to call an updating API.</li>
+      <li class="numberedList">Finally, we will also verify that Swagger UI can issue access tokens and call the APIs.</li>
+    </ol>
+    <h2 id="_idParaDest-290" class="heading-2">Building and running the automated tests</h2>
+    <p class="normal">To build and run automated tests, we<a id="_idIndexMarker762"/> perform the <a id="_idIndexMarker763"/>following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Build the Docker images from source with the following commands:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter11
+./gradlew build &amp;&amp; docker-compose build
+</code></pre>
+      </li>
+      <li class="numberedList">Start the system landscape in Docker and run the usual tests with the following command:
+        <pre class="programlisting con"><code class="hljs-con">./test-em-all.bash start
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">Note the new negative tests at the end that verify that we get a <code class="inlineCode">401 Unauthorized</code> code back when not authenticated, and <code class="inlineCode">403 Forbidden</code> when not authorized.</p>
+    </div>
+    <h2 id="_idParaDest-291" class="heading-2">Testing the protected discovery server</h2>
+    <p class="normal">With the protected discovery server, Eureka, up and running, we have to supply valid credentials to be <a id="_idIndexMarker764"/>able to access its APIs and web pages.</p>
+    <p class="normal">For example, asking the Eureka server for registered instances can be done by means of the following <code class="inlineCode">curl</code> command, where we supply the username and password directly in the URL:</p>
+    <pre class="programlisting con"><code class="hljs-con">curl -H "accept:application/json" https://u:p@localhost:8443/eureka/api/apps -ks | jq -r .applications.application[].instance[].instanceId
+</code></pre>
+    <p class="normal">A sample response is as follows:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_03.png" alt="Text  Description automatically generated" width="391" height="195"/></figure>
+    <p class="packt_figref">Figure 11.3: Services registered in Eureka using an API call</p>
+    <p class="normal">When accessing the web page on <code class="inlineCode">https://localhost:8443/eureka/web</code>, we first have to accept an unsecure connection, since our certificate is self-signed, and next, we have to<a id="_idIndexMarker765"/> supply valid credentials, as specified in the configuration file (<code class="inlineCode">u</code> as username and <code class="inlineCode">p</code> as password):</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_04.png" alt="Graphical user interface  Description automatically generated" width="878" height="510"/></figure>
+    <p class="packt_figref">Figure 11.4: Eureka requires authentication</p>
+    <p class="normal">Following a successful login, we will see the familiar web page from the Eureka server:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_05.png" alt="Table  Description automatically generated with medium confidence" width="812" height="380"/></figure>
+    <p class="packt_figref">Figure 11.5: Services registered in Eureka using the web page</p>
+    <p class="normal">After ensuring that <a id="_idIndexMarker766"/>access to the Eureka server is protected, we will learn how to issue OAuth access tokens.</p>
+    <h2 id="_idParaDest-292" class="heading-2">Acquiring access tokens</h2>
+    <p class="normal">Now we are ready to <a id="_idIndexMarker767"/>acquire access tokens using grant flows defined by OAuth 2.0. We will first try out the client credentials grant <a id="_idIndexMarker768"/>flow, followed by the authorization code grant flow.</p>
+    <h3 id="_idParaDest-293" class="heading-3">Acquiring access tokens using the client credentials grant flow</h3>
+    <p class="normal">To get an access token for <a id="_idIndexMarker769"/>the <code class="inlineCode">writer</code> client, that is, with<a id="_idIndexMarker770"/> both the <code class="inlineCode">product:read</code> and <code class="inlineCode">product:write</code> scopes, issue the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">curl -k https://writer:secret-writer@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .
+</code></pre>
+    <p class="normal">The client identifies itself using HTTP Basic authentication, passing its client ID, <code class="inlineCode">writer</code>, and its client <a id="_idIndexMarker771"/>secret, <code class="inlineCode">secret</code>.</p>
+    <p class="normal">A sample response is as follows:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_06.png" alt="Text  Description automatically generated" width="439" height="196"/></figure>
+    <p class="packt_figref">Figure 11.6: Sample token response</p>
+    <p class="normal">From the screenshot, we<a id="_idIndexMarker772"/> can see that we got the following information in the response:</p>
+    <ul>
+      <li class="bulletList">The access token itself.</li>
+      <li class="bulletList">The scopes granted to the token. The <code class="inlineCode">writer</code> client is granted both the <code class="inlineCode">product:write</code> and <code class="inlineCode">product:read</code> scope. It is also granted the <code class="inlineCode">openid</code> scope, allowing access to information regarding the user’s ID, such as an email address.</li>
+      <li class="bulletList">The type of token we got; <code class="inlineCode">Bearer</code> means that the bearer of this token should be given access according to the scopes granted to the token.</li>
+      <li class="bulletList">The number of seconds that the access token is valid, <code class="inlineCode">3599</code> seconds in this case.</li>
+    </ul>
+    <p class="normal">To get an access token <a id="_idIndexMarker773"/>for the <code class="inlineCode">reader</code> client, that is, with<a id="_idIndexMarker774"/> only the <code class="inlineCode">product:read</code> scope, simply replace <code class="inlineCode">writer</code> with <code class="inlineCode">reader</code> in the preceding command, resulting in:</p>
+    <pre class="programlisting con"><code class="hljs-con">curl -k https://reader:secret-reader@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read" -s | jq .
+</code></pre>
+    <h3 id="_idParaDest-294" class="heading-3">Acquiring access tokens using the authorization code grant flow</h3>
+    <p class="normal">To acquire an access token using the authorization code grant flow, we need to involve a web browser. This grant<a id="_idIndexMarker775"/> flow is a bit more complicated in order to make it secure in an environment that is partly unsecure (the web browser).</p>
+    <p class="normal">In the first unsecure step, we will use the<a id="_idIndexMarker776"/> web browser to acquire an authorization code that can be used only once, to be exchanged for an access token. The authorization code will be passed from the web browser to a secure layer, for example, server-side code, which can make a new request to the authorization server to exchange the authorization code for an access token. In this secure exchange, the server has to supply a client secret to verify its identity.</p>
+    <p class="normal">Perform the following steps to execute the authorization code grant flow:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To get an authorization code for the <code class="inlineCode">reader</code> client, use the following URL in a web browser that accepts the use of self-signed certificates, for example, Chrome: <code class="inlineCode">https://localhost:8443/oauth2/authorize?response_type=code&amp;client_id=reader&amp;redirect_uri=https://my.redirect.uri&amp;scope=product:read&amp;state=35725</code>.</li>
+      <li class="numberedList">When asked to log in by the web browser, use the credentials specified in the configuration of the authorization server, <code class="inlineCode">u</code> and <code class="inlineCode">p</code>:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_07.png" alt="Graphical user interface  Description automatically generated" width="812" height="560"/></figure>
+    <p class="packt_figref">Figure 11.7: Trying out the authorization code grant flow</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">We will be <a id="_idIndexMarker777"/>asked to give the <code class="inlineCode">reader</code> client <a id="_idIndexMarker778"/>consent to call the APIs in our name:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_08.png" alt="Graphical user interface, application  Description automatically generated" width="812" height="876"/></figure>
+    <p class="packt_figref">Figure 11.8: Authorization code grant flow consent page</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">After clicking on the <strong class="screenText">Submit Consent</strong> button, we will get the following response:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_09.png" alt="Graphical user interface, text, application  Description automatically generated" width="812" height="534"/></figure>
+    <p class="packt_figref">Figure 11.9: Authorization code grant flow redirect page</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">This might, at first glance, look a<a id="_idIndexMarker779"/> bit disappointing. The URL that the authorization <a id="_idIndexMarker780"/>server sent back to the web browser is based on the redirect URI specified by the client in the initial request. Copy the URL into a text editor and you will find something similar to the following: <p class="normal"><code class="inlineCode">https://my.redirect.uri/?code=7XBs...0mmyk&amp;state=35725</code></p>
+        <p class="normal">Great! We can find the authorization code in the redirect URL in the <code class="inlineCode">code</code> request parameter. Extract the authorization code from the <code class="inlineCode">code</code> parameter and define an environment variable, <code class="inlineCode">CODE</code>, with its value:</p>
+        <pre class="programlisting code"><code class="hljs-code">CODE=7XBs...0mmyk
+</code></pre>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="6">Pretend you<a id="_idIndexMarker781"/> are the backend <a id="_idIndexMarker782"/>server that exchanges the authorization code with an access token using the following <code class="inlineCode">curl</code> command:
+        <pre class="programlisting con"><code class="hljs-con">curl -k https://reader:secret-reader@localhost:8443/oauth2/token \
+ -d grant_type=authorization_code \
+ -d client_id=reader \
+ -d redirect_uri=https://my.redirect.uri \
+ -d code=$CODE -s | jq .
+</code></pre>
+        <p class="normal">A sample response is as follows:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_11_10.png" alt="Text  Description automatically generated" width="379" height="228"/></figure>
+        <p class="packt_figref">Figure 11.10: Authorization code grant flow access token</p>
+        <p class="normal">From the screenshot, we<a id="_idIndexMarker783"/> can see that we got similar information in the response as <a id="_idIndexMarker784"/>we got from the client credentials flow, with the following exceptions:</p>
+        <ul>
+          <li class="bulletList">Since we used a more secure grant flow, we also got a <code class="inlineCode">refresh token</code> issued</li>
+          <li class="bulletList">Since we asked for an access token for the <code class="inlineCode">reader</code> client, we only got a <code class="inlineCode">product:read</code> scope, no <code class="inlineCode">product:write</code> scope</li>
+        </ul>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="7">To get an authorization code for the <code class="inlineCode">writer</code> client, use the following URL: <code class="inlineCode">https://localhost:8443/oauth2/authorize?response_type=code&amp;client_id=writer&amp;redirect_uri=https://my.redirect.uri&amp;scope=product:read+product:write&amp;state=72489</code>.</li>
+      <li class="numberedList">To exchange the code for an access token for the <code class="inlineCode">writer</code> client, run the following command:
+        <pre class="programlisting con"><code class="hljs-con">curl -k https://writer:secret-writer@localhost:8443/oauth2/token \
+  -d grant_type=authorization_code \
+  -d client_id=writer \
+  -d redirect_uri=https://my.redirect.uri \
+  -d code=$CODE -s | jq .
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Verify that the<a id="_idIndexMarker785"/> response now also contains<a id="_idIndexMarker786"/> the <code class="inlineCode">product:write</code> scope!</p>
+    <h2 id="_idParaDest-295" class="heading-2">Calling protected APIs using access tokens</h2>
+    <p class="normal">Now, let’s use the access <a id="_idIndexMarker787"/>tokens we have acquired to call the protected APIs.</p>
+    <p class="normal">An OAuth 2.0 access token is expected<a id="_idIndexMarker788"/> to be sent as a standard HTTP <code class="inlineCode">authorization</code> header, where the access token is prefixed with <code class="inlineCode">Bearer</code>.</p>
+    <p class="normal">Run the following commands to call the protected APIs:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Call an API to retrieve a composite product without a valid access token:
+        <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN=an-invalid-token
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i  
+</code></pre>
+        <p class="normal">It should return the following response:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_11_11.png" alt="Graphical user interface, text, application  Description automatically generated" width="648" height="94"/></figure>
+        <p class="packt_figref">Figure 11.11: Invalid token results in a 401 Unauthorized response</p>
+        <p class="normal">The error message clearly states that the access token is invalid!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Try using <a id="_idIndexMarker789"/>the API to retrieve a composite <a id="_idIndexMarker790"/>product using one of the access tokens acquired for the <code class="inlineCode">reader</code> client from the previous section:
+        <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN={a-reader-access-token}
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i 
+</code></pre>
+        <p class="normal">Now we will get the <code class="inlineCode">200 OK</code> status code and the expected response body will be returned:</p>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_12.png" alt="Graphical user interface, text  Description automatically generated" width="250" height="134"/></figure>
+    <p class="packt_figref">Figure 11.12: Valid access token results in a 200 OK response</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">If we try to <a id="_idIndexMarker791"/>access an updating API, for example, the <a id="_idIndexMarker792"/>delete API, with an access token acquired for the <code class="inlineCode">reader</code> client, the call will fail:
+        <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN={a-reader-access-token}
+curl https://localhost:8443/product-composite/999 -k -H "Authorization: Bearer $ACCESS_TOKEN" -X DELETE -i  
+</code></pre>
+        <p class="normal">It will fail with a response similar to the following:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_11_13.png" alt="Graphical user interface, text  Description automatically generated" width="775" height="155"/></figure>
+        <p class="packt_figref">Figure 11.13: Insufficient scope results in a 403 Forbidden result</p>
+        <p class="normal">From the error<a id="_idIndexMarker793"/> response, it is clear that we are forbidden to call the API since the<a id="_idIndexMarker794"/> request requires higher privileges than what our access token is granted.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">If we repeat the call to the delete API, but with an access token acquired for the <code class="inlineCode">writer</code> client, the call will succeed with <code class="inlineCode">202 Accepted</code> in the response.</li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">The <code class="inlineCode">delete</code> operation should return <code class="inlineCode">202</code> even if the product with the specified product ID does not exist in the underlying database, since the <code class="inlineCode">delete</code> operation is idempotent, as described in <em class="chapterRef">Chapter 6</em>, <em class="italic">Adding Persistence</em>. Refer to the <em class="italic">Adding new APIs</em> section.</p>
+    </div>
+    <p class="normal">If you look into the log output using the <code class="inlineCode">docker-compose logs -f product-composite</code> command, you should be able to find authorization information such as the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_14.png" alt="Text  Description automatically generated" width="772" height="132"/></figure>
+    <p class="packt_figref">Figure 11.14: Authorization info in the log output</p>
+    <p class="normal">This information was extracted in the <code class="inlineCode">product-composite</code> service from the JWT-encoded access token; the <code class="inlineCode">product-composite</code> service did not need to communicate<a id="_idIndexMarker795"/> with the authorization server to get this information!</p>
+    <p class="normal">With these tests, we have <a id="_idIndexMarker796"/>seen how to acquire an access token with the client credentials and authorization code grant flows. We have also seen how scopes can be used to limit what a client can do with a specific access token, for example, only use it for reading operations.</p>
+    <h2 id="_idParaDest-296" class="heading-2">Testing Swagger UI with OAuth 2.0</h2>
+    <p class="normal">In this section, we will learn <a id="_idIndexMarker797"/>how to use the Swagger UI component to <a id="_idIndexMarker798"/>access the protected API. The configuration described in the <em class="italic">Changes in the product-composite service only</em> section above allows us to issue an access token for Swagger UI and use it when calling the APIs from Swagger UI.</p>
+    <p class="normal">To try it out, perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Open the Swagger UI start page by going to the following URL in a web browser: <code class="inlineCode">https://localhost:8443/openapi/swagger-ui.html</code>.</li>
+      <li class="numberedList">On the start page, we can now see a new button, next to the <strong class="screenText">Servers</strong> drop-down list, with the text <strong class="screenText">Authorize</strong>. <p class="normal">Click on the <strong class="screenText">Authorize</strong> button to initiate an authorization code grant flow.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Swagger UI will present a list of scopes that it will ask the authorization server to get access to. Select all scopes by clicking on the link with the text <strong class="screenText">select all</strong> and then clicking on the <strong class="screenText">Authorize</strong> button: <figure class="mediaobject"><img src="../Images/B19825_11_15.png" alt="Graphical user interface, application  Description automatically generated" width="812" height="728"/></figure>
+        <p class="packt_figref">Figure 11.15: Swagger UI asking for OAuth scopes</p>
+        <p class="normal">You will then<a id="_idIndexMarker799"/> be redirected to the authorization server. If you<a id="_idIndexMarker800"/> are not already logged in from the web browser used, the authorization server will ask for your credentials as in the <em class="italic">Acquiring access tokens using the authorization code grant flow</em> section.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Log in with username <code class="inlineCode">u</code> and password <code class="inlineCode">p</code>.</li>
+      <li class="numberedList">The authorization server will ask for your consent. Select both scopes and click on the <strong class="screenText">Submit Consent</strong> button.</li>
+      <li class="numberedList">Swagger UI will complete <a id="_idIndexMarker801"/>the authorization process by <a id="_idIndexMarker802"/>showing information about the completed grant flow. Click on the <strong class="screenText">Close</strong> button to get back to the start page:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_16.png" alt="Graphical user interface, application  Description automatically generated" width="812" height="726"/></figure>
+    <p class="packt_figref">Figure 11.16: Swagger UI summarizing the OAuth grant flow</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="7">Now you can try <a id="_idIndexMarker803"/>out the APIs in<a id="_idIndexMarker804"/> the same way as described in <em class="chapterRef">Chapter 5</em>, <em class="italic">Adding an API Description Using OpenAPI</em>. Swagger UI will add the access token to the requests. If you look closely at the <code class="inlineCode">curl</code> command reported below the <strong class="screenText">Responses</strong> header, you can find the access token.</li>
+    </ol>
+    <p class="normal">This completes the tests we <a id="_idIndexMarker805"/>will perform with the local <a id="_idIndexMarker806"/>authorization server. In the next section, we will replace it with an external OpenID Connect-compliant provider.</p>
+    <h1 id="_idParaDest-297" class="heading-1">Testing with an external OpenID Connect provider</h1>
+    <p class="normal">So, the OAuth <a id="_idIndexMarker807"/>dance works fine with an authorization server we control ourselves. But what happens if we replace it with a certified OpenID Connect provider? In theory, it should work out of the box. Let’s find out, shall we?</p>
+    <div class="packt_tip">
+      <p class="normal">For a list of certified<a id="_idIndexMarker808"/> implementations of OpenID Connect, refer to <a href="https://openid.net/developers/certified/"><span class="url">https://openid.net/developers/certified/</span></a>.</p>
+    </div>
+    <p class="normal">We will use Auth0, <code class="inlineCode">https://auth0.com/</code>, for our tests with an external OpenID provider. To be able to use Auth0 instead of our own authorization server, we will go through the following topics:</p>
+    <ul>
+      <li class="bulletList">Setting up an account with a <code class="inlineCode">reader</code> and <code class="inlineCode">writer</code> client and a user in Auth0</li>
+      <li class="bulletList">Applying the changes required to use Auth0 as an OpenID provider</li>
+      <li class="bulletList">Running the test script to verify that it is working</li>
+      <li class="bulletList">Acquiring access tokens using the following grant flows:<ul>
+          <li class="bulletList">Client credentials grant flow</li>
+          <li class="bulletList">Authorization code grant flow</li>
+        </ul>
+      </li>
+      <li class="bulletList">Calling protected APIs using the access tokens acquired from the grant flows</li>
+      <li class="bulletList">Using the user info endpoint to get more information about a user</li>
+    </ul>
+    <p class="normal">Let us go through each of them in the following sections.</p>
+    <h2 id="_idParaDest-298" class="heading-2">Setting up and configuring an account in Auth0</h2>
+    <p class="normal">Most of the configuration<a id="_idIndexMarker809"/> required in Auth0 will be taken care of by a script that uses Auth0’s management API. But we must perform a few manual steps up to the point where Auth0 has created a client ID and client secret we can use to access the management API. Auth0’s service is multi-tenant, allowing us to create our own domain of OAuth objects in terms of clients, resource owners, and resource servers.</p>
+    <p class="normal">Perform the following manual steps to sign up for a free account in Auth0 and create a client that we can use to access the management API:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Open the URL <a href="https://auth0.com"><span class="url">https://auth0.com</span></a> in your browser.</li>
+      <li class="numberedList">Click on the <strong class="screenText">hamburger menu</strong> (☰) in the top-right corner.</li>
+      <li class="numberedList">Click on the <strong class="screenText">Sign up</strong> button:<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1">Sign up with an email of your choice.</li>
+          <li class="alphabeticList">After a successful sign-up, you will be asked to create a tenant domain. Enter the name of the tenant of your choice, in my case: <code class="inlineCode">dev-ml-3rd.eu.auth0.com</code>.</li>
+          <li class="alphabeticList">Fill in the information about your account as requested.</li>
+          <li class="alphabeticList">Also, look in your mailbox for an email with the subject <strong class="screenText">Please Verify Your Auth0 Account</strong> and use the instructions in the email to verify your account.</li>
+        </ol>
+      </li>
+      <li class="numberedList">Following sign-up, you will be directed to an <strong class="screenText">onboarding</strong> page.</li>
+      <li class="numberedList">In the menu to the left, click on <strong class="screenText">Applications</strong> to get it expanded, then click on <strong class="screenText">APIs</strong> to find the management API, <strong class="screenText">Auth0 Management API</strong>. This API was created for you during the creation of your tenant. We will use this API to create the required definitions in the tenant.</li>
+      <li class="numberedList">Click on <strong class="screenText">Auth0 Management API</strong> and select the <strong class="screenText">Test</strong> tab.</li>
+      <li class="numberedList">A big button with the text <strong class="screenText">Create &amp; Authorize Test</strong><strong class="keyWord"> </strong>will appear. Click on it to get a client created that can be used to access the management API.</li>
+      <li class="numberedList">Once created, a page is displayed with the header <strong class="screenText">Asking Auth0 for tokens from my application</strong>. As a final step, we need to give the created client permission to use the management APIs.</li>
+      <li class="numberedList">Click on the tab <strong class="screenText">Machine to Machine Applications</strong>, next to the <strong class="screenText">Test</strong> tab.</li>
+      <li class="numberedList">Here we will find the test client, <strong class="screenText">Auth0 Management API (Test Application)</strong>, and we can see that it is authorized to use the management API. If we click<a id="_idIndexMarker810"/> on the down arrow next to the <strong class="screenText">Authorized</strong> toggle button, a large number of available privileges are revealed.</li>
+      <li class="numberedList">Click on the <strong class="screenText">All</strong> choice and then on the <strong class="screenText">Update</strong> button. The screen should look similar to the following screenshot:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_17.png" alt="Graphical user interface, application  Description automatically generated" width="812" height="604"/></figure>
+    <p class="packt_figref">Figure 11.17: Auth0 management API client permissions</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="12">Click on the <strong class="screenText">Continue</strong> button after understanding that you now have a very powerful client with access to all management APIs within your tenant.</li>
+      <li class="numberedList">Now, we just need to <a id="_idIndexMarker811"/>collect the client ID and client secret of the created client. The easiest way to do that is to select <strong class="screenText">Applications</strong> in the menu to the left (under the main menu choice <strong class="screenText">Applications</strong>) and then select the application named <strong class="screenText">Auth0 Management API (Test Application)</strong>. <p class="numberedList">A screen similar to the following should be displayed:</p>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_18.png" alt="Graphical user interface, application, Teams  Description automatically generated" width="812" height="727"/></figure>
+    <p class="packt_figref">Figure 11.18: Auth0 Management API client application information</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="14">Open the file <code class="inlineCode">$BOOK_HOME/Chapter11/auth0/env.bash</code> and copy the following values from <a id="_idIndexMarker812"/>the screen above:<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1"><strong class="screenText">Domain</strong> into the value of the variable <code class="inlineCode">TENANT</code></li>
+          <li class="alphabeticList"><strong class="screenText">Client ID</strong> into the value of the variable <code class="inlineCode">MGM_CLIENT_ID</code></li>
+          <li class="alphabeticList"><strong class="screenText">Client Secret</strong> into the value of the variable <code class="inlineCode">MGM_CLIENT_SECRET</code></li>
+        </ol>
+      </li>
+      <li class="numberedList">Complete the values required in the <code class="inlineCode">env.bash</code> file by specifying an email address and password, in the variables <code class="inlineCode">USER_EMAIL</code> and <code class="inlineCode">USER_PASSWORD</code>, of a test user that the script will create for us.</li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">Specifying a password for a user like this is not considered best practice from a security perspective. Auth0 supports enrolling users who will be able to set the password themselves, but it is more involved to set up. For more information, see <a href="https://auth0.com/docs/connections/database/password-change"><span class="url">https://auth0.com/docs/connections/database/password-change</span></a>. Since this is only used for test purposes, specifying a password like this is OK.</p>
+    </div>
+    <p class="normal">We can now run the<a id="_idIndexMarker813"/> script that will create the following definitions for us:</p>
+    <ul>
+      <li class="bulletList">Two applications, <code class="inlineCode">reader</code> and <code class="inlineCode">writer</code>, or clients in OAuth terminology</li>
+      <li class="bulletList">The <code class="inlineCode">product-composite</code> API, a resource server in OAuth terminology, with the OAuth scopes <code class="inlineCode">product:read</code> and <code class="inlineCode">product:write</code></li>
+      <li class="bulletList">A user, a resource owner in OAuth terminology, that we will use to test the authorization code grant flow</li>
+      <li class="bulletList">Finally, we will grant the <code class="inlineCode">reader</code> application the scope <code class="inlineCode">product:read</code>, and the <code class="inlineCode">writer</code> application the scopes <code class="inlineCode">product:read</code> and <code class="inlineCode">product:write</code></li>
+    </ul>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Run the following commands:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter11/auth0
+./setup-tenant.bash
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Expect the following output (details removed from the output below):</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_19.png" alt="Text  Description automatically generated" width="812" height="540"/></figure>
+    <p class="packt_figref">Figure 11.19: Output from setup-tenant.bash the first time it is executed</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Save a copy of the <code class="inlineCode">export</code> commands printed at the end of the output; we will use them multiple times later on in this chapter.</li>
+      <li class="numberedList">Look in your mailbox for<a id="_idIndexMarker814"/> the email specified for the test user. You will receive a mail with the subject <strong class="screenText">Verify your email</strong><em class="italic">.</em> Use the instructions in the email to verify the test user’s email address.</li>
+    </ol>
+    <p class="normal">Note that the script is idempotent, meaning it can be run multiple times without corrupting the configuration. If running the script again, it should respond with:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_20.png" alt="" role="presentation" width="812" height="397"/></figure>
+    <p class="packt_figref">Figure 11.20: Output from setup-tenant.bash the next time it is executed</p>
+    <p class="normal">It can be very handy to be able to run the script again, for example, to get access to the client ID<a id="_idIndexMarker815"/> and client secret of the <code class="inlineCode">reader</code> and <code class="inlineCode">writer</code>.</p>
+    <div class="packt_tip">
+      <p class="normal">If you need to remove the objects created by <code class="inlineCode">setup-tenant.bash</code>, you can run the script <code class="inlineCode">reset-tenant.bash</code>.</p>
+    </div>
+    <p class="normal">With an Auth0 account created and configured, we can move on and apply the necessary configuration changes in the system landscape.</p>
+    <h2 id="_idParaDest-299" class="heading-2">Applying the required changes to use Auth0 as an OpenID provider</h2>
+    <p class="normal">In this section, we will learn what<a id="_idIndexMarker816"/> configuration changes are required to be able to replace the local authorization server with Auth0. We only need to change the configuration for the two services that act as OAuth resource servers, the <code class="inlineCode">product-composite</code> and <code class="inlineCode">gateway</code> services. We also need to change our test script a bit, so that it acquires the access tokens from Auth0 instead of acquiring them from our local authorization server. Let’s start with the OAuth resource servers, the <code class="inlineCode">product-composite</code> and <code class="inlineCode">gateway</code> services.</p>
+    <div class="note">
+      <p class="normal">The changes described in this topic have <strong class="keyWord">not</strong> been applied to the source code in the book’s Git repository; you need to make them yourself to see them in action!</p>
+    </div>
+    <h3 id="_idParaDest-300" class="heading-3">Changing the configuration in the OAuth resource servers</h3>
+    <p class="normal">As already described, when using an OpenID Connect provider, we only have to configure the base URI to the <a id="_idIndexMarker817"/>standardized discovery endpoint in the OAuth resource servers.</p>
+    <p class="normal">In the <code class="inlineCode">product-composite</code> and <code class="inlineCode">gateway</code> projects, update the OIDC discovery endpoint to point to Auth0 instead of to our local authorization server. Make the following change to the <code class="inlineCode">application.yml</code> file in both projects:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Locate the property <code class="inlineCode">spring.security.oauth2.resourceserver.jwt.issuer-uri</code>.</li>
+      <li class="numberedList">Replace its value with <code class="inlineCode">https://${TENANT}/</code>, where <code class="inlineCode">${TENANT}</code> should be replaced with your tenant domain name; in my case, it is <code class="inlineCode">dev-ml.eu.auth0.com</code>. Do <em class="italic">not</em> forget the trailing <code class="inlineCode">/!</code></li>
+    </ol>
+    <p class="normal">In my case, the configuration of the OIDC discovery endpoint will look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">spring.security.oauth2.resourceserver.jwt.issuer-uri: https:<span class="hljs-comment">//dev-ml.eu.auth0.com/</span>
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">If you are curious, you can see what’s in the discovery document by running the following command:</p>
+      <pre class="programlisting con"><code class="hljs-con">curl https://${TENANT}/.well-known/openid-configuration -s | jq
+</code></pre>
+    </div>
+    <p class="normal">Rebuild the <code class="inlineCode">product-composite</code> and <code class="inlineCode">gateway</code> services as follows:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter11
+./gradlew build &amp;&amp; docker-compose up -d --build product-composite gateway
+</code></pre>
+    <p class="normal">With the <code class="inlineCode">product-composite</code> and <code class="inlineCode">gateway</code> services updated, we can move on and also update the test <a id="_idIndexMarker818"/>script.</p>
+    <h3 id="_idParaDest-301" class="heading-3">Changing the test script so it acquires access tokens from Auth0</h3>
+    <p class="normal">We also need to update the test script so it <a id="_idIndexMarker819"/>acquires access tokens from the Auth0 OIDC provider. This is done by performing the following changes in <code class="inlineCode">test-em-all.bash</code>:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Find the following command:
+        <pre class="programlisting code"><code class="hljs-code">ACCESS_TOKEN=<span class="hljs-constructor">$(</span><span class="hljs-params">curl</span><span class="hljs-constructor"> -</span><span class="hljs-params">k</span><span class="hljs-constructor"> </span><span class="hljs-params">https</span><span class="hljs-constructor">:</span><span class="hljs-operator">//</span><span class="hljs-params">writer</span><span class="hljs-constructor">:</span><span class="hljs-params">secret</span><span class="hljs-constructor">-</span><span class="hljs-params">writer</span><span class="hljs-constructor">@$HOST:$PORT</span><span class="hljs-operator">/</span><span class="hljs-params">oauth2</span><span class="hljs-operator">/</span><span class="hljs-params">token</span><span class="hljs-constructor"> -</span><span class="hljs-params">d</span><span class="hljs-constructor"> </span><span class="hljs-params">grant_type</span><span class="hljs-constructor">=</span><span class="hljs-params">client_credentials</span><span class="hljs-constructor"> -</span><span class="hljs-params">d</span><span class="hljs-constructor"> </span><span class="hljs-params">scope</span><span class="hljs-constructor">=</span><span class="hljs-string">"product:read product:write"</span><span class="hljs-constructor"> -</span><span class="hljs-params">s</span><span class="hljs-constructor"> | </span><span class="hljs-params">jq</span><span class="hljs-constructor"> .</span><span class="hljs-params">access_token</span><span class="hljs-constructor"> -</span><span class="hljs-params">r</span><span class="hljs-constructor">)</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Replace it with these commands:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-built_in">export</span> TENANT=...
+<span class="hljs-built_in">export</span> WRITER_CLIENT_ID=...
+<span class="hljs-built_in">export</span> WRITER_CLIENT_SECRET=...
+ACCESS_TOKEN=$(curl -X POST https://<span class="hljs-variable">$TENANT</span>/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:<span class="hljs-built_in">read</span>+product:write \
+  -d client_id=<span class="hljs-variable">$WRITER_CLIENT_ID</span> \
+  -d client_secret=<span class="hljs-variable">$WRITER_CLIENT_SECRET</span> -s | jq -r .access_token)
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">Note from the preceding command that Auth0 requires us to specify the intended <strong class="keyWord">audience</strong> of the requested access token, as an extra layer of security. The audience is the API we plan to call using the access token. Given that an API implementation verifies the <code class="inlineCode">audience</code> field, this would prevent the situation where someone tries to use an access token issued for another purpose to get access to an API.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Set the values for the environment variables <code class="inlineCode">TENANT</code>, <code class="inlineCode">WRITER_CLIENT_ID</code>, and <code class="inlineCode">WRITER_CLIENT_SECRET</code> in the preceding commands with the values returned by the <code class="inlineCode">setup-tenant.bash</code> script.</li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">As mentioned above, you can run the script again to acquire these values without risking any negative side effects!</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Find the following command:
+        <pre class="programlisting code"><code class="hljs-code">READER_ACCESS_TOKEN=$(curl -k https://reader:secret-reader@<span class="hljs-variable">$HOST</span>:<span class="hljs-variable">$PORT</span>/oauth2/token -d grant_type=client_credentials -d scope=<span class="hljs-string">"product:read"</span> -s | jq .access_token -r)
+</code></pre>
+      </li>
+      <li class="numberedList">Replace it with this command:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-built_in">export</span> READER_CLIENT_ID=...
+<span class="hljs-built_in">export</span> READER_CLIENT_SECRET=...
+READER_ACCESS_TOKEN=$(curl -X POST https://<span class="hljs-variable">$TENANT</span>/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:<span class="hljs-built_in">read</span> \
+  -d client_id=<span class="hljs-variable">$READER_CLIENT_ID</span> \
+  -d client_secret=<span class="hljs-variable">$READER_CLIENT_SECRET</span> -s | jq -r .access_token)
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">Note that we only request the <code class="inlineCode">product:read</code> scope and not the <code class="inlineCode">product:write</code> scope here.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="6">Set the values for the environment variables <code class="inlineCode">READER_CLIENT_ID</code> and <code class="inlineCode">READER_CLIENT_SECRET</code> in the preceding commands with the values returned by the <code class="inlineCode">setup-tenant.bash</code> script.</li>
+    </ol>
+    <p class="normal">Now the access tokens are<a id="_idIndexMarker820"/> issued by Auth0 instead of our local authorization server, and our API implementations can verify the access tokens using information from Auth0’s discovery service configured in the <code class="inlineCode">application.yml</code> files. The API implementations can, as before, use the scopes in the access tokens to authorize the client to perform the call to the API, or not.</p>
+    <p class="normal">With this, we have all the required changes in place. Let’s run some tests to verify that we can acquire access tokens from Auth0.</p>
+    <h2 id="_idParaDest-302" class="heading-2">Running the test script with Auth0 as the OpenID Connect provider</h2>
+    <p class="normal">Now, we are ready to give Auth0 a try!</p>
+    <p class="normal">Run the usual tests, but this<a id="_idIndexMarker821"/> time, using Auth0 as the OpenID Connect provider, with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">./test-em-all.bash
+</code></pre>
+    <p class="normal">In the logs, you will be able to find authorization information from the access tokens issued by Auth0. Run the command:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose logs product-composite | grep "Authorization info"
+</code></pre>
+    <p class="normal">Expect the following outputs from the command:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">From calls using an access token with both the <code class="inlineCode">product:read</code> and <code class="inlineCode">product:write</code> scopes, we will see both scopes listed as follows:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_21.png" alt="Text  Description automatically generated" width="697" height="229"/></figure>
+    <p class="packt_figref">Figure 11.21: Authorization information for the writer client from Auth0 in the log output</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">From calls using an access token with only the <code class="inlineCode">product:read</code> scope, we will see that only that scope is listed as follows:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_22.png" alt="Text  Description automatically generated" width="673" height="218"/></figure>
+    <p class="packt_figref">Figure 11.22: Authorization information for the reader client from Auth0 in the log output</p>
+    <div class="packt_tip">
+      <p class="normal">As we can see from the log output, we now also get information regarding the <strong class="keyWord">intended audience</strong> for this access token. To strengthen security, we could add a test to our service that verifies that its URL, <code class="inlineCode">https://localhost:8443/product-composite</code> in this case, is part of the audience list. This would, as mentioned earlier, prevent the situation where someone tries to use an access token issued for another purpose than to get access to our API.</p>
+    </div>
+    <p class="normal">With the automated tests working together with Auth0, we can move on and learn how to acquire access tokens using the different types of grant flow. Let’s start with the client<a id="_idIndexMarker822"/> credentials grant flow.</p>
+    <h2 id="_idParaDest-303" class="heading-2">Acquiring access tokens using the client credentials grant flow</h2>
+    <p class="normal">If you want to acquire an <a id="_idIndexMarker823"/>access token from Auth0 yourself, you can do so by running the following command, using the client credentials grant flow:</p>
+    <pre class="programlisting con"><code class="hljs-con">export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+  -d grant_type=client_credentials \
+  -d audience=https://localhost:8443/product-composite \
+  -d scope=product:read+product:write \
+  -d client_id=$WRITER_CLIENT_ID \
+  -d client_secret=$WRITER_CLIENT_SECRET
+</code></pre>
+    <p class="normal">Set the values for the environment variables <code class="inlineCode">TENANT</code>, <code class="inlineCode">WRITER_CLIENT_ID</code>, and <code class="inlineCode">WRITER_CLIENT_SECRET</code> in the <a id="_idIndexMarker824"/>preceding commands with the values returned by the <code class="inlineCode">setup-tenant.bash</code> script.</p>
+    <p class="normal">Following the instructions in the <em class="italic">Calling protected APIs using access tokens</em> section, you should be able to call the APIs using the acquired access token.</p>
+    <h2 id="_idParaDest-304" class="heading-2">Acquiring access tokens using the authorization code grant flow</h2>
+    <p class="normal">In this section, we will learn how to acquire <a id="_idIndexMarker825"/>an access token from Auth0 using the authorization code grant flow. As already described above, we first need to acquire an authorization code using a web browser. Next, we can use server-side code to exchange the authorization code for an access token.</p>
+    <p class="normal">Perform the following steps to execute the authorization code grant flow with Auth0:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To get an authorization code for the default app client, use the following URL in the web browser: <p class="normal"><code class="inlineCode">https://${TENANT}/authorize?audience=https://localhost:8443/product-composite&amp;scope=openid email product:read product:write&amp;response_type=code&amp;client_id=${WRITER_CLIENT_ID}&amp;redirect_uri=https://my.redirect.uri&amp;state=845361</code>.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Replace <code class="inlineCode">${TENANT}</code> and <code class="inlineCode">${WRITER_CLIENT_ID}</code> in the preceding URL with the tenant domain name and writer client ID returned by the <code class="inlineCode">setup-tenant.bash</code> script.</li>
+      <li class="numberedList">Auth0 should present the following login screen:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_23.png" alt="Graphical user interface, application  Description automatically generated" width="467" height="654"/></figure>
+    <p class="packt_figref">Figure 11.23: Authorization code grant flow with Auth0, the login screen</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Following a successful<a id="_idIndexMarker826"/> login, Auth0 will ask you to give the client application your consent:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_24.png" alt="Graphical user interface, application  Description automatically generated" width="663" height="919"/></figure>
+    <p class="packt_figref">Figure 11.24: Authorization code grant flow with Auth0, the consent screen</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">The authorization code<a id="_idIndexMarker827"/> is now in the URL in the browser, just like when we tried out the authorization code grant flow with our local authorization server:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_11_25.png" alt="Graphical user interface, application  Description automatically generated" width="812" height="731"/></figure>
+    <p class="packt_figref">Figure 11.25: Authorization code grant flow with Auth0, access token</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="6">Extract the code and run the following command to get the access token:
+        <pre class="programlisting con"><code class="hljs-con">CODE=...
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+ -d grant_type=authorization_code \
+ -d client_id=$WRITER_CLIENT_ID \
+ -d client_secret=$WRITER_CLIENT_SECRET  \
+ -d code=$CODE \
+ -d redirect_uri=https://my.redirect.uri -s | jq .
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Set the values for the environment variables <code class="inlineCode">TENANT</code>, <code class="inlineCode">WRITER_CLIENT_ID</code>, and <code class="inlineCode">WRITER_CLIENT_SECRET</code> in the preceding commands to the values returned by the <code class="inlineCode">setup-tenant.bash</code> script.</p>
+    <p class="normal">Now that we have learned<a id="_idIndexMarker828"/> how to acquire access tokens using both grant flows, we are ready to try calling the external API using an access token acquired from Auth0 in the next section.</p>
+    <h2 id="_idParaDest-305" class="heading-2">Calling protected APIs using the Auth0 access tokens</h2>
+    <p class="normal">We can use access<a id="_idIndexMarker829"/> tokens issued by Auth0 to call our APIs, just like when we used access tokens issued by our local authorization server.</p>
+    <p class="normal">For a read-only API, execute the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i  
+</code></pre>
+    <p class="normal">For an updating API, execute the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/999 -k -H "Authorization: Bearer $ACCESS_TOKEN" -X DELETE -i 
+</code></pre>
+    <p class="normal">Since we have requested both scopes, <code class="inlineCode">product:read</code> and <code class="inlineCode">product:write</code>, both the preceding API calls are expected to return <code class="inlineCode">200 OK</code>.</p>
+    <h2 id="_idParaDest-306" class="heading-2">Getting extra information about the user</h2>
+    <p class="normal">From the log output in <em class="italic">Figures 11.21</em> and <em class="italic">11.22</em> in the <em class="italic">Running the test script with Auth0 as the OpenID Connect provider section</em>, we could not see any information about the user that initiated the API request. If you want your API implementation to know a <a id="_idIndexMarker830"/>bit more about the user, it can call Auth0’s <code class="inlineCode">userinfo_endpoint</code>. The URL of the <code class="inlineCode">userinfo</code> endpoint can be found in the response of a request to the OIDC discovery endpoint, as described in the <em class="italic">Changing the configuration in the OAuth resource servers </em>section. To get user info related to an access token, make the following request:</p>
+    <pre class="programlisting con"><code class="hljs-con">Export TENANT=...
+curl -H "Authorization: Bearer $ACCESS_TOKEN" https://$TENANT/userinfo -s | jq
+</code></pre>
+    <p class="normal">Set the values for the <code class="inlineCode">TENANT</code> environment variable in the preceding commands to the values returned by the <code class="inlineCode">setup-tenant.bash</code> script.</p>
+    <p class="normal">Note that this command only applies to access tokens issued using the authorization code grant flow. Access tokens issued using the client credentials grant flow don’t contain any user information and will result in an error response if tried.</p>
+    <p class="normal">A sample response is as follows:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_11_26.png" alt="Text  Description automatically generated" width="446" height="199"/></figure>
+    <p class="packt_figref">Figure 11.26: Requesting extra user information from Auth0</p>
+    <div class="packt_tip">
+      <p class="normal">This endpoint can also be used to verify that the user hasn’t revoked the access token in Auth0.</p>
+    </div>
+    <p class="normal">Wrap up the tests by <a id="_idIndexMarker831"/>shutting down the system landscape with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose down
+</code></pre>
+    <p class="normal">This concludes the section, where we have learned how to replace the local OAuth 2.0 authorization server with an external alternative. We have also seen how to reconfigure the microservice landscape to validate access tokens using an external OIDC provider.</p>
+    <h1 id="_idParaDest-307" class="heading-1">Summary</h1>
+    <p class="normal">In this chapter, we have learned how to use Spring Security to protect our APIs.</p>
+    <p class="normal">We have seen how easy it is to enable HTTPS to prevent eavesdropping by third parties using Spring Security. With Spring Security, we have also learned that it is straightforward to restrict access to the discovery server, Netflix Eureka, using HTTP Basic authentication. Finally, we have seen how we can use Spring Security to simplify the use of OAuth 2.0 and OpenID Connect to allow third-party client applications to access our APIs in the name of a user, but without requiring that the user share credentials with the client applications. We have learned both how to set up a local OAuth 2.0 authorization server based on Spring Security and also how to change the configuration so that an external OpenID Connect provider, Auth0, can be used instead.</p>
+    <p class="normal">One concern, however, is how to manage the configuration required. Each microservice instance must be provided with its own configuration, making it hard to get a good overview of the current configuration. Updating configuration that concerns multiple microservices will also be challenging. Added to the scattered configuration is the fact that some of the configurations we have seen so far contain sensitive information, such as credentials or certificates. It seems like we need a better way to handle the configuration for a number of cooperating microservices and also a solution for how to handle sensitive parts of the configuration.</p>
+    <p class="normal">In the next chapter, we will explore the Spring Cloud Config Server and see how it can be used to handle these types of problems.</p>
+    <h1 id="_idParaDest-308" class="heading-1">Questions</h1>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">What are the benefits and shortcomings of using self-signed certificates?</li>
+      <li class="numberedList">What is the purpose of OAuth 2.0 authorization codes?</li>
+      <li class="numberedList">What is the purpose of OAuth 2.0 scopes?</li>
+      <li class="numberedList">What does it mean when a token is a JWT?</li>
+      <li class="numberedList">How can we trust the information that is stored in a JWT?</li>
+      <li class="numberedList">Is it suitable to use the OAuth 2.0 authorization code grant flow with a native mobile app?</li>
+      <li class="numberedList">What does OpenID Connect add to OAuth 2.0?</li>
+    </ol>
+  </div>
+</div>
+</div>
+</body></html>

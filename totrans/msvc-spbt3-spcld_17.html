@@ -1,0 +1,654 @@
+<html><head></head><body>
+<div id="book-content">
+<div id="sbo-rt-content"><div id="_idContainer416" class="Basic-Text-Frame">
+    <h1 class="chapterNumber">17</h1>
+    <h1 id="_idParaDest-422" class="chapterTitle">Implementing Kubernetes Features to Simplify the System Landscape</h1>
+    <p class="normal">The current microservice landscape contains several supporting services that implement important design patterns required in a large-scale microservice landscape, for example, an edge server, config server, authorization server, and a service for distributed tracing. For a recap, refer to <em class="chapterRef">Chapter 1</em>, <em class="italic">Introduction to Microservices</em>. In the previous chapter, we replaced the implementation of the design pattern for service discovery, based on Netflix Eureka, with the built-in discovery service in Kubernetes. In this chapter, we will further simplify the microservice landscape by reducing the number of supporting services required to be deployed. Instead, the corresponding design patterns will be handled by built-in capabilities in Kubernetes. The Spring Cloud Config Server will be replaced with Kubernetes ConfigMaps and Secrets. The Spring Cloud Gateway will be replaced by a Kubernetes Ingress object, which can act as an edge server in the same way as the Spring Cloud Gateway.</p>
+    <p class="normal">In <em class="chapterRef">Chapter 11</em>, <em class="italic">Securing Access to APIs</em>, we introduced the use of certificates to protect the external API. The certificates were provisioned manually, which is both time-consuming and error-prone, specifically when it comes to remembering to rotate the certificates before they expire. In this chapter, we will learn about <strong class="keyWord">cert-manager</strong> and how it can be used to automate the process of creating, provisioning, and rotating certificates.</p>
+    <p class="normal">When more and more features in a platform such as Kubernetes are being used, it is important to ensure that the source code for the microservices doesn’t become dependent on the platform. To ensure that we can still use the microservices without deploying them to Kubernetes, we will conclude the chapter by deploying the microservice landscape using Docker Compose and executing the <code class="inlineCode">test-em-all.bash</code> test script to verify that the microservices still work from a functional perspective without using Kubernetes.</p>
+    <p class="normal">The following topics will be covered in this chapter:</p>
+    <ul>
+      <li class="bulletList">Replacing the Spring Cloud Config Server with Kubernetes ConfigMaps and Secrets</li>
+      <li class="bulletList">Replacing the Spring Cloud Gateway with a Kubernetes Ingress object</li>
+      <li class="bulletList">Using <code class="inlineCode">cert-manager</code> to automatically provision certificates</li>
+      <li class="bulletList">Deploying and testing the microservice landscape on Kubernetes</li>
+      <li class="bulletList">Deploying and testing the microservice landscape using Docker Compose to ensure that the source code in the microservices isn’t locked into Kubernetes</li>
+    </ul>
+    <h1 id="_idParaDest-423" class="heading-1">Technical requirements</h1>
+    <p class="normal">For instructions on how to install the tools used in this book and how to access the source code for this book, see:</p>
+    <ul>
+      <li class="bulletList"><em class="chapterRef">Chapter 21</em>, <em class="italic">Installation Instructions for macOS</em></li>
+      <li class="bulletList"><em class="chapterRef">Chapter 22</em>, <em class="italic">Installation Instructions for Microsoft Windows with WSL 2 and Ubuntu</em></li>
+    </ul>
+    <p class="normal">The code examples in this chapter all come from the source code in <code class="inlineCode">$BOOK_HOME/Chapter17</code>.</p>
+    <p class="normal">If you want to view the changes applied to the source code in this chapter, that is, see what it took to replace the Spring Cloud Config Server and Spring Cloud Gateway with corresponding features in Kubernetes, and use cert-manager to provision certificates, you can compare it with the source code for <em class="chapterRef">Chapter 16</em>, <em class="italic">Deploying Our Microservices to Kubernetes</em>. You can use your favorite <code class="inlineCode">diff</code> tool and compare the two folders, <code class="inlineCode">$BOOK_HOME/Chapter16</code> and <code class="inlineCode">$BOOK_HOME/Chapter17</code>.</p>
+    <h1 id="_idParaDest-424" class="heading-1">Replacing the Spring Cloud Config Server</h1>
+    <p class="normal">As we have seen in the previous chapter, ConfigMaps and Secrets can be used to hold configuration information for our microservices. The Spring Cloud Config Server adds features such as keeping all <a id="_idIndexMarker1191"/>configurations in one place, optional version control using Git, and the ability to encrypt sensitive information on the disk. But it also consumes a non-negligible amount of memory (as with any Java and Spring-based application) and adds significant overhead during startup.</p>
+    <p class="normal">For example, when running automated integration tests such as the test script we are using in this book, <code class="inlineCode">test-em-all.bash</code>, all microservices are started up at the same time, including the configuration server. Since the other microservices must get their configuration from the configuration server, they all have to wait for the configuration server to be up and running before they can start up themselves. This leads to a significant delay when running integration tests. If we use Kubernetes ConfigMaps and Secrets instead, this delay is eliminated, making automated integration tests run faster. Therefore, it makes sense to use the Spring Cloud Config Server when the underlying platform doesn’t provide a similar capability, but when deploying to Kubernetes, it is better to use ConfigMaps and Secrets.</p>
+    <p class="normal">Using Kubernetes ConfigMaps and Secrets instead of the Spring Cloud Config Server will make the microservice landscape start up faster, which means it will require less memory. It will also simplify the microservice landscape by eliminating one supporting service, the configuration server. When we perform the replacement, it is important to do it in such a way that the source code in the microservices isn’t affected, thereby avoiding unnecessary lock-in to Kubernetes.</p>
+    <p class="normal">This change is illustrated in the following diagram:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_17_01.png" alt="Diagram  Description automatically generated" width="877" height="422"/></figure>
+    <p class="packt_figref">Figure 17.1: Replacing the Spring Cloud Config Server with Kubernetes built-in ConfigMaps and Secrets</p>
+    <p class="normal">Let’s see what is required <a id="_idIndexMarker1192"/>to replace the Spring Cloud Config Server with Kubernetes ConfigMaps and Secrets!</p>
+    <div class="note">
+      <p class="normal">Note especially that we only change the configuration; no changes are required in the Java source code!</p>
+    </div>
+    <h2 id="_idParaDest-425" class="heading-2">Changes required to replace the Spring Cloud Config Server</h2>
+    <p class="normal">The following <a id="_idIndexMarker1193"/>changes have been <a id="_idIndexMarker1194"/>applied in the configuration of the source code to replace the Spring Cloud Config Server with Kubernetes ConfigMaps and Secrets:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">We have removed the <code class="inlineCode">spring-cloud/config-server</code> project and also removed the project in the <code class="inlineCode">settings.gradle</code> build file.</li>
+      <li class="numberedList">We have removed the Helm chart for the configuration server.</li>
+      <li class="numberedList">We have removed config server-specific tests from the <code class="inlineCode">test-em-all.bash</code> test script.</li>
+      <li class="numberedList">We have removed the following configuration from all microservices:<ul>
+          <li class="bulletList">The <code class="inlineCode">spring-cloud-starter-config</code> dependency in the <code class="inlineCode">build.gradle</code> build files</li>
+          <li class="bulletList">The <code class="inlineCode">application.yml</code> files in the <code class="inlineCode">src/main/resource</code> folders in each project, which were used to connect to the config server</li>
+          <li class="bulletList">The <code class="inlineCode">spring.cloud.config.enabled=false</code> property setting in integration tests, since it is no longer required</li>
+        </ul>
+      </li>
+      <li class="numberedList">Changes to the configuration files in the <code class="inlineCode">config-repo</code> folder:<ul>
+          <li class="bulletList">We have removed properties with sensitive information, for example, credentials for MongoDB, MySQL, RabbitMQ, and the password for the TLS certificate used by the edge server. Kubernetes Secrets will be used to handle sensitive information.</li>
+          <li class="bulletList">The route to the configuration server API has been removed in the configuration of the edge server.</li>
+        </ul>
+      </li>
+      <li class="numberedList">Changes to the microservices’ Helm charts in <code class="inlineCode">kubernetes/helm/components</code>:<ul>
+          <li class="bulletList">A <code class="inlineCode">config-repo</code> folder has been added to each chart. Soft links have been created in Helm chart’s <code class="inlineCode">config-repo</code> folder for the required configuration files from the common <code class="inlineCode">config-repo</code> folder. For each microservice, a soft link has been created to the common configuration file, <code class="inlineCode">application.yaml</code>, and to the microservice-specific configuration file.</li>
+        </ul>
+        <div class="note">
+          <p class="normal">For a recap on how soft links are created, refer to the <em class="italic">The components charts</em> section in <em class="chapterRef">Chapter 16</em>, <em class="italic">Deploying Our Microservices to Kubernetes</em>.</p>
+        </div>
+        <ul>
+          <li class="bulletList">The <code class="inlineCode">values.yaml</code> file has been updated with the following:<ul>
+              <li class="bulletList">An <a id="_idIndexMarker1195"/>environment variable for a Spring property that is used for pointing <a id="_idIndexMarker1196"/>out what configuration files to use. For example, the property looks like the following for the <code class="inlineCode">product</code> microservice:
+                <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">SPRING_CONFIG_LOCATION:</span> <span class="hljs-string">file:/config-repo/application.yml,file:/config-repo/product.yml</span>
+</code></pre>
+              </li>
+              <li class="bulletList">A ConfigMap that the microservices will use to find their configuration files. The ConfigMap will be made available inside the container on the /config-repo path. The declaration looks like this:
+                <pre class="programlisting code"><code class="hljs-code"><span class="hljs-string">configmap:</span>
+<span class="hljs-string">  enabled: true</span>
+<span class="hljs-string">  volumeMounts:</span>
+<span class="hljs-string">    mountPath: /config-repo</span>
+</code></pre>
+              </li>
+              <li class="bulletList">To create the ConfigMap, a template has been added that is based on the named template, <code class="inlineCode">common.configmap_from_file</code>, from the <code class="inlineCode">common</code> chart.</li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li class="numberedList">Changes to the environments’ Helm charts in <code class="inlineCode">kubernetes/helm/environments</code>:<ul>
+          <li class="bulletList">We have removed the dependency on the config server’s chart.</li>
+          <li class="bulletList">The <code class="inlineCode">values.yaml</code> file has been updated.</li>
+          <li class="bulletList">The Secrets for the config server and its clients have been replaced with Secrets for the resource managers, MongoDB, MySQL, and RabbitMQ, and their clients. For example:
+            <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-attr">rabbitmq-zipkin-credentials:</span>
+    <span class="hljs-attr">RABBIT_USER:</span> <span class="hljs-string">rabbit-user-dev</span>
+    <span class="hljs-attr">RABBIT_PASSWORD:</span> <span class="hljs-string">rabbit-pwd-dev</span>
+  <span class="hljs-attr">mongodb-credentials:</span>
+    <span class="hljs-attr">SPRING_DATA_MONGODB_AUTHENTICATION_DATABASE:</span> <span class="hljs-string">admin</span>
+    <span class="hljs-attr">SPRING_DATA_MONGODB_USERNAME:</span> <span class="hljs-string">mongodb-user-dev</span>
+    <span class="hljs-attr">SPRING_DATA_MONGODB_PASSWORD:</span> <span class="hljs-string">mongodb-pwd-dev</span>
+</code></pre>
+          </li>
+        </ul>
+        <div class="note">
+          <p class="normal">Recap from the previous chapter: Note that this <code class="inlineCode">values.yaml</code> file contains sensitive information, like the passwords from the example above. This file must therefore be stored securely. An alternative, if it is inappropriate to store this file securely, is to remove the sensitive information from this file and supply the sensitive information when the <code class="inlineCode">helm install</code> command is executed.</p>
+        </div>
+        <ul>
+          <li class="bulletList">Each component is assigned the Secrets it requires.</li>
+        </ul>
+        <div class="note">
+          <p class="normal">Recap from the previous chapter: the Secrets will be mapped into each Pod as environment variables.</p>
+        </div>
+        <p class="normal">For example, the <a id="_idIndexMarker1197"/>product service needs access to both MongoDB and RabbitMQ <a id="_idIndexMarker1198"/>and is therefore assigned the following two Secrets:</p>
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">product:</span>
+  <span class="hljs-attr">envFromSecretRefs:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">rabbitmq-credentials</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">mongodb-credentials</span>
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Most of the changes in the Helm charts’ <code class="inlineCode">values.yaml</code> files end up in Kubernetes manifests for <code class="inlineCode">Deployment</code> objects. For example, the <code class="inlineCode">product</code> microservice’s <code class="inlineCode">Deployment</code> object will look like the following:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Deployment</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">product</span>
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">template:</span>
+    <span class="hljs-attr">spec:</span>
+      <span class="hljs-attr">containers:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">product</span>
+          <span class="hljs-attr">env:</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">SPRING_CONFIG_LOCATION</span>
+            <span class="hljs-attr">value:</span> <span class="hljs-string">file:/config-repo/application.yml,file:/config-repo/product.yml</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">SPRING_PROFILES_ACTIVE</span>
+            <span class="hljs-attr">value:</span> <span class="hljs-string">docker</span>
+          <span class="hljs-attr">envFrom:</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">secretRef:</span>
+              <span class="hljs-attr">name:</span> <span class="hljs-string">rabbitmq-credentials</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">secretRef:</span>
+              <span class="hljs-attr">name:</span> <span class="hljs-string">mongodb-credentials</span>
+          <span class="hljs-attr">volumeMounts:</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">product</span>
+            <span class="hljs-attr">mountPath:</span> <span class="hljs-string">/config-repo</span>
+      <span class="hljs-attr">volumes:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">product</span>
+          <span class="hljs-attr">configMap:</span>
+            <span class="hljs-attr">name:</span> <span class="hljs-string">product</span>
+</code></pre>
+    <p class="normal">Note that parts of the manifest that have not been affected by the changes above have been omitted for improved readability.</p>
+    <p class="normal">If you want to render <a id="_idIndexMarker1199"/>a component’s Kubernetes manifest yourself, you can do that by applying Helm’s <code class="inlineCode">template</code> command on the <a id="_idIndexMarker1200"/>chart of interest. You must also add values from the environment’s <code class="inlineCode">values.yaml</code> file that are applicable for the component of the <code class="inlineCode">template</code> command. Take the <code class="inlineCode">product</code> service as an example. The <code class="inlineCode">dev-env</code> chart’s <code class="inlineCode">values.yaml</code> file contains the following settings that apply to the <code class="inlineCode">product</code> service:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">product:</span>
+  <span class="hljs-attr">envFromSecretRefs:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">rabbitmq-credentials</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">mongodb-credentials</span>
+</code></pre>
+    <p class="normal">To add these settings to the <code class="inlineCode">template</code> command, we can use the <code class="inlineCode">--set</code> flag.</p>
+    <div class="note">
+      <p class="normal">There is also a <code class="inlineCode">--values</code> flag that can be used to add a <code class="inlineCode">values.yaml</code> file when the command is executed.</p>
+    </div>
+    <p class="normal">When adding values from an environment chart, we must remember that they are parent charts to the component charts. This means that the name of the component chart must be removed from the settings when applied directly to the component chart. In this case, it means that we should add the following values to the <code class="inlineCode">template</code> command to render the <code class="inlineCode">product</code> chart correctly:</p>
+    <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-attr">envFromSecretRefs:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">rabbitmq-credentials</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">mongodb-credentials</span>
+</code></pre>
+    <p class="normal">YAML arrays like the one above can be defined using the <code class="inlineCode">--set</code> flag by listing the elements within curly braces, for example, <code class="inlineCode">"{a,b,c}"</code>. The <code class="inlineCode">product</code> chart can be rendered using the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">helm template kubernetes/helm/components/product \
+  --set envFromSecretRefs= \
+    "{rabbitmq-credentials, mongodb-credentials}"
+</code></pre>
+    <p class="normal">The result will contain manifests for the <code class="inlineCode">product</code> microservice, a ConfigMap, a Service, and finally, a <code class="inlineCode">Deployment</code> object.</p>
+    <p class="normal">This is what is <a id="_idIndexMarker1201"/>required to replace the configuration server with Kubernetes ConfigMaps and Secrets. In the next section, we will <a id="_idIndexMarker1202"/>learn about how we can replace the Spring Cloud Gateway with a Kubernetes Ingress object.</p>
+    <h1 id="_idParaDest-426" class="heading-1">Replacing the Spring Cloud Gateway</h1>
+    <p class="normal">In this section, we will further simplify the microservice landscape by replacing the Spring Cloud Gateway using <a id="_idIndexMarker1203"/>the built-in Ingress object in Kubernetes, reducing the number of supporting services required to be deployed.</p>
+    <p class="normal">As introduced in <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>, an Ingress object can be used in Kubernetes to act as an edge server in the same way as a Spring Cloud Gateway. The Spring Cloud Gateway comes with a richer routing functionality compared to an Ingress object. However, the Ingress is part of the Kubernetes platform, requiring no extra deployments, and can also be extended using cert-manager to automatically provision certificates, as we will see later in this chapter.</p>
+    <p class="normal">We have also used the Spring Cloud Gateway to protect our microservices from unauthenticated requests, by requiring a valid OAuth 2.0/OIDC access token from a trusted OAuth authorization server or OIDC provider. See <em class="chapterRef">Chapter 11</em>, <em class="italic">Securing Access to APIs</em>, if a recap is required. Generally, Kubernetes Ingress objects do not have support for this. Specific implementations of the Ingress controller might, however, support it. </p>
+    <p class="normal">Finally, the composite health check we added to the gateway in <em class="chapterRef">Chapter 10</em>, <em class="italic">Using Spring Cloud Gateway to Hide Microservices behind an Edge Server</em>, can be replaced by the Kubernetes liveness and readiness probes defined in each microservice’s deployment manifest.</p>
+    <p class="normal">Therefore, in the same way as for the Spring Cloud Config Server, it makes sense to use the Spring Cloud Gateway where the underlying platform doesn’t provide a similar capability. When deploying to Kubernetes, it is better to use Ingress objects.</p>
+    <p class="normal">In this chapter, we will delegate the responsibility of validating that the request contains a valid access token to the <code class="inlineCode">product-composite</code> microservice. This is done by the Ingress forwarding the HTTP header that contains the access token in the requests to the <code class="inlineCode">product-composite</code> microservice, and it will perform its validation of the OAuth access tokens as in the previous chapters. The next chapter will introduce the concept of a service mesh, where we will see an alternative implementation of an Ingress that fully supports validating JWT-encoded OAuth access tokens.</p>
+    <div class="note">
+      <p class="normal">In the <em class="italic">Verifying that the microservices work without Kubernetes</em> section, we will still use the Spring Cloud Gateway together with Docker Compose, so we will not remove the project.</p>
+    </div>
+    <p class="normal">The following diagram shows that the Spring Cloud Gateway is removed from the microservice landscape when deploying to Kubernetes:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_17_02.png" alt="Graphical user interface, diagram, text, application  Description automatically generated" width="877" height="323"/></figure>
+    <p class="packt_figref">Figure 17.2: Replacing the Spring Cloud Gateway with the Kubernetes built-in Ingress controller</p>
+    <p class="normal">Let’s see what is <a id="_idIndexMarker1204"/>required to replace the Spring Cloud Gateway with a Kubernetes Ingress object!</p>
+    <div class="note">
+      <p class="normal">Note especially that we only change the configuration; that is, no changes are required in the Java source code!</p>
+    </div>
+    <h2 id="_idParaDest-427" class="heading-2">Changes required to replace the Spring Cloud Gateway</h2>
+    <p class="normal">The following <a id="_idIndexMarker1205"/>changes have been <a id="_idIndexMarker1206"/>applied to the configuration of the source code to replace the Spring Cloud Gateway with a Kubernetes Ingress object:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">We have removed the Helm chart for the Spring Cloud Gateway.</li>
+      <li class="numberedList">We have added a named template for Ingress manifests and some default values for the Ingress in the <code class="inlineCode">common</code> chart. <p class="normal">The named template, <code class="inlineCode">kubernetes/helm/common/templates/_ingress.yaml</code>, begins with a declaration that we recognize from the previous chapter:</p>
+        <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">define</span> <span class="hljs-string">"common.ingress"</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$common</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">.Values.common</span> <span class="hljs-string">-</span>}}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.Values</span> <span class="hljs-string">"common"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">:=</span> <span class="hljs-string">dict</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">$noCommon</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">:=</span> <span class="hljs-string">omit</span> <span class="hljs-string">.</span> <span class="hljs-string">"Values"</span> <span class="hljs-string">-</span>}} 
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">with</span> <span class="hljs-string">merge</span> <span class="hljs-string">$noValues</span> <span class="hljs-string">$overrides</span> <span class="hljs-string">$common</span> <span class="hljs-string">-</span>}}
+<span class="hljs-attr">apiVersion:</span> <span class="hljs-string">networking.k8s.io/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Ingress</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.fullname"</span> <span class="hljs-string">.</span> }}
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"</span><span class="hljs-string">common.name"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">helm.sh/chart:</span> {{ <span class="hljs-string">include</span> <span class="hljs-string">"common.chart"</span> <span class="hljs-string">.</span> }}
+    <span class="hljs-attr">app.kubernetes.io/managed-by:</span> {{ <span class="hljs-string">.Release.Service</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">with</span> <span class="hljs-string">.Values.ingress.annotations</span> }}
+  <span class="hljs-attr">annotations:</span>
+{{ <span class="hljs-string">toYaml</span> <span class="hljs-string">.</span> <span class="hljs-string">|</span> <span class="hljs-string">indent</span> <span class="hljs-number">4</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+</code></pre>
+        <p class="normal">The name of the template is <code class="inlineCode">common.ingress</code>, and the <code class="inlineCode">apiVersion</code> and <code class="inlineCode">kind</code> are set to <code class="inlineCode">networking.k8s.io/v1</code> and <code class="inlineCode">Ingress, respectively,</code> to identify it as an Ingress manifest. Most of the remainder of the template above looks the same as seen in other manifests where overriding <a id="_idIndexMarker1207"/>parameters is <a id="_idIndexMarker1208"/>required, such as the <code class="inlineCode">Deployment</code> or <code class="inlineCode">Service</code> template. The only new part is that the template allows the addition of annotations, if required, using the <code class="inlineCode">ingress.annotations</code> field in the <code class="inlineCode">values.yaml</code> file.</p>
+        <p class="normal">The rest of the Ingress template contains the main part of the manifest, the <code class="inlineCode">spec</code> part. It looks like this:</p>
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">tls:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">hosts:</span>
+        <span class="hljs-bullet">-</span> {{ <span class="hljs-string">.Values.ingress.host</span> <span class="hljs-string">|</span> <span class="hljs-string">quote</span> }}
+      <span class="hljs-attr">secretName:</span> {{ <span class="hljs-string">.Values.ingress.tls.secretName</span> }}
+  <span class="hljs-attr">rules:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">host:</span> {{ <span class="hljs-string">.Values.ingress.host</span> <span class="hljs-string">|</span> <span class="hljs-string">quote</span> }}
+      <span class="hljs-attr">http:</span>
+        <span class="hljs-attr">paths:</span>
+        {{<span class="hljs-bullet">-</span> <span class="hljs-string">range</span> <span class="hljs-string">.Values.ingress.paths</span> }}
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> {{ <span class="hljs-string">.path</span> }}
+            <span class="hljs-attr">pathType:</span> <span class="hljs-string">Prefix</span>
+            <span class="hljs-attr">backend:</span>
+              <span class="hljs-attr">service:</span>
+                <span class="hljs-attr">name:</span> {{ <span class="hljs-string">.service</span> }}
+                <span class="hljs-attr">port:</span>
+                  <span class="hljs-attr">name:</span> <span class="hljs-string">http</span>
+        {{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> }}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+</code></pre>
+        <p class="normal">First comes a <code class="inlineCode">tls</code> section where the manifest declares that the Ingress only accepts HTTPS traffic and that the accepted <code class="inlineCode">hostname</code> will be specified with the key <code class="inlineCode">ingress.host</code> in the <code class="inlineCode">values.yaml</code> files. The certificate used for serving HTTPS requests will be stored in a Secret named as specified in the <code class="inlineCode">values.yaml</code> files using the <code class="inlineCode">ingress.tls.secretName</code> key.</p>
+        <p class="normal">Next are the routing rules declared in the <code class="inlineCode">rules</code> section. First is the hostname used for routing. This will be the same hostname as in the <code class="inlineCode">tls</code> section above. Next comes a list of routes. They will be filled in using the <code class="inlineCode">ingress.paths</code> section in the <code class="inlineCode">values.yaml</code> file. Each entry contains a <code class="inlineCode">path</code> and the name of the <code class="inlineCode">service</code> that requests to that path will be routed to. Each service is expected to have the name of its port set to <code class="inlineCode">http</code>.</p>
+        <p class="normal">The <code class="inlineCode">common</code> chart’s <code class="inlineCode">values.yaml</code> file provides the following default values for the Ingress manifest:</p>
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">ingress:</span>
+  <span class="hljs-attr">annotations:</span>
+    <span class="hljs-attr">cert-manager.io/issuer:</span> <span class="hljs-string">selfsigned</span>
+  <span class="hljs-attr">tls:</span>
+    <span class="hljs-attr">secretName:</span> <span class="hljs-string">tls-certificate</span>
+</code></pre>
+        <p class="normal">First is an annotation, <code class="inlineCode">cert-manager.io/issuer</code>, declared for the Ingress object, indicating that cert-manager should manage the required certificate for this Ingress object using an issuer named <code class="inlineCode">selfsigned</code>. More about this is below, in the <em class="italic">Automating certificate provisioning</em> section. Next is the Secret that will hold the certificate, given the default name <code class="inlineCode">tls-certificate</code>.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">We have <a id="_idIndexMarker1209"/>added templates and additional settings to the environment charts, <code class="inlineCode">dev-env</code> and <code class="inlineCode">prod-env</code>, for Ingress <a id="_idIndexMarker1210"/>manifests. The templates are named <code class="inlineCode">ingress.yml</code> and are based on the named template from the <code class="inlineCode">common</code> chart described above:
+        <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">template</span> <span class="hljs-string">"common.ingress"</span> <span class="hljs-string">.</span> <span class="hljs-string">-</span>}}
+</code></pre>
+      </li>
+      <li class="numberedList">The remaining values required to render an Ingress manifest, a <code class="inlineCode">hostname</code> and the actual <code class="inlineCode">paths</code> used for routing, are specified in each environment chart’s <code class="inlineCode">values.yaml</code> files. The declaration looks like this:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">ingress:</span>
+  <span class="hljs-attr">host:</span> <span class="hljs-string">minikube.me</span>
+  <span class="hljs-attr">paths:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/oauth2</span>
+      <span class="hljs-attr">service:</span> <span class="hljs-string">auth-server</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/login</span>
+      <span class="hljs-attr">service:</span> <span class="hljs-string">auth-server</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/error</span>
+      <span class="hljs-attr">service:</span> <span class="hljs-string">auth-server</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/product-composite</span>
+      <span class="hljs-attr">service:</span> <span class="hljs-string">product-composite</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/actuator/health</span>
+      <span class="hljs-attr">service:</span> <span class="hljs-string">product-composite</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/openapi</span>
+      <span class="hljs-attr">service:</span> <span class="hljs-string">product-composite</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/webjars</span>
+      <span class="hljs-attr">service:</span> <span class="hljs-string">product-composite</span>
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">From the configuration, we can see that we will use the hostname <code class="inlineCode">minikube.me</code> and that three routes are defined for the <code class="inlineCode">auth-server</code>, while the rest of the declared paths will be routed to the <code class="inlineCode">product-composite</code> service.</p>
+    <div class="note">
+      <p class="normal">We will register the hostname <code class="inlineCode">minikube.me</code> in the local <code class="inlineCode">/etc/hosts</code> file later, in the <em class="italic">Testing with Kubernetes ConfigMaps, Secrets, Ingress, and cert-manager</em> section.</p>
+    </div>
+    <p class="normal">The changes above will result in an Ingress manifest being rendered by Helm. Since the Ingress template is only <a id="_idIndexMarker1211"/>used by the environments <a id="_idIndexMarker1212"/>charts, we need to render one of the environment charts to see the Ingress manifest.</p>
+    <p class="normal">Run the following command to render manifests using the <code class="inlineCode">dev-env</code> chart:</p>
+    <pre class="programlisting con"><code class="hljs-con">helm template kubernetes/helm/environments/dev-env
+</code></pre>
+    <p class="normal">Look for <code class="inlineCode">kind: Ingress</code> in the output and you will find the Ingress manifest. It looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">networking.k8s.io/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Ingress</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">RELEASE-NAME-dev-env</span>
+  <span class="hljs-attr">labels:</span>
+    <span class="hljs-attr">app.kubernetes.io/name:</span> <span class="hljs-string">dev-env</span>
+    <span class="hljs-attr">helm.sh/chart:</span> <span class="hljs-string">dev-env-1.0.0</span>
+    <span class="hljs-attr">app.kubernetes.io/managed-by:</span> <span class="hljs-string">Helm</span>
+  <span class="hljs-attr">annotations:</span>
+    <span class="hljs-attr">cert-manager.io/issuer:</span> <span class="hljs-string">selfsigned</span>
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">tls:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">hosts:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-string">"minikube.me"</span>
+      <span class="hljs-attr">secretName:</span> <span class="hljs-string">tls-certificate</span>
+  <span class="hljs-attr">rules:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-attr">host:</span> <span class="hljs-string">"minikube.me"</span>
+      <span class="hljs-attr">http:</span>
+        <span class="hljs-attr">paths:</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/oauth2</span>
+            <span class="hljs-attr">pathType:</span> <span class="hljs-string">Prefix</span>
+            <span class="hljs-attr">backend:</span>
+              <span class="hljs-attr">service:</span>
+                <span class="hljs-attr">name:</span> <span class="hljs-string">auth-server</span>
+                <span class="hljs-attr">port:</span>
+                  <span class="hljs-attr">name:</span> <span class="hljs-string">http</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/product-composite</span>
+            <span class="hljs-attr">pathType:</span> <span class="hljs-string">Prefix</span>
+            <span class="hljs-attr">backend:</span>
+              <span class="hljs-attr">service:</span>
+                <span class="hljs-attr">name:</span> <span class="hljs-string">product-composite</span>
+                <span class="hljs-attr">port:</span>
+                  <span class="hljs-attr">name:</span> <span class="hljs-string">http</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">path:</span> <span class="hljs-string">/actuator/health</span>
+            <span class="hljs-attr">pathType:</span> <span class="hljs-string">Prefix</span>
+            <span class="hljs-attr">backend:</span>
+              <span class="hljs-attr">service:</span>
+                <span class="hljs-attr">name:</span> <span class="hljs-string">product-composite</span>
+                <span class="hljs-attr">port:</span>
+                  <span class="hljs-attr">name:</span> <span class="hljs-string">http</span>
+</code></pre>
+    <p class="normal">Note that some of the routing rules have been removed for improved readability.</p>
+    <p class="normal">The final missing piece is how the Secret containing the certificate is created; let’s look into that next.</p>
+    <h1 id="_idParaDest-428" class="heading-1">Automating certificate provisioning</h1>
+    <p class="normal">The cert-manager tool (<a href="https://cert-manager.io/docs/"><span class="url">https://cert-manager.io/docs/</span></a>) is a certificate management controller for Kubernetes. </p>
+    <p class="normal">It can facilitate <a id="_idIndexMarker1213"/>the automated creation, provisioning, and <a id="_idIndexMarker1214"/>rotation of certificates. It supports several sources for the certificates; for example:</p>
+    <ul>
+      <li class="bulletList">An <strong class="keyWord">RFC8555</strong> (<a href="https://tools.ietf.org/html/rfc8555"><span class="url">https://tools.ietf.org/html/rfc8555</span></a>)-compliant <strong class="keyWord">ACME server</strong> <a id="_idIndexMarker1215"/>such <a id="_idIndexMarker1216"/>as <strong class="keyWord">Let’s Encrypt</strong> (<a href="https://letsencrypt.org"><span class="url">https://letsencrypt.org</span></a>)</li>
+      <li class="bulletList"><strong class="keyWord">HashiCorp Vault PKI Secrets Engine</strong> (<a href="https://www.vaultproject.io/docs/secrets/pki"><span class="url">https://www.vaultproject.io/docs/secrets/pki</span></a>)</li>
+      <li class="bulletList">Self-signed <a id="_idIndexMarker1217"/>certificates, issued by cert-manager itself</li>
+    </ul>
+    <p class="normal">For a full list of available issuers, see <a href="https://cert-manager.io/docs/configuration/"><span class="url">https://cert-manager.io/docs/configuration/</span></a>.</p>
+    <p class="normal">Since self-signed certificates don’t require communication with any external resources, they are a good candidate for use during development. We will use them within the scope of this book.</p>
+    <div class="note">
+      <p class="normal">Using cert-manager in production typically requires the use of an issuer, such as Let’s Encrypt, which can issue certificates for the external APIs that the API clients (for example, web browsers and external systems) will trust.</p>
+    </div>
+    <p class="normal">After installation of cert-manager in a Kubernetes cluster, at least one issuer must be registered. An issuer can either be local to a namespace or accessible cluster-wide. We will use a local issuer that is registered in the existing namespace, <code class="inlineCode">hands-on</code>.</p>
+    <p class="normal">It will be the responsibility of the environment charts, <code class="inlineCode">dev-env</code> and <code class="inlineCode">prod-env</code>, to register a proper issuer. Both environments will use the self-signed issuer. A named template, <code class="inlineCode">_issuer.yaml</code>, has been added to the <code class="inlineCode">common</code> chart. It looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">define</span> <span class="hljs-string">"common.issuer"</span> <span class="hljs-string">-</span>}}
+<span class="hljs-attr">apiVersion:</span> <span class="hljs-string">cert-manager.io/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Issuer</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">selfsigned</span>
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">selfSigned:</span> {}
+{{<span class="hljs-bullet">-</span> <span class="hljs-string">end</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">The <code class="inlineCode">apiVersion</code> and <code class="inlineCode">kind</code> fields specify that this is an issuer defined by cert-manager. Its name is set to <code class="inlineCode">selfsigned</code>. In the <em class="italic">Changes required to replace the Spring Cloud Gateway</em> section above, we saw how this name was used to annotate the Ingress manifest:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">ingress:</span>
+  <span class="hljs-attr">annotations:</span>
+    <span class="hljs-attr">cert-manager.io/issuer:</span> <span class="hljs-string">selfsigned</span>
+  <span class="hljs-attr">tls:</span>
+    <span class="hljs-attr">secretName:</span> <span class="hljs-string">tls-certificate</span>
+</code></pre>
+    <p class="normal">This is all that it takes to get cert-manager to kick in and provide a certificate for the Ingress object. The cert-manager listens for the registration of Ingress objects that are annotated with <code class="inlineCode">cert-manager.io/issuer</code> and starts to issue certificates using the issuer referenced in the value of the annotation, in this case, <code class="inlineCode">selfsigned</code>. The cert-manager tool will use the issuer to create a certificate and store it in a Secret named by the Ingress object. In our case, the name is set to <code class="inlineCode">tls-certificate</code>. A <code class="inlineCode">Certificate</code> object will also be created with the same name, containing administrative information like when it is time for cert-manager to renew the certificate.</p>
+    <p class="normal">Since the named template, <code class="inlineCode">common.issuer</code>, does not accept any configuration, all that is required to <a id="_idIndexMarker1218"/>apply it in the <code class="inlineCode">dev-env</code> and <code class="inlineCode">prod-env</code> charts is to add a template in each chart that uses the named template. The template is named <code class="inlineCode">issuer.yaml</code> and looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">{{<span class="hljs-bullet">-</span> <span class="hljs-string">template</span> <span class="hljs-string">"common.issuer"</span> <span class="hljs-string">.</span> <span class="hljs-string">-</span>}}
+</code></pre>
+    <p class="normal">With this, we have everything that is required to replace the Spring Cloud Config Server and Gateway with native Kubernetes components and cert-manager. Let’s deploy and run some tests!</p>
+    <h1 id="_idParaDest-429" class="heading-1">Testing with Kubernetes ConfigMaps, Secrets, Ingress, and cert-manager</h1>
+    <p class="normal">With the preceding changes described, we are ready to test the system landscape with the Spring Cloud Config Server and the Spring Cloud Gateway replaced by Kubernetes ConfigMaps, Secrets, an Ingress <a id="_idIndexMarker1219"/>object, and cert-manager. As before, when we <a id="_idIndexMarker1220"/>used the Spring Cloud Gateway as the edge server, the external API will be <a id="_idIndexMarker1221"/>protected by HTTPS. With this deployment, it will be the Ingress <a id="_idIndexMarker1222"/>controller that uses the certificate provisioned by cert-manager to protect the external API with HTTPS. This is illustrated in the following diagram:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_17_03.png" alt="Diagram  Description automatically generated" width="878" height="278"/></figure>
+    <p class="packt_figref">Figure 17.3: Protecting external access using HTTPS</p>
+    <p class="normal">The Ingress controller is exposed on the default HTTPS port, <code class="inlineCode">443</code>, on the Minikube instance. On the host, where we run the Minikube instance as a Docker container, we communicate with the Minikube instance via <code class="inlineCode">localhost</code>. When the Minikube instance was created, port forwarding was configured from port <code class="inlineCode">8443</code> on <code class="inlineCode">localhost</code> to the <code class="inlineCode">443</code> port in the Minikube instance. The Ingress controller was installed when we performed the <code class="inlineCode">minikube addons enable ingress</code> command.</p>
+    <div class="note">
+      <p class="normal">For a recap on the setup of the Minikube instance, see the <em class="italic">Creating a Kubernetes cluster</em> section in <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>.</p>
+    </div>
+    <p class="normal">An interesting question here is, how can the Ingress controller use port <code class="inlineCode">443</code> on the Minikube instance? We have <a id="_idIndexMarker1223"/>seen the use of services of type <code class="inlineCode">NodePort</code> that can <a id="_idIndexMarker1224"/>allocate a port starting from <code class="inlineCode">30000</code>, so how can the Ingress <a id="_idIndexMarker1225"/>controller use the standard <a id="_idIndexMarker1226"/>port for HTTPS, <code class="inlineCode">443</code>?</p>
+    <p class="normal">The Ingress controller consists of a <code class="inlineCode">Deployment</code> object, <code class="inlineCode">ingress-nginx-controller</code>, in the <code class="inlineCode">ingress-nginx</code> namespace. The answer to the question is that the <code class="inlineCode">Deployment</code> object configures its Pod using a <code class="inlineCode">hostPort</code> to map port <code class="inlineCode">443</code> in the Kubernetes host, that is, the Minikube instance, to port <code class="inlineCode">443</code> in the container that runs in the Pod. The central parts in the definition of the <code class="inlineCode">Deployment</code> object look like the following:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Deployment</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">ingress-nginx-controller</span>
+<span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">template:</span>
+    <span class="hljs-attr">spec:</span>
+      <span class="hljs-attr">containers:</span>
+        <span class="hljs-attr">image:</span> <span class="hljs-string">registry.k8s.io/ingress-nginx/controller:v1.5.1</span>
+        <span class="hljs-attr">ports:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">containerPort:</span> <span class="hljs-number">443</span>
+          <span class="hljs-attr">hostPort:</span> <span class="hljs-number">443</span>
+</code></pre>
+    <div class="note">
+      <p class="normal">This setup works for a single-node Kubernetes cluster used for development and testing. In a multi-node Kubernetes cluster, external load balancers are used to expose an Ingress controller for high availability and scalability.</p>
+    </div>
+    <p class="normal">The <code class="inlineCode">Deployment</code> object uses the same type of commands as we used in <em class="chapterRef">Chapter 16</em>, <em class="italic">Deploying Our Microservices to Kubernetes</em>; refer to the <em class="italic">Deploying to Kubernetes for development and test</em> section. In this section, we will also install cert-manager and add an entry to the<code class="inlineCode">/etc/hosts</code> file for the hostname <code class="inlineCode">minikube.me</code>.</p>
+    <p class="normal">Execute the following steps to deploy the system landscape and verify that it works as expected:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Install cert-manager in the <code class="inlineCode">cert-manager</code> namespace and wait for the deployment to complete. Before cert-manager can be installed, we need to add its Helm repository. Run the following commands:
+        <pre class="programlisting con"><code class="hljs-con">helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --create-namespace \
+  --namespace cert-manager \
+  --version v1.11.0 \
+  --set installCRDs=true \
+  --wait
+</code></pre>
+        <div class="note">
+          <p class="normal">The cert-manager tool also comes with a set of Kubernetes <strong class="keyWord">Custom Resource Definitions</strong> (<strong class="keyWord">CRDs</strong>), like the <code class="inlineCode">Issuer</code> object that was introduced above. CRDs are used in Kubernetes to extend its API, that is, to add new objects to its API. The <code class="inlineCode">--set installCRDs=true</code> flag in the command above ensures that these object definitions are installed when installing cert-manager.</p>
+        </div>
+        <p class="normal">Verify that three <a id="_idIndexMarker1227"/>Pods are ready in the <code class="inlineCode">cert-manager</code> namespace <a id="_idIndexMarker1228"/>with the following command:</p>
+        <pre class="programlisting con"><code class="hljs-con">kubectl get pods --namespace cert-manager
+</code></pre>
+        <p class="normal">Expect a response like this:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_17_04.png" alt="Text  Description automatically generated" width="812" height="147"/></figure>
+        <p class="packt_figref">Figure 17.4: Pods in the cert-manager namespace</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Map <code class="inlineCode">minikube.me</code> to the IP address we can use to reach the Minikube instance by adding <a id="_idIndexMarker1229"/>a line to the <code class="inlineCode">/etc/hosts</code> file. Run <a id="_idIndexMarker1230"/>the following command:
+        <pre class="programlisting con"><code class="hljs-con">sudo bash -c "echo 127.0.0.1 minikube.me | tee -a /etc/hosts"
+</code></pre>
+        <div class="note">
+          <p class="normal">Note that the <code class="inlineCode">sudo</code> command will probably ask for your password.</p>
+        </div>
+        <p class="normal">Verify the result with the <code class="inlineCode">cat /etc/hosts</code> command. Expect a line that contains <code class="inlineCode">127.0.0.1 minikube.me</code>.</p>
+        <p class="normal">If your <code class="inlineCode">/etc/hosts</code> file contains multiple lines for <code class="inlineCode">minikube.me</code> (for example, from earlier attempts), you need to remove the old ones manually.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">You can build Docker images from the source code as follows:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter17
+eval $(minikube docker-env -u)
+./gradlew build
+eval $(minikube docker-env)
+docker-compose build
+</code></pre>
+      </li>
+    </ol>
+    <div class="note">
+      <p class="normal">The <code class="inlineCode">eval $(minikube docker-env -u)</code> command is used to ensure that the <code class="inlineCode">./gradlew build </code>command uses the host’s Docker engine and not the Docker engine in the Minikube instance. The <code class="inlineCode">build</code> command uses Docker to run test containers.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Resolve the <a id="_idIndexMarker1231"/>Helm chart dependencies:<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1">First, we <a id="_idIndexMarker1232"/>update the dependencies in the <code class="inlineCode">components</code> folder:
+            <pre class="programlisting con"><code class="hljs-con">for f in kubernetes/helm/components/*; do helm dep up $f; done
+</code></pre>
+          </li>
+          <li class="alphabeticList">Next, we <a id="_idIndexMarker1233"/>update the dependencies in the <code class="inlineCode">environments</code> folder:
+            <pre class="programlisting con"><code class="hljs-con">for f in kubernetes/helm/environments/*; do helm dep up $f; done
+</code></pre>
+          </li>
+        </ol>
+      </li>
+      <li class="numberedList">Set the <code class="inlineCode">hands-on</code> namespace <a id="_idIndexMarker1234"/>as the default namespace for <code class="inlineCode">kubectl</code>:
+        <pre class="programlisting con"><code class="hljs-con">kubectl config set-context $(kubectl config current-context) --namespace=hands-on
+</code></pre>
+      </li>
+      <li class="numberedList">In a separate terminal window, run the following command to monitor how certificate objects are created by cert-manager:
+        <pre class="programlisting con"><code class="hljs-con">kubectl get certificates -w --output-watch-events
+</code></pre>
+      </li>
+      <li class="numberedList">Deploy the system landscape using Helm and wait for all deployments to complete:
+        <pre class="programlisting con"><code class="hljs-con">helm install hands-on-dev-env \
+  kubernetes/helm/environments/dev-env \
+  -n hands-on \
+  --create-namespace \
+  --wait
+</code></pre>
+      </li>
+      <li class="numberedList">Note how the certificate is created by cert-manager during the deployment. Expect the following output from the <code class="inlineCode">kubectl get certificates</code> command:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_17_05.png" alt="Graphical user interface  Description automatically generated with medium confidence" width="649" height="173"/></figure>
+    <p class="packt_figref">Figure 17.5: Events from cert-manager provisioning a certificate</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="9">Stop the <code class="inlineCode">kubectl get certificates</code> command with <em class="keystroke">Ctrl</em><em class="italic"> </em>+ <em class="keystroke">C</em>.</li>
+      <li class="numberedList">Run the test to verify that the system landscape works as expected:
+        <pre class="programlisting con"><code class="hljs-con">HOST=minikube.me PORT=8443 USE_K8S=true ./test-em-all.bash
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Expect output <a id="_idIndexMarker1235"/>from the tests similar to what <a id="_idIndexMarker1236"/>we obtained in the <a id="_idIndexMarker1237"/>previous chapter (in a condensed format):</p>
+    <figure class="mediaobject"><img src="../Images/B19825_17_06.png" alt="Text  Description automatically generated" width="812" height="268"/></figure>
+    <p class="packt_figref">Figure 17.6: Verifying the system landscape created by the dev-env Helm chart</p>
+    <p class="normal">Before wrapping up the <code class="inlineCode">dev-env</code>, let’s try <a id="_idIndexMarker1238"/>out the certificate object that cert-manager created and see how it can be used to affect the retention time for the certificate.</p>
+    <h2 id="_idParaDest-430" class="heading-2">Rotating certificates</h2>
+    <p class="normal">Let’s start getting acquainted <a id="_idIndexMarker1239"/>with the certificate object by issuing the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">kubectl describe cert tls-certificate
+</code></pre>
+    <p class="normal">At the end of the output from the command, we will find the following information regarding the time that the certificate will be valid for:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_17_07.png" alt="Text  Description automatically generated" width="547" height="99"/></figure>
+    <p class="packt_figref">Figure 17.7: Certificate validation period and renewal time</p>
+    <p class="normal">We can see that the certificate is valid for 90 days (<strong class="screenText">Not After</strong> – <strong class="screenText">Not Before</strong>) and that cert-manager will try to renew it after 60 days (<strong class="screenText">Renewal Time</strong> – <strong class="screenText">Not Before</strong>). Since the self-signed issuer we are using doesn’t allow any configuration, these are the default values that cert-manager uses: 90 days, lifetime and a renewal process that is initiated after 2/3 of the lifetime.</p>
+    <p class="normal">But we don’t want to wait 60 days before we can observe a renewal of the certificate. If we study the API specification for the certificate object at <a href="https://cert-manager.io/docs/reference/api-docs/#cert-manager.io/v1.Certificate"><span class="url">https://cert-manager.io/docs/reference/api-docs/#cert-manager.io/v1.Certificate</span></a>, we will find a field in the <code class="inlineCode">spec</code> section that is of interest. </p>
+    <p class="normal">It is named <code class="inlineCode">renewBefore</code> and can be used to specify how early cert-manager should start the renewal process. If we want the certificate to be renewed once per minute, we can specify the <code class="inlineCode">renewBefore</code> to be 90 days – 1 minute = 90*24 hours – 1 minute = 2160 hours – 1 minute = 2159 hours and 59 minutes.</p>
+    <p class="normal">Start the <code class="inlineCode">kubectl get events -w</code> command in a separate terminal window and run the following <code class="inlineCode">patch</code> command to add the <code class="inlineCode">renewBefore</code> field to the certificate:</p>
+    <pre class="programlisting con"><code class="hljs-con">kubectl patch certificate tls-certificate --type=json \
+-p='[{"op": "add", "path": "/spec/renewBefore", "value": "2159h59m"}]'
+</code></pre>
+    <p class="normal">Within 1 minute, the <code class="inlineCode">get events</code> command should start to report on certificate renewals. For each renewal, the following should be printed by the <code class="inlineCode">get events</code> command:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_17_08.png" alt="Graphical user interface, text  Description automatically generated" width="799" height="134"/></figure>
+    <p class="packt_figref">Figure 17.8: Events from cert-manager rotating a certificate</p>
+    <p class="normal">Wait a couple of minutes to verify that the certificate is renewed once per minute. If you are curious about when the next renewal will happen, you can issue the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">kubectl get cert tls-certificate -o json | jq .status.renewalTime
+</code></pre>
+    <p class="normal">It should respond with a date like <strong class="screenText">2023-05-07T05:58:40Z</strong>.</p>
+    <p class="normal">If you no longer <a id="_idIndexMarker1240"/>want to have a custom retention time, you can remove the <code class="inlineCode">renewBefore</code> field with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">kubectl patch certificate tls-certificate --type=json \
+  -p='[{"op": "remove", "path": "/spec/renewBefore"}]'
+</code></pre>
+    <p class="normal">This concludes the tests we will do in the system landscape deployed using the <code class="inlineCode">dev-env</code> chart. We can remove the system landscape with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">kubectl delete namespace hands-on
+</code></pre>
+    <p class="normal">Let us also recap how to deploy the system landscape using the <code class="inlineCode">prod-env</code> chart!</p>
+    <h2 id="_idParaDest-431" class="heading-2">Deploying to Kubernetes for staging and production</h2>
+    <p class="normal">Deploying to <a id="_idIndexMarker1241"/>a staging and production environment using the <code class="inlineCode">prod-env</code> chart follows the same steps as we used in the <em class="italic">Deploying to Kubernetes for staging and production</em> section in <em class="chapterRef">Chapter 16</em>, <em class="italic">Deploying Our Microservices to Kubernetes</em>. The steps are recapitulated here in a compact form:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Start MySQL, MongoDB, and RabbitMQ outside of Kubernetes:
+        <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env)
+docker-compose up -d mongodb mysql rabbitmq
+</code></pre>
+      </li>
+      <li class="numberedList">Tag Docker images with <code class="inlineCode">v1</code> versions:
+        <pre class="programlisting con"><code class="hljs-con">docker tag hands-on/auth-server hands-on/auth-server:v1
+docker tag hands-on/product-composite-service hands-on/product-composite-service:v1 
+docker tag hands-on/product-service hands-on/product-service:v1
+docker tag hands-on/recommendation-service hands-on/recommendation-service:v1
+docker tag hands-on/review-service hands-on/review-service:v1
+</code></pre>
+      </li>
+      <li class="numberedList">Deploy the microservices using the <code class="inlineCode">prod-env</code> Helm chart:
+        <pre class="programlisting con"><code class="hljs-con">helm install hands-on-prod-env \
+  kubernetes/helm/environments/prod-env \
+  -n hands-on --create-namespace \
+  --wait
+</code></pre>
+      </li>
+      <li class="numberedList">Run the test to verify that the system landscape works as expected:
+        <pre class="programlisting con"><code class="hljs-con">HOST=minikube.me PORT=8443 USE_K8S=true ./test-em-all.bash
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">When you are done, clean up the resources created in both Kubernetes and Docker using the following commands:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Stop the <code class="inlineCode">kubectl get cert -w</code> and <code class="inlineCode">kubectl get events -w</code> commands if they still are running by using <em class="keystroke">Ctrl </em>+ <em class="keystroke">C</em>.</li>
+      <li class="numberedList">Delete the <a id="_idIndexMarker1242"/>namespace in Kubernetes with the following command:
+        <pre class="programlisting con"><code class="hljs-con">kubectl delete namespace hands-on
+</code></pre>
+      </li>
+      <li class="numberedList">Stop MySQL, MongoDB, and RabbitMQ with the following command:
+        <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env)
+docker-compose down
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">With this, we are done with all tests running on Kubernetes. Let’s see how to verify that the microservices still work <em class="italic">without</em> Kubernetes.</p>
+    <h1 id="_idParaDest-432" class="heading-1">Verifying that the microservices work without Kubernetes</h1>
+    <p class="normal">In this chapter and the previous one, we have seen how features in the Kubernetes platform, such as ConfigMaps, Secrets, Services, and Ingress objects, can simplify the effort of developing a landscape of cooperating <a id="_idIndexMarker1243"/>microservices. But it is important to ensure that the source code of the microservices doesn’t become dependent on the platform from a functional perspective. Avoiding such a lock-in makes it possible to change to another platform in the future, if required, with minimal effort. Changing the platform should not require changes in the source code, but only in the configuration of the microservices.</p>
+    <p class="normal">Testing the microservices using Docker Compose and running the <code class="inlineCode">test-em-all.bash</code> verification script will ensure that they work from a functional perspective without Kubernetes. When running microservices without Kubernetes, we will lack the non-functional features that Kubernetes provides us with, for example, monitoring, scaling, and restarting containers.</p>
+    <p class="normal">When using Docker Compose, we will replace the following Kubernetes features:</p>
+    <ul>
+      <li class="bulletList">Instead of ConfigMaps, we will use volumes that map the configuration files directly from the host filesystem</li>
+      <li class="bulletList">Instead of using Secrets, we will keep sensitive information such as credentials in the Docker Compose <code class="inlineCode">.env</code> file</li>
+      <li class="bulletList">Instead of an Ingress, we will use the Spring Cloud Gateway</li>
+      <li class="bulletList">Instead of Services, we will map hostnames used by the clients directly to the hostnames of the containers, meaning that we will not have any service discovery in place and will not be able to scale containers</li>
+    </ul>
+    <p class="normal">Using Docker Compose this way will result in significant disadvantages from a non-functional perspective <a id="_idIndexMarker1244"/>compared to using Kubernetes. But this is acceptable, given that Docker Compose will only be used to run functional tests.</p>
+    <p class="normal">Let’s go through the changes in the <code class="inlineCode">docker-compose*.yml</code> files before we run the tests using Docker Compose.</p>
+    <h2 id="_idParaDest-433" class="heading-2">Changes in the Docker Compose files</h2>
+    <p class="normal">To run <a id="_idIndexMarker1245"/>microservices outside Kubernetes, using Docker Compose, the <a id="_idIndexMarker1246"/>following changes have been applied to the <code class="inlineCode">docker-compose*.yml</code> files:</p>
+    <ul>
+      <li class="bulletList">We have removed the configuration server definition</li>
+      <li class="bulletList">We have removed the use of the following configuration server environment variables: <code class="inlineCode">CONFIG_SERVER_USR</code> and <code class="inlineCode">CONFIG_SERVER_PWD</code></li>
+      <li class="bulletList">We have mapped the <code class="inlineCode">config-repo</code> folder as a volume in each container that needs to read configuration files from the configuration repository</li>
+      <li class="bulletList">We have defined the <code class="inlineCode">SPRING_CONFIG_LOCATION</code> environment variable to point to the configuration files in the configuration repository</li>
+      <li class="bulletList">We have stored sensitive information such as credentials and passwords in TLS certificates in the Docker Compose <code class="inlineCode">.env</code> file</li>
+      <li class="bulletList">We have defined environment variables with credentials for access to resource managers, using the variables defined in the <code class="inlineCode">.env</code> file</li>
+    </ul>
+    <p class="normal">For example, the configuration of the <code class="inlineCode">product</code> microservice looks like the following in <code class="inlineCode">docker-compose.yml</code>:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">product:</span>
+  <span class="hljs-attr">build:</span> <span class="hljs-string">microservices/product-service</span>
+  <span class="hljs-attr">image:</span> <span class="hljs-string">hands-on/product-service</span>
+  <span class="hljs-attr">environment:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_PROFILES_ACTIVE=docker</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_CONFIG_LOCATION=file:/config-repo/application.yml,file:/config-repo/product.yml</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_RABBITMQ_USERNAME=${RABBITMQ_USR}</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_RABBITMQ_PASSWORD=${RABBITMQ_PWD}</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_DATA_MONGODB_AUTHENTICATION_DATABASE=admin</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_DATA_MONGODB_USERNAME=${MONGODB_USR}</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_DATA_MONGODB_PASSWORD=${MONGODB_PWD}</span>
+  <span class="hljs-attr">volumes:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">$PWD/config-repo:/config-repo</span>
+</code></pre>
+    <p class="normal">Here is an explanation of the source code:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">config-repo</code> folder is mapped as a volume into the container at <code class="inlineCode">/config-repo</code></li>
+      <li class="bulletList">The <code class="inlineCode">SPRING_CONFIG_LOCATION</code> environment variable tells Spring where to find the property files, in this case, the <code class="inlineCode">/config-repo/application.yml</code> and <code class="inlineCode">/config-repo/product.yml</code> files</li>
+      <li class="bulletList">Credentials for accessing RabbitMQ and MongoDB are set up as environment variables based on the content in the <code class="inlineCode">.env</code> file</li>
+    </ul>
+    <p class="normal">The credentials <a id="_idIndexMarker1247"/>referred to in the preceding source <a id="_idIndexMarker1248"/>code are defined in the <code class="inlineCode">.env</code> file as:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">RABBITMQ_USR</span>=rabbit-user-prod
+<span class="hljs-attr">RABBITMQ_PWD</span>=rabbit-pwd-prod
+<span class="hljs-attr">MONGODB_USR</span>=mongodb-user-prod
+<span class="hljs-attr">MONGODB_PWD</span>=mongodb-pwd-prod
+</code></pre>
+    <h2 id="_idParaDest-434" class="heading-2">Testing with Docker Compose</h2>
+    <p class="normal">To test with Docker Compose, we <a id="_idIndexMarker1249"/>will use Docker Desktop instead <a id="_idIndexMarker1250"/>of Minikube. Perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To direct the Docker client to use Docker Desktop instead of Minikube, run the following command:
+        <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env --unset)
+</code></pre>
+      </li>
+      <li class="numberedList">To avoid port conflicts on port <code class="inlineCode">8443</code>, you need to stop the Minikube instance:
+        <pre class="programlisting con"><code class="hljs-con">minikube stop 
+</code></pre>
+      </li>
+      <li class="numberedList">Build the Docker images in Docker Desktop with the following command:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose build
+</code></pre>
+      </li>
+      <li class="numberedList">Run the tests using RabbitMQ (with one partition per topic):
+        <pre class="programlisting con"><code class="hljs-con">COMPOSE_FILE=docker-compose.yml ./test-em-all.bash start stop
+</code></pre>
+      </li>
+      <li class="numberedList">The tests should begin by starting all the containers, running the tests, and finally, stopping all the containers. Expect output similar to what we have seen in the previous chapters (output reduced to improve readability):</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_17_09.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="649" height="635"/></figure>
+    <p class="packt_figref">Figure 17.9: Verifying the functionality of the system landscape without using Kubernetes</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="6">Optionally, run the<a id="_idIndexMarker1251"/> tests using RabbitMQ with <a id="_idIndexMarker1252"/>multiple partitions per topic:
+        <pre class="programlisting con"><code class="hljs-con">COMPOSE_FILE=docker-compose-partitions.yml ./test-em-all.bash start stop
+</code></pre>
+        <p class="normal">Expect output that’s similar to the preceding test.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="7">Alternatively, run the test using Kafka with multiple partitions per topic:
+        <pre class="programlisting con"><code class="hljs-con">COMPOSE_FILE=docker-compose-kafka.yml ./test-em-all.bash start stop
+</code></pre>
+        <p class="normal">Expect output that’s similar to the preceding test.</p>
+      </li>
+    </ol>
+    <div class="note">
+      <p class="normal">Since it can take a few seconds for the Kafka broker to decide which partition to assign to the instances in the consumer groups, the tests can fail since the rebalancing operation is still in progress when the tests are started. If the test fails, then rerun the command, but without the <code class="inlineCode">start</code> flag:</p>
+      <pre class="programlisting con"><code class="hljs-con">COMPOSE_FILE=docker-compose-kafka.yml ./test-em-all.bash stop
+</code></pre>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="8">Start the Minikube<a id="_idIndexMarker1253"/> instance, and set the default <a id="_idIndexMarker1254"/>namespace to <code class="inlineCode">hands-on</code>:
+        <pre class="programlisting con"><code class="hljs-con">minikube start
+kubectl config set-context $(kubectl config current-context) --namespace=hands-on
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">With the successful execution of these tests, we have verified that the microservices also work without Kubernetes.</p>
+    <h1 id="_idParaDest-435" class="heading-1">Summary</h1>
+    <p class="normal">In this chapter, we have seen how capabilities in Kubernetes can be used to simplify a microservice landscape, meaning that we reduce the number of supporting services to be developed and deployed together with the microservices. We have seen how Kubernetes ConfigMaps and Secrets can be used to replace the Spring Cloud Config Server and how a Kubernetes Ingress object can replace the Spring Cloud Gateway.</p>
+    <p class="normal">Using cert-manager allowed us to automatically provision certificates for HTTPS endpoints exposed by the Ingress controller, eliminating the need for manual and cumbersome work.</p>
+    <p class="normal">To verify that the source code of the microservices can run on other platforms, that is, isn’t locked into Kubernetes, we deployed the microservices using Docker Compose and ran the <code class="inlineCode">test-em-all.bash</code> test script.</p>
+    <p class="normal">In the next chapter, we will be introduced to the concept of a service mesh and learn how a service mesh product, <strong class="keyWord">Istio</strong>, can be used to improve observability, security, resilience, and routing in a landscape of cooperating microservices that are deployed on Kubernetes.</p>
+    <p class="normal">Head over to the next chapter!</p>
+    <h1 id="_idParaDest-436" class="heading-1">Questions</h1>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">How was the Spring Cloud Config Server replaced by Kubernetes resources?</li>
+      <li class="numberedList">How was the Spring Cloud Gateway replaced by Kubernetes resources?</li>
+      <li class="numberedList">What is required to make cert-manager automatically provision certificates for an Ingress object?</li>
+      <li class="numberedList">How can the retention time of a certificate be checked and updated?</li>
+      <li class="numberedList">Where is the actual certificate stored?</li>
+      <li class="numberedList">Why did we run the tests using Docker Compose?</li>
+    </ol>
+  </div>
+</div>
+</div>
+</body></html>

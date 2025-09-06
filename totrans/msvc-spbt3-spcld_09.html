@@ -1,0 +1,460 @@
+<html><head></head><body>
+<div id="book-content">
+<div id="sbo-rt-content"><div id="_idContainer214" class="Basic-Text-Frame">
+    <h1 class="chapterNumber">9</h1>
+    <h1 id="_idParaDest-234" class="chapterTitle">Adding Service Discovery Using Netflix Eureka</h1>
+    <p class="normal">In this chapter, we will learn how to use Netflix Eureka as a discovery service for microservices based on Spring Boot. To allow our microservices to communicate with Netflix Eureka, we will use the Spring Cloud module for Netflix Eureka clients. Before we delve into the details, we will elaborate on why a discovery service is needed and why a DNS server isn’t sufficient.</p>
+    <p class="normal">The following topics will be covered in this chapter:</p>
+    <ul>
+      <li class="bulletList">Introduction to service discovery</li>
+      <li class="bulletList">Setting up a Netflix Eureka server</li>
+      <li class="bulletList">Connecting microservices to a Netflix Eureka server</li>
+      <li class="bulletList">Setting up the configuration for development use</li>
+      <li class="bulletList">Trying out Netflix Eureka as a discovery service</li>
+    </ul>
+    <h1 id="_idParaDest-235" class="heading-1">Technical requirements</h1>
+    <p class="normal">For instructions on how to install tools used in this book and how to access the source code for this book, see:</p>
+    <ul>
+      <li class="bulletList"><em class="chapterRef">Chapter 21</em>, <em class="italic">Installation Instructions for macOS</em></li>
+      <li class="bulletList"><em class="chapterRef">Chapter 22</em>, <em class="italic">Installation Instructions for Microsoft Windows with WSL 2 and Ubuntu</em></li>
+    </ul>
+    <p class="normal">The code examples in this chapter all come from the source code in <code class="inlineCode">$BOOK_HOME/Chapter09</code>.</p>
+    <p class="normal">If you want to view the changes applied to the source code in this chapter, that is, see what it took to add Netflix Eureka as a discovery service to the microservices landscape, you can compare it with the source code for <em class="chapterRef">Chapter 7</em>, <em class="italic">Developing Reactive Microservices</em>. You can use your favorite <code class="inlineCode">diff</code> tool and compare the two folders, that is, <code class="inlineCode">$BOOK_HOME/Chapter07</code> and <code class="inlineCode">$BOOK_HOME/Chapter09</code>.</p>
+    <h1 id="_idParaDest-236" class="heading-1">Introducing service discovery</h1>
+    <p class="normal">Service discovery <a id="_idIndexMarker609"/>is probably the most important<a id="_idIndexMarker610"/> support function required to make a landscape of cooperating microservices production-ready. Netflix Eureka was the first discovery server supported by Spring Cloud.</p>
+    <div class="note">
+      <p class="normal">We are strictly speaking about a <em class="italic">service</em> for <em class="italic">service discovery</em>, but instead of referring to it as a <em class="italic">service discovery service</em>, it will simply be referred to as a <em class="italic">discovery service</em>. When referring to an actual implementation of <em class="italic">service discovery</em>, like Netflix Eureka, the term <em class="italic">discovery server</em> will be used.</p>
+    </div>
+    <p class="normal">We will see how easy it is to register microservices with Netflix Eureka when using Spring Cloud. We will also learn how a client can use Spring Cloud LoadBalancer to send HTTP requests to one of the instances registered in Netflix Eureka. Finally, we will try scaling the microservices up and down, together with running some disruptive tests to see how Netflix Eureka can handle different types of fault scenarios.</p>
+    <p class="normal">Before we jump into the implementation details, we will look at the following topics:</p>
+    <ul>
+      <li class="bulletList">The problem with DNS-based service discovery</li>
+      <li class="bulletList">Challenges with service discovery</li>
+      <li class="bulletList">Service discovery with Netflix Eureka in Spring Cloud</li>
+    </ul>
+    <h2 id="_idParaDest-237" class="heading-2">The problem with DNS-based service discovery</h2>
+    <p class="normal">Why can’t<a id="_idIndexMarker611"/> we simply start <a id="_idIndexMarker612"/>new instances of a microservice and rely on round-robin DNS?</p>
+    <p class="normal">The idea behind round-robin DNS is that each instance of a microservice registers its IP address under the same name in a DNS server. When a client asks for IP addresses for the DNS name, the DNS server will return a list of IP addresses for the registered instances. The client can use this list of IP addresses to send requests to the microservice instances in a round-robin fashion, using the IP addresses one after another.</p>
+    <p class="normal">Let’s try it out and see what happens! Follow these steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Assuming that you have followed the instructions from <em class="chapterRef">Chapter 7</em>, <em class="italic">Developing Reactive Microservices</em>, start the system landscape and insert some test data with the following command:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter07
+./test-em-all.bash start
+</code></pre>
+      </li>
+      <li class="numberedList">Scale up the <code class="inlineCode">review</code> microservice to two instances:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose up -d --scale review=2
+</code></pre>
+      </li>
+      <li class="numberedList">Ask the composite product service for the IP addresses it finds for the <code class="inlineCode">review</code> microservice:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose exec product-composite getent hosts review
+</code></pre>
+        <p class="normal">Expect an answer like the following:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_09_01.png" alt="A picture containing text  Description automatically generated" width="303" height="82"/></figure>
+        <p class="packt_figref">Figure 9.1: Review microservice IP addresses</p>
+        <p class="normal">Great, the composite product service sees two IP addresses – in my case, <code class="inlineCode">192.168.96.9</code> and <code class="inlineCode">192.168.96.8</code> – one for each instance of the <code class="inlineCode">review</code> microservice!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">If you want <a id="_idIndexMarker613"/>to, you <a id="_idIndexMarker614"/>can verify that these are the correct IP addresses by using the following commands. The commands ask each instance of the <code class="inlineCode">review</code> microservice for its IP address:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose exec --index=1 review cat /etc/hosts
+docker-compose exec --index=2 review cat /etc/hosts
+</code></pre>
+        <p class="normal">The last line in the output from each command should contain one of the IP addresses, as shown in the preceding code. For example:</p>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_09_02.png" alt="Graphical user interface  Description automatically generated with medium confidence" width="350" height="80"/></figure>
+    <p class="packt_figref">Figure 9.2: IP address output</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">Now, let’s try out a couple of calls to the <code class="inlineCode">product-composite</code> service and see<a id="_idIndexMarker615"/> whether it<a id="_idIndexMarker616"/> uses both instances of the <code class="inlineCode">review</code> microservice:
+        <pre class="programlisting con"><code class="hljs-con">curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.rev
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Unfortunately, we will only get responses from one of the microservice instances, as in this example:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_09_03.png" alt="Graphical user interface, application  Description automatically generated" width="358" height="78"/></figure>
+    <p class="packt_figref">Figure 9.3: Response from one review instance only</p>
+    <p class="normal">That was disappointing!</p>
+    <p class="normal">Okay, so what is going on here?</p>
+    <p class="normal">A DNS client asks a DNS server to resolve a DNS name and receives a list of IP addresses. Next, the DNS client tries out the received IP addresses one by one until it finds one that works, in most cases the first one in the list. A DNS client typically holds on to a working IP address; it does not apply a round-robin approach per request. Added to this, neither a typical DNS server implementation nor the DNS protocol itself is well suited for handling volatile microservice instances that come and go all the time. Because of this, even though DNS-based round-robin is appealing in theory, it is not very practical to use for the service discovery of microservice instances.</p>
+    <p class="normal">Before we <a id="_idIndexMarker617"/>move on <a id="_idIndexMarker618"/>and learn how to handle service discovery in a better way, let’s shut down the system landscape:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose down
+</code></pre>
+    <h2 id="_idParaDest-238" class="heading-2">Challenges with service discovery</h2>
+    <p class="normal">So, we need <a id="_idIndexMarker619"/>something a bit more<a id="_idIndexMarker620"/> powerful than a plain DNS to keep track of available microservice instances!</p>
+    <p class="normal">We must take the following into consideration when we’re keeping track of many small moving parts, that is, microservice instances:</p>
+    <ul>
+      <li class="bulletList">New instances can start up at any point in time.</li>
+      <li class="bulletList">Existing instances can stop responding and eventually crash at any point in time.</li>
+      <li class="bulletList">Some of the failing instances might be okay after a while and should start to receive traffic again, while others will not and should be removed from the service registry.</li>
+      <li class="bulletList">Some microservice instances might take some time to start up; that is, just because they can receive HTTP requests doesn’t mean that traffic should be routed to them.</li>
+      <li class="bulletList">Unintended network partitioning and other network-related errors can occur at any time.</li>
+    </ul>
+    <p class="normal">Building a robust<a id="_idIndexMarker621"/> and resilient discovery server<a id="_idIndexMarker622"/> is not an easy task, to say the least. Let’s see how we can use Netflix Eureka to handle these challenges!</p>
+    <h2 id="_idParaDest-239" class="heading-2">Service discovery with Netflix Eureka in Spring Cloud</h2>
+    <p class="normal">Netflix Eureka <a id="_idIndexMarker623"/>implements<a id="_idIndexMarker624"/> client-side service discovery, meaning that the clients run software that talks to the discovery server, Netflix Eureka, to get information about the available microservice instances. </p>
+    <p class="normal">This is illustrated in the following diagram:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_09_04.png" alt="Diagram  Description automatically generated" width="878" height="480"/></figure>
+    <p class="packt_figref">Figure 9.4: Discovery server diagram</p>
+    <p class="normal">The process is as follows:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Whenever a microservice instance starts up – for example, the <strong class="screenText">Review</strong> service – it registers itself to one of the Eureka servers.</li>
+      <li class="numberedList">On a regular basis, each microservice instance sends a heartbeat message to the Eureka server, telling it that the microservice instance is okay and is ready to receive requests.</li>
+      <li class="numberedList">Clients – for example, the <strong class="screenText">Product Composite</strong> service – use a client library that regularly asks the Eureka service for information about available services.</li>
+      <li class="numberedList">When the client needs to send a request to another microservice, it already has a list of available instances in its client library and can pick one of them without asking the discovery server. Typically, available instances are chosen in a round-robin fashion; that is, they are called one after another before the first one is called once more.</li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">In <em class="chapterRef">Chapter 17</em>, <em class="italic">Implementing Kubernetes Features to Simplify the System Landscape</em>, we will look at an alternative approach to providing a discovery service using<a id="_idIndexMarker625"/> the <strong class="keyWord">server-side service</strong> concept in Kubernetes.</p>
+    </div>
+    <p class="normal">Spring Cloud comes <a id="_idIndexMarker626"/>with an abstraction <a id="_idIndexMarker627"/>of how to communicate with a discovery service such as Netflix Eureka and provides an interface called <code class="inlineCode">DiscoveryClient</code>. This can be used to interact with a discovery service to get information regarding available services and instances. Implementations of the <code class="inlineCode">DiscoveryClient</code> interface are also capable of automatically registering a Spring Boot application with the discovery server.</p>
+    <p class="normal">Spring Boot can find implementations of the <code class="inlineCode">DiscoveryClient</code> interface automatically during startup, so we only need to bring in a dependency on the corresponding implementation to connect to a discovery server. In the case of Netflix Eureka, the dependency that’s used by our microservices is <code class="inlineCode">spring-cloud-starter-netflix-eureka-client</code>.</p>
+    <div class="packt_tip">
+      <p class="normal">Spring Cloud also has <code class="inlineCode">DiscoveryClient</code> implementations that support the use of either Apache ZooKeeper or HashiCorp Consul as a discovery server.</p>
+    </div>
+    <p class="normal">Spring Cloud also comes with an abstraction – the <code class="inlineCode">LoadBalancerClient</code> interface – for clients that want to make requests through a load balancer to registered instances in the discovery service. The standard reactive HTTP client, <code class="inlineCode">WebClient</code>, can be configured to use the <code class="inlineCode">LoadBalancerClient</code> implementation. By adding the <code class="inlineCode">@LoadBalanced</code> annotation to a <code class="inlineCode">@Bean</code> declaration that returns a <code class="inlineCode">WebClient.Builder</code> object, a <code class="inlineCode">LoadBalancerClient</code> implementation will be injected into the <code class="inlineCode">Builder</code> instance as an <code class="inlineCode">ExchangeFilterFunction</code>. Later in this chapter, in the <em class="italic">Connecting microservices to a Netflix Eureka server </em>section, we will look at some source code examples of how this can be used.</p>
+    <p class="normal">In summary, Spring Cloud makes it very easy to use Netflix Eureka as a discovery service. With this<a id="_idIndexMarker628"/> introduction <a id="_idIndexMarker629"/>to service discovery and its challenges, as well as how Netflix Eureka can be used together with Spring Cloud, we are ready to learn how to set up a Netflix Eureka server.</p>
+    <h1 id="_idParaDest-240" class="heading-1">Setting up a Netflix Eureka server</h1>
+    <p class="normal">In this section, we will<a id="_idIndexMarker630"/> learn how to set up a Netflix Eureka server for service discovery. Setting up a Netflix Eureka server using Spring Cloud is really easy – just follow these steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Create a Spring Boot project using Spring Initializr, as described in <em class="chapterRef">Chapter 3</em>, <em class="italic">Creating a Set of Cooperating Microservices</em>, in the <em class="italic">Using Spring Initializr to generate skeleton code</em> section.</li>
+      <li class="numberedList">Add a dependency to <code class="inlineCode">spring-cloud-starter-netflix-eureka-server</code>.</li>
+      <li class="numberedList">Add the <code class="inlineCode">@EnableEurekaServer</code> annotation to the application class.</li>
+      <li class="numberedList">Add a Dockerfile, similar to the Dockerfiles that are used for our microservices, with the exception that we export the default Eureka port, <code class="inlineCode">8761</code>, instead of the default port for our microservices, <code class="inlineCode">8080</code>.</li>
+      <li class="numberedList">Add the Eureka server to our three Docker Compose files, that is, <code class="inlineCode">docker-compose.yml</code>, <code class="inlineCode">docker-compose-partitions.yml</code>, and <code class="inlineCode">docker-compose-kafka.yml</code>, like this:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">eureka:</span>
+  <span class="hljs-attr">build:</span> <span class="hljs-string">spring-cloud/eureka-server</span>
+  <span class="hljs-attr">mem_limit:</span> <span class="hljs-string">512m</span>
+  <span class="hljs-attr">ports:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">"8761:8761"</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Finally, add some configuration. Please see the <em class="italic">Setting up the configuration for development use</em> section in this chapter, where we will go through the configuration for both the Eureka server and our microservices.</li>
+    </ol>
+    <p class="normal">That’s all it takes!</p>
+    <div class="note">
+      <p class="normal">The application class contains a workaround for a bug described in <a href="https://github.com/spring-cloud/spring-cloud-netflix/issues/4145"><span class="url">https://github.com/spring-cloud/spring-cloud-netflix/issues/4145</span></a>. It affects the Spring Cloud version, 2022.0.1, used in this book. See the class <code class="inlineCode">CustomErrorController</code> in <code class="inlineCode">EurekaServerApplication.java</code>.</p>
+    </div>
+    <p class="normal">You can find the <a id="_idIndexMarker631"/>source code for the Eureka server in the <code class="inlineCode">$BOOK_HOME/Chapter09/spring-cloud/eureka-server</code> folder.</p>
+    <p class="normal">Now that we have set up a Netflix Eureka server for service discovery, we are ready to learn how to connect microservices to it.</p>
+    <h1 id="_idParaDest-241" class="heading-1">Connecting microservices to a Netflix Eureka server</h1>
+    <p class="normal">In this section, we<a id="_idIndexMarker632"/> will learn how to<a id="_idIndexMarker633"/> connect microservice instances to a Netflix Eureka server. We will learn both how microservice instances register themselves to the Eureka server during their startup and how clients can use the Eureka server to find the microservice instances they want to call.</p>
+    <p class="normal">To be able to register a microservice instance in the Eureka server, we need to do the following:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Add a dependency to <code class="inlineCode">spring-cloud-starter-netflix-eureka-client</code> in the build file, <code class="inlineCode">build.gradle</code>:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">Implementation</span> <span class="hljs-string">'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'</span>
+</code></pre>
+      </li>
+      <li class="numberedList">When running tests on a single microservice, we don’t want to depend on having the Eureka server up and running. Therefore, we will disable the use of Netflix Eureka in all Spring Boot tests, that is, JUnit tests annotated with <code class="inlineCode">@SpringBootTest</code>. This can be done by adding the <code class="inlineCode">eureka.client.enabled</code> property and setting it to <code class="inlineCode">false</code> in the annotation, like so:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@SpringBootTest(webEnvironment=RANDOM_PORT, properties = {"eureka.client.enabled=false"})</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Finally, add some configuration. Please go to the <em class="italic">Setting up the configuration for development use</em> section, where we will go through the configuration for both the Eureka server and our microservices.</li>
+    </ol>
+    <p class="normal">There is one property in the configuration that is extra important: <code class="inlineCode">spring.application.name</code>. It is used to give each microservice a virtual hostname, a name used by the Eureka service to identify each microservice. Eureka clients will use this<a id="_idIndexMarker634"/> virtual <a id="_idIndexMarker635"/>hostname in the URLs that are used to make HTTP calls to the microservice, as we will see as we proceed.</p>
+    <p class="normal">To be able to look up available microservice instances through the Eureka server in the <code class="inlineCode">product-composite</code> microservice, we also need to do the following:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Add a Spring bean in the main application class, <code class="inlineCode">ProductCompositeServiceApplication</code>, which creates a load balancer-aware <code class="inlineCode">WebClient</code> builder:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Bean</span>
+<span class="hljs-meta">@LoadBalanced</span>
+<span class="hljs-keyword">public</span> WebClient.Builder <span class="hljs-title">loadBalancedWebClientBuilder</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">return</span> WebClient.builder();
+}
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">For more information on how to use a <code class="inlineCode">WebClient</code> instance as a load balancer client, see <a href="https://docs.spring.io/spring-cloud-commons/docs/current/reference/html/#webclinet-loadbalancer-client"><span class="url">https://docs.spring.io/spring-cloud-commons/docs/current/reference/html/#webclinet-loadbalancer-client</span></a>.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">The <code class="inlineCode">WebClient</code>-builder bean can be used by the integration class, <code class="inlineCode">ProductCompositeIntegration</code>, by injecting it into the constructor:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">private</span> WebClient webClient;
+<span class="hljs-meta">@Autowired</span>
+<span class="hljs-keyword">public</span> <span class="hljs-title">ProductCompositeIntegration</span><span class="hljs-params">(</span>
+<span class="hljs-params">  WebClient.Builder webClientBuilder, </span>
+<span class="hljs-params">  ...</span>
+<span class="hljs-params">)</span> {
+  <span class="hljs-built_in">this</span>.webClient = webClientBuilder.build();
+  ...
+}
+</code></pre>
+        <p class="normal">The constructor uses the injected builder to create the <code class="inlineCode">webClient</code>.</p>
+        <p class="normal">Once a <code class="inlineCode">WebClient</code> is built, it is immutable. This means that it can be reused by concurrent requests without risking them stepping on each other’s toes.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">We can now <a id="_idIndexMarker636"/>get<a id="_idIndexMarker637"/> rid of our hardcoded configuration of available microservices in <code class="inlineCode">application.yml</code>. It looks like this:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">app:</span>
+  <span class="hljs-attr">product-service:</span>
+    <span class="hljs-attr">host:</span> <span class="hljs-string">localhost</span>
+    <span class="hljs-attr">port:</span> <span class="hljs-number">7001</span>
+  <span class="hljs-attr">recommendation-service:</span>
+    <span class="hljs-attr">host:</span> <span class="hljs-string">localhost</span>
+    <span class="hljs-attr">port:</span> <span class="hljs-number">7002</span>
+  <span class="hljs-attr">review-service:</span>
+    <span class="hljs-attr">host:</span> <span class="hljs-string">localhost</span>
+    <span class="hljs-attr">port:</span> <span class="hljs-number">7003</span>
+</code></pre>
+      </li>
+      <li class="numberedList">The corresponding code in the integration class, <code class="inlineCode">ProductCompositeIntegration</code>, that handled the hardcoded configuration is simplified and replaced by a declaration of the base URLs to the APIs of the core microservices. This is shown in the following code:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">PRODUCT_SERVICE_URL</span> <span class="hljs-operator">=</span> <span class="hljs-string">"http://product"</span>;
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">RECOMMENDATION_SERVICE_URL</span> <span class="hljs-operator">=</span> <span class="hljs-string">"http://recommendation"</span>;
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">REVIEW_SERVICE_URL</span> <span class="hljs-operator">=</span> <span class="hljs-string">"http://review"</span>;
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">The hostnames in the preceding URLs are not actual DNS names. Instead, they are the virtual hostnames that are used by the microservices when they register themselves to the Eureka server, in other words, the values of the <code class="inlineCode">spring.application.name</code> property.</p>
+    <p class="normal">Now that we’ve<a id="_idIndexMarker638"/> seen <a id="_idIndexMarker639"/>how to connect microservice instances to a Netflix Eureka server, we can move on and learn how to configure the Eureka server and the microservice instances that connect to it.</p>
+    <h1 id="_idParaDest-242" class="heading-1">Setting up the configuration for development use</h1>
+    <p class="normal">Now, it’s <a id="_idIndexMarker640"/>time for the trickiest part of setting up Netflix Eureka as a discovery service: setting up a working configuration for both the Eureka server and its clients, our microservice instances.</p>
+    <p class="normal">Netflix Eureka is a highly configurable discovery server that can be set up for a number of different use cases, and it provides robust, resilient, and fault-tolerant runtime characteristics. One downside of this flexibility and robustness is that it has an almost overwhelming number of configuration options. </p>
+    <p class="normal">Fortunately, Netflix Eureka comes with good default values for most of the configurable parameters – at least when it comes to using them in a production environment.</p>
+    <p class="normal">When it comes to using Netflix Eureka during development, the default values cause long startup times. For example, it can take a long time for a client to make an initial successful call to a microservice instance that is registered in the Eureka server.</p>
+    <p class="normal">Up to two minutes of waiting time can be experienced when using the default configuration values. This waiting time is added to the time it takes for the Eureka service and the microservices to start up. The reason for this waiting time is that the involved processes need to synchronize registration information with each other. The microservice instances need to register with the Eureka server, and the client needs to gather information from the Eureka server. This communication is mainly based on heartbeats, which happen every 30 seconds by default. A couple of caches are also involved, which slows down the propagation of updates.</p>
+    <p class="normal">We will use a configuration that minimizes this waiting time, which is useful during development. In production environments, the default values should be used as a<a id="_idIndexMarker641"/> starting point!</p>
+    <div class="packt_tip">
+      <p class="normal">We will only use one Netflix Eureka server instance, which is okay in a development environment. In a production environment, you should always use two or more instances to ensure high availability for the Netflix Eureka server.</p>
+    </div>
+    <p class="normal">Let’s start to learn what types of configuration parameters we need to know about.</p>
+    <h2 id="_idParaDest-243" class="heading-2">Eureka configuration parameters</h2>
+    <p class="normal">The configuration <a id="_idIndexMarker642"/>parameters for Eureka are divided into three groups:</p>
+    <ul>
+      <li class="bulletList">Parameters for the Eureka server, prefixed with <code class="inlineCode">eureka.server</code>.</li>
+      <li class="bulletList">Parameters for Eureka clients, prefixed with <code class="inlineCode">eureka.client</code>. This is for clients who want to communicate with a Eureka server.</li>
+      <li class="bulletList">Parameters for Eureka instances, prefixed with <code class="inlineCode">eureka.instance</code>. This is for the microservice instances that want to register themselves in the Eureka server.</li>
+    </ul>
+    <p class="normal">Some of the available parameters are described in the Spring Cloud Netflix documentation: <a href="https://docs.spring.io/spring-cloud-netflix/docs/current/reference/html/"><span class="url">https://docs.spring.io/spring-cloud-netflix/docs/current/reference/html/</span></a>.</p>
+    <p class="normal">For an extensive list of available parameters, I recommend reading the source code:</p>
+    <ul>
+      <li class="bulletList">For Eureka server parameters, look at the <code class="inlineCode">org.springframework.cloud.netflix.eureka.server.EurekaServerConfigBean</code> class for default values and the <code class="inlineCode">com.netflix.eureka.EurekaServerConfig</code> interface for the relevant documentation.</li>
+      <li class="bulletList">For Eureka client parameters, look at the <code class="inlineCode">org.springframework.cloud.netflix.eureka.EurekaClientConfigBean</code> class for the default values and documentation.</li>
+      <li class="bulletList">For Eureka instance parameters, look at the <code class="inlineCode">org.springframework.cloud.netflix.eureka.EurekaInstanceConfigBean</code> class for default values and documentation.</li>
+    </ul>
+    <p class="normal">Let’s start to<a id="_idIndexMarker643"/> learn about configuration parameters for the Eureka server.</p>
+    <h2 id="_idParaDest-244" class="heading-2">Configuring the Eureka server</h2>
+    <p class="normal">To configure<a id="_idIndexMarker644"/> the Eureka server for use in a development environment, the following configuration can be used:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">server:</span>
+  <span class="hljs-attr">port:</span> <span class="hljs-number">8761</span>
+<span class="hljs-attr">eureka:</span>
+  <span class="hljs-attr">instance:</span>
+    <span class="hljs-attr">hostname:</span> <span class="hljs-string">localhost</span>
+  <span class="hljs-attr">client:</span>
+    <span class="hljs-attr">registerWithEureka:</span> <span class="hljs-literal">false</span>
+    <span class="hljs-attr">fetchRegistry:</span> <span class="hljs-literal">false</span>
+    <span class="hljs-attr">serviceUrl:</span>
+      <span class="hljs-attr">defaultZone:</span> <span class="hljs-string">http://${eureka.instance.hostname}:${server.port}/eureka/</span>
+ 
+  <span class="hljs-attr">server:</span>
+    <span class="hljs-attr">waitTimeInMsWhenSyncEmpty:</span> <span class="hljs-number">0</span>
+    <span class="hljs-attr">response-cache-update-interval-ms:</span> <span class="hljs-number">5000</span>
+</code></pre>
+    <p class="normal">The first part of the configuration, for a Eureka <code class="inlineCode">instance</code> and <code class="inlineCode">client</code>, is a standard configuration for a standalone Eureka server. For details, see the Spring Cloud documentation, which we referred to previously. The last two parameters used for the Eureka server, <code class="inlineCode">waitTimeInMsWhenSyncEmpty</code> and <code class="inlineCode">response-cache-update-interval-ms</code>, are used to minimize the startup time.</p>
+    <p class="normal">With the Eureka server configured, we are ready to see how clients to the Eureka server, that is, the microservice instances, can be configured.</p>
+    <h2 id="_idParaDest-245" class="heading-2">Configuring clients to the Eureka server</h2>
+    <p class="normal">To be able<a id="_idIndexMarker645"/> to connect to the Eureka server, the microservices have the following configuration:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">eureka:</span>
+  <span class="hljs-attr">client:</span>
+    <span class="hljs-attr">serviceUrl:</span>
+      <span class="hljs-attr">defaultZone:</span> <span class="hljs-string">http://localhost:8761/eureka/</span>
+    <span class="hljs-attr">initialInstanceInfoReplicationIntervalSeconds:</span> <span class="hljs-number">5</span>
+    <span class="hljs-attr">registryFetchIntervalSeconds:</span> <span class="hljs-number">5</span>
+  <span class="hljs-attr">instance:</span>
+    <span class="hljs-attr">leaseRenewalIntervalInSeconds:</span> <span class="hljs-number">5</span>
+    <span class="hljs-attr">leaseExpirationDurationInSeconds:</span> <span class="hljs-number">5</span>
+<span class="hljs-meta">---</span>
+<span class="hljs-attr">spring.config.activate.on-profile:</span> <span class="hljs-string">docker</span>
+<span class="hljs-attr">eureka.client.serviceUrl.defaultZone:</span> <span class="hljs-string">http://eureka:8761/eureka/</span>
+</code></pre>
+    <p class="normal">The <code class="inlineCode">eureka.client.serviceUrl.defaultZone</code> parameter is used to find the Eureka server, using the hostname <code class="inlineCode">localhost</code> when running without Docker and the hostname <code class="inlineCode">eureka</code> when running as containers in Docker. The other parameters are used to minimize the startup time and the time it takes to deregister a microservice instance that is stopped.</p>
+    <p class="normal">Now, we have everything in place that’s required to actually try out the discovery service using the Netflix Eureka server together with our microservices.</p>
+    <h1 id="_idParaDest-246" class="heading-1">Trying out the discovery service</h1>
+    <p class="normal">With all of the<a id="_idIndexMarker646"/> details in place, we are ready to try out Netflix Eureka:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First, build the Docker images with the following commands:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter09
+./gradlew build &amp;&amp; docker-compose build
+</code></pre>
+      </li>
+      <li class="numberedList">Next, start the system landscape and run the usual tests with the following command:
+        <pre class="programlisting con"><code class="hljs-con">./test-em-all.bash start
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Expect an output similar to what we have seen in previous chapters:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_09_05.png" alt="Graphical user interface, text  Description automatically generated" width="727" height="226"/></figure>
+    <p class="packt_figref">Figure 9.5: Successful test output</p>
+    <p class="normal">With the system<a id="_idIndexMarker647"/> landscape up and running, we can start by testing how to scale up the number of instances for one of the microservices.</p>
+    <h2 id="_idParaDest-247" class="heading-2">Scaling up</h2>
+    <p class="normal">Run the<a id="_idIndexMarker648"/> following commands to try out scaling up a service:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Launch two extra <code class="inlineCode">review</code> microservice instances:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose up -d --scale review=3
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">With the preceding command, we ask Docker Compose to run three instances of the <code class="inlineCode">review</code> service. Since one instance is already running, two new instances will be started up.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Once the new instances are up and running, browse to <code class="inlineCode">http://localhost:8761/</code> and expect something like the following: <figure class="mediaobject"><img src="../Images/B19825_09_06.png" alt="Graphical user interface, website  Description automatically generated" width="812" height="543"/></figure>
+        <p class="packt_figref">Figure 9.6: Viewing instances registered with Eureka</p>
+        <p class="normal">Verify that<a id="_idIndexMarker649"/> you can see three <code class="inlineCode">review</code> instances in the Netflix Eureka web UI, as shown in the preceding screenshot.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">One way of knowing when the new instances are up and running is to run this command:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose logs review | grep Started 
+</code></pre>
+        <p class="normal">Expect output that looks as follows:</p>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_09_07.png" alt="Graphical user interface, text, application  Description automatically generated" width="739" height="75"/></figure>
+    <p class="packt_figref">Figure 9.7: New review instances</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">We can also use a REST API that the Eureka service exposes. To get a list of instance IDs, we can issue a <code class="inlineCode">curl</code> command, like this:
+        <pre class="programlisting con"><code class="hljs-con">curl -H "accept:application/json" localhost:8761/eureka/apps -s | jq -r .applications.application[].instance[].instanceId
+</code></pre>
+        <p class="normal">Expect a<a id="_idIndexMarker650"/> response that looks similar to the following:</p>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_09_08.png" alt="Text  Description automatically generated" width="371" height="181"/></figure>
+    <p class="packt_figref">Figure 9.8: List of microservice instance IDs</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">If you look into the test script, <code class="inlineCode">test-em-all.bash</code>, you will find new tests that verify that we can reach Eureka’s REST API and that it reports four instances:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-comment"># Verify access to Eureka and that all four microservices are # registered in Eureka</span>
+assertCurl 200 <span class="hljs-string">"curl -H "</span>accept:application/json<span class="hljs-string">" </span><span class="hljs-variable">$HOST</span><span class="hljs-string">:8761/eureka/apps -s"</span>
+assertEqual 4 $(<span class="hljs-built_in">echo</span> <span class="hljs-variable">$RESPONSE</span> | jq <span class="hljs-string">".applications.application | length"</span>)
+</code></pre>
+      </li>
+      <li class="numberedList">Now that we have all of the instances up and running, let’s try out the client-side load <a id="_idIndexMarker651"/>balancer by making some requests and focusing on the address of the <code class="inlineCode">review</code> service in the responses, as follows:
+        <pre class="programlisting con"><code class="hljs-con">curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.rev
+</code></pre>
+        <p class="normal">Expect responses similar to the following:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_09_09.png" alt="Text  Description automatically generated" width="410" height="110"/></figure>
+        <p class="packt_figref">Figure 9.9: Review service addresses</p>
+        <p class="normal">Note that the address of the <code class="inlineCode">review</code> service changes in each response; the load balancer uses round-robin logic to call the available <code class="inlineCode">review</code> instances, one at a time!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="7">We can also take a look into the <code class="inlineCode">review</code> instance’s log records with the following command:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose logs review | grep "Response size"
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">You will see output that looks similar to the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_09_10.png" alt="Text  Description automatically generated" width="531" height="96"/></figure>
+    <p class="packt_figref">Figure 9.10: Review instance log records</p>
+    <p class="normal">In the preceding<a id="_idIndexMarker652"/> output, we can see how the three review microservice instances, <code class="inlineCode">review_2</code>, <code class="inlineCode">review_3</code>, and <code class="inlineCode">review_1</code>, in turn have responded to the requests.</p>
+    <p class="normal">We can also try to scale down the instances, which we will do next.</p>
+    <h2 id="_idParaDest-248" class="heading-2">Scaling down</h2>
+    <p class="normal">Let’s also see <a id="_idIndexMarker653"/>what happens if we lose one instance of the <code class="inlineCode">review</code> microservice. Run the following commands:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">We can simulate one instance stopping unexpectedly by running the following command:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose up -d --scale review=2
+</code></pre>
+      </li>
+      <li class="numberedList">After the shutdown of the <code class="inlineCode">review</code> instance, there is a short time period during which calls to the API might fail. This is caused by the time it takes for information regarding the lost instance to propagate to the client, the <code class="inlineCode">product-composite</code> service. During this time frame, the client-side load balancer might choose the instance that no longer exists. To prevent this from occurring, resilience mechanisms such as timeouts and retries can be used. In <em class="chapterRef">Chapter 13</em>, <em class="italic">Improving Resilience Using Resilience4j</em>, we will see how this can be applied. For now, let’s specify a timeout on our <code class="inlineCode">curl</code> command, using the <code class="inlineCode">-m 2</code> option to specify that we will wait no longer than two seconds for a response:
+        <pre class="programlisting con"><code class="hljs-con">curl localhost:8080/product-composite/1 -m 2
+</code></pre>
+        <p class="normal">If a timeout occurs, that is, the client-side load balancer tries to call an instance that<a id="_idIndexMarker654"/> no longer exists, the following response is expected from <code class="inlineCode">curl</code>:</p>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_09_11.png" alt="Graphical user interface, text  Description automatically generated" width="714" height="68"/></figure>
+    <p class="packt_figref">Figure 9.11: Response from curl if a timeout occurs</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Besides that, we should expect normal responses from the two remaining instances; that is, the <code class="inlineCode">serviceAddresses.rev</code> field should contain the addresses of the two instances, as in the following:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_09_12.png" alt="Graphical user interface, text, application  Description automatically generated" width="502" height="78"/></figure>
+    <p class="packt_figref">Figure 9.12: Normal responses from remaining instances</p>
+    <p class="normal">In the preceding sample output, we can see that two different container names and IP addresses are reported. This means that the requests have been served by the two remaining microservice instances.</p>
+    <p class="normal">After trying out the scaling down of microservice instances, we can try out something that<a id="_idIndexMarker655"/> is a bit more disruptive: stopping the Eureka server and seeing what happens when the discovery server is temporarily unavailable.</p>
+    <h2 id="_idParaDest-249" class="heading-2">Disruptive tests with the Eureka server</h2>
+    <p class="normal">Let’s bring <a id="_idIndexMarker656"/>some disorder to<a id="_idIndexMarker657"/> our Eureka server and see how the system landscape manages it!</p>
+    <p class="normal">To start with, what happens if we crash the Eureka server?</p>
+    <p class="normal">As long as clients have read the information regarding available microservice instances from the Eureka server before it is stopped, the clients will be fine since they cache the information locally. However, new instances will not be made available to clients, and they will not be notified if any running instances are terminated. So, calls to instances that are no longer running will cause failures.</p>
+    <p class="normal">Let’s try this out!</p>
+    <h3 id="_idParaDest-250" class="heading-3">Stopping the Eureka server</h3>
+    <p class="normal">To simulate <a id="_idIndexMarker658"/>a Eureka server crash, follow these steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First, stop the Eureka server and keep the two <code class="inlineCode">review</code> instances up and running:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose up -d --scale review=2 --scale eureka=0
+</code></pre>
+      </li>
+      <li class="numberedList">Try a couple of calls to the API and extract the service address of the <code class="inlineCode">review</code> service:
+        <pre class="programlisting con"><code class="hljs-con">curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.rev
+</code></pre>
+      </li>
+      <li class="numberedList">The response will – just like before we stopped the Eureka server – contain the addresses of the two <code class="inlineCode">review</code> instances, like so:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_09_13.png" alt="Graphical user interface, text, application  Description automatically generated" width="362" height="77"/></figure>
+    <p class="packt_figref">Figure 9.13: Response with two review instance addresses</p>
+    <p class="normal">This shows that the client can make calls to existing instances, even though the Eureka server is no longer running.</p>
+    <h3 id="_idParaDest-251" class="heading-3">Starting up an extra instance of the product service</h3>
+    <p class="normal">As a final test of <a id="_idIndexMarker659"/>the effects of a crashed Eureka server, let’s see what happens if we start up a new instance of the <code class="inlineCode">product</code> microservice. Perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Let’s try starting a new instance of the <code class="inlineCode">product</code> service:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose up -d --scale review=2 --scale eureka=0 --scale product=2
+</code></pre>
+      </li>
+      <li class="numberedList">Call the API a couple of times and extract the address of the <code class="inlineCode">product</code> service with the following command:
+        <pre class="programlisting con"><code class="hljs-con">curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.pro
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Since no Eureka server is running, the client will not be notified of the new <code class="inlineCode">product</code> instance, and so all calls will go to the first instance, as in the following example:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_09_14.png" alt="Graphical user interface, text, application  Description automatically generated" width="461" height="80"/></figure>
+    <p class="packt_figref">Figure 9.14: Address of the first product instance only</p>
+    <p class="normal">We have seen some of the most important aspects of not having a Netflix Eureka server up and running. Let’s conclude the section on disruptive tests by starting up the Netflix Eureka server again and seeing how the system landscape handles self-healing, that is, resilience.</p>
+    <h1 id="_idParaDest-252" class="heading-1">Starting up the Eureka server again</h1>
+    <p class="normal">In this section, we will <a id="_idIndexMarker660"/>wrap up the disruptive tests by starting up the Eureka server again. We will also verify that the system landscape self-heals, which means the new instance of the <code class="inlineCode">product</code> microservice gets registered with the Netflix Eureka server and the client gets updated by the Eureka server. Perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Start the Eureka server with the following command:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose up -d --scale review=1 --scale eureka=1 --scale product=2
+</code></pre>
+      </li>
+      <li class="numberedList">Make the following call a couple of times to extract the addresses of the product and the <code class="inlineCode">review</code> service:
+        <pre class="programlisting con"><code class="hljs-con">curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses
+</code></pre>
+        <p class="normal">Verify that the following happens:</p>
+        <ul>
+          <li class="bulletList">All calls go to the remaining <code class="inlineCode">review</code> instance, demonstrating that the client has detected that the second <code class="inlineCode">review</code> instance is gone.</li>
+          <li class="bulletList">Calls to the <code class="inlineCode">product</code> service are load-balanced over the two <code class="inlineCode">product</code> instances, demonstrating the client has detected that there are two <code class="inlineCode">product</code> instances available.</li>
+        </ul>
+        <p class="normal">The response <a id="_idIndexMarker661"/>should contain the same address for the <code class="inlineCode">review</code> instance and two different addresses for the two <code class="inlineCode">product</code> instances, as shown in the following two examples:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_09_15.png" alt="Graphical user interface, text, application  Description automatically generated" width="478" height="76"/></figure>
+        <p class="packt_figref">Figure 9.15: Product and review addresses</p>
+        <p class="normal">This is the second response:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_09_16.png" alt="Graphical user interface, text, application  Description automatically generated" width="507" height="81"/></figure>
+        <p class="packt_figref">Figure 9.16: Product and review addresses</p>
+        <p class="normal">The IP addresses <code class="inlineCode">192.168.128.4</code> and <code class="inlineCode">192.168.128.10</code> belong to the two <code class="inlineCode">product</code> instances. <code class="inlineCode">192.168.128.8</code> is the IP address of the single remaining <code class="inlineCode">review</code> instance.</p>
+        <p class="normal">To summarize, the Eureka server provides a very robust and resilient implementation of a discovery service. If even higher availability is desired, multiple Eureka servers can be launched and configured to communicate with each other. Details on how to set up multiple Eureka servers can be found in the Spring Cloud documentation: <a href="https://docs.spring.io/spring-cloud-netflix/docs/current/reference/html/#spring-cloud-eureka-server-peer-awareness"><span class="url">https://docs.spring.io/spring-cloud-netflix/docs/current/reference/html/#spring-cloud-eureka-server-peer-awareness</span></a>.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Finally, shut down the system landscape with this command:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose down
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">This completes <a id="_idIndexMarker662"/>the tests of the discovery server, Netflix Eureka, where we have learned how to scale up and scale down microservice instances and what happens if a Netflix Eureka server crashes and later on comes back online.</p>
+    <h1 id="_idParaDest-253" class="heading-1">Summary</h1>
+    <p class="normal">In this chapter, we learned how to use Netflix Eureka for service discovery. First, we looked into the shortcomings of a simple DNS-based service discovery solution and the challenges that a robust and resilient service discovery solution must be able to handle.</p>
+    <p class="normal">Netflix Eureka is a very capable service discovery solution that provides robust, resilient, and fault-tolerant runtime characteristics. However, it can be challenging to configure correctly, especially for a smooth developer experience. With Spring Cloud, it becomes easy to set up a Netflix Eureka server and adapt Spring Boot-based microservices, both so that they can register themselves to Eureka during startup and, when acting as a client to other microservices, to keep track of available microservice instances.</p>
+    <p class="normal">With a discovery server in place, it’s time to see how we can handle external traffic using Spring Cloud Gateway as an edge server. Head over to the next chapter to find out how!</p>
+    <h1 id="_idParaDest-254" class="heading-1">Questions</h1>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">What is required to turn a Spring Boot application created with Spring Initializr into a fully fledged Netflix Eureka server?</li>
+      <li class="numberedList">What is required to make a Spring Boot-based microservice register itself automatically as a startup service with Netflix Eureka?</li>
+      <li class="numberedList">What is required to make it possible for a Spring Boot-based microservice to call another microservice that is registered in a Netflix Eureka server?</li>
+      <li class="numberedList">Let’s assume that you have a Netflix Eureka server up and running, along with one instance of microservice <em class="italic">A</em> and two instances of microservice <em class="italic">B</em>. All microservice instances register themselves with the Netflix Eureka server. Microservice <em class="italic">A</em> makes HTTP requests to microservice <em class="italic">B</em> based on the information it gets from the Eureka server. What will happen if, in turn, the following happens?<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1">The Netflix Eureka server crashes</li>
+          <li class="alphabeticList">One of the instances of microservice <em class="italic">B</em> crashes</li>
+          <li class="alphabeticList">A new instance of microservice <em class="italic">A</em> starts up</li>
+          <li class="alphabeticList">A new instance of microservice <em class="italic">B</em> starts up</li>
+          <li class="alphabeticList">The Netflix Eureka server starts up again</li>
+        </ol>
+      </li>
+    </ol>
+  </div>
+</div>
+</div>
+</body></html>

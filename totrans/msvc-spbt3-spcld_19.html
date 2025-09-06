@@ -1,0 +1,839 @@
+<html><head></head><body>
+<div id="book-content">
+<div id="sbo-rt-content"><div id="_idContainer502" class="Basic-Text-Frame">
+    <h1 class="chapterNumber">19</h1>
+    <h1 id="_idParaDest-476" class="chapterTitle">Centralized Logging with the EFK Stack</h1>
+    <p class="normal">In this chapter, we will learn how to collect and store log records from microservice instances, as well as how to search and analyze log records. As we mentioned in <em class="chapterRef">Chapter 1</em>, <em class="italic">Introduction to Microservices</em>, it is difficult to get an overview of what is going on in a system landscape of microservices when each microservice instance writes log records to its local filesystem. We need a component that can collect the log records from the microservice’s local filesystem and store them in a central database for analysis, search, and visualization. A popular open-source-based solution for this is based on the following tools:</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Elasticsearch</strong>, a distributed<a id="_idIndexMarker1387"/> database with great capabilities for searching and analyzing large datasets</li>
+      <li class="bulletList"><strong class="keyWord">Fluentd</strong>, a data collector that <a id="_idIndexMarker1388"/>can be used to collect log records from various sources, filter and transform the collected information, and finally send it to various consumers, for example, Elasticsearch</li>
+      <li class="bulletList"><strong class="keyWord">Kibana</strong>, a graphical <a id="_idIndexMarker1389"/>frontend to Elasticsearch that can be used to visualize search results and run analyses of the collected log records</li>
+    </ul>
+    <p class="normal">Together, these tools are called the <strong class="keyWord">EFK stack</strong>, named after the initials of each tool.</p>
+    <p class="normal">The following topics will be covered in this chapter:</p>
+    <ul>
+      <li class="bulletList">Configuring Fluentd</li>
+      <li class="bulletList">Deploying the EFK stack on Kubernetes for development and test usage</li>
+      <li class="bulletList">Analyzing the collected log records</li>
+      <li class="bulletList">Discovering log records from the microservices and finding related log records</li>
+      <li class="bulletList">Performing root cause analysis</li>
+    </ul>
+    <h1 id="_idParaDest-477" class="heading-1">Technical requirements</h1>
+    <p class="normal">For instructions on how to install the tools used in this book and how to access the source code for this book, see:</p>
+    <ul>
+      <li class="bulletList"><em class="chapterRef">Chapter 21</em>, <em class="italic">Installation Instructions for macOS</em></li>
+      <li class="bulletList"><em class="chapterRef">Chapter 22</em>, <em class="italic">Installation Instructions for Microsoft Windows with WSL 2 and Ubuntu</em></li>
+    </ul>
+    <p class="normal">The code examples in this chapter all come from the source code in <code class="inlineCode">$BOOK_HOME/Chapter19</code>.</p>
+    <p class="normal">If you want to view the changes applied to the source code in this chapter, that is, see the changes we made so that we can use the EFK stack for centralized log analysis, you can compare it with the source code for <em class="chapterRef">Chapter 18</em>, <em class="italic">Using a Service Mesh to Improve Observability and Management</em>. You can use your favorite <code class="inlineCode">diff</code> tool and compare the two folders, <code class="inlineCode">$BOOK_HOME/Chapter18</code> and <code class="inlineCode">$BOOK_HOME/Chapter19</code>.</p>
+    <h1 id="_idParaDest-478" class="heading-1">Introducing Fluentd</h1>
+    <p class="normal">In this section, we will learn<a id="_idIndexMarker1390"/> the basics of how to configure Fluentd. Before we do that, let’s learn a bit about the background of Fluentd and how it works at a high level.</p>
+    <h2 id="_idParaDest-479" class="heading-2">Overview of Fluentd</h2>
+    <p class="normal">Historically, one of the<a id="_idIndexMarker1391"/> most popular open source stacks for handling log records has been the ELK stack from Elastic (<a href="https://www.elastic.co"><span class="url">https://www.elastic.co</span></a>), based on<a id="_idIndexMarker1392"/> Elasticsearch, Logstash (used for log collection and transformation), and Kibana. Since Logstash runs on a Java VM, it requires a relatively large amount of memory. Over the years, a number of open source alternatives have been developed that require significantly less memory than Logstash, one of<a id="_idIndexMarker1393"/> them being Fluentd (<a href="https://www.fluentd.org"><span class="url">https://www.fluentd.org</span></a>).</p>
+    <p class="normal">Fluentd is managed by the <strong class="keyWord">Cloud Native Computing Foundation</strong> (<strong class="keyWord">CNCF</strong>) (<a href="https://www.cncf.io"><span class="url">https://www.cncf.io</span></a>), the same <a id="_idIndexMarker1394"/>organization that manages the Kubernetes project. Therefore, Fluentd has <a id="_idIndexMarker1395"/>become a natural choice as an open-source-based log collector that runs in Kubernetes. Together with Elastic and Kibana, it forms the EFK stack.</p>
+    <div class="packt_tip">
+      <p class="normal">CNCF maintains a list of alternative products for several categories, for example, for logging. For alternatives to Fluentd listed by CNCF, see <a href="https://landscape.cncf.io/card-mode?category=logging&amp;grouping=category"><span class="url">https://landscape.cncf.io/card-mode?category=logging&amp;grouping=category</span></a>.</p>
+    </div>
+    <p class="normal">Fluentd is written in a mix of C and Ruby, using C for the performance-critical parts and Ruby where flexibility is of more importance, for example, allowing the simple installation of third-party plugins using Ruby’s <code class="inlineCode">gem install</code> command.</p>
+    <p class="normal">A log record is processed as an event in Fluentd and consists of the following information:</p>
+    <ul>
+      <li class="bulletList">A <code class="inlineCode">time</code> field describing when the log record was created</li>
+      <li class="bulletList">A <code class="inlineCode">tag</code> field that identifies what type of log record it is – the tag is used by Fluentd’s routing engine to determine how a log record will be processed</li>
+      <li class="bulletList">A <code class="inlineCode">record</code> that contains the actual log information, which is stored as a JSON object</li>
+    </ul>
+    <p class="normal">A Fluentd configuration file is used to tell Fluentd how to collect, process, and finally send log records to various targets, such as Elasticsearch. A configuration file consists of the following types of core elements:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">&lt;source&gt;</code>: Source elements describe where Fluentd will collect log records, for example, tailing log files that have been written to by Docker containers.
+    <div class="packt_tip">
+      <p class="normal"><em class="italic">Tailing a log file</em> means monitoring what is written to a log file. A frequently used Unix/Linux tool for monitoring what is appended to a file is named <code class="inlineCode">tile</code>.</p>
+    </div>
+    <p class="normal">Source elements typically tag the log records, describing the type of log record. They could, for example, be used to tag log records to state that they come from containers running in Kubernetes.</p></li>
+    </ul>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">&lt;filter&gt;</code>: Filter elements are used to process the log records. For example, a filter element can parse log records that come from Spring Boot-based microservices and extract interesting parts of the log message into separate fields in the log record. Extracting information into separate <a id="_idIndexMarker1396"/>fields in the log record makes the information searchable by Elasticsearch. A filter element selects the log records to process based on their tags.</li>
+      <li class="bulletList"><code class="inlineCode">&lt;match&gt;</code>: Match elements decide where to send log records, acting as output elements. They are used to perform two main tasks:<ul>
+          <li class="bulletList">Sending processed log records to targets such as Elasticsearch.</li>
+          <li class="bulletList">Routing to decide how to process log records. A routing rule can rewrite the tag and re-emit the log record into the Fluentd routing engine for further processing. A routing rule is expressed as an embedded <code class="inlineCode">&lt;rule&gt;</code> element inside the <code class="inlineCode">&lt;match&gt;</code> element. Output elements decide what log records to process, in the same way as a filter: based on the tag of the log records.</li>
+        </ul>
+      </li>
+    </ul>
+    <p class="normal">Fluentd comes with a number of built-in and external third-party plugins that are used by the source, filter, and output elements. We will see some of them in action when we walk through the configuration file in the next section. For more information on the available plugins, see Fluentd’s documentation, which is available at <a href="https://docs.fluentd.org"><span class="url">https://docs.fluentd.org</span></a>.</p>
+    <p class="normal">With this overview of Fluentd out of the way, we are ready to see how Fluentd can be configured to process the log records from our microservices.</p>
+    <h2 id="_idParaDest-480" class="heading-2">Configuring Fluentd</h2>
+    <p class="normal">The <a id="_idIndexMarker1397"/>configuration of Fluentd is based on the configuration files from a Fluentd project on GitHub, <code class="inlineCode">fluentd-kubernetes-daemonset</code>. The project contains Fluentd configuration files for how to collect log records from containers that run in Kubernetes and how to send them to Elasticsearch once they have been processed. </p>
+    <p class="normal">We will reuse this configuration without changes, and it will simplify our own configuration to a great extent. The Fluentd configuration files can be found at <a href="https://github.com/fluent/fluentd-kubernetes-daemonset/tree/master/archived-image/v1.4/debian-elasticsearch/conf"><span class="url">https://github.com/fluent/fluentd-kubernetes-daemonset/tree/master/archived-image/v1.4/debian-elasticsearch/conf</span></a>.</p>
+    <p class="normal">The configuration files that provide this functionality are <code class="inlineCode">kubernetes.conf</code> and <code class="inlineCode">fluent.conf</code>. The <code class="inlineCode">kubernetes.conf</code> configuration file contains the following information:</p>
+    <ul>
+      <li class="bulletList">Source elements<a id="_idIndexMarker1398"/> that tail container log files and log files from processes that run outside of Kubernetes, for example, <code class="inlineCode">kubelet</code> and the Docker daemon. The source elements also tag the log records from Kubernetes with the full name of the log file with <code class="inlineCode">/</code> replaced by <code class="inlineCode">.</code> and prefixed with <code class="inlineCode">kubernetes</code>. Since the tag is based on the full filename, the name contains the name of the namespace, pod, and container, among other things. So, the tag is very useful for finding log records of interest by matching the tag. <p class="normal">For example, the tag from the <code class="inlineCode">product-composite</code> microservice could be something like <code class="inlineCode">kubernetes.var.log.containers.product-composite-7...s_hands-on_comp-e...b.log</code>, while the tag for the corresponding <code class="inlineCode">istio-proxy</code> in the same Pod could be something like <code class="inlineCode">kubernetes.var.log.containers.product-composite-7...s_hands-on_istio-proxy-1...3.log</code>.</p>
+      </li>
+    </ul>
+    <ul>
+      <li class="bulletList">A filter element that enriches the log records that come from containers running inside Kubernetes, along with Kubernetes-specific fields that contain information such as the names of the containers and the namespace they run in.</li>
+    </ul>
+    <p class="normal">The main configuration file, <code class="inlineCode">fluent.conf</code>, contains the following information:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">@include</code> statements for other configuration files, for example, the <code class="inlineCode">kubernetes.conf</code> file we described previously. It also includes custom configuration files that are placed in a specific folder, making it very easy for us to reuse these configuration files without any changes and provide our own configuration file that only handles processing related to our own log records. We simply need to place our own configuration file in the folder specified by the <code class="inlineCode">fluent.conf</code> file.</li>
+      <li class="bulletList">An output element that sends log records to Elasticsearch.</li>
+    </ul>
+    <p class="normal">As described in the <em class="italic">Deploying Fluentd</em> section later on, these two configuration files will be packaged into the Docker image we will build for Fluentd.</p>
+    <p class="normal">What’s left to cover in our own configuration file is the following:</p>
+    <ul>
+      <li class="bulletList">Detecting and parsing Spring Boot-formatted log records from our microservices.</li>
+      <li class="bulletList">Handling multiline stack traces. Stack traces are written to log files using multiple lines. This makes it hard for Fluentd to handle a stack trace as a single log record.</li>
+      <li class="bulletList">Separating log records from the <code class="inlineCode">istio-proxy</code> sidecars from the log records that were created by the microservices running in the same Pod. The log records that are created by <code class="inlineCode">istio-proxy</code> don’t follow the same pattern <a id="_idIndexMarker1399"/>as the log patterns that are created by our Spring Boot-based microservices. Therefore, they must be handled separately so that Fluentd doesn’t try to parse them as Spring Boot-formatted log records.</li>
+    </ul>
+    <p class="normal">To achieve this, the configuration is, to a large extent, based on using the <code class="inlineCode">rewrite_tag_filter</code> plugin. This plugin can be used for routing log records based on the concept of changing the name of a tag and then re-emitting the log record to the Fluentd routing engine.</p>
+    <p class="normal">This processing is summarized by the following UML activity diagram:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_19_01.png" alt="A picture containing text, screenshot, diagram, line  Description automatically generated" width="877" height="916"/></figure>
+    <p class="packt_figref">Figure 19.1: Fluentd processing of log records</p>
+    <p class="normal">At a high level, the <a id="_idIndexMarker1400"/>design of the configuration file looks as follows:</p>
+    <ul>
+      <li class="bulletList">The tags of all log records from Istio, including <code class="inlineCode">istio-proxy</code>, are prefixed with <code class="inlineCode">istio</code> so that they can be separated from the Spring Boot-based log records.</li>
+      <li class="bulletList">The tags of all log records from the <code class="inlineCode">hands-on</code> namespace (except for the log records from <code class="inlineCode">istio-proxy</code>) are prefixed with <code class="inlineCode">spring-boot</code>.</li>
+      <li class="bulletList">The log records from Spring Boot are checked for the presence of multiline stack traces. If the log record is part of a multiline stack trace, it is processed by the third-party <code class="inlineCode">detect-exceptions</code> plugin to recreate the stack trace. Otherwise, it is parsed using a regular expression to extract information of interest. See the <em class="italic">Deploying Fluentd</em> section for details on this third-party plugin.</li>
+    </ul>
+    <p class="normal">The <code class="inlineCode">fluentd-hands-on.conf</code> configuration file implements this activity diagram. The configuration file is placed inside a Kubernetes ConfigMap (see <code class="inlineCode">kubernetes/efk/fluentd-hands-on-configmap.yml</code>). Let’s go through this step by step, as follows:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First comes the definition of the ConfigMap and the filename of the configuration file, <code class="inlineCode">fluentd-hands-on.conf</code>. It looks as follows:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">ConfigMap</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">fluentd-hands-on-config</span>
+  <span class="hljs-attr">namespace:</span> <span class="hljs-string">kube-system</span>
+<span class="hljs-attr">data:</span>
+  <span class="hljs-attr">fluentd-hands-on.conf:</span> <span class="hljs-string">|</span>
+</code></pre>
+        <p class="normal">We can see that the <code class="inlineCode">data</code> element will contain the configuration of Fluentd. It starts with the filename and uses a vertical bar, <code class="inlineCode">|</code>, to mark the beginning of the embedded configuration file for Fluentd.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">The first <code class="inlineCode">&lt;match&gt;</code> element matches the log records from Istio, that is, tags that are prefixed with <code class="inlineCode">Kubernetes</code> and contain <code class="inlineCode">istio</code> as either part of their namespace or part of their container name. It looks like this:
+        <pre class="programlisting code"><code class="hljs-code">    <span class="hljs-string">&lt;match</span> <span class="hljs-string">kubernetes.**istio**&gt;</span>
+      <span class="hljs-string">@type</span> <span class="hljs-string">rewrite_tag_filter</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">^(.*)$</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">istio.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+    <span class="hljs-string">&lt;/match&gt;</span>
+</code></pre>
+        <p class="normal">Let’s explain the preceding source code:</p>
+      </li>
+    </ol>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">&lt;match&gt;</code> element matches any tags that follow the <code class="inlineCode">kubernetes.**istio**</code> pattern, that is, tags that start with <code class="inlineCode">Kubernetes</code> and then contain the word <code class="inlineCode">istio</code> somewhere in the tag name. <code class="inlineCode">istio</code> can come from the name of either the namespace or the<a id="_idIndexMarker1401"/> container; both are part of the tag.</li>
+      <li class="bulletList">The <code class="inlineCode">&lt;match&gt;</code> element contains only one <code class="inlineCode">&lt;rule&gt;</code> element, which prefixes the tag with <code class="inlineCode">istio</code>. The <code class="inlineCode">${tag}</code> variable holds the current value of the tag.</li>
+      <li class="bulletList">Since this is the only <code class="inlineCode">&lt;rule&gt;</code> element in the <code class="inlineCode">&lt;match&gt;</code> element, it is configured to match all log records.</li>
+      <li class="bulletList">Since all log records that come from Kubernetes have a <code class="inlineCode">log</code> field, the <code class="inlineCode">key</code> field is set to <code class="inlineCode">log</code>, that is, the rule looks for a <code class="inlineCode">log</code> field in the log records.</li>
+      <li class="bulletList">To match any string in the <code class="inlineCode">log</code> field, the <code class="inlineCode">pattern</code> field is set to the <code class="inlineCode">^(.*)$</code> regular expression. <code class="inlineCode">^</code> marks the beginning of a string, while <code class="inlineCode">$</code> marks the end of a string. <code class="inlineCode">(.*)</code> matches any number of characters, except for line breaks.</li>
+      <li class="bulletList">The log records are re-emitted to the Fluentd routing engine. Since no other elements in the configuration file match tags starting with <code class="inlineCode">istio</code>, the log records will be sent directly to the output element for Elasticsearch, which is defined in the <code class="inlineCode">fluent.conf</code> file we described previously.</li>
+    </ul>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">The second <code class="inlineCode">&lt;match&gt;</code> element matches all log records from the <code class="inlineCode">hands-on</code> namespace, that is, the log records that are emitted by our microservices. It looks like this:
+        <pre class="programlisting code"><code class="hljs-code">    <span class="hljs-string">&lt;match</span> <span class="hljs-string">kubernetes.**hands-on**&gt;</span>
+      <span class="hljs-string">@type</span> <span class="hljs-string">rewrite_tag_filter</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">^(.*)$</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">spring-boot.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+    <span class="hljs-string">&lt;/match&gt;</span>
+</code></pre>
+        <p class="normal">From the source code, we can see that:</p>
+      </li>
+    </ol>
+    <ul>
+      <li class="bulletList">The log<a id="_idIndexMarker1402"/> records emitted by our microservices use formatting rules for the log message defined by Spring Boot, so their tags are prefixed with <code class="inlineCode">spring-boot</code>. Then, they are re-emitted for further processing.</li>
+      <li class="bulletList">The <code class="inlineCode">&lt;match&gt;</code> element is configured in the same way as the <code class="inlineCode">&lt;match kubernetes.**istio**&gt;</code> element we looked at previously, to match all records.</li>
+    </ul>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">The third <code class="inlineCode">&lt;match&gt;</code> element matches <code class="inlineCode">spring-boot</code> log records and determines whether they are ordinary Spring Boot log records or part of a multiline stack trace. Since Spring Boot 3, Project Reactor has added extra information to stack traces to clarify what caused an exception. (For details, see <a href="https://projectreactor.io/docs/core/release/reference/#_reading_a_stack_trace_in_debug_mode"><span class="url">https://projectreactor.io/docs/core/release/reference/#_reading_a_stack_trace_in_debug_mode</span></a>.) 
+    <p class="numberedList">To be able to parse the actual stack trace, we will filter out this information. The <code class="inlineCode">&lt;match&gt;</code> element looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">    <span class="hljs-string">&lt;match</span> <span class="hljs-string">spring-boot.**&gt;</span>
+      <span class="hljs-string">@type</span> <span class="hljs-string">rewrite_tag_filter</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}([-+]\d{2}:\d{2}|Z).*/</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">parse.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+      <span class="hljs-comment"># Get rid of Reactor debug info:</span>
+      <span class="hljs-comment">#</span>
+      <span class="hljs-comment">#   Suppressed: reactor.core.publisher.FluxOnAssembly$OnAssemblyException:</span>
+      <span class="hljs-comment"># Error has been observed at the following site(s):</span>
+      <span class="hljs-comment">#   *__checkpoint ,á¢ Handler se.magnus.microservices.core.product.services.ProductServiceImpl#getProduct(HttpHeaders, int, int, int) [DispatcherHandler]</span>
+      <span class="hljs-comment">#   *__checkpoint ,á¢ org.springframework.web.filter.reactive.ServerHttpObservationFilter [DefaultWebFilterChain]</span>
+      <span class="hljs-comment">#   *__checkpoint ,á¢ HTTP GET "/product/1?faultPercent=100" [ExceptionHandlingWebHandler]</span>
+      <span class="hljs-comment"># Original Stack Trace:</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">/^\s+Suppressed:.*$/</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">skip.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">/^Error</span> <span class="hljs-string">has</span> <span class="hljs-string">been</span> <span class="hljs-string">observed</span> <span class="hljs-string">at</span> <span class="hljs-string">the</span> <span class="hljs-string">following</span> <span class="hljs-string">site.*/</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">skip.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">/^\s+\*__checkpoint.*/</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">skip.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">/^Original</span> <span class="hljs-string">Stack</span> <span class="hljs-string">Trace:.*/</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">skip.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+      <span class="hljs-string">&lt;rule&gt;</span>
+        <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+        <span class="hljs-string">pattern</span> <span class="hljs-string">/^.*/</span>
+        <span class="hljs-string">tag</span> <span class="hljs-string">check.exception.${tag}</span>
+      <span class="hljs-string">&lt;/rule&gt;</span>
+    <span class="hljs-string">&lt;/match&gt;</span>
+</code></pre>
+    <p class="normal">As seen in the source<a id="_idIndexMarker1403"/> code, this is determined by using six <code class="inlineCode">&lt;rule&gt;</code> elements:</p></li>
+    </ol>
+    <ul>
+      <li class="bulletList">The first uses a regular expression to check whether the <code class="inlineCode">log</code> field in the log element starts with a timestamp or not.</li>
+      <li class="bulletList">If the <code class="inlineCode">log</code> field starts with a timestamp, the log record is treated as an ordinary Spring Boot log record and its tag is prefixed with <code class="inlineCode">parse</code>.</li>
+      <li class="bulletList">Next follows four rule elements that are used to filter out the extra information added by Project Reactor; they all prefix the tag with <code class="inlineCode">skip</code>.</li>
+      <li class="bulletList">Otherwise, the last <code class="inlineCode">&lt;rule&gt;</code> element will match, and the log record is handled as a multiline log record. Its tag is prefixed with <code class="inlineCode">check.exception</code>.</li>
+      <li class="bulletList">The log record is re-emitted in either case and its tag will either start with <code class="inlineCode">check.exception.spring-boot</code>, <code class="inlineCode">skip.spring-boot,</code> or <code class="inlineCode">parse.spring-boot</code> after this processing.</li>
+    </ul>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">The fourth <code class="inlineCode">&lt;match&gt;</code> element is used to get rid of the log output from Project Reactor, i.e. match tags starting with <code class="inlineCode">skip.spring-boot</code>. The <code class="inlineCode">&lt;match&gt;</code> element <a id="_idIndexMarker1404"/>applies the <code class="inlineCode">null</code> output plugin that throws away the events. It looks like this:
+        <pre class="programlisting code"><code class="hljs-code">    <span class="hljs-string">&lt;match</span> <span class="hljs-string">skip.spring-boot.**&gt;</span>
+      <span class="hljs-string">@type</span> <span class="hljs-string">null</span>
+    <span class="hljs-string">&lt;/match&gt;</span>
+</code></pre>
+      </li>
+      <li class="numberedList">In the fifth <code class="inlineCode">&lt;match&gt;</code> element, the selected log records have a tag that starts with <code class="inlineCode">check.exception.spring-boot</code>, that is, log records that are part of a multiline stack trace. It looks like this:
+        <pre class="programlisting code"><code class="hljs-code">    <span class="hljs-string">&lt;match</span> <span class="hljs-string">check.exception.spring-boot.**&gt;</span>
+      <span class="hljs-string">@type</span> <span class="hljs-string">detect_exceptions</span>
+      <span class="hljs-string">languages</span> <span class="hljs-string">java</span>
+      <span class="hljs-string">remove_tag_prefix</span> <span class="hljs-string">check</span>
+      <span class="hljs-string">message</span> <span class="hljs-string">log</span>
+      <span class="hljs-string">multiline_flush_interval</span> <span class="hljs-number">5</span>
+    <span class="hljs-string">&lt;/match&gt;</span>
+</code></pre>
+        <p class="normal">The <code class="inlineCode">detect_exceptions</code> plugin works like this:</p>
+      </li>
+    </ol>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">detect_exceptions</code> plugin is used to combine multiple one-line log records into a single log record that contains a complete stack trace.</li>
+      <li class="bulletList">Before a multiline log record is re-emitted into the routing engine, the <code class="inlineCode">check</code> prefix is removed from the tag to prevent a never-ending processing loop of the log record.</li>
+    </ul>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="7">Finally, the configuration file consists of a <code class="inlineCode">&lt;filter&gt;</code> element that parses Spring Boot log messages using a regular expression, extracting information of interest. It looks like this:
+        <pre class="programlisting code"><code class="hljs-code">    <span class="hljs-string">&lt;filter</span> <span class="hljs-string">parse.spring-boot.**&gt;</span>
+      <span class="hljs-string">@type</span> <span class="hljs-string">parser</span>
+      <span class="hljs-string">key_name</span> <span class="hljs-string">log</span>
+      <span class="hljs-string">time_key</span> <span class="hljs-string">time</span>
+      <span class="hljs-string">time_format</span> <span class="hljs-string">%Y-%m-%d</span>T<span class="hljs-string">%H:%M:%S.%N</span>
+      <span class="hljs-string">reserve_data</span> <span class="hljs-literal">true</span>
+      <span class="hljs-string">format</span> <span class="hljs-string">/^(?&lt;time&gt;\d{4}-\d{2}-</span>
+      <span class="hljs-string">\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}([-+]\d{2}:\d{2}|Z))\s+</span>
+      <span class="hljs-string">(?&lt;spring.level&gt;[^\s]+)\s+</span>
+      <span class="hljs-string">(\[(?&lt;spring.service&gt;[^,]*),(?&lt;spring.trace&gt;[^,]*),(?</span>
+      <span class="hljs-string">&lt;spring.span&gt;[^\]]*)]*\])\s+</span>
+      <span class="hljs-string">(?&lt;spring.pid&gt;\d+)\s+---\s+\[\s*(?&lt;spring.thread&gt;[^\]]+)\]\s+</span>
+      <span class="hljs-string">(?&lt;spring.class&gt;[^\s]+)\s*:\s+</span>
+      <span class="hljs-string">(?&lt;log&gt;.*)$/</span>
+    <span class="hljs-string">&lt;/filter&gt;</span>
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Note that filter elements don’t re-emit log records; instead, they just pass them on to the next element in the configuration file that matches the log record’s tag.</p>
+    <p class="normal">The following fields <a id="_idIndexMarker1405"/>are extracted from the Spring Boot log message that’s stored in the <code class="inlineCode">log</code> field in the log record:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">&lt;time&gt;</code>: The timestamp for when the log record was created</li>
+      <li class="bulletList"><code class="inlineCode">&lt;spring.level&gt;</code>: The log level of the log record: <code class="inlineCode">FATAL</code>, <code class="inlineCode">ERROR</code>, <code class="inlineCode">WARN</code>, <code class="inlineCode">INFO</code>, <code class="inlineCode">DEBUG</code>, or <code class="inlineCode">TRACE</code></li>
+      <li class="bulletList"><code class="inlineCode">&lt;spring.service&gt;</code>: The name of the microservice</li>
+      <li class="bulletList"><code class="inlineCode">&lt;spring.trace&gt;</code>: The trace ID used to perform distributed tracing</li>
+      <li class="bulletList"><code class="inlineCode">&lt;spring.span&gt;</code>: The span ID, the ID of the part of the distributed processing that this microservice executed</li>
+      <li class="bulletList"><code class="inlineCode">&lt;spring.pid&gt;</code>: The process ID</li>
+      <li class="bulletList"><code class="inlineCode">&lt;spring.thread&gt;</code>: The thread ID</li>
+      <li class="bulletList"><code class="inlineCode">&lt;spring.class&gt;</code>: The name of the Java class</li>
+      <li class="bulletList"><code class="inlineCode">&lt;log&gt;</code>: The actual log message</li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">The names of Spring Boot-based microservices are specified using the <code class="inlineCode">spring.application.name</code> property. This property has been added to each microservice-specific property file in the config repository, in the <code class="inlineCode">config-repo</code> folder.</p>
+    </div>
+    <p class="normal">Getting regular expressions right can be challenging, to say the least. Thankfully, there are several websites that can help. When it comes to using regular expressions together with Fluentd, I recommend using the following site: <a href="https://fluentular.herokuapp.com/"><span class="url">https://fluentular.herokuapp.com/</span></a>.</p>
+    <p class="normal">Now that we have been<a id="_idIndexMarker1406"/> introduced to how Fluentd works and how the configuration file is constructed, we are ready to deploy the EFK stack.</p>
+    <h1 id="_idParaDest-481" class="heading-1">Deploying the EFK stack on Kubernetes</h1>
+    <p class="normal">Deploying the EFK <a id="_idIndexMarker1407"/>stack on Kubernetes will be done<a id="_idIndexMarker1408"/> in the same way as we have deployed our own microservices: using Kubernetes manifest files for objects <a id="_idIndexMarker1409"/>such as Deployments, Services, and ConfigMaps.</p>
+    <p class="normal">The deployment of the EFK stack is divided into three parts:</p>
+    <ul>
+      <li class="bulletList">Deploying Elasticsearch and Kibana</li>
+      <li class="bulletList">Deploying Fluentd</li>
+      <li class="bulletList">Setting up access to Elasticsearch and Kibana</li>
+    </ul>
+    <p class="normal">But first, we need to build and deploy our own microservices.</p>
+    <h2 id="_idParaDest-482" class="heading-2">Building and deploying our microservices</h2>
+    <p class="normal">Building, deploying, and verifying the deployment using the <code class="inlineCode">test-em-all.bash</code> test script is done in the same way as it was done in <em class="chapterRef">Chapter 18</em>, <em class="italic">Using a Service Mesh to Improve Observability and Management</em>, in the <em class="italic">Running commands to create the service mesh</em> section. These<a id="_idIndexMarker1410"/> instructions assume that the cert-manager and Istio are installed as instructed in <em class="chapterRef">Chapters 17</em> and <em class="chapterRef">18</em>.</p>
+    <p class="normal">Run the following <a id="_idIndexMarker1411"/>commands to get started:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First, build the Docker images from the source with the following commands:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter19
+eval $(minikube docker-env -u)
+./gradlew build
+eval $(minikube docker-env)
+docker-compose build
+</code></pre>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">The <code class="inlineCode">eval $(minikube docker-env -u)</code> command ensures that the <code class="inlineCode">./gradlew build</code> command uses the host’s Docker engine and not the Docker engine in the Minikube instance. The <code class="inlineCode">build</code> command uses Docker to run test containers.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Recreate the <a id="_idIndexMarker1412"/>namespace, <code class="inlineCode">hands-on</code>, and set it as the default namespace:
+        <pre class="programlisting con"><code class="hljs-con">kubectl delete namespace hands-on
+kubectl apply -f kubernetes/hands-on-namespace.yml
+kubectl config set-context $(kubectl config current-context) --namespace=hands-on 
+</code></pre>
+      </li>
+      <li class="numberedList">Resolve the Helm <a id="_idIndexMarker1413"/>chart dependencies with the following commands. <p class="normal">First, we update the dependencies in the <code class="inlineCode">components</code> folder:</p>
+        <pre class="programlisting con"><code class="hljs-con">for f in kubernetes/helm/components/*; do helm dep up $f; done
+</code></pre>
+        <p class="normal">Next, we update the dependencies in the <code class="inlineCode">environments</code> folder:</p>
+        <pre class="programlisting con"><code class="hljs-con">for f in kubernetes/helm/environments/*; do helm dep up $f; done
+</code></pre>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Deploy the system landscape using Helm and wait for all deployments to complete:
+        <pre class="programlisting con"><code class="hljs-con">helm install hands-on-dev-env \
+  kubernetes/helm/environments/dev-env \
+  -n hands-on --wait
+</code></pre>
+      </li>
+      <li class="numberedList">Start the Minikube tunnel in a separate terminal window, if it’s not already running (see <em class="chapterRef">Chapter 18</em>, the <em class="italic">Setting up access to Istio services</em> section, for a recap, if required):
+        <pre class="programlisting con"><code class="hljs-con">minikube tunnel
+</code></pre>
+        <p class="normal">Remember that this command requires that your user has <code class="inlineCode">sudo</code> privileges and that you enter your password during startup. It takes a couple of seconds before the command asks for the password, so it is easy to miss!</p>
+        <ol class="numberedList" style="list-style-type: decimal;">
+          <li class="numberedList" value="6">Run the normal <a id="_idIndexMarker1414"/>tests to verify the deployment with the following command:
+            <pre class="programlisting con"><code class="hljs-con">./test-em-all.bash
+</code></pre>
+          </li>
+        </ol>
+        <p class="normal">Expect the output to<a id="_idIndexMarker1415"/> be similar to what we saw in the previous chapters:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_19_02.png" alt="A screenshot of a computer  Description automatically generated" width="812" height="284"/></figure>
+        <p class="packt_figref">Figure 19.2: Tests running fine</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="7">You can also try out the APIs manually by running the following commands:
+        <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN=$(curl -k https://writer:secret-writer@minikube.me/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+echo ACCESS_TOKEN=$ACCESS_TOKEN
+curl -ks https://minikube.me/product-composite/1 -H "Authorization: Bearer $ACCESS_TOKEN" | jq .productId
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Expect the requested product ID, <code class="inlineCode">1</code>, in the response.</p>
+    <p class="normal">With the microservices <a id="_idIndexMarker1416"/>deployed, we<a id="_idIndexMarker1417"/> can move on and deploy Elasticsearch and Kibana!</p>
+    <h2 id="_idParaDest-483" class="heading-2">Deploying Elasticsearch and Kibana</h2>
+    <p class="normal">We will deploy Elasticsearch <a id="_idIndexMarker1418"/>and Kibana to their own namespace, <code class="inlineCode">logging</code>. Both Elasticsearch and Kibana will be deployed for development and test usage using a Kubernetes Deployment and Service object. The services will expose the <a id="_idIndexMarker1419"/>standard ports for Elasticsearch and Kibana internally in the Kubernetes cluster, that is, port <code class="inlineCode">9200</code> for Elasticsearch and port <code class="inlineCode">5601</code> for Kibana.</p>
+    <p class="normal">To provide external HTTP access to Elasticsearch and Kibana, we will create Istio objects as we did in <em class="chapterRef">Chapter 18</em><em class="italic">, Using a Service Mesh to Improve Observability and Management</em>, for Kiali and Jaeger – see the <em class="italic">Setting up access to Istio services</em> section for a recap, if required. This will result in Elasticsearch and Kibana being available at <a href="https://elasticsearch.minikube.me"><span class="url">https://elasticsearch.minikube.me</span></a> and <a href="https://kibana.minikube.me"><span class="url">https://kibana.minikube.me</span></a>.</p>
+    <p class="normal">The manifest files have been packaged in a Helm chart in the <code class="inlineCode">kubernetes/helm/environments/logging</code> folder.</p>
+    <div class="packt_tip">
+      <p class="normal">For recommended deployment options for Elasticsearch and Kibana in a production environment on Kubernetes, see <a href="https://www.elastic.co/elastic-cloud-kubernetes"><span class="url">https://www.elastic.co/elastic-cloud-kubernetes</span></a>.</p>
+    </div>
+    <p class="normal">We will use the latest versions that were available for version 7 when this chapter was written:</p>
+    <ul>
+      <li class="bulletList">Elasticsearch version 7.17.10</li>
+      <li class="bulletList">Kibana version 7.17.10</li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">Elasticsearch version 8 is not used, due to limited support in the Fluentd plugin for Elasticsearch; see <a href="https://github.com/uken/fluent-plugin-elasticsearch/issues/1005"><span class="url">https://github.com/uken/fluent-plugin-elasticsearch/issues/1005</span></a>. The base Docker image, <code class="inlineCode">fluentd-kubernetes-daemonset</code>, that we will use in the following section to install Fluentd uses this plugin.</p>
+    </div>
+    <p class="normal">Before we deploy, let’s<a id="_idIndexMarker1420"/> look at the most interesting parts of the manifest files<a id="_idIndexMarker1421"/> in the Helm chart’s <code class="inlineCode">template</code> folder.</p>
+    <h3 id="_idParaDest-484" class="heading-3">A walkthrough of the manifest files</h3>
+    <p class="normal">The manifest file for<a id="_idIndexMarker1422"/> Elasticsearch, <code class="inlineCode">elasticsearch.yml</code>, contains a standard Kubernetes Deployment and Service object that we have seen multiple times before, for example, in <em class="chapterRef">Chapter 15</em>, <em class="italic">Introduction to Kubernetes</em>, in the <em class="italic">Trying out a sample deployment</em> section. The most interesting part of the manifest file is the following:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Deployment</span>
+<span class="hljs-string">...</span>
+      <span class="hljs-attr">containers:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">elasticsearch</span>
+        <span class="hljs-attr">image:</span> <span class="hljs-string">docker.elastic.co/elasticsearch/elasticsearch:7.17.10</span>
+        <span class="hljs-attr">resources:</span>
+          <span class="hljs-attr">limits:</span>
+            <span class="hljs-attr">cpu:</span> <span class="hljs-string">500m</span>
+            <span class="hljs-attr">memory:</span> <span class="hljs-string">2Gi</span>
+          <span class="hljs-attr">requests:</span>
+            <span class="hljs-attr">cpu:</span> <span class="hljs-string">500m</span>
+            <span class="hljs-attr">memory:</span> <span class="hljs-string">2Gi</span>
+</code></pre>
+    <p class="normal">Let’s explain some of this manifest:</p>
+    <ul>
+      <li class="bulletList">We use an official Docker image from Elastic that’s available at <code class="inlineCode">docker.elastic.co</code>. The version is set to <code class="inlineCode">7.17.10</code>.</li>
+      <li class="bulletList">The Elasticsearch container is allowed to allocate a relatively large amount of memory – 2 GB – to be able to run queries with good performance. The more memory, the better the performance.</li>
+    </ul>
+    <p class="normal">The manifest file for Kibana, <code class="inlineCode">kibana.yml</code>, also contains a standard Kubernetes Deployment and Service object. The most interesting parts in the manifest file are as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">Deployment</span>
+<span class="hljs-string">...</span>
+      <span class="hljs-attr">containers:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">kibana</span>
+        <span class="hljs-attr">image:</span> <span class="hljs-string">docker.elastic.co/kibana/kibana:7.17.10</span>
+        <span class="hljs-attr">env:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">ELASTICSEARCH_URL</span>
+          <span class="hljs-attr">value:</span> <span class="hljs-string">http://elasticsearch:9200</span>
+</code></pre>
+    <p class="normal">Let’s explain some of the manifest:</p>
+    <ul>
+      <li class="bulletList">For Kibana, we <a id="_idIndexMarker1423"/>also use an official Docker image from Elastic that’s available at <code class="inlineCode">docker.elastic.co</code>. The version is set to <code class="inlineCode">7.17.10</code>.</li>
+      <li class="bulletList">To connect Kibana with the Elasticsearch Pod, an environment variable, <code class="inlineCode">ELASTICSEARCH_URL</code>, is defined to specify the address to the Elasticsearch service, <code class="inlineCode">http://elasticsearch:9200</code>.</li>
+    </ul>
+    <p class="normal">Finally, the Istio manifests for setting up external access are found in the files <code class="inlineCode">expose-elasticsearch.yml</code> and <code class="inlineCode">expose-kibana.yml</code>. For a recap on how the <code class="inlineCode">Gateway</code>, <code class="inlineCode">VirtualService</code>, and <code class="inlineCode">DestinationRule</code> objects are used, see the section <em class="italic">Creating the service mesh</em> in <em class="chapterRef">Chapter 18</em>. They will provide the following forwarding of external requests:</p>
+    <ul>
+      <li class="bulletList"><a href="https://elasticsearch.minikube.me"><span class="url">https://elasticsearch.minikube.me</span></a> → <code class="inlineCode">http://elasticsearch:9200</code></li>
+      <li class="bulletList"><a href="https://kibana.minikube.me"><span class="url">https://kibana.minikube.me</span></a> → <code class="inlineCode">http://kibana:5601</code></li>
+    </ul>
+    <p class="normal">With these insights, we are ready to perform the deployment of Elasticsearch and Kibana.</p>
+    <h3 id="_idParaDest-485" class="heading-3">Running the deploy commands</h3>
+    <p class="normal">Deploy Elasticsearch <a id="_idIndexMarker1424"/>and Kibana by performing the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To make the deployment steps run faster, prefetch the Docker images for Elasticsearch and Kibana with the following commands:
+        <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env)
+docker pull docker.elastic.co/elasticsearch/elasticsearch:7.17.10
+docker pull docker.elastic.co/kibana/kibana:7.17.10
+</code></pre>
+      </li>
+      <li class="numberedList">Use the Helm chart to create the <code class="inlineCode">logging</code> namespace, deploy Elasticsearch and<a id="_idIndexMarker1425"/> Kibana in it, and wait for the Pods to be ready:
+        <pre class="programlisting con"><code class="hljs-con">helm install logging-hands-on-add-on kubernetes/helm/environments/logging \
+    -n logging --create-namespace --wait
+</code></pre>
+      </li>
+      <li class="numberedList">Verify that Elasticsearch is up and running with the following command:
+        <pre class="programlisting con"><code class="hljs-con">curl https://elasticsearch.minikube.me -sk | jq -r .tagline
+</code></pre>
+        <p class="normal">Expect <code class="inlineCode">You Know, for Search</code> as a response.</p>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">Depending on your hardware, you might need to wait for a minute or two before Elasticsearch responds with this message.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Verify that<a id="_idIndexMarker1426"/> Kibana is up and running with the following command:
+        <pre class="programlisting con"><code class="hljs-con">curl https://kibana.minikube.me \
+  -kLs -o /dev/null -w "%{http_code}\n"
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Expect <code class="inlineCode">200</code> as the response.</p>
+    <div class="packt_tip">
+      <p class="normal">Again, you might need to wait for a minute or two before Kibana is initialized and responds with <code class="inlineCode">200</code>.</p>
+    </div>
+    <p class="normal">With Elasticsearch and Kibana deployed, we can start to deploy Fluentd.</p>
+    <h2 id="_idParaDest-486" class="heading-2">Deploying Fluentd</h2>
+    <p class="normal">Deploying Fluentd is a bit<a id="_idIndexMarker1427"/> more complex compared to deploying Elasticsearch and Kibana. To deploy Fluentd, we will use a Docker image that’s been published by the Fluentd project on Docker Hub, <code class="inlineCode">fluent/fluentd-kubernetes-daemonset</code>, and the sample Kubernetes manifest files from a Fluentd project on GitHub, <code class="inlineCode">fluentd-kubernetes-daemonset</code>. It is located at <a href="https://github.com/fluent/fluentd-kubernetes-daemonset"><span class="url">https://github.com/fluent/fluentd-kubernetes-daemonset</span></a>. As is implied by the name of the project, Fluentd will be deployed as a DaemonSet, running one Pod per Node in the Kubernetes cluster. Each Fluentd Pod is responsible for collecting log output from processes and containers that run on the same Node as the Pod. Since we are using Minikube with a single Node cluster, we will only have one Fluentd Pod.</p>
+    <p class="normal">To handle multiline log records that contain stack traces from exceptions, we will use a third-party Fluentd plugin provided by Google, <code class="inlineCode">fluent-plugin-detect-exceptions</code>, which is available at <a href="https://github.com/GoogleCloudPlatform/fluent-plugin-detect-exceptions"><span class="url">https://github.com/GoogleCloudPlatform/fluent-plugin-detect-exceptions</span></a>. To be able to use this plugin, we <a id="_idIndexMarker1428"/>will build our own Docker image where the <code class="inlineCode">fluent-plugin-detect-exceptions</code> plugin will be installed.</p>
+    <p class="normal">Fluentd’s Docker image, <code class="inlineCode">fluentd-kubernetes-daemonset</code>, will be used as the base image.</p>
+    <p class="normal">We will use the following versions:</p>
+    <ul>
+      <li class="bulletList">Fluentd version 1.4.2</li>
+      <li class="bulletList"><code class="inlineCode">fluent-plugin-detect-exceptions</code> version 0.0.12</li>
+    </ul>
+    <p class="normal">Before we deploy, let’s look at the most interesting parts of the manifest files.</p>
+    <h3 id="_idParaDest-487" class="heading-3">A walkthrough of the manifest files</h3>
+    <p class="normal">The Dockerfile that’s <a id="_idIndexMarker1429"/>used to build the Docker image, <code class="inlineCode">kubernetes/efk/Dockerfile</code>, looks as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code">FROM fluent/fluentd-kubernetes-daemonset:v1.4.2-debian-elasticsearch-1.1
+RUN gem install fluent-plugin-detect-exceptions -v 0.0.12 \
+ &amp;&amp; gem sources --clear-all \
+ &amp;&amp; rm -rf /var/lib/apt/lists/* \
+           /home/fluent/.gem/ruby/2.3.0/cache/*.gem
+</code></pre>
+    <p class="normal">Let’s explain this in detail:</p>
+    <ul>
+      <li class="bulletList">The base image is Fluentd’s Docker image, <code class="inlineCode">fluentd-kubernetes-daemonset</code>. The <code class="inlineCode">v1.4.2-debian-elasticsearch-1.1</code> tag specifies that version 1.4.2 will be used with a package that contains built-in support for sending log records to Elasticsearch. The base Docker image contains the Fluentd configuration files that were mentioned in the <em class="italic">Configuring Fluentd</em> section.</li>
+      <li class="bulletList">The Google plugin, <code class="inlineCode">fluent-plugin-detect-exceptions</code>, is installed using Ruby’s package manager, <code class="inlineCode">gem</code>.</li>
+    </ul>
+    <p class="normal">The manifest file of the DaemonSet, <code class="inlineCode">kubernetes/efk/fluentd-ds.yml</code>, is based on a sample manifest file in the <code class="inlineCode">fluentd-kubernetes-daemonset</code> project, which can be found at <a href="https://github.com/fluent/fluentd-kubernetes-daemonset/blob/master/fluentd-daemonset-elasticsearch.yaml"><span class="url">https://github.com/fluent/fluentd-kubernetes-daemonset/blob/master/fluentd-daemonset-elasticsearch.yaml</span></a>.</p>
+    <p class="normal">This file is a bit <a id="_idIndexMarker1430"/>complex, so let’s go through the most interesting parts separately:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First, here’s the declaration of the DaemonSet:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">apiVersion:</span> <span class="hljs-string">apps/v1</span>
+<span class="hljs-attr">kind:</span> <span class="hljs-string">DaemonSet</span>
+<span class="hljs-attr">metadata:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">fluentd</span>
+  <span class="hljs-attr">namespace:</span> <span class="hljs-string">kube-system</span>
+</code></pre>
+        <p class="normal">The <code class="inlineCode">kind</code> key specifies that this is a DaemonSet. The <code class="inlineCode">namespace</code> key specifies that the DaemonSet will be created in the <code class="inlineCode">kube-system</code> namespace and not in the <code class="inlineCode">logging</code> namespace where Elasticsearch and Kibana are deployed.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">The next part specifies the template for the Pods that are created by the DaemonSet. The most interesting parts are as follows:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spec:</span>
+  <span class="hljs-attr">template:</span>
+    <span class="hljs-attr">spec:</span>
+      <span class="hljs-attr">containers:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">fluentd</span>
+        <span class="hljs-attr">image:</span> <span class="hljs-string">hands-on/fluentd:v1</span>
+        <span class="hljs-attr">env:</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">FLUENT_ELASTICSEARCH_HOST</span>
+            <span class="hljs-attr">value:</span> <span class="hljs-string">"elasticsearch.logging"</span>
+          <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">FLUENT_ELASTICSEARCH_PORT</span>
+            <span class="hljs-attr">value:</span> <span class="hljs-string">"9200"</span>
+</code></pre>
+        <p class="normal">The Docker image that’s used for the Pods is <code class="inlineCode">hands-on/fluentd:v1</code>. We will build this Docker image after walking through the manifest files using the Dockerfile we described previously.</p>
+        <p class="normal">A number of environment variables are supported by the Docker image and are used to customize it. The two most important ones are as follows:</p>
+      </li>
+    </ol>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">FLUENT_ELASTICSEARCH_HOST</code>, which specifies the hostname of the Elasticsearch service, <code class="inlineCode">elasticsearch.logging</code></li>
+      <li class="bulletList"><code class="inlineCode">FLUENT_ELASTICSEARCH_PORT</code>, which specifies the port that’s used to communicate with Elasticsearch, <code class="inlineCode">9200</code></li>
+    </ul>
+    <div class="packt_tip">
+      <p class="normal">Since the Fluentd Pod runs in a different namespace to Elasticsearch, the hostname cannot be specified using its short name, that is, <code class="inlineCode">elasticsearch</code>. Instead, the namespace part of the DNS name must also be specified, that is, <code class="inlineCode">elasticsearch.logging</code>. As an alternative, the <strong class="keyWord">fully qualified domain name</strong> (<strong class="keyWord">FQDN</strong>), <code class="inlineCode">elasticsearch.logging.svc.cluster.local</code>, can also be used. But since the last part of the DNS name, <code class="inlineCode">svc.cluster.local</code>, is shared by all DNS names inside a Kubernetes cluster, it does not need to be specified.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Finally, a number<a id="_idIndexMarker1431"/> of volumes, that is, filesystems, are mapped to the Pod, as follows:
+        <pre class="programlisting code"><code class="hljs-code">        <span class="hljs-attr">volumeMounts:</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">varlog</span>
+          <span class="hljs-attr">mountPath:</span> <span class="hljs-string">/var/log</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">varlibdockercontainers</span>
+          <span class="hljs-attr">mountPath:</span> <span class="hljs-string">/var/lib/docker/containers</span>
+          <span class="hljs-attr">readOnly:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">journal</span>
+          <span class="hljs-attr">mountPath:</span> <span class="hljs-string">/var/log/journal</span>
+          <span class="hljs-attr">readOnly:</span> <span class="hljs-literal">true</span>
+        <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">fluentd-extra-config</span>
+          <span class="hljs-attr">mountPath:</span> <span class="hljs-string">/fluentd/etc/conf.d</span>
+      <span class="hljs-attr">volumes:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">varlog</span>
+        <span class="hljs-attr">hostPath:</span>
+          <span class="hljs-attr">path:</span> <span class="hljs-string">/var/log</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">varlibdockercontainers</span>
+        <span class="hljs-attr">hostPath:</span>
+          <span class="hljs-attr">path:</span> <span class="hljs-string">/var/lib/docker/containers</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">journal</span>
+        <span class="hljs-attr">hostPath:</span>
+          <span class="hljs-attr">path:</span> <span class="hljs-string">/run/log/journal</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-attr">name:</span> <span class="hljs-string">fluentd-extra-config</span>
+        <span class="hljs-attr">configMap:</span>
+          <span class="hljs-attr">name:</span> <span class="hljs-string">"fluentd-hands-on-config"</span>
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Let’s take a look at the source code in detail:</p>
+    <ul>
+      <li class="bulletList">Three folders on the host (that is, the Node) are mapped to the Fluentd Pod. These folders contain the log files that Fluentd will tail and collect log records from. The folders are <code class="inlineCode">/var/log</code>, <code class="inlineCode">/var/lib/docker/containers</code>, and <code class="inlineCode">/run/log/journal</code>.</li>
+      <li class="bulletList">Our own configuration file, which specifies how Fluentd will process log records from our microservices, is mapped using a ConfigMap called <code class="inlineCode">fluentd-hands-on-config</code> to the <code class="inlineCode">/fluentd/etc/conf.d</code> folder. The base Docker image configures Fluentd to include any configuration file that’s found in the <code class="inlineCode">/fluentd/etc/conf.d</code> folder. See the <em class="italic">Configuring Fluentd</em> section for details.</li>
+    </ul>
+    <p class="normal">For the full source code of the manifest file for the DaemonSet, see the <code class="inlineCode">kubernetes/efk/fluentd-ds.yml</code> file.</p>
+    <p class="normal">Now that we’ve <a id="_idIndexMarker1432"/>walked through everything, we are ready to perform the deployment of Fluentd.</p>
+    <h3 id="_idParaDest-488" class="heading-3">Running the deploy commands</h3>
+    <p class="normal">To deploy Fluentd, we have to <a id="_idIndexMarker1433"/>build the Docker image, create the ConfigMap, and finally deploy the DaemonSet. Run the following commands to perform these steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Build the Docker image and tag it with <code class="inlineCode">hands-on/fluentd:v1</code> using the following command:
+        <pre class="programlisting con"><code class="hljs-con">eval $(minikube docker-env)
+docker build -f kubernetes/efk/Dockerfile -t hands-on/fluentd:v1 kubernetes/efk/
+</code></pre>
+      </li>
+      <li class="numberedList">Create the ConfigMap, deploy Fluentd’s DaemonSet, and wait for the Pod to be ready with the following commands:
+        <pre class="programlisting con"><code class="hljs-con">kubectl apply -f kubernetes/efk/fluentd-hands-on-configmap.yml 
+kubectl apply -f kubernetes/efk/fluentd-ds.yml
+kubectl wait --timeout=120s --for=condition=Ready pod -l app=fluentd -n kube-system
+</code></pre>
+      </li>
+      <li class="numberedList">Verify that the Fluentd Pod is healthy with the following command:
+        <pre class="programlisting con"><code class="hljs-con">kubectl logs -n kube-system -l app=fluentd --tail=-1 | grep "fluentd worker is now running worker"
+</code></pre>
+      
+    <p class="normal">Expect a response of <code class="inlineCode">2023-05-22 14:59:46 +0000 [info]: #0 fluentd worker is now running worker=0</code>.</p></li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">As for Elasticsearch and Kibana, you might need to wait for a minute or two before Fluentd responds with this message.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Fluentd will start to collect a considerable number of log records from the various containers<a id="_idIndexMarker1434"/> in the Minikube instance. After a minute or so, you can ask Elasticsearch how many log records have been collected with the following command:
+        <pre class="programlisting con"><code class="hljs-con">curl https://elasticsearch.minikube.me/_all/_count -sk | jq .count
+</code></pre>
+      </li>
+      <li class="numberedList">The command can be a bit slow the first time it is executed but should return a total count of several thousands of log records. In my case, it returned <code class="inlineCode">55607</code>.</li>
+    </ol>
+    <p class="normal">This completes the deployment of the EFK stack. Now, it’s time to try it out and find out what all the collected log records are about!</p>
+    <h1 id="_idParaDest-489" class="heading-1">Trying out the EFK stack</h1>
+    <p class="normal">The first thing we <a id="_idIndexMarker1435"/>need to do before we can try out the EFK stack is to initialize Kibana so it knows what indices to use in Elasticsearch.</p>
+    <div class="note">
+      <p class="normal">An <strong class="keyWord">index</strong> in Elasticsearch <a id="_idIndexMarker1436"/>corresponds to a <strong class="keyWord">database</strong> in SQL concepts. The SQL<a id="_idIndexMarker1437"/> concepts <strong class="keyWord">table</strong>, <strong class="keyWord">row</strong>, and <strong class="keyWord">column</strong> correspond to <strong class="keyWord">type</strong>, <strong class="keyWord">document</strong>, and <strong class="keyWord">property</strong> in Elasticsearch.</p>
+    </div>
+    <p class="normal">Once that is done, we will try out the following common tasks:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">We will start by analyzing what types of log records Fluentd has collected and stored in Elasticsearch. Kibana has a very useful visualization capability that can be used for this.</li>
+      <li class="numberedList">Next, we will learn how to find all related log records created by the microservices while processing <a id="_idIndexMarker1438"/>an external request. We will use the <strong class="keyWord">trace ID</strong> in the log records as a correlation ID to find related log records.</li>
+      <li class="numberedList">Finally, we will learn how to use <a id="_idIndexMarker1439"/>Kibana to perform <strong class="keyWord">root cause analysis</strong>, finding the actual reason for an error.</li>
+    </ol>
+    <h2 id="_idParaDest-490" class="heading-2">Initializing Kibana</h2>
+    <p class="normal">Before we start to <a id="_idIndexMarker1440"/>use Kibana, we must specify what search indices to use in Elasticsearch and what field in the indices holds the timestamps for the log records.</p>
+    <div class="packt_tip">
+      <p class="normal">Just a quick reminder that we are using a certificate created by our own CA, meaning that it is not trusted by web browsers! For a recap on how to make web browsers accept our certificate, see the <em class="italic">Observing the service mesh</em> section of <em class="chapterRef">Chapter 18</em>.</p>
+    </div>
+    <p class="normal">Perform the following steps to initialize Kibana:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Open Kibana’s web UI using the <a href="https://kibana.minikube.me"><span class="url">https://kibana.minikube.me</span></a> URL in a web browser.</li>
+      <li class="numberedList">On the <strong class="screenText">Welcome home</strong> page, click on the hamburger menu <strong class="screenText">≡</strong> (three horizontal lines) in the upper-left corner, and click on <strong class="screenText">Stack Management</strong> at the bottom of the menu to the left. </li>
+      <li class="numberedList">In the <strong class="screenText">Management</strong> menu, go to the bottom and select <strong class="screenText">Index Patterns</strong>.</li>
+      <li class="numberedList">Click on the button named <strong class="screenText">Create index pattern</strong>.</li>
+      <li class="numberedList">Enter <code class="inlineCode">logstash-*</code> as the index pattern name and click on the <strong class="screenText">Next Step</strong> button.</li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">Indices are, by default, named <code class="inlineCode">logstash</code> for historical reasons, even though Fluentd is used for log collection.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="6">Click on the drop-down list for the <strong class="screenText">Timestamp field</strong> and select the only available field, <code class="inlineCode">@timestamp</code>.</li>
+      <li class="numberedList">Click on the <strong class="screenText">Create index pattern</strong> button.</li>
+    </ol>
+    <p class="normal">Kibana will show a page that summarizes the fields that are available in the selected indices.</p>
+    <p class="normal">With Kibana initialized, we are ready to examine the collected log records.</p>
+    <h2 id="_idParaDest-491" class="heading-2">Analyzing the log records</h2>
+    <p class="normal">From the deployment of Fluentd, we know that it immediately started to collect a significant number of log records. So, the first thing we need to do is get an understanding of what <a id="_idIndexMarker1441"/>types of log records Fluentd has collected and stored in Elasticsearch.</p>
+    <p class="normal">We will use Kibana’s visualization feature to divide the log records by the Kubernetes namespace and then ask Kibana to show us how the log records are divided by the type of container within each namespace. A pie chart is a suitable chart type for this type of analysis. Perform the following steps to create a pie chart:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">In Kibana’s web UI, click on the hamburger menu again and select <strong class="screenText">Visualize Library</strong> under <strong class="screenText">Analytics</strong> in the menu.</li>
+      <li class="numberedList">Click on the <strong class="screenText">Create new visualization</strong> button and select the <strong class="screenText">Lens</strong> type on the next page. A web page like the following will be displayed:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_03.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="545"/></figure>
+    <p class="packt_figref">Figure 19.3: Starting to analyze log records in Kibana</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Verify that <strong class="screenText">logstash-*</strong> is the selected index pattern in the top-left drop-down menu.</li>
+      <li class="numberedList">In the <strong class="screenText">Bar vertical stacked</strong> drop-down menu next to the index pattern, select <strong class="screenText">Pie</strong> as the visualization type.</li>
+      <li class="numberedList">In the time <a id="_idIndexMarker1442"/>picker (a date interval selector) above the pie chart, set a date interval large enough to cover log records of interest (set to the <strong class="screenText">Last 15 minutes</strong> in the following screenshot). Click on its calendar icon to adjust the time interval.</li>
+      <li class="numberedList">In the field named <strong class="screenText">Search field names</strong> below the index pattern, enter <code class="inlineCode">kubernetes.namespace_name.keyword</code>.</li>
+      <li class="numberedList">Under the <strong class="screenText">Available fields</strong> list, the field <strong class="screenText">kubernetes.namespace_name.keyword</strong> is now present. Drag this field into the big box in the middle of the page, named <strong class="screenText">Drop some fields here to start</strong>. Kibana will immediately start to analyze log records and render a pie chart divided<a id="_idIndexMarker1443"/> into Kubernetes namespaces. <p class="numberedList">In my case, it looks like:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_19_04.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="528"/></figure>
+        <p class="packt_figref">Figure 19.4: Kibana analysis of log records per Kubernetes namespace</p>
+        <p class="normal">We can see that the log records are divided into the Namespaces we have been working with in the previous chapters: <code class="inlineCode">kube-system</code>, <code class="inlineCode">istio-system</code>, <code class="inlineCode">logging</code>, and our own <code class="inlineCode">hands-on</code> Namespace. To see what containers have created the log records per Namespace, we need to add a second field.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="8">In the <strong class="screenText">Search field names</strong> field, enter <code class="inlineCode">kubernetes.container_name.keyword</code>.</li>
+      <li class="numberedList">In the <strong class="screenText">Available fields</strong> list, the field <code class="inlineCode">kubernetes.container_name.keyword</code> is now present. Drag this field into the big box in the middle of the page showing the pie chart. Kibana will immediately start to analyze log records and render a pie chart divided by Kubernetes namespace and container name. </li>
+      <li class="numberedList">In the result of <em class="italic">step 9</em>, we can see a lot of log records coming from <code class="inlineCode">coredns</code>, 67% in my case. Since we are not particularly interested in these log records, we<a id="_idIndexMarker1444"/> can remove them by adding a filter with the following steps:<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1">Click on <strong class="screenText">+ Add filter</strong> (in the top-left corner).</li>
+          <li class="alphabeticList">Select the <strong class="screenText">Field</strong> <code class="inlineCode">kubernetes.container_name.keyword</code> and the <strong class="screenText">is not -</strong><code class="inlineCode"> </code><strong class="screenText">Operator</strong>. Finally, enter the <strong class="screenText">Value</strong> <code class="inlineCode">coredns</code> and click on the <strong class="screenText">Save</strong> button.</li>
+        </ol>
+      </li>
+      <li class="numberedList">In my case, the rendered pie chart now looks like this: <figure class="mediaobject"><img src="../Images/B19825_19_05.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="688"/></figure>
+        <p class="packt_figref">Figure 19.5: Kibana analysis of log records per namespace and container</p>
+        <p class="normal">Here, we can find the log records from our microservices. Most of the log records come from the <code class="inlineCode">review</code> and <code class="inlineCode">recommendation</code> microservices. The <code class="inlineCode">product</code> and <code class="inlineCode">product-composite</code> microservices can be found under the <strong class="screenText">other</strong> section of the pie chart.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="12">Wrap up this<a id="_idIndexMarker1445"/> introduction to how to analyze what types of log records we have collected by saving this pie chart in a dashboard. Click on the <strong class="screenText">Save</strong> button in the top-right corner.</li>
+      <li class="numberedList">On the page named <strong class="screenText">Save Lens visualization</strong>, do the following:<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1">Give it a <strong class="screenText">Title</strong>, for example, <code class="inlineCode">hands-on-visualization</code>.</li>
+          <li class="alphabeticList">Enter a <strong class="screenText">Description</strong>, for example, <code class="inlineCode">This is my first visualization in Kibana</code>.</li>
+          <li class="alphabeticList">In the <strong class="screenText">Add to dashboard </strong>box, select <strong class="screenText">New</strong>. The page should look like this:</li>
+        </ol>
+      </li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_06.png" alt="A screenshot of a computer  Description automatically generated" width="812" height="608"/></figure>
+    <p class="packt_figref">Figure 19.6: Creating a dashboard in Kibana</p>
+    <ol class="alphabeticList" style="list-style-type: lower-alpha;">
+      <li class="alphabeticList" value="4">Click on the<a id="_idIndexMarker1446"/> button named <strong class="screenText">Save and go to Dashboard</strong>. A dashboard like the following should be presented:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_07.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="641"/></figure>
+    <p class="packt_figref">Figure 19.7: The new dashboard in Kibana</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="14">Click on the <strong class="screenText">Save</strong> button in the top-right corner, give the dashboard a name, for example, <code class="inlineCode">hands-on-dashboard</code>, and click on the <strong class="screenText">Save</strong> button.</li>
+    </ol>
+    <p class="normal">You can now always go back to this dashboard by selecting <strong class="screenText">Dashboard</strong> from<a id="_idIndexMarker1447"/> the hamburger menu.</p>
+    <p class="normal">Kibana contains tons of features for analyzing log records – feel free to try them out on your own. For inspiration, see <a href="https://www.elastic.co/guide/en/kibana/7.17/dashboard.html"><span class="url">https://www.elastic.co/guide/en/kibana/7.17/dashboard.html</span></a>. We will now move on and start to<a id="_idIndexMarker1448"/> locate the actual log records from our microservice.</p>
+    <h2 id="_idParaDest-492" class="heading-2">Discovering the log records from microservices</h2>
+    <p class="normal">In this section, we will learn how<a id="_idIndexMarker1449"/> to utilize one of the main features of centralized logging, finding log records from our microservices. We will also learn how to use the trace ID in the log records to find log records from other microservices that belong to the same process, for example, processing an external request sent to the public API.</p>
+    <p class="normal">Let’s start by creating some log records that we can look up with the help of Kibana. We will use the API to create a product with a unique product ID and then retrieve information about the product. After that, we can try to find the log records that were created when retrieving the product information.</p>
+    <p class="normal">The creation of log records in the microservices has been updated a bit from the previous chapter so that the <code class="inlineCode">product-composite</code> and the three core microservices, <code class="inlineCode">product</code>, <code class="inlineCode">recommendation</code>, and <code class="inlineCode">review</code>, all write a log record with the log level set to <code class="inlineCode">INFO</code> when they begin processing a <code class="inlineCode">get</code> request. Let’s go over the source code that’s been added to each microservice:</p>
+    <ul>
+      <li class="bulletList">Product composite microservice log creation:
+        <pre class="programlisting code"><code class="hljs-code">LOG.info(<span class="hljs-string">"Will get composite product info for product.id={}"</span>, productId);
+</code></pre>
+      </li>
+      <li class="bulletList">Product microservice log creation:
+        <pre class="programlisting code"><code class="hljs-code">LOG.info(<span class="hljs-string">"Will get product info for id={}"</span>, productId);
+</code></pre>
+      </li>
+      <li class="bulletList">Recommendation microservice log creation:
+        <pre class="programlisting code"><code class="hljs-code">LOG.info(<span class="hljs-string">"Will get recommendations for product with id={}"</span>, productId);
+</code></pre>
+      </li>
+      <li class="bulletList">Review microservice log creation:
+        <pre class="programlisting code"><code class="hljs-code">LOG.info(<span class="hljs-string">"Will get reviews for product with id={}"</span>, productId);
+</code></pre>
+      </li>
+    </ul>
+    <p class="normal">For more details, see the source code in the <code class="inlineCode">microservices</code> folder.</p>
+    <p class="normal">Perform the following steps to use the API to create log records and, after that, use Kibana to look up the log records:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Get an access token with the following command:
+        <pre class="programlisting con"><code class="hljs-con">ACCESS_TOKEN=$(curl -k https://writer:secret-writer@minikube.me/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+echo ACCESS_TOKEN=$ACCESS_TOKEN
+</code></pre>
+      </li>
+      <li class="numberedList">As mentioned in<a id="_idIndexMarker1450"/> the introduction to this section, we will start by creating a product with a unique product ID. Create a minimalistic product (without recommendations and reviews) for <code class="inlineCode">"productId" :1234</code> by executing the following command:
+        <pre class="programlisting con"><code class="hljs-con">curl -X POST -k https://minikube.me/product-composite \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  --data '{"productId":1234,"name":"product name 1234","weight":1234}'
+</code></pre>
+        <p class="normal">Read the product with the following command:</p>
+        <pre class="programlisting con"><code class="hljs-con">curl -H "Authorization: Bearer $ACCESS_TOKEN" -k 'https://minikube.me/product-composite/1234' -s | jq .
+</code></pre>
+        <p class="normal">Expect a response similar to the following:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_19_08.png" alt="A screenshot of a computer program  Description automatically generated with medium confidence" width="495" height="261"/></figure>
+        <p class="packt_figref">Figure 19.8: Look up the product with productId = 1234</p>
+        <p class="normal">Hopefully, we<a id="_idIndexMarker1451"/> got some log records created by these API calls. Let’s jump over to Kibana and find out!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">On the Kibana web page, click <strong class="screenText">Discover</strong> from the hamburger menu. You will see something like the following: <figure class="mediaobject"><img src="../Images/B19825_19_09.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="636"/></figure>
+        <p class="packt_figref">Figure 19.9: Kibana web UI with its major parts</p>
+        <p class="normal">In the top-left <a id="_idIndexMarker1452"/>corner, we can see that Kibana has found <strong class="screenText">5,350</strong> log records. The time picker shows that they are from the <strong class="screenText">Last 15 minutes</strong>. In the histogram, we can see how the log records are spread out over time. Below the histogram is a table showing the most recent log events that were found by the query.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">If you want to change the time interval, you can use the time picker. Click on its calendar icon to adjust the time interval.</li>
+      <li class="numberedList">To get a better view of the content in the log records, add some fields from the log records as columns in the table under the histogram.</li>
+      <li class="numberedList">To be able to see all available fields, click on the down arrow to the right of the <strong class="screenText">Filter by type</strong> label, and unselect <strong class="screenText">Hide empty fields</strong>.</li>
+      <li class="numberedList">Select the fields from the list of <strong class="screenText">Available fields</strong> to the left. Scroll down until the field is found. To find the fields more easily, use the field named <strong class="screenText">Search field names</strong> to filter the list of available fields. <p class="normal">Hold the cursor<a id="_idIndexMarker1453"/> over the field and a <strong class="keyWord">+</strong> button will appear (a white cross in a blue circle); click on it to add the field as a column in the table. Select the following fields, in order:</p>
+        <ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1"><code class="inlineCode">spring.level</code>, the log level</li>
+          <li class="alphabeticList"><code class="inlineCode">kubernetes.namespace_name</code>, the Kubernetes namespace</li>
+          <li class="alphabeticList"><code class="inlineCode">kubernetes.container_name</code>, the name of the container</li>
+          <li class="alphabeticList"><code class="inlineCode">spring.trace</code>, the trace ID used for distributed tracing</li>
+          <li class="alphabeticList"><code class="inlineCode">log</code>, the actual log message</li>
+        </ol>
+        <p class="normal">To save some space, you can hide the list of fields by clicking on the collapse icon next to the index pattern field (containing the text <code class="inlineCode">logstash-*</code>).</p>
+        <p class="normal">The web page should look something like the following:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_19_10.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="567"/></figure>
+        <p class="packt_figref">Figure 19.10: Kibana web UI showing log records</p>
+        <p class="normal">The table now contains information that is of interest regarding the log records!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="8">To find log records from the call to the <code class="inlineCode">GET</code> API, we can ask Kibana to find log records where the log field contains the text <code class="inlineCode">product.id=1234</code>. This matches the log<a id="_idIndexMarker1454"/> output from the <code class="inlineCode">product-composite</code> microservice that was shown previously. <p class="normal">This can be done by entering <code class="inlineCode">log:"product.id=1234"</code> in the top-left <strong class="screenText">Search</strong> field and clicking on the <strong class="screenText">Update</strong> button (this button can also be named <strong class="screenText">Refresh</strong>). Expect one log record to be found:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_19_11.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="87"/></figure>
+        <p class="packt_figref">Figure 19.11: Kibana web UI showing a log record for productId = 1234</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="9">Verify that the timestamp<a id="_idIndexMarker1455"/> is from when you called the <code class="inlineCode">GET</code> API and verify that the name of the container that created the log record is <code class="inlineCode">product-composite</code>, that is, verify that the log record was sent by the product composite microservice.</li>
+      <li class="numberedList">Now, we want to see the related log records from the other microservices that participated in the process of returning information about the product with product ID <code class="inlineCode">1234</code>. In other words, we want to find log records with the same <strong class="keyWord">trace ID</strong> as that of the log record we found. <p class="numberedList">To do this, place the cursor over the <code class="inlineCode">spring.trace</code> field for the log record. Two small magnifying glasses will be shown to the right of the field, one with a <strong class="keyWord">+</strong> sign and one with a <strong class="keyWord">-</strong> sign. Click on the magnifying glass with the <strong class="screenText">+</strong> sign to filter on the trace ID.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="11">Clear the <strong class="screenText">Search</strong> field so that the only search criterion is the filter of the trace field. Then, click <a id="_idIndexMarker1456"/>on the <strong class="screenText">Update</strong> button to see the result. Expect a response like the following: <figure class="mediaobject"><img src="../Images/B19825_19_12.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="202"/></figure>
+        <p class="packt_figref">Figure 19.12: Kibana web UI showing log records for a trace ID</p>
+        <p class="normal">We can see some detailed debug messages that clutter the view; let’s get rid of them!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="12">Place the cursor over a <strong class="screenText">DEBUG</strong> value and click on the magnifying glass with the <strong class="keyWord">–</strong> sign to filter out log records with the log level set to <strong class="screenText">DEBUG</strong>.</li>
+      <li class="numberedList">We should now be able to see the four expected log records, one for each microservice involved in the lookup of product information for the product with product ID <code class="inlineCode">1234</code>:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_13.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="203"/></figure>
+    <p class="packt_figref">Figure 19.13: Kibana web UI showing log records for a trace ID with log level = INFO</p>
+    <p class="normal">Also, note that the filters that were applied included the trace ID but excluded log records with the log level set to <strong class="screenText">DEBUG</strong>.</p>
+    <p class="normal">Now that we know how to<a id="_idIndexMarker1457"/> find the expected log records, we are ready to take the next step. This will be to learn how to find unexpected log records, that is, error messages, and how to perform root cause analysis to find the reason for these error messages.</p>
+    <h2 id="_idParaDest-493" class="heading-2">Performing root cause analyses</h2>
+    <p class="normal">One of the<a id="_idIndexMarker1458"/> most important features of centralized logging is that it makes it possible to analyze errors using log records from many sources and, based on that, perform root cause analysis, finding the actual reason for the error message.</p>
+    <p class="normal">In this section, we will simulate an error and see how we can find information about it all the way down to the line of source code that caused the error in one of the microservices in the system landscape. To simulate an error, we will reuse the fault parameter we introduced in <em class="chapterRef">Chapter 13</em>, <em class="italic">Improving Resilience Using Resilience4j</em>, in the <em class="italic">Adding programmable delays and random errors</em> section. We can use this to force the <code class="inlineCode">product</code> microservice to throw an exception. Perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Run the following command to generate a fault in the <code class="inlineCode">product</code> microservice<a id="_idIndexMarker1459"/> while searching for product information on the product with product ID <code class="inlineCode">1234</code>:
+        <pre class="programlisting con"><code class="hljs-con">curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://minikube.me/product-composite/1234?faultPercent=100 -s | jq .
+</code></pre>
+        <p class="normal">Expect the following error in response:</p>
+        <figure class="mediaobject"><img src="../Images/B19825_19_14.png" alt="A picture containing text, screenshot, software, multimedia  Description automatically generated" width="552" height="232"/></figure>
+        <p class="packt_figref">Figure 19.14: A request that caused an error in the processing</p>
+        <p class="normal">Now, we must pretend that we have no clue about the reason for this error! Otherwise, the root cause analysis wouldn’t be very exciting, right?</p>
+        <p class="normal">Let’s assume that we work in a support organization and have been asked to investigate a problem that just occurred when an end user tried to look up information regarding a product with product ID <code class="inlineCode">1234</code> but got an error message saying “<code class="inlineCode">500 Internal Server Error</code>" in response.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">Before we start to analyze the problem, let’s delete the previous search filters in the Kibana web UI so that we can start from scratch. For each filter we defined in <a id="_idIndexMarker1460"/>the previous section, click on its close icon (an <strong class="keyWord">x</strong>) to remove it.</li>
+      <li class="numberedList">Start by using the time picker to select a time interval that includes the point in time when the problem occurred. In my case, 15 minutes is sufficient.</li>
+      <li class="numberedList">Select log records belonging to our namespace, <code class="inlineCode">hands-on</code>. This can be done by the following steps:<ol class="alphabeticList" style="list-style-type: lower-alpha;">
+          <li class="alphabeticList" value="1">Expand the list of fields to the left, by clicking on the hamburger icon (<strong class="screenText">≡</strong>) in the top-left corner. </li>
+          <li class="alphabeticList">Click on the field <strong class="screenText">kubernetes.namespace_name</strong> in the list of <strong class="screenText">Selected fields</strong>. A list of the top five namespaces is shown.</li>
+          <li class="alphabeticList">Click on the <strong class="screenText">+</strong> sign after the <strong class="screenText">hands-on</strong> namespace.</li>
+        </ol>
+      </li>
+      <li class="numberedList">Next, search for log records with the log level set to <strong class="screenText">WARN</strong> within this time frame where the log message mentions product ID <code class="inlineCode">1234</code>. This can be done by clicking on the <code class="inlineCode">spring.level</code> field in the list of selected fields. When you click on this field, its most used values will be displayed under it. Filter on the <strong class="screenText">WARN</strong> value by clicking on its <strong class="screenText">+</strong> sign. Kibana will now show log records within the selected time frame with their log level set to <strong class="screenText">WARN</strong> from the <strong class="screenText">hands-on</strong> namespace, like this: <figure class="mediaobject"><img src="../Images/B19825_19_15.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="359"/></figure>
+        <p class="packt_figref">Figure 19.15: Kiali web UI, showing log records that report ERRORs</p>
+        <p class="normal">We can see a number of error messages related to product ID <code class="inlineCode">1234</code>. The top log entries have the same trace ID, so this seems like a trace ID of interest to use for further investigation. The first log entry also contains the text reported by the end user <strong class="screenText">500</strong> and <strong class="screenText">Internal Server Error</strong>, and the error message <strong class="screenText">Something went wrong…</strong>, which probably has to <a id="_idIndexMarker1461"/>do with the root cause of the error.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="6">Filter on the trace ID of the first log record as we did in the previous section.</li>
+      <li class="numberedList">Remove the filter of the <code class="inlineCode">WARN</code> log level to be able to see all the records belonging to this trace ID. Expect Kibana to respond with a lot of log records looking something like this: <figure class="mediaobject"><img src="../Images/B19825_19_16.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="421"/></figure>
+        <p class="packt_figref">Figure 19.16: Kiali web UI, looking for the root cause</p>
+        <p class="normal">Unfortunately, we cannot find any stack trace identifying the root cause by using trace IDs. This is due to a limitation in the Fluentd plugin we use for collecting<a id="_idIndexMarker1462"/> multiline exceptions, <code class="inlineCode">fluent-plugin-detect-exceptions</code>. It cannot relate stack traces to the trace ID that was used. Instead, we can use a feature in Kibana to find surrounding log records that have occurred near in time to a specific log record.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="8">Expand the log record that says <strong class="screenText">Error body: {… status”:500,”error”:”Internal Server Error”,”message”:”Something went wrong...”…}</strong> using the arrow to the left of the log record. Detailed information about this specific log record will be revealed:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_17.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="251"/></figure>
+    <p class="packt_figref">Figure 19.17: Kiali web UI, expanding the log record with the root cause log message</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="9">There is also a link <a id="_idIndexMarker1463"/>named <strong class="screenText">View surrounding documents</strong>; click on it to see nearby log records. Scroll down to the bottom of the page to find a <strong class="screenText">Load</strong> field where the number of records can be specified. Increase the default value, from 5 to 10. Expect a web page like the following:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_18.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="520"/></figure>
+    <p class="packt_figref">Figure 19.18: Kiali web UI, the root cause found</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="10">The third log record below the expanded log record contains the stack trace for the error message <strong class="screenText">Something went wrong...</strong>. This error message looks interesting. It was logged by the <code class="inlineCode">product</code> microservice just five milliseconds before the expanded log record. They seem to be related! The<a id="_idIndexMarker1464"/> stack trace in that log record points to line 104 in <code class="inlineCode">ProductServiceImpl.java</code>. Looking at the source code (see <code class="inlineCode">microservices/product-service/src/main/java/se/magnus/microservices/core/product/services/ProductServiceImpl.java</code>), line 104 looks as follows:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title">RuntimeException</span>(<span class="hljs-string">"Something went wrong..."</span>);
+</code></pre>
+        <p class="normal">This is the root cause of the error. We did know this in advance, but now we have seen how we can navigate to it as well.</p>
+      </li>
+    </ol>
+    <div class="packt_tip">
+      <p class="normal">In this case, the problem is quite simple to resolve; simply omit the <code class="inlineCode">faultPercent</code> parameter in the request to the API. In other cases, resolving the root cause can be much harder to figure out!</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="11">This concludes the root cause analysis. Click on the back button in the web browser to get back to the main page.</li>
+      <li class="numberedList">To be able to reuse the configuration of the search criteria and table layout, its definition can be saved by Kibana. Select, for example, to filter on log records<a id="_idIndexMarker1465"/> from the <code class="inlineCode">hands-on</code> namespace and click on the <strong class="screenText">Save</strong> link in the top-right menu. Give the search definition a name and click on the <strong class="screenText">Save</strong> button. The search definition can be restored when required using the <strong class="screenText">Open</strong> link in the menu.</li>
+    </ol>
+    <p class="normal">This concludes this chapter on using the EFK stack for centralized logging.</p>
+    <h1 id="_idParaDest-494" class="heading-1">Summary</h1>
+    <p class="normal">In this chapter, we learned about the importance of collecting log records from microservices in a system landscape into a common centralized database where analysis and searches of the stored log records can be performed. We used the EFK stack, Elasticsearch, Fluentd, and Kibana, to collect, process, store, analyze, and search for log records.</p>
+    <p class="normal">Fluentd was used to collect log records not only from our microservices but also from the various supporting containers in the Kubernetes cluster. Elasticsearch was used as a text search engine. Together with Kibana, we saw how easy it is to get an understanding of what types of log records we have collected.</p>
+    <p class="normal">We also learned how to use Kibana to perform important tasks such as finding related log records from cooperating microservices and how to perform root cause analysis, finding the real problem for an error message.</p>
+    <p class="normal">Being able to collect and analyze log records in this way is an important capability in a production environment, but these types of activities are always done afterward once the log record has been collected. Another important capability is to be able to monitor the current health of the microservices, collecting and visualizing runtime metrics in terms of the use of hardware resources, response times, and so on. We touched on this subject in the previous chapter, and in the next chapter, we will learn more about monitoring microservices.</p>
+    <h1 id="_idParaDest-495" class="heading-1">Questions</h1>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">A user searched for <code class="inlineCode">ERROR</code> log messages in the <code class="inlineCode">hands-on</code> namespace for the last 30 days using the search criteria shown in the following screenshot, but none were found. Why?</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_19.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="814" height="652"/></figure>
+    <p class="packt_figref">Figure 19.19: Kiali web UI, not showing expected log records</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">A user has found a log record of interest (shown below). How can the user find related log records from this and other microservices, for example, that come from processing an external API request?</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_20.png" alt="A screenshot of a computer  Description automatically generated with medium confidence" width="812" height="573"/></figure>
+    <p class="packt_figref">Figure 19.20: Kiali web UI; how do we find related log records?</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">A user has found a log record that seems to indicate the root cause of a problem that was reported by an end user. How can the user find the stack trace that shows where in the source code the error occurred?</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_19_21.png" alt="A screen shot of a computer  Description automatically generated with low confidence" width="812" height="100"/></figure>
+    <p class="packt_figref">Figure 19.21: Kiali web UI; how do we find the root cause?</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">Why doesn’t the following Fluentd configuration element work?
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-string">&lt;match</span> <span class="hljs-string">kubernetes.**hands-on**&gt;</span>
+  <span class="hljs-string">@type</span> <span class="hljs-string">rewrite_tag_filter</span>
+  <span class="hljs-string">&lt;rule&gt;</span>
+    <span class="hljs-string">key</span> <span class="hljs-string">log</span>
+    <span class="hljs-string">pattern</span> <span class="hljs-string">^(.*)$</span>
+    <span class="hljs-string">tag</span> <span class="hljs-string">spring-boot.${tag}</span>
+  <span class="hljs-string">&lt;/rule&gt;</span>
+<span class="hljs-string">&lt;/match&gt;</span>
+</code></pre>
+      </li>
+      <li class="numberedList">How can you determine whether Elasticsearch is up and running?</li>
+      <li class="numberedList">You suddenly lose connection to Kibana from your web browser. What could have caused this problem?</li>
+    </ol>
+  </div>
+</div>
+</div>
+</body></html>

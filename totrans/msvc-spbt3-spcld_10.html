@@ -1,0 +1,430 @@
+<html><head></head><body>
+<div id="book-content">
+<div id="sbo-rt-content"><div id="_idContainer228" class="Basic-Text-Frame">
+    <h1 class="chapterNumber">10</h1>
+    <h1 id="_idParaDest-255" class="chapterTitle">Using Spring Cloud Gateway to Hide Microservices behind an Edge Server</h1>
+    <p class="normal">In this chapter, we will learn how to use Spring Cloud Gateway as an edge server, to control what APIs are exposed from our microservices-based system landscape. We will see how microservices that have public APIs are made accessible from the outside through the edge server, while microservices that have private APIs are only accessible from the inside of the microservice landscape. In our system landscape, this means that the product composite service and the discovery server, Netflix Eureka, will be exposed through the edge server. The three core services, <code class="inlineCode">product</code>, <code class="inlineCode">recommendation</code>, and <code class="inlineCode">review</code>, will be hidden from the outside.</p>
+    <p class="normal">The following topics will be covered in this chapter:</p>
+    <ul>
+      <li class="bulletList">Adding an edge server to our system landscape</li>
+      <li class="bulletList">Setting up Spring Cloud Gateway, including configuring routing rules</li>
+      <li class="bulletList">Trying out the edge server</li>
+    </ul>
+    <h1 id="_idParaDest-256" class="heading-1">Technical requirements</h1>
+    <p class="normal">For instructions on how to install the tools used in this book and how to access the source code for this book, see:</p>
+    <ul>
+      <li class="bulletList"><em class="chapterRef">Chapter 21</em>, <em class="italic">Installation Instructions for macOS</em></li>
+      <li class="bulletList"><em class="chapterRef">Chapter 22</em>, <em class="italic">Installation Instructions for Microsoft Windows with WSL 2 and Ubuntu</em> </li>
+    </ul>
+    <p class="normal">The code examples in this chapter all come from the source code in <code class="inlineCode">$BOOK_HOME/Chapter10</code>.</p>
+    <p class="normal">If you want to view the changes applied to the source code in this chapter – that is, see what it took to add Spring Cloud Gateway as an edge server to the microservices landscape – you can compare it with the source code for <em class="chapterRef">Chapter 9</em>, <em class="italic">Adding Service Discovery Using Netflix Eureka</em>. </p>
+    <p class="normal">You can use your favorite <code class="inlineCode">diff</code> tool and compare the two folders, <code class="inlineCode">$BOOK_HOME/Chapter09</code> and <code class="inlineCode">$BOOK_HOME/Chapter10</code>.</p>
+    <h1 id="_idParaDest-257" class="heading-1">Adding an edge server to our system landscape</h1>
+    <p class="normal">In <a id="_idIndexMarker663"/>this section, we will see how the edge server <a id="_idIndexMarker664"/>is added to the system landscape and how it affects the way external clients access the public APIs that the microservices expose. All incoming requests will now be routed through the edge server, as illustrated by the following diagram:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_10_01.png" alt="Graphical user interface, diagram, text  Description automatically generated" width="878" height="413"/></figure>
+    <p class="packt_figref">Figure 10.1: Adding an edge server</p>
+    <p class="normal">As <a id="_idIndexMarker665"/>we can see from the preceding <a id="_idIndexMarker666"/>diagram, external clients send all their requests to the edge server. The edge server can route the incoming requests based on the URL path. For example, requests with a URL that starts with <code class="inlineCode">/product-composite/</code> are routed to the product composite microservice, and a request with a URL that starts with <code class="inlineCode">/eureka/</code> is routed to the discovery server based on Netflix Eureka.</p>
+    <div class="packt_tip">
+      <p class="normal">To make the discovery service work with Netflix Eureka, we don’t need to expose it through the edge server. The internal services will communicate directly with Netflix Eureka. The reasons for exposing it are to make its web page and API accessible to an operator that needs to check the status of Netflix Eureka, and to see what instances are currently registered in the discovery service.</p>
+    </div>
+    <p class="normal">In <em class="chapterRef">Chapter 9</em>, <em class="italic">Adding Service Discovery Using Netflix Eureka</em>, we exposed both the <code class="inlineCode">product-composite</code> service and the discovery server, Netflix Eureka, to the outside. When we introduce the edge server in this chapter, this will no longer be the case. This is <a id="_idIndexMarker667"/>implemented by removing the following<a id="_idIndexMarker668"/> port declarations for the two services in the Docker Compose files:</p>
+    <pre class="programlisting gen"><code class="hljs">  <span class="hljs-attr">product-composite:</span>
+    <span class="hljs-attr">build:</span> <span class="hljs-string">microservices/product-composite-service</span>
+    <span class="hljs-attr">ports:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">"8080:8080"</span>
+  <span class="hljs-attr">eureka:</span>
+    <span class="hljs-attr">build:</span> <span class="hljs-string">spring-cloud/eureka-server</span>
+    <span class="hljs-attr">ports:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">"8761:8761"</span>
+</code></pre>
+    <p class="normal">With the edge server introduced, we will learn how to set up an edge server based on Spring Cloud Gateway in the next section.</p>
+    <h1 id="_idParaDest-258" class="heading-1">Setting up Spring Cloud Gateway</h1>
+    <p class="normal">Setting up Spring Cloud <a id="_idIndexMarker669"/>Gateway as an edge server is straightforward and can be done with the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Create a Spring Boot project using Spring Initializr, as described in <em class="chapterRef">Chapter 3</em>, <em class="italic">Creating a Set of Cooperating Microservices</em> – refer to the <em class="italic">Using Spring Initializr to generate skeleton code</em> section.</li>
+      <li class="numberedList">Add a dependency on <code class="inlineCode">spring-cloud-starter-gateway</code>.</li>
+      <li class="numberedList">To be able to locate microservice instances through Netflix Eureka, also add the <code class="inlineCode">spring-cloud-starter-netflix-eureka-client</code> dependency.</li>
+      <li class="numberedList">Add the edge server project to the common build file, <code class="inlineCode">settings.gradle</code>:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">include</span> <span class="hljs-string">':spring-cloud:gateway'</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Add a <code class="inlineCode">Dockerfile</code> with the same content as for the microservices; see the <code class="inlineCode">Dockerfile</code> content in the folder <code class="inlineCode">$BOOK_HOME/Chapter10/microservices</code>.</li>
+      <li class="numberedList">Add the edge server to our three Docker Compose files:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">gateway:</span>
+  <span class="hljs-attr">environment:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">SPRING_PROFILES_ACTIVE=docker</span>
+  <span class="hljs-attr">build:</span> <span class="hljs-string">spring-cloud/gateway</span>
+  <span class="hljs-attr">mem_limit:</span> <span class="hljs-string">512m</span>
+  <span class="hljs-attr">ports:</span>
+    <span class="hljs-bullet">-</span> <span class="hljs-string">"8080:8080"</span>
+</code></pre>
+        <p class="normal">From the preceding code, we can see that the edge server exposes port <code class="inlineCode">8080</code> to the outside of Docker Engine. To control how much memory is required, a memory limit of <code class="inlineCode">512</code> MB is applied to the edge server, in the same way as we did for the other microservices.</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="7">Since the edge server will handle all incoming traffic, we will move the composite health check from the product composite service to the edge server. This is described in the <em class="italic">Adding a composite health check</em> section next.</li>
+      <li class="numberedList">Add configuration for routing rules and more. Since there is a lot to configure, it <a id="_idIndexMarker670"/>is handled in a separate section below, <em class="italic">Configuring a Spring Cloud Gateway</em>.</li>
+    </ol>
+    <p class="normal">You can find the source code for the Spring Cloud Gateway in <code class="inlineCode">$BOOK_HOME/Chapter10/spring-cloud/gateway</code>.</p>
+    <h2 id="_idParaDest-259" class="heading-2">Adding a composite health check</h2>
+    <p class="normal">With an edge <a id="_idIndexMarker671"/>server in place, external health check requests also have to go through the edge server. Therefore, the composite health check that checks the status of all microservices has been moved from the <code class="inlineCode">product-composite</code> service to the edge server. See <em class="chapterRef">Chapter 7</em>, <em class="italic">Developing Reactive Microservices</em> – refer to the <em class="italic">Adding a health API</em> section for implementation details for the composite health check.</p>
+    <p class="normal">The following has been added to the edge server:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">The <code class="inlineCode">HealthCheckConfiguration</code> class has been added, which declares the reactive health contributor:
+        <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-meta">@Bean</span>
+  ReactiveHealthContributor <span class="hljs-title">healthcheckMicroservices</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">final</span> Map&lt;String, ReactiveHealthIndicator&gt; registry = 
+      <span class="hljs-keyword">new</span> <span class="hljs-title">LinkedHashMap</span>&lt;&gt;();
+    registry.put(<span class="hljs-string">"product"</span>,           () -&gt; 
+      getHealth(<span class="hljs-string">"http://product"</span>));
+    registry.put(<span class="hljs-string">"recommendation"</span>,    () -&gt; 
+      getHealth(<span class="hljs-string">"http://recommendation"</span>));
+    registry.put(<span class="hljs-string">"review"</span>,            () -&gt; 
+      getHealth(<span class="hljs-string">"http://review"</span>));
+    registry.put(<span class="hljs-string">"product-composite"</span>, () -&gt; 
+      getHealth(<span class="hljs-string">"http://product-composite"</span>));
+    <span class="hljs-keyword">return</span> CompositeReactiveHealthContributor.fromMap(registry);
+  }
+  <span class="hljs-keyword">private</span> Mono&lt;Health&gt; <span class="hljs-title">getHealth</span><span class="hljs-params">(String baseUrl)</span> {
+    <span class="hljs-type">String</span> <span class="hljs-variable">url</span> <span class="hljs-operator">=</span> baseUrl + <span class="hljs-string">"/actuator/health"</span>;
+    LOG.debug(<span class="hljs-string">"Setting up a call to the Health API on URL: {}"</span>, 
+      url);
+    <span class="hljs-keyword">return</span> webClient.get().uri(url).retrieve()
+      .bodyToMono(String.class)
+      .map(s -&gt; <span class="hljs-keyword">new</span> <span class="hljs-title">Health</span>.Builder().up().build())
+      .onErrorResume(ex -&gt; 
+      Mono.just(<span class="hljs-keyword">new</span> <span class="hljs-title">Health</span>.Builder().down(ex).build()))
+      .log(LOG.getName(), FINE);
+  }
+</code></pre>
+        <p class="normal">From<a id="_idIndexMarker672"/> the preceding code, we can see that a health check for the <code class="inlineCode">product-composite</code> service has been added, instead of the health check used in <em class="chapterRef">Chapter 7</em>, <em class="italic">Developing Reactive Microservices</em>!</p>
+      </li>
+    </ol>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="2">The main application class, <code class="inlineCode">GatewayApplication</code>, declares a <code class="inlineCode">WebClient.Builder</code> bean to be used by the implementation of the health indicator, as follows:
+        <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-meta">@Bean</span>
+  <span class="hljs-meta">@LoadBalanced</span>
+  <span class="hljs-keyword">public</span> WebClient.Builder <span class="hljs-title">loadBalancedWebClientBuilder</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">return</span> WebClient.builder();
+  }
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">From the preceding source code, we can see that <code class="inlineCode">WebClient.builder</code> is annotated with <code class="inlineCode">@LoadBalanced</code>, which makes it aware of microservice instances <a id="_idIndexMarker673"/>registered in the discovery server, Netflix Eureka. Refer to the <em class="italic">Service Discovery with Netflix Eureka in Spring Cloud</em> section in <em class="chapterRef">Chapter 9</em>, <em class="italic">Adding Service Discovery Using Netflix Eureka</em>, for more details.</p>
+    <p class="normal">With a composite health check in place for the edge server, we are ready to look at the configuration that needs to be set up for Spring Cloud Gateway.</p>
+    <h2 id="_idParaDest-260" class="heading-2">Configuring Spring Cloud Gateway</h2>
+    <p class="normal">When it comes to <a id="_idIndexMarker674"/>configuring Spring Cloud Gateway, the most important thing is setting up the routing rules. We also need to set up a few other things in the configuration:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Since Spring Cloud Gateway will use Netflix Eureka to find the microservices it will route traffic to, it must be configured as a Eureka client in the same way as described in <em class="chapterRef">Chapter 9</em>, <em class="italic">Adding Service Discovery Using Netflix Eureka</em> – refer to the <em class="italic">Configuring clients to the Eureka server</em> section.</li>
+      <li class="numberedList">Configure Spring Boot Actuator for development usage, as described in <em class="chapterRef">Chapter 7</em>, <em class="italic">Developing Reactive Microservices</em> – refer to the <em class="italic">Adding a health API</em> section:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">management.endpoint.health.show-details:</span> <span class="hljs-string">"ALWAYS"</span>
+<span class="hljs-attr">management.endpoints.web.exposure.include:</span> <span class="hljs-string">"*"</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Configure log levels so that we can see log messages from interesting parts of the internal processing in Spring Cloud Gateway, for example, how it decides where to route incoming requests to:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">logging:</span>
+  <span class="hljs-attr">level:</span>
+    <span class="hljs-attr">root:</span> <span class="hljs-string">INFO</span>
+    <span class="hljs-string">org.springframework.cloud.gateway.route.</span>
+        <span class="hljs-attr">RouteDefinitionRouteLocator:</span> <span class="hljs-string">INFO</span>
+    <span class="hljs-attr">org.springframework.cloud.gateway:</span> <span class="hljs-string">TRACE</span>
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">For the full <a id="_idIndexMarker675"/>source code, refer to the configuration file, <code class="inlineCode">src/main/resources/application.yml</code>.</p>
+    <h3 id="_idParaDest-261" class="heading-3">Routing rules</h3>
+    <p class="normal">Setting up routing<a id="_idIndexMarker676"/> rules can be done in two ways: programmatically, using a Java DSL, or by configuration. Using a Java DSL to set up routing rules programmatically can be useful in cases where the rules are stored in external storage, such as a database, or are given at runtime, for example, via a RESTful API or a message sent to the gateway. In more static use cases, I find it more convenient to declare the routes in the configuration file, <code class="inlineCode">src/main/resources/application.yml</code>. Separating the routing rules from the Java code makes it possible to update the routing rules without having to deploy a new version of the microservice.</p>
+    <p class="normal">A <strong class="keyWord">route</strong> is defined<a id="_idIndexMarker677"/> by the following:</p>
+    <ul>
+      <li class="bulletList"><strong class="keyWord">Predicates</strong>, which<a id="_idIndexMarker678"/> select a route based on information in the incoming HTTP request</li>
+      <li class="bulletList"><strong class="keyWord">Filters</strong>, which can <a id="_idIndexMarker679"/>modify both the request and/or the response</li>
+      <li class="bulletList">A <strong class="keyWord">destination URI</strong>, which<a id="_idIndexMarker680"/> describes where to send a request</li>
+      <li class="bulletList">An <strong class="keyWord">ID</strong>, that is, the <a id="_idIndexMarker681"/>name of the route</li>
+    </ul>
+    <p class="normal">For a full list of available predicates and filters, refer to the reference documentation: <a href="https://cloud.spring.io/spring-cloud-gateway/single/spring-cloud-gateway.html"><span class="url">https://cloud.spring.io/spring-cloud-gateway/single/spring-cloud-gateway.html</span></a>.</p>
+    <p class="normal">In the following subsections, we will first learn how to route requests to the <code class="inlineCode">product-composite</code> service and the Eureka server. After that, we will see how predicates and filters can be used, even though they are not used in this book elsewhere.</p>
+    <h4 class="heading-4">Routing requests to the product-composite API</h4>
+    <p class="normal">If we, for example, want to route <a id="_idIndexMarker682"/>incoming requests where the URL path starts with <code class="inlineCode">/product-composite/</code> to our <code class="inlineCode">product-composite</code> service, we can specify a routing rule like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spring.cloud.gateway.routes:</span>
+<span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">product-composite</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">lb://product-composite</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/product-composite/**</span>
+</code></pre>
+    <p class="normal">Some points to note from the preceding code:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">id: product-composite</code>: The name of the route is <code class="inlineCode">product-composite</code>.</li>
+      <li class="bulletList"><code class="inlineCode">uri: lb://product-composite</code>: If the route is selected by its predicates, the request will be routed to the service that is named <code class="inlineCode">product-composite</code> in the discovery service, Netflix Eureka. The protocol <code class="inlineCode">lb://</code> is used to direct Spring Cloud Gateway to use the client-side load balancer to look up the destination in the discovery service.</li>
+      <li class="bulletList"><code class="inlineCode">predicates: - Path=/product-composite/**</code> is used to specify what requests this route should match. <code class="inlineCode">**</code> matches zero or more elements in the path.</li>
+    </ul>
+    <p class="normal">To be able to route requests to the <strong class="keyWord">Swagger UI</strong> set up in <em class="chapterRef">Chapter 5</em>, <em class="italic">Adding an API Description Using OpenAPI</em>, an extra route to the <code class="inlineCode">product-composite</code> service is added:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">product-composite-swagger-ui</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">lb://product-composite</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/openapi/**</span>
+</code></pre>
+    <p class="normal">Requests sent to the edge server with a URI starting with <code class="inlineCode">/openapi/</code> will be directed to the <code class="inlineCode">product-composite</code> service.</p>
+    <div class="note">
+      <p class="normal">When the Swagger UI is presented behind an edge server, it must be able to present an OpenAPI Specification of the API that contains the correct server URL – the URL of the edge server instead of the URL of the <code class="inlineCode">product-composite</code> service itself. To enable the <code class="inlineCode">product-composite</code> service to produce a correct server URL in the OpenAPI specification, the following configuration has been added to the <code class="inlineCode">product-composite</code> service:</p>
+      <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">server.forward-headers-strategy:</span> <span class="hljs-string">framework</span>
+</code></pre>
+      <p class="normal">For more details, see <a href="https://springdoc.org/index.html#how-can-i-deploy-springdoc-openapi-ui-behind-a-reverse-proxy"><span class="url">https://springdoc.org/index.html#how-can-i-deploy-springdoc-openapi-ui-behind-a-reverse-proxy</span></a>.</p>
+      <p class="normal">To verify that the correct server URL is set in the OpenAPI specification, the following test has been added to the test script, <code class="inlineCode">test-em-all.bash</code>:</p>
+      <pre class="programlisting code"><code class="hljs-code">  assertCurl 200 <span class="hljs-string">"curl -s  http://</span><span class="hljs-variable">$HOST</span><span class="hljs-string">:</span><span class="hljs-variable">$PORT</span><span class="hljs-string">/</span>
+<span class="hljs-string">    openapi/v3/api-docs"</span>
+  assertEqual <span class="hljs-string">"http://</span><span class="hljs-variable">$HOST</span><span class="hljs-string">:</span><span class="hljs-variable">$PORT</span><span class="hljs-string">"</span> <span class="hljs-string">"</span><span class="hljs-subst">$(echo $RESPONSE </span>
+<span class="hljs-subst">    | jq -r .servers[].url)</span><span class="hljs-string">"</span>
+</code></pre>
+    </div>
+    <h4 class="heading-4">Routing requests to the Eureka server’s API and web page</h4>
+    <p class="normal">Eureka <a id="_idIndexMarker683"/>exposes both an API and a web page for its clients. To provide a clean separation between the API and the web page in Eureka, we will set up routes as follows:</p>
+    <ul>
+      <li class="bulletList">Requests sent to the edge server with the path starting with <code class="inlineCode">/eureka/api/</code> should be handled as a call to the Eureka API.</li>
+      <li class="bulletList">Requests sent to the edge server with the path starting with <code class="inlineCode">/eureka/web/</code> should be handled as a call to the Eureka web page.</li>
+    </ul>
+    <p class="normal">API requests will be routed to <code class="inlineCode">http://${app.eureka-server}:8761/eureka</code>. The routing rule for the Eureka API looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">eureka-api</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">http://${app.eureka-server}:8761</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/eureka/api/{segment}</span>
+  <span class="hljs-attr">filters:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">SetPath=/eureka/{segment}</span>
+</code></pre>
+    <p class="normal">The <code class="inlineCode">{segment}</code> part in the <code class="inlineCode">Path</code> value matches zero or more elements in the path and will be used to replace the <code class="inlineCode">{segment}</code> part in the <code class="inlineCode">SetPath</code> value.</p>
+    <p class="normal">Web page requests will be routed to <code class="inlineCode">http://${app.eureka-server}:8761</code>. The web page will load several web resources, such as <code class="inlineCode">.js</code>, <code class="inlineCode">.css</code>, and <code class="inlineCode">.png</code> files. These requests will <a id="_idIndexMarker684"/>be routed to <code class="inlineCode">http://${app.eureka-server}:8761/eureka</code>. The routing rules for the Eureka web page look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">eureka-web-start</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">http://${app.eureka-server}:8761</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/eureka/web</span>
+  <span class="hljs-attr">filters:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">SetPath=/</span>
+<span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">eureka-web-other</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">http://${app.eureka-server}:8761</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/eureka/**</span>
+</code></pre>
+    <p class="normal">From the preceding configuration, we can take the following notes. The <code class="inlineCode">${app.eureka-server}</code> property is resolved by Spring’s property mechanism, depending on what Spring profile is activated:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">When running the services on the same host without using Docker, for example, for debugging purposes, the property will be translated to <code class="inlineCode">localhost</code> using the <code class="inlineCode">default</code> profile.</li>
+      <li class="numberedList">When running the services as Docker containers, the Netflix Eureka server will run in a container with the DNS name <code class="inlineCode">eureka</code>. Therefore, the property will be translated into <code class="inlineCode">eureka</code> using the <code class="inlineCode">docker</code> profile.</li>
+    </ol>
+    <p class="normal">The relevant parts in the <code class="inlineCode">application.yml</code> file that define this translation look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">app.eureka-server:</span> <span class="hljs-string">localhost</span>
+<span class="hljs-meta">---</span>
+<span class="hljs-attr">spring.config.activate.on-profile:</span> <span class="hljs-string">docker</span>
+<span class="hljs-attr">app.eureka-server:</span> <span class="hljs-string">eureka</span>
+</code></pre>
+    <p class="normal">With this, we <a id="_idIndexMarker685"/>have seen how to route requests to both the <code class="inlineCode">product-composite</code> and the Eureka server. As a final step, let’s see how predicates and filters can be used in Spring Cloud Gateway.</p>
+    <h4 class="heading-4">Routing requests with predicates and filters</h4>
+    <p class="normal">To learn a bit <a id="_idIndexMarker686"/>more about the routing capabilities in Spring Cloud Gateway, we will try <a id="_idIndexMarker687"/>out <strong class="keyWord">host-based routing</strong>, where Spring Cloud Gateway uses the hostname of the incoming request to determine where to route the request. We will use one of my favorite websites for testing HTTP codes: <a href="http://httpstat.us/"><span class="url">http://httpstat.us/</span></a>.</p>
+    <p class="normal">A call to <code class="inlineCode">http://httpstat.us/${CODE}</code> simply returns a response with the <code class="inlineCode">${CODE}</code> HTTP code and a response body, also containing the HTTP code, and a corresponding descriptive text. For example, see the following <code class="inlineCode">curl</code> command:</p>
+    <pre class="programlisting con"><code class="hljs-con">curl http://httpstat.us/200 -i
+</code></pre>
+    <p class="normal">This will return the HTTP code <code class="inlineCode">200</code>, and a response body with the text <code class="inlineCode">200 OK</code>.</p>
+    <p class="normal">Let’s assume that we want to route calls to <code class="inlineCode">http://${hostname}:8080/headerrouting</code> as follows:</p>
+    <ul>
+      <li class="bulletList">Calls to the <code class="inlineCode">i.feel.lucky</code> host should return <code class="inlineCode">200 OK</code></li>
+      <li class="bulletList">Calls to the <code class="inlineCode">im.a.teapot</code> host should return <code class="inlineCode">418 I'm a teapot</code></li>
+      <li class="bulletList">Calls to all other hostnames should return <code class="inlineCode">501 Not Implemented</code></li>
+    </ul>
+    <p class="normal">To implement these routing rules in Spring Cloud Gateway, we can use the <code class="inlineCode">Host</code> route predicate to select requests with specific hostnames, and the <code class="inlineCode">SetPath</code> filter to set the desired HTTP code in the request path. This can be done as follows:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To <a id="_idIndexMarker688"/>make calls to <code class="inlineCode">http://i.feel.lucky:8080/headerrouting</code> return <code class="inlineCode">200 OK</code>, we can set up the following route:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">host_route_200</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">http://httpstat.us</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Host=i.feel.lucky:8080</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/headerrouting/**</span>
+  <span class="hljs-attr">filters:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">SetPath=/200</span>
+</code></pre>
+      </li>
+      <li class="numberedList">To make calls to <code class="inlineCode">http://im.a.teapot:8080/headerrouting</code> return <code class="inlineCode">418 I'm a teapot</code>, we can set up the following route:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">host_route_418</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">http://httpstat.us</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Host=im.a.teapot:8080</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/headerrouting/**</span>
+  <span class="hljs-attr">filters:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">SetPath=/418</span>
+</code></pre>
+      </li>
+      <li class="numberedList">Finally, to <a id="_idIndexMarker689"/>make calls to all other hostnames return <code class="inlineCode">501 Not Implemented</code>, we can set up the following route:
+        <pre class="programlisting code"><code class="hljs-code"><span class="hljs-bullet">-</span> <span class="hljs-attr">id:</span> <span class="hljs-string">host_route_501</span>
+  <span class="hljs-attr">uri:</span> <span class="hljs-string">http://httpstat.us</span>
+  <span class="hljs-attr">predicates:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">Path=/headerrouting/**</span>
+  <span class="hljs-attr">filters:</span>
+  <span class="hljs-bullet">-</span> <span class="hljs-string">SetPath=/501</span>
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">Okay, that was quite a bit of configuration, so let’s now try it out!</p>
+    <h1 id="_idParaDest-262" class="heading-1">Trying out the edge server</h1>
+    <p class="normal">To try out<a id="_idIndexMarker690"/> the edge server, we perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First, build the Docker images with the following commands:
+        <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter10
+./gradlew clean build &amp;&amp; docker-compose build
+</code></pre>
+      </li>
+      <li class="numberedList">Next, start the system landscape in Docker and run the usual tests with the following command:
+        <pre class="programlisting con"><code class="hljs-con">./test-em-all.bash start
+</code></pre>
+      </li>
+      <li class="numberedList">Expect output similar to what we have seen in previous chapters:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_10_02.png" alt="Text  Description automatically generated" width="812" height="297"/></figure>
+    <p class="packt_figref">Figure 10.2: Output from test-em-all.bash</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">From the log output, note the second to last test result, <code class="inlineCode">http://localhost:8080</code>. That is the output from the test that verifies that the server URL in Swagger UI’s OpenAPI specification is correctly rewritten<a id="_idIndexMarker691"/> as the URL of the edge server.</li>
+    </ol>
+    <p class="normal">With the system landscape, including the edge server, up and running, let’s explore the following topics:</p>
+    <ul>
+      <li class="bulletList">Examining what is exposed by the edge server outside of the system landscape running in the Docker engine.</li>
+      <li class="bulletList">Trying out some of the most frequently used routing rules as follows:<ul>
+          <li class="bulletList">Using URL-based routing to call our APIs through the edge server</li>
+          <li class="bulletList">Using URL-based routing to call the Swagger UI through the edge server</li>
+          <li class="bulletList">Using URL-based routing to call Netflix Eureka through the edge server, both using its API and web-based UI</li>
+          <li class="bulletList">Using header-based routing to see how we can route requests based on the hostname in the request</li>
+        </ul>
+      </li>
+    </ul>
+    <h2 id="_idParaDest-263" class="heading-2">Examining what is exposed outside the Docker engine</h2>
+    <p class="normal">To understand what<a id="_idIndexMarker692"/> the edge server exposes to the outside of the system landscape, perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Use the <code class="inlineCode">docker-compose ps</code> command to see which ports are exposed by our services:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose ps gateway eureka product-composite product recommendation review
+</code></pre>
+      </li>
+      <li class="numberedList">As we can see in the following output, only the edge server (named <code class="inlineCode">gateway</code>) exposes its port (<code class="inlineCode">8080</code>) outside the Docker engine:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_10_03.png" alt="Timeline  Description automatically generated with medium confidence" width="812" height="177"/></figure>
+    <p class="packt_figref">Figure 10.3: Output from docker-compose ps</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">If we want to see what routes the edge server has set up, we can use the <code class="inlineCode">/actuator/gateway/routes</code> API. The response from this API is rather verbose. To limit the response to information we are interested in, we can apply a <code class="inlineCode">jq</code> filter. In the following example, the <code class="inlineCode">id</code> of the route and the <code class="inlineCode">uri</code> that the request will be routed to are selected:
+        <pre class="programlisting con"><code class="hljs-con">curl localhost:8080/actuator/gateway/routes -s | jq '.[] | {"\(.route_id)": "\(.uri)"}' | grep -v '{\|}'
+</code></pre>
+      </li>
+      <li class="numberedList">This command will respond with the following:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_10_04.png" alt="Text  Description automatically generated" width="606" height="209"/></figure>
+    <p class="packt_figref">Figure 10.4: Spring Cloud Gateway routing rules</p>
+    <p class="normal">This gives us a good overview of the actual routes configured in the edge server. Now, let’s try out the routes!</p>
+    <h2 id="_idParaDest-264" class="heading-2">Trying out the routing rules</h2>
+    <p class="normal">In this section, we will try out<a id="_idIndexMarker693"/> the edge server and the routes it exposes to the outside of the system landscape. Let’s start by calling the <code class="inlineCode">product-composite</code> API and its Swagger UI. Then, we’ll call the Eureka API and visit its web page. Finally, we’ll conclude by testing the routes that are based on hostnames.</p>
+    <h3 id="_idParaDest-265" class="heading-3">Calling the product composite API through the edge server</h3>
+    <p class="normal">Let’s perform <a id="_idIndexMarker694"/>the following steps to<a id="_idIndexMarker695"/> call the product composite API through the edge server:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To be able to see what is going on in the edge server, we can follow its log output:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose logs -f --tail=0 gateway
+</code></pre>
+      </li>
+      <li class="numberedList">Now, in a separate terminal window, make the call to the <code class="inlineCode">product-composite</code> API through the edge server:
+        <pre class="programlisting con"><code class="hljs-con">curl http://localhost:8080/product-composite/1
+</code></pre>
+      </li>
+      <li class="numberedList">Expect the normal type of response from the <code class="inlineCode">product-composite</code> API:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_10_05.png" alt="Graphical user interface  Description automatically generated" width="812" height="67"/></figure>
+    <p class="packt_figref">Figure 10.5: Output from retrieving the composite product with Product ID 1</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">We should be able to find the following information in the log output:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_10_06.png" alt="Text  Description automatically generated" width="812" height="118"/></figure>
+    <p class="packt_figref">Figure 10.6: Log output from the edge server</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="5">From the<a id="_idIndexMarker696"/> log output, we<a id="_idIndexMarker697"/> can see the pattern matching based on the predicate we specified in the configuration, and we can see which microservice instance the edge server selected from the available instances in the discovery server – in this case, it forwards the request to <code class="inlineCode">http://b8013440aea0:8080/product-composite/1</code>.</li>
+    </ol>
+    <h3 id="_idParaDest-266" class="heading-3">Calling the Swagger UI through the edge server</h3>
+    <p class="normal">To verify that we <a id="_idIndexMarker698"/>can reach the Swagger UI<a id="_idIndexMarker699"/> introduced in <em class="chapterRef">Chapter 5</em>, <em class="italic">Adding an API Description Using OpenAPI</em>, through the edge server, open the URL <code class="inlineCode">http://localhost:8080/openapi/swagger-ui.html</code> in a web browser. The resulting <a id="_idIndexMarker700"/>Swagger UI page should look like<a id="_idIndexMarker701"/> this:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_10_07.png" alt="Graphical user interface, text, application  Description automatically generated" width="812" height="835"/></figure>
+    <p class="packt_figref">Figure 10.7: The Swagger UI through the edge server, gateway</p>
+    <p class="normal">Note the server URL: <code class="inlineCode">http://localhost:8080</code>; this means that the <code class="inlineCode">product-composite</code> API’s own URL, <code class="inlineCode">http://product-service:8080/</code>, has been replaced in the OpenAPI specification returned by the Swagger UI.</p>
+    <p class="normal">If you want <a id="_idIndexMarker702"/>to, you can proceed and actually try <a id="_idIndexMarker703"/>out the <code class="inlineCode">product-composite</code> API in the Swagger UI, as we did back in <em class="chapterRef">Chapter 5</em>, <em class="italic">Adding an API Description Using OpenAPI</em>!</p>
+    <h3 id="_idParaDest-267" class="heading-3">Calling Eureka through the edge server</h3>
+    <p class="normal">To call Eureka <a id="_idIndexMarker704"/>through an edge server, perform the <a id="_idIndexMarker705"/>following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">First, call the Eureka API through the edge server to see what instances are currently registered in the discovery server:
+        <pre class="programlisting con"><code class="hljs-con">curl -H "accept:application/json" \
+localhost:8080/eureka/api/apps -s | \
+jq -r .applications.application[].instance[].instanceId
+</code></pre>
+      </li>
+      <li class="numberedList">Expect a response along the lines of the following:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_10_08.png" alt="Text  Description automatically generated" width="439" height="192"/></figure>
+    <p class="packt_figref">Figure 10.8: Eureka listing the edge server, gateway, in the REST call</p>
+    <div class="packt_tip">
+      <p class="normal">Note that the edge server (named <code class="inlineCode">gateway</code>) is also present in the response.</p>
+    </div>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="3">Next, open<a id="_idIndexMarker706"/> the Eureka web page in a web <a id="_idIndexMarker707"/>browser using the URL <code class="inlineCode">http://localhost:8080/eureka/web</code>:</li>
+    </ol>
+    <figure class="mediaobject"><img src="../Images/B19825_10_09.png" alt="Graphical user interface, website  Description automatically generated" width="812" height="622"/></figure>
+    <p class="packt_figref">Figure 10.9: Eureka listing the edge server, gateway, in the web UI</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="4">From<a id="_idIndexMarker708"/> the preceding screenshot, we<a id="_idIndexMarker709"/> can see the Eureka web page reporting the same available instances as the API response in the previous step.</li>
+    </ol>
+    <h3 id="_idParaDest-268" class="heading-3">Routing based on the host header</h3>
+    <p class="normal">Let’s wrap up by testing<a id="_idIndexMarker710"/> the route configuration based on the hostname used in the requests to see predicates and filters in use!</p>
+    <p class="normal">Normally, the hostname in the request is set automatically in the <code class="inlineCode">Host</code> header by the HTTP client. When testing the edge server locally, the hostname will be <code class="inlineCode">localhost</code> – that is not so useful when testing hostname-based routing. However, we can cheat by specifying another hostname in the <code class="inlineCode">Host</code> header in the call to the API. Let’s see how this can be done:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">To call for the <code class="inlineCode">i.feel.lucky</code> hostname, use this code:
+        <pre class="programlisting con"><code class="hljs-con">curl http://localhost:8080/headerrouting -H "Host: i.feel.lucky:8080"
+</code></pre>
+      </li>
+      <li class="numberedList">Expect the response <code class="inlineCode">200 OK</code>.</li>
+      <li class="numberedList">For the hostname <code class="inlineCode">im.a.teapot</code>, use the following command:
+        <pre class="programlisting con"><code class="hljs-con">curl http://localhost:8080/headerrouting -H "Host: im.a.teapot:8080"
+</code></pre>
+      </li>
+      <li class="numberedList">Expect the response <code class="inlineCode">418 I'm a teapot</code>.</li>
+      <li class="numberedList">Finally, if not specifying any <code class="inlineCode">Host</code> header, use <code class="inlineCode">localhost</code> as the <code class="inlineCode">Host</code> header:
+        <pre class="programlisting con"><code class="hljs-con">curl http://localhost:8080/headerrouting
+</code></pre>
+      </li>
+      <li class="numberedList">Expect the response <code class="inlineCode">501 Not Implemented</code>.</li>
+    </ol>
+    <p class="normal">We can also use <code class="inlineCode">i.feel.lucky</code> and <code class="inlineCode">im.a.teapot</code> as real hostnames in the requests if we add them to the file <code class="inlineCode">/etc/hosts</code>, specifying that they should be translated into the same IP address as <code class="inlineCode">localhost</code>, that is, <code class="inlineCode">127.0.0.1</code>. To do so, perform the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Run the <a id="_idIndexMarker711"/>following command to add a row to the <code class="inlineCode">/etc/hosts</code> file with the required information:
+        <pre class="programlisting con"><code class="hljs-con">sudo bash -c "echo '127.0.0.1 i.feel.lucky im.a.teapot' &gt;&gt; /etc/hosts"
+</code></pre>
+      </li>
+      <li class="numberedList">We can now perform the same routing based on the hostname, but without specifying the <code class="inlineCode">Host</code> header. Try it out by running the following commands:
+        <pre class="programlisting con"><code class="hljs-con">curl http://i.feel.lucky:8080/headerrouting
+curl http://im.a.teapot:8080/headerrouting
+</code></pre>
+      </li>
+      <li class="numberedList">Expect the same responses as previously, <code class="inlineCode">200 OK</code> and <code class="inlineCode">418 I'm a teapot</code>.</li>
+      <li class="numberedList">Wrap up the tests by shutting down the system landscape with the following command:
+        <pre class="programlisting con"><code class="hljs-con">docker-compose down
+</code></pre>
+      </li>
+      <li class="numberedList">Clean up the <code class="inlineCode">/etc/hosts</code> file from the DNS name translation we added for the hostnames, <code class="inlineCode">i.feel.lucky</code> and <code class="inlineCode">im.a.teapot</code>. Edit the <code class="inlineCode">/etc/hosts</code> file and remove the<a id="_idIndexMarker712"/> line we added:
+        <pre class="programlisting con"><code class="hljs-con">127.0.0.1 i.feel.lucky im.a.teapot
+</code></pre>
+      </li>
+    </ol>
+    <p class="normal">These tests of the routing capabilities in the edge server end the chapter.</p>
+    <h1 id="_idParaDest-269" class="heading-1">Summary</h1>
+    <p class="normal">In this chapter, we have seen how Spring Cloud Gateway can be used as an edge server to control what services are allowed to be called from outside of the system landscape. Based on predicates, filters, and destination URIs, we can define routing rules in a very flexible way. If we want to, we can configure Spring Cloud Gateway to use a discovery service such as Netflix Eureka to look up the target microservice instances.</p>
+    <p class="normal">An important topic we still need address is how we prevent unauthorized access to the APIs exposed by the edge server, and how we can prevent third parties from intercepting traffic.</p>
+    <p class="normal">In the next chapter, we will see how we can secure access to the edge server using standard security mechanisms, such as HTTPS, OAuth, and OpenID Connect.</p>
+    <h1 id="_idParaDest-270" class="heading-1">Questions</h1>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">What are the elements used to build a routing rule in Spring Cloud Gateway called?</li>
+      <li class="numberedList">What are the aforementioned elements used for?</li>
+      <li class="numberedList">How can we instruct Spring Cloud Gateway to locate microservice instances through a discovery service such as Netflix Eureka?</li>
+      <li class="numberedList">In a Docker environment, how can we ensure that external HTTP requests to the Docker engine can only reach the edge server?</li>
+      <li class="numberedList">How do we change the routing rules so that the edge server accepts calls to the <code class="inlineCode">product-composite</code> service on the <code class="inlineCode">http://$HOST:$PORT/api/product</code> URL instead of the currently used <code class="inlineCode">http://$HOST:$PORT/product-composite</code>?</li>
+    </ol>
+    <h1 id="_idParaDest-271" class="heading-1">Join our community on Discord</h1>
+    <p class="normal">Join our community’s Discord space for discussion with the author and other readers:</p>
+    <p class="normal"><a href="https://packt.link/SpringBoot3e"><span class="url">https://packt.link/SpringBoot3e</span></a></p>
+    <p class="normal"><img src="../Images/QR_Code1849216352344398875.png" alt="" role="presentation" width="177" height="177"/></p>
+  </div>
+</div>
+</div>
+</body></html>

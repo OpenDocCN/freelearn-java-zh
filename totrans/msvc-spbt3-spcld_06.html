@@ -1,0 +1,993 @@
+<html><head></head><body>
+<div id="book-content">
+<div id="sbo-rt-content"><div id="_idContainer153" class="Basic-Text-Frame">
+    <h1 class="chapterNumber">6</h1>
+    <h1 id="_idParaDest-152" class="chapterTitle">Adding Persistence</h1>
+    <p class="normal">In this chapter, we will learn how to persist data that a microservice is using. As already mentioned in <em class="chapterRef">Chapter 2</em>, <em class="italic">Introduction to Spring Boot</em>, we will use the Spring Data project to persist data to MongoDB and MySQL databases.</p>
+    <p class="normal">The <code class="inlineCode">product</code> and <code class="inlineCode">recommendation</code> microservices will use Spring Data for MongoDB and the <code class="inlineCode">review</code> microservice will use Spring Data for <a id="_idIndexMarker363"/>the <strong class="keyWord">Java Persistence API</strong> (<strong class="keyWord">JPA</strong>) to access a MySQL database. We will add operations to the RESTful APIs to be able to create and delete data in the databases. The existing APIs for reading data will be updated to access the databases. We will run the databases as Docker containers, managed by Docker Compose, that is, in the same way as we run our microservices.</p>
+    <p class="normal">The following topics will be covered in this chapter:</p>
+    <ul>
+      <li class="bulletList">Adding a persistence layer to the core microservices</li>
+      <li class="bulletList">Writing automated tests that focus on persistence</li>
+      <li class="bulletList">Using the persistence layer in the service layer</li>
+      <li class="bulletList">Extending the composite service API</li>
+      <li class="bulletList">Adding databases to the Docker Compose landscape</li>
+      <li class="bulletList">Manual testing of the new APIs and the persistence layer</li>
+      <li class="bulletList">Updating the automated tests of the microservice landscape</li>
+    </ul>
+    <h1 id="_idParaDest-153" class="heading-1">Technical requirements</h1>
+    <p class="normal">For instructions on how to install the tools used in this book and how to access the source code for this book, see:</p>
+    <ul>
+      <li class="bulletList"><em class="chapterRef">Chapter 21</em>, <em class="italic">Installation Instructions for macOS</em></li>
+      <li class="bulletList"><em class="chapterRef">Chapter 22</em>, <em class="italic">Installation Instructions for Microsoft Windows with WSL 2 and Ubuntu</em></li>
+    </ul>
+    <p class="normal">To access the databases manually, we will use the CLI tools provided in the Docker images used to run the databases. We will also expose the standard ports used for each database in Docker Compose, <code class="inlineCode">3306</code> for MySQL and <code class="inlineCode">27017</code> for MongoDB. This will enable us to use our favorite database tools to access the databases in the same way as if they were running locally on our computers.</p>
+    <p class="normal">The code examples in this chapter all come from the source code in <code class="inlineCode">$BOOK_HOME/Chapter06</code>.</p>
+    <p class="normal">If you want to view the changes applied to the source code in this chapter, that is, see what it took to add persistence to the microservices using Spring Data, you can compare it with the source code for <em class="chapterRef">Chapter 5</em>, <em class="italic">Adding an API Description Using OpenAPI</em>. You can use your favorite <code class="inlineCode">diff</code> tool and compare the two folders, <code class="inlineCode">$BOOK_HOME/Chapter05</code> and <code class="inlineCode">$BOOK_HOME/Chapter06</code>.</p>
+    <p class="normal">Before going into details, let’s see where we are heading.</p>
+    <h1 id="_idParaDest-154" class="heading-1">Chapter objectives</h1>
+    <p class="normal">By the end of this chapter, we<a id="_idIndexMarker364"/> will have layers inside our microservices that look like the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_01.png" alt="" role="presentation" width="878" height="712"/></figure>
+    <p class="packt_figref">Figure 6.1: The microservice landscape we’re aiming for</p>
+    <p class="normal">The <strong class="keyWord">Protocol layer</strong> handles<a id="_idIndexMarker365"/> protocol-specific logic. It is very thin, only consisting of the <code class="inlineCode">RestController</code> annotations in the <code class="inlineCode">api</code> project and the common <code class="inlineCode">GlobalControllerExceptionHandler</code> in the <code class="inlineCode">util</code> project. The main functionality of each microservice resides in<a id="_idIndexMarker366"/> each <strong class="keyWord">Service layer</strong>. </p>
+    <p class="normal">The <code class="inlineCode">product-composite</code> service <a id="_idIndexMarker367"/>contains an <strong class="keyWord">Integration layer</strong> used to handle the communication with the three core microservices. The core microservices will all have a <strong class="keyWord">Persistence layer</strong> used<a id="_idIndexMarker368"/> for communicating with their databases.</p>
+    <p class="normal">We will be able to access data stored in MongoDB with a command like the following:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose exec mongodb mongosh product-db --quiet --eval "db.products.find()"
+</code></pre>
+    <p class="normal">The result of the command should look like the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_02.png" alt="" role="presentation" width="877" height="138"/></figure>
+    <p class="packt_figref">Figure 6.2: Accessing data stored in MongoDB</p>
+    <p class="normal">Regarding data stored in MySQL, we will be able to access it with a command like this:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose exec mysql mysql -uuser -p review-db -e "select * from reviews"
+</code></pre>
+    <p class="normal">The result of the command should look as follows:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_03.png" alt="" role="presentation" width="572" height="192"/></figure>
+    <p class="packt_figref">Figure 6.3: Accessing data stored in MySQL</p>
+    <div class="packt_tip">
+      <p class="normal">The output from the <code class="inlineCode">mongo</code> and <code class="inlineCode">mysql</code> commands has been shortened for improved readability.</p>
+    </div>
+    <p class="normal">Let’s see how to implement this. We will start by adding persistence functionality to our core microservices!</p>
+    <h1 id="_idParaDest-155" class="heading-1">Adding a persistence layer to the core microservices</h1>
+    <p class="normal">Let’s start<a id="_idIndexMarker369"/> with adding a persistence layer to the core microservices. Besides using Spring Data, we will also use a Java bean mapping tool, <strong class="keyWord">MapStruct</strong>, which<a id="_idIndexMarker370"/> makes it easy to transform between Spring Data entity objects and the API model classes. For further <a id="_idIndexMarker371"/>details, see <a href="http://mapstruct.org/"><span class="url">http://mapstruct.org/</span></a>.</p>
+    <p class="normal">First, we need to add dependencies to MapStruct, Spring Data, and the JDBC drivers for the databases we intend to use. After that, we can define our Spring Data entity classes and repositories. The Spring Data entity classes and repositories will be placed in their own Java package, <code class="inlineCode">persistence</code>. For example, for the product microservice, they will be placed in the Java package <code class="inlineCode">se.magnus.microservices.core.product.persistence</code>.</p>
+    <h2 id="_idParaDest-156" class="heading-2">Adding dependencies</h2>
+    <p class="normal">We will <a id="_idIndexMarker372"/>use MapStruct v1.5.3, so we <a id="_idIndexMarker373"/>will start by defining a variable holding the version information in the build file for each core microservice, <code class="inlineCode">build.gradle</code>:</p>
+    <pre class="programlisting code"><code class="hljs-code">ext {
+  mapstructVersion = <span class="hljs-string">"1.5.3.Final"</span>
+}
+</code></pre>
+    <p class="normal">Next, we declare a dependency on MapStruct:</p>
+    <pre class="programlisting code"><code class="hljs-code">implementation <span class="hljs-string">"org.mapstruct:mapstruct:${mapstructVersion}"</span>
+</code></pre>
+    <p class="normal">Since MapStruct generates the implementation of the bean mappings at compile time by processing MapStruct annotations, we need to add an <code class="inlineCode">annotationProcessor</code> and a <code class="inlineCode">testAnnotationProcessor</code> dependency:</p>
+    <pre class="programlisting code"><code class="hljs-code">annotationProcessor <span class="hljs-string">"org.mapstruct:mapstruct-processor:${mapstructVersion}"</span>
+testAnnotationProcessor <span class="hljs-string">"org.mapstruct:mapstruct-processor:${mapstructVersion}"</span>
+</code></pre>
+    <p class="normal">To make<a id="_idIndexMarker374"/> the compile-time <a id="_idIndexMarker375"/>generation work in popular IDEs such as IntelliJ IDEA, we also need to add the following dependency:</p>
+    <pre class="programlisting code"><code class="hljs-code">compileOnly <span class="hljs-string">"org.mapstruct:mapstruct-processor:${mapstructVersion}"</span>
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">If you are using IntelliJ IDEA, you also need to ensure that support for annotation processing is enabled. Open <strong class="keyWord">Preferences</strong> and navigate to <strong class="keyWord">Build</strong>, <strong class="keyWord">Execute</strong>, <strong class="keyWord">Deployment | Compiler | Annotations Processors</strong>. Verify that the checkbox named <strong class="keyWord">Enable annotation processing</strong> is selected!</p>
+    </div>
+    <p class="normal">For the <code class="inlineCode">product</code> and <code class="inlineCode">recommendation</code> microservices, we declare the following dependencies to Spring Data for MongoDB:</p>
+    <pre class="programlisting code"><code class="hljs-code">implementation <span class="hljs-string">'org.springframework.boot:spring-boot-starter-data-mongodb'</span>
+</code></pre>
+    <p class="normal">For the <code class="inlineCode">review</code> microservice, we declare a dependency on Spring Data for JPA and a JDBC driver for MySQL like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">implementation <span class="hljs-string">'org.springframework.boot:spring-boot-starter-data-jpa'</span>
+implementation <span class="hljs-string">'com.mysql:mysql-connector-j'</span>
+</code></pre>
+    <p class="normal">To enable the use of MongoDB and MySQL when running automated integration tests, we will <a id="_idIndexMarker376"/>use <strong class="keyWord">Testcontainers</strong> and its support for JUnit 5, MongoDB, and MySQL. For the <code class="inlineCode">product</code> and <code class="inlineCode">recommendation</code> microservices, we declare the following test dependencies:</p>
+    <pre class="programlisting code"><code class="hljs-code">implementation <span class="hljs-title">platform</span><span class="hljs-params">(</span><span class="hljs-string">'org.testcontainers:testcontainers-bom:1.15.2'</span><span class="hljs-params">)</span>
+testImplementation <span class="hljs-string">'org.testcontainers:testcontainers'</span>
+testImplementation <span class="hljs-string">'org.testcontainers:junit-jupiter'</span>
+testImplementation <span class="hljs-string">'org.testcontainers:mongodb'</span>
+</code></pre>
+    <p class="normal">For the <code class="inlineCode">review</code> microservices, we declare the following test dependencies:</p>
+    <pre class="programlisting code"><code class="hljs-code">implementation <span class="hljs-title">platform</span><span class="hljs-params">(</span><span class="hljs-string">'org.testcontainers:testcontainers-bom:1.15.2'</span><span class="hljs-params">)</span>
+testImplementation <span class="hljs-string">'org.testcontainers:testcontainers'</span>
+testImplementation <span class="hljs-string">'org.testcontainers:junit-jupiter'</span>
+testImplementation <span class="hljs-string">'org.testcontainers:mysql'</span>
+</code></pre>
+    <p class="normal">For more <a id="_idIndexMarker377"/>information on<a id="_idIndexMarker378"/> how Testcontainers is used in integration tests, see the <em class="italic">Writing automated tests that focus on persistence</em> section later on.</p>
+    <h2 id="_idParaDest-157" class="heading-2">Storing data with entity classes</h2>
+    <p class="normal">The <a id="_idIndexMarker379"/>entity classes are similar to the corresponding API model classes in terms of what fields they contain; see the Java package <code class="inlineCode">se.magnus.api.core</code> in the <code class="inlineCode">api</code> project. We will add two fields, <code class="inlineCode">id</code> and <code class="inlineCode">version</code>, in the entity classes compared to the API model classes.</p>
+    <p class="normal">The <code class="inlineCode">id</code> field is used to hold the database identity of each stored entity, corresponding to the primary key when using a relational database. We will delegate the responsibility of generating unique values for the <code class="inlineCode">id</code> field to Spring Data. Depending on the database used, Spring Data can delegate this responsibility to the database engine or handle it on its own. In either case, the application code does not need to consider how a unique database <code class="inlineCode">id</code> value is set. The <code class="inlineCode">id</code> field is not exposed in the API, as a best practice from a security perspective. The fields in the model classes that identify an entity will be assigned a unique index in the corresponding entity class, to ensure consistency in the database from a business perspective.</p>
+    <p class="normal">The <code class="inlineCode">version</code> field is used to implement optimistic locking, allowing Spring Data to verify that updates of an entity in the database do not overwrite a concurrent update. If the value of the <code class="inlineCode">version</code> field stored in the database is higher than the value of the <code class="inlineCode">version</code> field in an update request, this indicates that the update is performed on stale data—the information to be updated has been updated by someone else since it was read from the database. Attempts to perform updates based on stale data will be prevented by Spring Data. In the section on writing persistence tests, we will see tests verifying that the optimistic locking mechanism in Spring Data prevents updates performed on stale data. Since we only implement APIs for create, read, and delete operations, we will not expose the <code class="inlineCode">version</code> field in the API.</p>
+    <p class="normal">The<a id="_idIndexMarker380"/> most interesting parts of the product entity class, used for storing entities in MongoDB, look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="code-highlight"><strong class="hljs-meta-slc">@Document(collection="products")</strong></span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title">ProductEntity</span> {
+ <span class="code-highlight"><strong class="hljs-meta-slc">@Id</strong></span>
+ <span class="hljs-keyword">private</span> String id;
+ <span class="code-highlight"><strong class="hljs-meta-slc">@Version</strong></span>
+ <span class="hljs-keyword">private</span> Integer version;
+ <span class="code-highlight"><strong class="hljs-meta-slc">@Indexed(unique = true)</strong></span>
+ <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> productId;
+ <span class="hljs-keyword">private</span> String name;
+ <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> weight;
+</code></pre>
+    <p class="normal">Here are some observations from the preceding code:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">@Document(collection = "products")</code> annotation is used to mark the class as an entity class used for MongoDB, that is, mapped to a collection in MongoDB with the name <code class="inlineCode">products</code>.</li>
+      <li class="bulletList">The <code class="inlineCode">@Id</code> and <code class="inlineCode">@Version</code> annotations are used to mark the <code class="inlineCode">id</code> and <code class="inlineCode">version</code> fields to be used by Spring Data, as explained previously.</li>
+      <li class="bulletList">The <code class="inlineCode">@Indexed(unique = true)</code> annotation is used to get a unique index created for the business key, <code class="inlineCode">productId</code>.</li>
+    </ul>
+    <p class="normal">The most interesting parts of the <code class="inlineCode">Recommendation</code> entity class, also used for storing entities in MongoDB, look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Document(collection="recommendations")</span>
+<span class="code-highlight"><strong class="hljs-meta-slc">@CompoundIndex</strong></span><span class="hljs-meta">(name = "prod-rec-id", unique = true, def = "{'productId': 1, 'recommendationId' : 1}")</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title">RecommendationEntity</span> {
+    <span class="hljs-meta">@Id</span>
+    <span class="hljs-keyword">private</span> String id;
+    <span class="hljs-meta">@Version</span>
+    <span class="hljs-keyword">private</span> Integer version;
+    <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> productId;
+    <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> recommendationId;
+    <span class="hljs-keyword">private</span> String author;
+    <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> rating;
+    <span class="hljs-keyword">private</span> String content;
+</code></pre>
+    <p class="normal">Added <a id="_idIndexMarker381"/>to the explanations for the preceding product entity, we can see how a unique compound index is created using the <code class="inlineCode">@CompoundIndex</code> annotation for the compound business key based on the <code class="inlineCode">productId</code> and <code class="inlineCode">recommendationId</code> fields.</p>
+    <p class="normal">Finally, the most interesting parts of the <code class="inlineCode">Review</code> entity class, used for storing entities in a SQL database like MySQL, look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="code-highlight"><strong class="hljs-meta-slc">@Entity</strong></span>
+<span class="code-highlight"><strong class="hljs-meta-slc">@Table</strong></span><span class="hljs-meta">(name = "reviews", indexes = { @Index(name = "reviews_unique_idx", unique = true, columnList = </span><span class="code-highlight"><strong class="hljs-meta-slc">"productId,reviewId"</strong></span><span class="hljs-meta">) })</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title">ReviewEntity</span> {
+    <span class="code-highlight"><strong class="hljs-meta-slc">@Id</strong></span> <span class="code-highlight"><strong class="hljs-meta-slc">@GeneratedValue</strong></span>
+    <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> id;
+    <span class="code-highlight"><strong class="hljs-meta-slc">@Version</strong></span>
+    <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> version;
+    <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> productId;
+    <span class="hljs-keyword">private</span> <span class="hljs-type">int</span> reviewId;
+    <span class="hljs-keyword">private</span> String author;
+    <span class="hljs-keyword">private</span> String subject;
+    <span class="hljs-keyword">private</span> String content;
+</code></pre>
+    <p class="normal">Notes from the preceding code:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">@Entity</code> and <code class="inlineCode">@Table</code> annotations are used to mark the class as an entity class used for JPA—mapped to a table in a SQL database with the name <code class="inlineCode">reviews</code>.</li>
+      <li class="bulletList">The <code class="inlineCode">@Table</code> annotation is also used to specify that a unique compound index will be created for the compound business key based on the <code class="inlineCode">productId</code> and <code class="inlineCode">reviewId</code> fields.</li>
+      <li class="bulletList">The <code class="inlineCode">@Id</code> and <code class="inlineCode">@Version</code> annotations are used to mark the <code class="inlineCode">id</code> and <code class="inlineCode">version</code> fields to be used by Spring Data, as explained previously. To direct Spring Data to JPA in order to automatically generate unique <code class="inlineCode">id</code> values for the <code class="inlineCode">id</code> field, we are using the <code class="inlineCode">@GeneratedValue</code> annotation.</li>
+    </ul>
+    <p class="normal">For the full <a id="_idIndexMarker382"/>source code of the entity classes, see the <code class="inlineCode">persistence</code> package in each of the core microservice projects.</p>
+    <h2 id="_idParaDest-158" class="heading-2">Defining repositories in Spring Data</h2>
+    <p class="normal">Spring Data<a id="_idIndexMarker383"/> comes with a <a id="_idIndexMarker384"/>set of interfaces for defining repositories. We will use the interfaces <code class="inlineCode">CrudRepository</code> and <code class="inlineCode">PagingAndSortingRepository</code>:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">CrudRepository</code> interface<a id="_idIndexMarker385"/> provides standard methods for performing basic create, read, update, and delete operations on the data stored in the databases.</li>
+      <li class="bulletList">The <code class="inlineCode">PagingAndSortingRepository</code> interface<a id="_idIndexMarker386"/> adds support for paging and sorting to the <code class="inlineCode">CrudRepository</code> interface.</li>
+    </ul>
+    <p class="normal">We will use the <code class="inlineCode">CrudRepository</code> interface as the base for the <code class="inlineCode">Recommendation</code> and <code class="inlineCode">Review</code> repositories and also the <code class="inlineCode">PagingAndSortingRepository</code> interface as the base for the <code class="inlineCode">Product</code> repository.</p>
+    <p class="normal">We will also add a few extra query methods to our repositories for looking up entities using the business key, <code class="inlineCode">productId</code>.</p>
+    <p class="normal">Spring Data supports defining extra query methods based on naming conventions for the signature of the method. For example, the <code class="inlineCode">findByProductId(int productId)</code> method signature can be used to direct Spring Data to automatically create a query that returns entities from the underlying collection or table. In this case, it will return entities that have the <code class="inlineCode">productId</code> field set to the value specified in the <code class="inlineCode">productId</code> parameter. For more details on how to declare extra queries, see <a href="https://docs.spring.io/spring-data/data-commons/docs/current/reference/html/#repositories.query-methods.query-creation"><span class="url">https://docs.spring.io/spring-data/data-commons/docs/current/reference/html/#repositories.query-methods.query-creation</span></a>.</p>
+    <p class="normal">The <code class="inlineCode">Product</code> repository class looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> <span class="hljs-keyword">interface</span> <span class="hljs-title">ProductRepository</span> <span class="hljs-keyword">extends</span>
+    <span class="hljs-title">PagingAndSortingRepository</span> &lt;ProductEntity, String&gt;,
+    CrudRepository&lt;ProductEntity, String&gt; {
+    <span class="code-highlight"><strong class="hljs-slc">Optional</strong></span>&lt;ProductEntity&gt; <span class="hljs-title">findByProductId</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span>;
+}
+</code></pre>
+    <p class="normal">Since the <code class="inlineCode">findByProductId</code> method might return zero or one product entity, the return value is marked to be optional by wrapping it in an <code class="inlineCode">Optional</code> object.</p>
+    <p class="normal">The <code class="inlineCode">Recommendation</code> repository class looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> <span class="hljs-keyword">interface</span> <span class="hljs-title">RecommendationRepository</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">CrudRepository</span> &lt;RecommendationEntity, String&gt; {
+    <span class="code-highlight"><strong class="hljs-slc">List</strong></span>&lt;RecommendationEntity&gt; <span class="hljs-title">findByProductId</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span>;
+}
+</code></pre>
+    <p class="normal">In this<a id="_idIndexMarker387"/> case, the <code class="inlineCode">findByProductId</code> method <a id="_idIndexMarker388"/>will return zero to many recommendation entities, so the return value is defined as a list.</p>
+    <p class="normal">Finally, the <code class="inlineCode">Review</code> repository class looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> <span class="hljs-keyword">interface</span> <span class="hljs-title">ReviewRepository</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">CrudRepository</span>&lt;ReviewEntity, Integer&gt; {
+    <span class="code-highlight"><strong class="hljs-meta-slc">@Transactional(readOnly = true)</strong></span>
+    List&lt;ReviewEntity&gt; <span class="hljs-title">findByProductId</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span>;
+}
+</code></pre>
+    <p class="normal">Since SQL databases are transactional, we have to specify the default transaction type—read-only in our case—for the query method, <code class="inlineCode">findByProductId()</code>.</p>
+    <p class="normal">That’s it—this is all it takes to establish a persistence layer for our core microservices.</p>
+    <p class="normal">For the full source code of the repository classes, see the <code class="inlineCode">persistence</code> package in each of the core microservice projects.</p>
+    <p class="normal">Let’s start using the persistence classes by writing some tests to verify that they work as intended.</p>
+    <h1 id="_idParaDest-159" class="heading-1">Writing automated tests that focus on persistence</h1>
+    <p class="normal">When <a id="_idIndexMarker389"/>writing persistence tests, we want to start a database when the tests begin and tear it down when the tests are complete. However, we don’t want the tests to wait for other resources to start up, for example, a web server such as Netty (which is required at runtime).</p>
+    <p class="normal">Spring Boot <a id="_idIndexMarker390"/>comes with two class-level annotations tailored to this specific requirement:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">@DataMongoTest</code>: This annotation starts up a MongoDB database when the test starts.</li>
+      <li class="bulletList"><code class="inlineCode">@DataJpaTest</code>: This annotation starts up a SQL database when the test starts:<ul>
+          <li class="bulletList">By default, Spring Boot configures the tests to roll back updates to the SQL database to minimize the risk of negative side effects on other tests. In our case, this behavior will cause some of the tests to fail. Therefore, automatic rollback is disabled with the class-level annotation <code class="inlineCode">@Transactional(propagation = NOT_SUPPORTED)</code>.</li>
+        </ul>
+      </li>
+    </ul>
+    <p class="normal">To handle the startup and tear-down of databases during the execution of the integration tests, we will use Testcontainers. Before looking into how to write persistence tests, let’s learn about how to use Testcontainers.</p>
+    <h2 id="_idParaDest-160" class="heading-2">Using Testcontainers</h2>
+    <p class="normal"><strong class="keyWord">Testcontainers</strong> (<a href="https://www.testcontainers.org"><span class="url">https://www.testcontainers.org</span></a>) is a <a id="_idIndexMarker391"/>library that <a id="_idIndexMarker392"/>simplifies running<a id="_idIndexMarker393"/> automated integration tests by running resource managers like a database or a message broker as a Docker container. Testcontainers can be configured to automatically start up Docker containers when JUnit tests are started and tear down the containers when the tests are complete.</p>
+    <p class="normal">To enable<a id="_idIndexMarker394"/> Testcontainers in an existing test class for a Spring Boot application like the microservices in this book, we can add the <code class="inlineCode">@Testcontainers</code> annotation to the test class. Using the <code class="inlineCode">@Container</code> annotation, we can, for example, declare that the <code class="inlineCode">Review</code> microservice’s integration tests will use a Docker container running MySQL. </p>
+    <p class="normal">The code looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@SpringBootTest</span>
+<span class="hljs-meta">@Testcontainers</span>
+<span class="hljs-keyword">class</span> <span class="hljs-title">SampleTests</span> {
+  <span class="hljs-meta">@Container</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-type">MySQLContainer</span> <span class="hljs-variable">database</span> <span class="hljs-operator">=</span> 
+    <span class="hljs-keyword">new</span> <span class="hljs-title">MySQLContainer</span>(<span class="hljs-string">"mysql:8.0.32"</span>);
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">The version specified for MySQL, 8.0.32, is copied from Docker Compose files to ensure that the same version is used.</p>
+    </div>
+    <p class="normal">A disadvantage <a id="_idIndexMarker395"/>of this approach <a id="_idIndexMarker396"/>is that each test class will use its own Docker <a id="_idIndexMarker397"/>container. Bringing up MySQL in a Docker container takes a few seconds, typically 10 seconds on my Mac. Running multiple test classes that use the same type of test container will add this latency for each test class. To avoid this extra latency, we can use<a id="_idIndexMarker398"/> the <strong class="keyWord">Single Container Pattern</strong> (see <a href="https://www.testcontainers.org/test_framework_integration/manual_lifecycle_control/#singleton-containers"><span class="url">https://www.testcontainers.org/test_framework_integration/manual_lifecycle_control/#singleton-containers</span></a>). Following this pattern, a base class is used to launch a single Docker container for MySQL. The base class, <code class="inlineCode">MySqlTestBase</code>, used in the <code class="inlineCode">Review</code> microservice looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> <span class="hljs-keyword">abstract</span> <span class="hljs-keyword">class</span> <span class="hljs-title">MySqlTestBase</span> {
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-type">MySQLContainer</span> <span class="code-highlight"><strong class="hljs-variable-slc">database</strong></span> <span class="hljs-operator">=</span>
+    <span class="hljs-keyword">new</span> <span class="hljs-title">MySQLContainer</span>(<span class="hljs-string">"mysql:8.0.32"</span>).withStartupTimeoutSeconds(<span class="hljs-number">300</span>);
+  
+  <span class="code-highlight"><strong class="hljs-keyword-slc">static</strong></span> {
+    database.start();
+  }
+  <span class="code-highlight"><strong class="hljs-meta-slc">@DynamicPropertySource</strong></span>
+  <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="code-highlight"><strong class="hljs-title-slc">databaseProperties</strong></span><span class="hljs-params">(DynamicPropertyRegistry registry)</span> {
+    registry.add(<span class="hljs-string">"spring.datasource.url"</span>, database::getJdbcUrl);
+    registry.add(<span class="hljs-string">"spring.datasource.username"</span>, database::getUsername);
+    registry.add(<span class="hljs-string">"spring.datasource.password"</span>, database::getPassword);
+  }
+}
+</code></pre>
+    <p class="normal">Explanations for the preceding source code:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">database</code> container is declared in the same way as in the preceding example, with the addition of an extended wait period of five minutes for the container to start up.</li>
+      <li class="bulletList">A <code class="inlineCode">static</code> block is used to start the database container before any JUnit code is invoked.</li>
+      <li class="bulletList">The database container will get some properties defined when started up, such as which port to use. To register these dynamically created properties in the application context, a static method <code class="inlineCode">databaseProperties()</code> is defined. The method is annotated with <code class="inlineCode">@DynamicPropertySource</code> to override the database configuration in the application context, such as the configuration from an <code class="inlineCode">application.yml</code> file.</li>
+    </ul>
+    <p class="normal">The<a id="_idIndexMarker399"/> test classes <a id="_idIndexMarker400"/>use the base class as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">class</span> <span class="hljs-title">PersistenceTests</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">MySqlTestBase</span> {
+<span class="hljs-keyword">class</span> <span class="hljs-title">ReviewServiceApplicationTests</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">MySqlTestBase</span> { 
+</code></pre>
+    <p class="normal">For the <code class="inlineCode">product</code> and <code class="inlineCode">review</code> microservices, which use MongoDB, a corresponding base class, <code class="inlineCode">MongoDbTestBase</code>, has been added.</p>
+    <p class="normal">By default, the log output from Testcontainers is rather extensive. A <strong class="keyWord">Logback</strong> configuration file<a id="_idIndexMarker401"/> can be placed in the <code class="inlineCode">src/test/resource</code> folder to limit the amount of log output. Logback is a<a id="_idIndexMarker402"/> logging framework (<a href="http://logback.qos.ch"><span class="url">http://logback.qos.ch</span></a>), and it is included in the microservices by using the <code class="inlineCode">spring-boot-starter-webflux</code> dependency. For details, see <a href="https://www.testcontainers.org/supported_docker_environment/logging_config/"><span class="url">https://www.testcontainers.org/supported_docker_environment/logging_config/</span></a>. The configuration file used in this chapter is named <code class="inlineCode">src/test/resources/logback-test.xml</code> and looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">&lt;?xml version=</span><span class="hljs-string">"1.0"</span><span class="hljs-meta"> encoding=</span><span class="hljs-string">"UTF-8"</span><span class="hljs-meta"> ?&gt;</span>
+<span class="hljs-tag">&lt;</span><span class="hljs-name">configuration</span><span class="hljs-tag">&gt;</span>
+    <span class="hljs-tag">&lt;</span><span class="hljs-name">include</span><span class="hljs-tag"> </span><span class="hljs-attr">resource</span><span class="hljs-tag">=</span><span class="hljs-string">"org/springframework/boot/logging/logback/</span><span class="code-highlight"><strong class="hljs-string-slc">defaults.xml</strong></span><span class="hljs-string">"</span><span class="hljs-tag">/&gt;</span>
+    <span class="hljs-tag">&lt;</span><span class="hljs-name">include</span><span class="hljs-tag"> </span><span class="hljs-attr">resource</span><span class="hljs-tag">=</span><span class="hljs-string">"org/springframework/boot/logging/logback/</span><span class="code-highlight"><strong class="hljs-string-slc">console-appender.xml</strong></span><span class="hljs-string">"</span><span class="hljs-tag">/&gt;</span>
+    <span class="hljs-tag">&lt;</span><span class="code-highlight"><strong class="hljs-name-slc">root</strong></span><span class="hljs-tag"> </span><span class="code-highlight"><strong class="hljs-attr-slc">level</strong></span><span class="hljs-tag">=</span><span class="code-highlight"><strong class="hljs-string-slc">"INFO"</strong></span><span class="hljs-tag">&gt;</span>
+        <span class="hljs-tag">&lt;</span><span class="hljs-name">appender-ref</span><span class="hljs-tag"> </span><span class="hljs-attr">ref</span><span class="hljs-tag">=</span><span class="hljs-string">"CONSOLE"</span><span class="hljs-tag"> /&gt;</span>
+    <span class="hljs-tag">&lt;/</span><span class="hljs-name">root</span><span class="hljs-tag">&gt;</span>
+<span class="hljs-tag">&lt;/</span><span class="hljs-name">configuration</span><span class="hljs-tag">&gt;</span>
+</code></pre>
+    <p class="normal">Some notes from the above <code class="inlineCode">XML</code> file:</p>
+    <ul>
+      <li class="bulletList">The config file includes two config files provided by Spring Boot to define the default values, and a log appender is configured that can write log events to the console.</li>
+      <li class="bulletList">The config file limits log output to the <code class="inlineCode">INFO</code> log level, discarding the <code class="inlineCode">DEBUG</code> and <code class="inlineCode">TRACE</code> log records emitted by the Testcontainers library.</li>
+    </ul>
+    <p class="normal">For details on Spring Boot’s support for logging and the use of Logback, see <a href="https://docs.spring.io/spring-boot/docs/current/reference/html/howto.html#howto-configure-logback-for-logging"><span class="url">https://docs.spring.io/spring-boot/docs/current/reference/html/howto.html#howto-configure-logback-for-logging</span></a>.</p>
+    <p class="normal">Finally, when<a id="_idIndexMarker403"/> using the <code class="inlineCode">@DataMongoTest</code> and <code class="inlineCode">@DataJpaTest</code> annotations instead of the <code class="inlineCode">@SpringBootTest</code> annotation to only <a id="_idIndexMarker404"/>start up the MongoDB and SQL database during the integration test, there is one more thing to consider. The <code class="inlineCode">@DataJpaTest</code> annotation is designed to start an embedded database by default. Since we want to use a containerized database, we have to disable this feature. </p>
+    <p class="normal">For the <code class="inlineCode">@DataJpaTest</code> annotation, this can be done by using an <code class="inlineCode">@AutoConfigureTestDatabase</code> annotation like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@DataJpaTest</span>
+<span class="hljs-meta">@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)</span>
+<span class="hljs-keyword">class</span> <span class="hljs-title">PersistenceTests</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">MySqlTestBase</span> {
+</code></pre>
+    <p class="normal">With Testcontainers introduced, we are ready to see how persistence tests can be written.</p>
+    <h2 id="_idParaDest-161" class="heading-2">Writing persistence tests</h2>
+    <p class="normal">The persistence tests<a id="_idIndexMarker405"/> for the three core microservices are similar to each other, so we will only go through the persistence tests for the <code class="inlineCode">product</code> microservice.</p>
+    <p class="normal">The test class, <code class="inlineCode">PersistenceTests</code>, declares a method, <code class="inlineCode">setupDb()</code>, annotated with <code class="inlineCode">@BeforeEach</code>, which is executed before each test method. The setup method removes any entities from previous tests in the database and inserts an entity that the test methods can use as the base for their tests:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@DataMongoTest</span>
+<span class="hljs-keyword">class</span> <span class="hljs-title">PersistenceTests</span> {
+    <span class="hljs-meta">@Autowired</span>
+    <span class="hljs-keyword">private</span> ProductRepository repository;
+    <span class="hljs-keyword">private</span> ProductEntity savedEntity;
+    <span class="hljs-meta">@BeforeEach</span>
+    <span class="hljs-keyword">void</span> <span class="hljs-title">setupDb</span><span class="hljs-params">()</span> {
+        repository.deleteAll();
+        <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">entity</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">ProductEntity</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"n"</span>, <span class="hljs-number">1</span>);
+        savedEntity = repository.save(entity);
+        assertEqualsProduct(entity, savedEntity);
+    }
+</code></pre>
+    <p class="normal">Next come <a id="_idIndexMarker406"/>the various test methods. First is a <code class="inlineCode">create</code> test:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">create</span><span class="hljs-params">()</span> {
+    <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">newEntity</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">ProductEntity</span>(<span class="hljs-number">2</span>, <span class="hljs-string">"n"</span>, <span class="hljs-number">2</span>);
+    <span class="code-highlight"><strong class="hljs-slc">repository.save</strong></span>(newEntity);
+    <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">foundEntity</span> <span class="hljs-operator">=</span> 
+    repository.<span class="code-highlight"><strong class="hljs-slc">findById</strong></span>(newEntity.getId()).get();
+    assertEqualsProduct(newEntity, foundEntity);
+    <span class="code-highlight"><strong class="hljs-slc">assertEquals(</strong><strong class="hljs-number-slc">2</strong></span>, repository.count());
+}
+</code></pre>
+    <p class="normal">This test creates a new entity, verifies that it can be found using the <code class="inlineCode">findById</code> method, and wraps up by asserting that there are two entities stored in the database, the one created by the <code class="inlineCode">setup</code> method and the one created by the test itself.</p>
+    <p class="normal">The <code class="inlineCode">update</code> test looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">update</span><span class="hljs-params">()</span> {
+    savedEntity.setName(<span class="hljs-string">"n2"</span>);
+    repository.<span class="code-highlight"><strong class="hljs-slc">save</strong></span>(savedEntity);
+    <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">foundEntity</span> <span class="hljs-operator">=</span> 
+    repository.<span class="code-highlight"><strong class="hljs-slc">findById</strong></span>(savedEntity.getId()).get();
+    <span class="code-highlight"><strong class="hljs-slc">assertEquals(</strong><strong class="hljs-number-slc">1</strong><strong class="hljs-slc">,</strong></span> (<span class="hljs-type">long</span>)foundEntity.getVersion());
+    <span class="code-highlight"><strong class="hljs-slc">assertEquals(</strong><strong class="hljs-string-slc">"n2"</strong><strong class="hljs-slc">,</strong></span> foundEntity.getName());
+}
+</code></pre>
+    <p class="normal">This test updates the entity created by the <code class="inlineCode">setup</code> method, reads it again from the database using the standard <code class="inlineCode">findById()</code> method, and asserts that it contains expected values for some of its fields. Note that, when an entity is created, its <code class="inlineCode">version</code> field is set to <code class="inlineCode">0</code> by Spring Data, so we expect it to be <code class="inlineCode">1</code> after the update.</p>
+    <p class="normal">The <code class="inlineCode">delete</code> test looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">delete</span><span class="hljs-params">()</span> {
+    repository.<span class="code-highlight"><strong class="hljs-slc">delete</strong></span>(savedEntity);
+    <span class="code-highlight"><strong class="hljs-slc">assertFalse(repository.existsById</strong></span>(savedEntity.getId()));
+}
+</code></pre>
+    <p class="normal">This test deletes the entity created by the <code class="inlineCode">setup</code> method and verifies that it no longer exists in the database.</p>
+    <p class="normal">The <code class="inlineCode">read</code> test looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">getByProductId</span><span class="hljs-params">()</span> {
+    Optional&lt;ProductEntity&gt; entity = 
+    repository.<span class="code-highlight"><strong class="hljs-slc">findByProductId</strong></span>(savedEntity.getProductId());
+    assertTrue(entity.isPresent());
+    <span class="code-highlight"><strong class="hljs-slc">assertEqualsProduct</strong></span>(savedEntity, entity.get());
+}
+</code></pre>
+    <p class="normal">This test <a id="_idIndexMarker407"/>uses the <code class="inlineCode">findByProductId()</code> method to get the entity created by the <code class="inlineCode">setup</code> method, verifies that it was found, and then uses the local helper method, <code class="inlineCode">assertEqualsProduct()</code>, to verify that the entity returned by <code class="inlineCode">findByProductId()</code> looks the same as the entity stored by the <code class="inlineCode">setup</code> method.</p>
+    <p class="normal">Next are two test methods that verify alternative flows—handling error conditions. First is a test that verifies that duplicates are handled correctly:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">duplicateError</span><span class="hljs-params">()</span> {
+  assertThrows(<span class="code-highlight"><strong class="hljs-slc">DuplicateKeyException</strong></span>.class, () -&gt; {
+    <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">entity</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">ProductEntity</span>(savedEntity.getProductId(), <span class="hljs-string">"</span><span class="hljs-string">n"</span>, <span class="hljs-number">1</span>);
+    repository.save(entity);
+  });
+} 
+</code></pre>
+    <p class="normal">The test tries to store an entity with the same business key as used by the entity created by the <code class="inlineCode">setup</code> method. The test will fail if the save operation succeeds, or if the save fails with an exception other than the expected <code class="inlineCode">DuplicateKeyException</code>.</p>
+    <p class="normal">The <a id="_idIndexMarker408"/>other negative test is, in my opinion, the most interesting test in the test class. It is a test that verifies correct error handling in the case of updates of stale data—it verifies that the optimistic locking mechanism works. It looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">optimisticLockError</span><span class="hljs-params">()</span> {
+    <span class="hljs-comment">// Store the saved entity in two separate entity objects</span>
+    <span class="hljs-type">ProductEntity</span> <span class="code-highlight"><strong class="hljs-variable-slc">entity1</strong></span> <span class="hljs-operator">=</span> 
+    repository.findById(savedEntity.getId()).get();
+    <span class="hljs-type">ProductEntity</span> <span class="code-highlight"><strong class="hljs-variable-slc">entity2</strong></span> <span class="hljs-operator">=</span> 
+    repository.findById(savedEntity.getId()).get();
+    <span class="hljs-comment">// Update the entity using the first entity object</span>
+    entity1.setName(<span class="hljs-string">"n1"</span>);
+    repository.<span class="code-highlight"><strong class="hljs-slc">save(entity1)</strong></span>;
+    <span class="hljs-comment">//  Update the entity using the second entity object.</span>
+    <span class="hljs-comment">// This should fail since the second entity now holds an old version </span>
+    <span class="hljs-comment">// number, that is, an Optimistic Lock Error</span>
+    assertThrows(<span class="code-highlight"><strong class="hljs-slc">OptimisticLockingFailureException.class</strong></span>, () -&gt; {
+      entity2.setName(<span class="hljs-string">"n2"</span>);
+      repository.<span class="code-highlight"><strong class="hljs-slc">save(entity2)</strong></span>;
+    });
+    <span class="hljs-comment">// Get the updated entity from the database and verify its new state</span>
+    <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">updatedEntity</span> <span class="hljs-operator">=</span> 
+    repository.findById(savedEntity.getId()).get();
+    <span class="code-highlight"><strong class="hljs-slc">assertEquals(</strong><strong class="hljs-number-slc">1</strong><strong class="hljs-slc">,</strong></span> (<span class="hljs-type">int</span>)updatedEntity.getVersion());
+    <span class="code-highlight"><strong class="hljs-slc">assertEquals(</strong><strong class="hljs-string-slc">"n1"</strong><strong class="hljs-slc">,</strong></span> updatedEntity.getName());
+}
+</code></pre>
+    <p class="normal">The following is observed from the code:</p>
+    <ul>
+      <li class="bulletList">First, the test reads the same entity twice and stores it in two different variables, <code class="inlineCode">entity1</code> and <code class="inlineCode">entity2</code>.</li>
+      <li class="bulletList">Next, it uses one of the variables, <code class="inlineCode">entity1</code>, to update the entity. The update of the entity in the database will cause the <code class="inlineCode">version</code> field of the entity to be increased automatically by Spring Data. The other variable, <code class="inlineCode">entity2</code>, now contains stale data, manifested by its <code class="inlineCode">version</code> field, which holds a lower value than the corresponding value in the database.</li>
+      <li class="bulletList">When the test tries to update the entity using the variable <code class="inlineCode">entity2</code>, which contains stale data, it is expected to fail by throwing an <code class="inlineCode">OptimisticLockingFailureException</code> exception.</li>
+      <li class="bulletList">The test wraps up by asserting that the entity in the database reflects the first update, that is, contains the name <code class="inlineCode">"n1"</code>, and that the <code class="inlineCode">version</code> field has the value <code class="inlineCode">1</code>; only one update has been performed on the entity in the database.</li>
+    </ul>
+    <p class="normal">Finally, the <code class="inlineCode">product</code> service<a id="_idIndexMarker409"/> contains a test that demonstrates the usage of built-in support for sorting and paging in Spring Data:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">paging</span><span class="hljs-params">()</span> {
+    repository.deleteAll();
+    List&lt;ProductEntity&gt; newProducts = rangeClosed(<span class="hljs-number">1001</span>, <span class="hljs-number">1010</span>)
+        .mapToObj(i -&gt; <span class="hljs-keyword">new</span> <span class="hljs-title">ProductEntity</span>(i, <span class="hljs-string">"name "</span> + i, i))
+        .collect(Collectors.toList());
+    repository.<span class="code-highlight"><strong class="hljs-slc">saveAll</strong></span>(newProducts);
+    <span class="hljs-type">Pageable</span> <span class="hljs-variable">nextPage</span> <span class="hljs-operator">=</span> <span class="code-highlight"><strong class="hljs-slc">PageRequest.of(</strong><strong class="hljs-number-slc">0</strong><strong class="hljs-slc">, </strong><strong class="hljs-number-slc">4</strong><strong class="hljs-slc">, ASC, </strong><strong class="hljs-string-slc">"productId"</strong><strong class="hljs-slc">);</strong></span>
+    nextPage = <span class="code-highlight"><strong class="hljs-slc">testNextPage</strong></span>(nextPage, <span class="hljs-string">"[1001, 1002, 1003, 1004]"</span>, 
+    <span class="hljs-literal">true</span>);
+    nextPage = testNextPage(nextPage, <span class="hljs-string">"[1005, 1006, 1007, 1008]"</span>, 
+    <span class="hljs-literal">true</span>);
+    nextPage = testNextPage(nextPage, <span class="hljs-string">"[1009, 1010]"</span>, <span class="hljs-literal">false</span>);
+}
+</code></pre>
+    <p class="normal">Explanations for the preceding code:</p>
+    <ul>
+      <li class="bulletList">The test starts by removing any existing data, then inserts 10 entities with the <code class="inlineCode">productId</code> field ranging from <code class="inlineCode">1001</code> to <code class="inlineCode">1010</code>.</li>
+      <li class="bulletList">Next, it creates <code class="inlineCode">PageRequest</code>, requesting a page count of <code class="inlineCode">4</code> entities per page and a sort order based on <code class="inlineCode">ProductId</code> in ascending order.</li>
+      <li class="bulletList">Finally, it uses a helper method, <code class="inlineCode">testNextPage</code>, to read the expected three pages, verifying the expected product IDs on each page and verifying that Spring Data correctly reports back whether more pages exist or not.</li>
+    </ul>
+    <p class="normal">The helper<a id="_idIndexMarker410"/> method <code class="inlineCode">testNextPage</code> looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">private</span> Pageable <span class="hljs-title">testNextPage</span><span class="hljs-params">(Pageable nextPage, String expectedProductIds, </span><span class="hljs-type">boolean</span><span class="hljs-params"> expectsNextPage)</span> {
+    Page&lt;ProductEntity&gt; productPage = repository.<span class="code-highlight"><strong class="hljs-slc">findAll(nextPage);</strong></span>
+    assertEquals(expectedProductIds, productPage.getContent()
+    .stream().map(p -&gt; p.getProductId()).collect(Collectors.
+    toList()).toString());
+    assertEquals(expectsNextPage, productPage.hasNext());
+    <span class="hljs-keyword">return</span> productPage.nextPageable();
+}
+</code></pre>
+    <p class="normal">The helper method uses the page request object, <code class="inlineCode">nextPage</code>, to get the next page from the repository method, <code class="inlineCode">findAll()</code>. Based on the result, it extracts the product IDs from the returned entities into a string and compares it to the expected list of product IDs. Finally, it returns the next page.</p>
+    <p class="normal">For the full source code of the persistence tests, see the test class <code class="inlineCode">PersistenceTests</code> in each of the core microservice projects.</p>
+    <p class="normal">The persistence tests in the <code class="inlineCode">product</code> microservice can be executed using Gradle with a command like this:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter06
+./gradlew microservices:product-service:test --tests PersistenceTests
+</code></pre>
+    <p class="normal">After running the tests, it should respond with the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_04.png" alt="" role="presentation" width="219" height="82"/></figure>
+    <p class="packt_figref">Figure 6.4: BUILD SUCCESSFUL response</p>
+    <p class="normal">With a persistence layer in place, we can update the service layer in our core microservices to use the persistence layer.</p>
+    <h1 id="_idParaDest-162" class="heading-1">Using the persistence layer in the service layer</h1>
+    <p class="normal">In this<a id="_idIndexMarker411"/> section, we will learn how to use the persistence layer in the service layer to store and retrieve data from a database. We will go through the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Logging the database connection URL</li>
+      <li class="numberedList">Adding new APIs</li>
+      <li class="numberedList">Calling the persistence layer from the service layer</li>
+      <li class="numberedList">Declaring a Java bean mapper</li>
+      <li class="numberedList">Updating the service tests</li>
+    </ol>
+    <h2 id="_idParaDest-163" class="heading-2">Logging the database connection URL</h2>
+    <p class="normal">When <a id="_idIndexMarker412"/>scaling up the number of microservices where each microservice connects to its own database, it can be hard to keep track of what database each microservice actually uses. To avoid this confusion, a good practice is to add a <code class="inlineCode">LOG</code> statement directly after the startup of a microservice that logs connection information that is used to connect to the database.</p>
+    <p class="normal">For example, the startup code for the <code class="inlineCode">product</code> service looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title">ProductServiceApplication</span> {
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">Logger</span> <span class="hljs-variable">LOG</span> <span class="hljs-operator">=</span> 
+  LoggerFactory.getLogger(ProductServiceApplication.class);
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span><span class="hljs-params">(String[] args)</span> {
+    <span class="hljs-type">ConfigurableApplicationContext</span> <span class="hljs-variable">ctx</span> <span class="hljs-operator">=</span> 
+    SpringApplication.run(ProductServiceApplication.class, args);
+    <span class="hljs-type">String</span> <span class="hljs-variable">mongodDbHost</span> <span class="hljs-operator">=</span> 
+    ctx.getEnvironment().getProperty(<span class="hljs-string">"spring.data.mongodb.host"</span>);
+    <span class="hljs-type">String</span> <span class="hljs-variable">mongodDbPort</span> <span class="hljs-operator">=</span> 
+    ctx.getEnvironment().getProperty(<span class="hljs-string">"spring.data.mongodb.port"</span>);
+<span class="code-highlight"><strong class="hljs-slc">    LOG.info(</strong><strong class="hljs-string-slc">"Connected to MongoDb: "</strong><strong class="hljs-slc"> + mongodDbHost + </strong><strong class="hljs-string-slc">":"</strong><strong class="hljs-slc"> + </strong></span>
+<span class="code-highlight"><strong class="hljs-slc">    mongodDbPort);</strong></span>
+  }
+}
+</code></pre>
+    <p class="normal">The call to the <code class="inlineCode">LOG.info</code> method will write something like the following to the log:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_05.png" alt="" role="presentation" width="445" height="60"/></figure>
+    <p class="packt_figref">Figure 6.5: Expected log output</p>
+    <p class="normal">For the<a id="_idIndexMarker413"/> full source code, see the main application class in each of the core microservice projects, for example, <code class="inlineCode">ProductServiceApplication</code> in the <code class="inlineCode">product-service</code> project.</p>
+    <h2 id="_idParaDest-164" class="heading-2">Adding new APIs</h2>
+    <p class="normal">Before we<a id="_idIndexMarker414"/> can use the persistence layer to create and delete information in the database, we need to create the corresponding API operations in our core service APIs.</p>
+    <p class="normal">The API operations for creating and deleting a product entity look like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@PostMapping(</span>
+<span class="hljs-meta">    value    = "/product",</span>
+<span class="hljs-meta">    consumes = "application/json",</span>
+<span class="hljs-meta">    produces = "application/json")</span>
+Product <span class="hljs-title">createProduct</span><span class="hljs-params">(</span><span class="hljs-meta">@RequestBody</span><span class="hljs-params"> Product body)</span>;
+<span class="hljs-meta">@DeleteMapping(value = "/product/{productId}")</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">deleteProduct</span><span class="hljs-params">(</span><span class="hljs-meta">@PathVariable</span><span class="hljs-params"> </span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span>;
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">The implementation of the delete operation will be <strong class="keyWord">idempotent</strong>; that is, it will return the same result if called several times. This is a valuable characteristic in fault scenarios. For example, if a client experiences a network timeout during a call to a delete operation, it can simply call the delete operation again without worrying about varying responses, for example, <strong class="screenText">OK</strong> (<strong class="screenText">200</strong>) in response the first time and <strong class="screenText">Not Found</strong> (<strong class="screenText">404</strong>) in response to consecutive calls, or any unexpected side effects. This implies that the operation should return the status code <strong class="screenText">OK</strong> (<strong class="screenText">200</strong>) even though the entity no longer exists in the database.</p>
+    </div>
+    <p class="normal">The API operations for the <code class="inlineCode">recommendation</code> and <code class="inlineCode">review</code> entities look similar; however, note that when it comes to the delete operation for the <code class="inlineCode">recommendation</code> and <code class="inlineCode">review</code> entities, it <a id="_idIndexMarker415"/>will delete all <code class="inlineCode">recommendations</code> and <code class="inlineCode">reviews</code> for the specified <code class="inlineCode">productId</code>.</p>
+    <p class="normal">For the full source code, see the interface declarations (<code class="inlineCode">ProductService</code>, <code class="inlineCode">RecommendationService</code>, and <code class="inlineCode">ReviewService</code>) of the core microservices in the <code class="inlineCode">api</code> project.</p>
+    <h2 id="_idParaDest-165" class="heading-2">Calling the persistence layer from the service layer</h2>
+    <p class="normal">The <a id="_idIndexMarker416"/>source code in the service layer for using the persistence layer is structured in the same way for all core microservices. Therefore, we will only go through the source code for the <code class="inlineCode">product</code> microservice.</p>
+    <p class="normal">First, we need to inject the repository class from the persistence layer and a Java bean mapper class into the constructor:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> ServiceUtil serviceUtil;
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> ProductRepository repository;
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> ProductMapper mapper;
+<span class="hljs-meta">@Autowired</span>
+<span class="hljs-keyword">public</span> <span class="hljs-title">ProductServiceImpl</span><span class="hljs-params">(</span><span class="code-highlight"><strong class="hljs-params-slc">ProductRepository repository, ProductMapper mapper, ServiceUtil serviceUtil</strong></span><span class="hljs-params">)</span> {
+    <span class="hljs-built_in">this</span>.repository = repository;
+    <span class="hljs-built_in">this</span>.mapper = mapper;
+    <span class="hljs-built_in">this</span>.serviceUtil = serviceUtil;
+}
+</code></pre>
+    <p class="normal">In the next section, we will see how the Java mapper class is defined.</p>
+    <p class="normal">Next, the <code class="inlineCode">createProduct</code> method is implemented as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> Product <span class="hljs-title">createProduct</span><span class="hljs-params">(Product body)</span> {
+    <span class="hljs-keyword">try</span> {
+        <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">entity</span> <span class="hljs-operator">=</span> mapper.apiToEntity(body);
+        <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">newEntity</span> <span class="hljs-operator">=</span> repository.<span class="code-highlight"><strong class="hljs-slc">save</strong></span>(entity);
+        <span class="hljs-keyword">return</span> mapper.<span class="code-highlight"><strong class="hljs-slc">entityToApi</strong></span>(newEntity);
+    } <span class="hljs-keyword">catch</span> (<span class="code-highlight"><strong class="hljs-slc">DuplicateKeyException</strong></span> dke) {
+        <span class="code-highlight"><strong class="hljs-keyword-slc">throw</strong><strong class="hljs-slc"> </strong><strong class="hljs-keyword-slc">new</strong><strong class="hljs-slc"> </strong><strong class="hljs-title-slc">InvalidInputException</strong></span>(<span class="hljs-string">"Duplicate key, Product Id: "</span> + 
+        body.getProductId());
+    }
+}
+</code></pre>
+    <p class="normal">The <code class="inlineCode">createProduct</code> method <a id="_idIndexMarker417"/>used the <code class="inlineCode">save</code> method in the repository to store a new entity. It should be noted that the mapper class is used to convert Java beans between an API model class and an entity class using the two mapper methods, <code class="inlineCode">apiToEntity()</code> and <code class="inlineCode">entityToApi()</code>. The only error we handle for the <code class="inlineCode">create</code> method is the <code class="inlineCode">DuplicateKeyException</code> exception, which we convert into an <code class="inlineCode">InvalidInputException</code> exception.</p>
+    <p class="normal">The <code class="inlineCode">getProduct</code> method looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> Product <span class="hljs-title">getProduct</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span> {
+    <span class="hljs-keyword">if</span> (<span class="code-highlight"><strong class="hljs-slc">productId &lt; </strong><strong class="hljs-number-slc">1</strong></span>) <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title">InvalidInputException</span>(<span class="hljs-string">"Invalid </span>
+<span class="hljs-string">    productId: "</span> + productId);
+    <span class="hljs-type">ProductEntity</span> <span class="hljs-variable">entity</span> <span class="hljs-operator">=</span> repository.<span class="code-highlight"><strong class="hljs-slc">findByProductId</strong></span>(productId)
+        .<span class="code-highlight"><strong class="hljs-slc">orElseThrow</strong></span>(() -&gt; <span class="hljs-keyword">new</span> <span class="hljs-title">NotFoundException</span>(<span class="hljs-string">"No product found for </span>
+<span class="hljs-string">         productId: "</span> + productId));
+    <span class="hljs-type">Product</span> <span class="hljs-variable">response</span> <span class="hljs-operator">=</span> mapper.entityToApi(entity);
+    response.setServiceAddress(<span class="code-highlight"><strong class="hljs-slc">serviceUtil</strong></span>.getServiceAddress());
+    <span class="hljs-keyword">return</span> response;
+}
+</code></pre>
+    <p class="normal">After some basic input validation (that is, ensuring that <code class="inlineCode">productId</code> is not negative), the <code class="inlineCode">findByProductId()</code> method in the repository is used to find the product entity. Since the repository method returns an <code class="inlineCode">Optional</code> product, we can use the <code class="inlineCode">orElseThrow()</code> method in the <code class="inlineCode">Optional</code> class to conveniently throw a <code class="inlineCode">NotFoundException</code> exception if no product entity is found. Before the product information is returned, the <code class="inlineCode">serviceUtil</code> object is used to fill in the currently used address of the microservice.</p>
+    <p class="normal">Finally, let’s see the <code class="inlineCode">deleteProduct</code> method:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">deleteProduct</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span> {
+    repository.<span class="code-highlight"><strong class="hljs-slc">findByProductId</strong></span>(productId).<span class="code-highlight"><strong class="hljs-slc">ifPresent</strong></span>(e -&gt; 
+    repository.delete(e));
+}
+</code></pre>
+    <p class="normal">The <code class="inlineCode">delete</code> method also uses the <code class="inlineCode">findByProductId()</code> method in the repository and uses the <code class="inlineCode">ifPresent()</code> method in the <code class="inlineCode">Optional</code> class to conveniently delete the entity only if it exists. Note that the implementation is idempotent; it will not report any failure if the entity is not found.</p>
+    <p class="normal">For the full source code, see the service implementation class in each of the core microservice projects, for example, <code class="inlineCode">ProductServiceImpl</code> in the <code class="inlineCode">product-service</code> project.</p>
+    <h2 id="_idParaDest-166" class="heading-2">Declaring a Java bean mapper</h2>
+    <p class="normal">So, what about the magic Java bean mapper?</p>
+    <p class="normal">As <a id="_idIndexMarker418"/>already mentioned, MapStruct is used to declare our mapper classes. The use of MapStruct is similar in all three core microservices, so we will only go through the source code for the mapper object in the <code class="inlineCode">product</code> microservice.</p>
+    <p class="normal">The <code class="inlineCode">mapper</code> class for the <code class="inlineCode">product</code> service looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Mapper(componentModel = "spring")</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">interface</span> <span class="hljs-title">ProductMapper</span> {
+    <span class="hljs-meta">@Mappings({</span>
+<span class="hljs-meta">        @Mapping(target = "</span><span class="code-highlight"><strong class="hljs-meta-slc">serviceAddress</strong></span><span class="hljs-meta">", ignore = true)</span>
+<span class="hljs-meta">    })</span>
+    Product <span class="code-highlight"><strong class="hljs-title-slc">entityToApi</strong></span><span class="hljs-params">(ProductEntity entity)</span>;
+    <span class="hljs-meta">@Mappings({</span>
+<span class="hljs-meta">        @Mapping(target = "</span><span class="code-highlight"><strong class="hljs-meta-slc">id</strong></span><span class="hljs-meta">", ignore = true),</span>
+<span class="hljs-meta">        @Mapping(target = "</span><span class="code-highlight"><strong class="hljs-meta-slc">version</strong></span><span class="hljs-meta">", ignore = true)</span>
+<span class="hljs-meta">    })</span>
+    ProductEntity <span class="code-highlight"><strong class="hljs-title-slc">apiToEntity</strong></span><span class="hljs-params">(Product api)</span>;
+}
+</code></pre>
+    <p class="normal">The following can be noted from the code:</p>
+    <ul>
+      <li class="bulletList">The <code class="inlineCode">entityToApi()</code> method maps entity objects to the API model object. Since the entity class does not have a field for <code class="inlineCode">serviceAddress</code>, the <code class="inlineCode">entityToApi()</code> method is annotated to ignore the <code class="inlineCode">serviceAddress</code> field in the API model object.</li>
+      <li class="bulletList">The <code class="inlineCode">apiToEntity()</code> method maps API model objects to entity objects. In the same way, the <code class="inlineCode">apiToEntity()</code> method is annotated to ignore the <code class="inlineCode">id</code> and <code class="inlineCode">version</code> fields that are missing in the API model class.</li>
+    </ul>
+    <p class="normal">Not only does MapStruct support mapping fields by name but it can also be directed to map fields with different names. In the mapper class for the <code class="inlineCode">recommendation</code> service, the <code class="inlineCode">rating</code> entity field is mapped to the API model field, <code class="inlineCode">rate</code>, using the following annotations:</p>
+    <pre class="programlisting code"><code class="hljs-code">    <span class="hljs-meta">@Mapping(target = "</span><span class="code-highlight"><strong class="hljs-meta-slc">rate</strong></span><span class="hljs-meta">", source="entity.</span><span class="code-highlight"><strong class="hljs-meta-slc">rating</strong></span><span class="hljs-meta">")</span>,
+    Recommendation <span class="hljs-title">entityToApi</span><span class="hljs-params">(RecommendationEntity entity)</span>;
+    <span class="hljs-meta">@Mapping(target = "</span><span class="code-highlight"><strong class="hljs-meta-slc">rating</strong></span><span class="hljs-meta">", source="api.</span><span class="code-highlight"><strong class="hljs-meta-slc">rate</strong></span><span class="hljs-meta">")</span>,
+    RecommendationEntity <span class="hljs-title">apiToEntity</span><span class="hljs-params">(Recommendation api)</span>;
+</code></pre>
+    <p class="normal">After a <a id="_idIndexMarker419"/>successful Gradle build, the generated mapping implementation can be found in the <code class="inlineCode">build/classes</code> folder for each project. For example, <code class="inlineCode">ProductMapperImpl.java</code> in the <code class="inlineCode">product-service</code> project.</p>
+    <p class="normal">For the full source code, see the mapper class in each of the core microservice projects, for example, <code class="inlineCode">ProductMapper</code> in the <code class="inlineCode">product-service</code> project.</p>
+    <h2 id="_idParaDest-167" class="heading-2">Updating the service tests</h2>
+    <p class="normal">The<a id="_idIndexMarker420"/> tests of the APIs exposed by the core microservices have been updated since the previous chapter with tests covering the create and delete API operations.</p>
+    <p class="normal">The added tests are similar in all three core microservices, so we will only go through the source code for the service tests in the <code class="inlineCode">product</code> microservice.</p>
+    <p class="normal">To ensure a known state for each test, a setup method, <code class="inlineCode">setupDb()</code>, is declared and annotated with <code class="inlineCode">@BeforeEach</code>, so it is executed before each test. The setup method removes any previously created entities:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Autowired</span>
+<span class="hljs-keyword">private</span> ProductRepository repository;
+<span class="hljs-meta">@</span><span class="code-highlight"><strong class="hljs-meta-slc">BeforeEach</strong></span>
+<span class="hljs-keyword">void</span> <span class="code-highlight"><strong class="hljs-title-slc">setupDb</strong></span><span class="hljs-params">()</span> {
+   repository.deleteAll();
+}
+</code></pre>
+    <p class="normal">The test method for the create API verifies that a product entity can be retrieved after it has been created and that creating another product entity with the same <code class="inlineCode">productId</code> results in an expected error, <code class="inlineCode">UNPROCESSABLE_ENTITY</code>, in the response to the API request:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">duplicateError</span><span class="hljs-params">()</span> {
+   <span class="hljs-type">int</span> <span class="hljs-variable">productId</span> <span class="hljs-operator">=</span> <span class="hljs-number">1</span>;
+   <span class="code-highlight"><strong class="hljs-slc">postAndVerifyProduct(productId, OK);</strong></span>
+   assertTrue(repository.findByProductId(productId).isPresent());
+   <span class="code-highlight"><strong class="hljs-slc">postAndVerifyProduct(productId, UNPROCESSABLE_ENTITY)</strong></span>
+      .jsonPath(<span class="hljs-string">"$.path"</span>).isEqualTo(<span class="hljs-string">"/product"</span>)
+      .jsonPath(<span class="hljs-string">"$.message"</span>).isEqualTo(<span class="hljs-string">"Duplicate key, Product Id: "</span> + 
+       productId);
+}
+</code></pre>
+    <p class="normal">The<a id="_idIndexMarker421"/> test method for the delete API verifies that a product entity can be deleted and that a second delete request is idempotent—it also returns the status code OK, even though the entity no longer exists in the database:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">deleteProduct</span><span class="hljs-params">()</span> {
+   <span class="hljs-type">int</span> <span class="hljs-variable">productId</span> <span class="hljs-operator">=</span> <span class="hljs-number">1</span>;
+   postAndVerifyProduct(productId, OK);
+   assertTrue(repository.findByProductId(productId).isPresent());
+   deleteAndVerifyProduct(productId, <span class="code-highlight"><strong class="hljs-slc">OK</strong></span>);
+   assertFalse(repository.findByProductId(productId).isPresent());
+   deleteAndVerifyProduct(productId, <span class="code-highlight"><strong class="hljs-slc">OK</strong></span>);
+}
+</code></pre>
+    <p class="normal">To simplify sending the create, read, and delete requests to the API and verify the response status, three helper methods have been created:</p>
+    <ul>
+      <li class="bulletList"><code class="inlineCode">postAndVerifyProduct()</code></li>
+      <li class="bulletList"><code class="inlineCode">getAndVerifyProduct()</code></li>
+      <li class="bulletList"><code class="inlineCode">deleteAndVerifyProduct()</code></li>
+    </ul>
+    <p class="normal">The <code class="inlineCode">postAndVerifyProduct()</code> method looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-keyword">private</span> WebTestClient.BodyContentSpec <span class="hljs-title">postAndVerifyProduct</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId, HttpStatus expectedStatus)</span> {
+   <span class="hljs-type">Product</span> <span class="hljs-variable">product</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">Product</span>(productId, <span class="hljs-string">"Name "</span> + productId, 
+   productId, <span class="hljs-string">"</span><span class="hljs-string">SA"</span>);
+   <span class="hljs-keyword">return</span> client.post()
+      .uri(<span class="hljs-string">"/product"</span>)
+      .body(just(product), Product.class)
+      .accept(APPLICATION_JSON)
+      .<span class="code-highlight"><strong class="hljs-slc">exchange()</strong></span>
+      .expectStatus().<span class="code-highlight"><strong class="hljs-slc">isEqualTo(expectedStatus)</strong></span>
+      .expectHeader().<span class="code-highlight"><strong class="hljs-slc">contentType(APPLICATION_JSON)</strong></span>
+<span class="code-highlight"><strong class="hljs-slc">      .expectBody();</strong></span>
+}
+</code></pre>
+    <p class="normal">The<a id="_idIndexMarker422"/> helper method performs the actual HTTP request and verifies the response code and content type of the response body. Added to that, the helper method also returns the body of the response for further investigations by the caller, if required. The other two helper methods for read and delete requests are similar.</p>
+    <p class="normal">The source code for the three service test classes can be found in each of the core microservice projects, for example, <code class="inlineCode">ProductServiceApplicationTests</code> in the <code class="inlineCode">product-service</code> project.</p>
+    <p class="normal">Now, let’s move on to see how we extend a composite service API.</p>
+    <h1 id="_idParaDest-168" class="heading-1">Extending the composite service API</h1>
+    <p class="normal">In this <a id="_idIndexMarker423"/>section, we will see how we can extend the composite API with operations for creating and deleting composite entities. We will go through the following steps:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Adding new operations to the composite service API</li>
+      <li class="numberedList">Adding methods to the integration layer</li>
+      <li class="numberedList">Implementing the new composite API operations</li>
+      <li class="numberedList">Updating the composite service tests</li>
+    </ol>
+    <h2 id="_idParaDest-169" class="heading-2">Adding new operations to the composite service API</h2>
+    <p class="normal">The <a id="_idIndexMarker424"/>composite versions of creating and deleting entities and handling aggregated entities are similar to the create and delete operations in the core service APIs. The major difference is that they have annotations added for OpenAPI-based documentation. For an explanation of the usage of the OpenAPI annotations <code class="inlineCode">@Operation</code> and <code class="inlineCode">@ApiResponse</code>, refer to <em class="chapterRef">Chapter 5</em>, <em class="italic">Adding an API Description Using OpenAPI</em>, specifically the <em class="italic">Adding API-specific documentation to the ProductCompositeService interface</em> section.</p>
+    <p class="normal">The API operation for creating a composite product entity is declared as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Operation(</span>
+<span class="hljs-meta">  summary = "${api.product-composite.create-composite-product.description}",</span>
+<span class="hljs-meta">  description = "${api.product-composite.create-composite-product.notes}")</span>
+<span class="hljs-meta">@ApiResponses(value = {</span>
+<span class="hljs-meta">  @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),</span>
+<span class="hljs-meta">  @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")</span>
+<span class="hljs-meta">  })</span>
+<span class="hljs-meta">@PostMapping(</span>
+<span class="hljs-meta">  value    = "/product-composite",</span>
+<span class="hljs-meta">  consumes = "application/json")</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">createProduct</span><span class="hljs-params">(</span><span class="hljs-meta">@RequestBody</span><span class="hljs-params"> ProductAggregate body)</span>; 
+</code></pre>
+    <p class="normal">The <a id="_idIndexMarker425"/>API operation for deleting a composite product entity is declared as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Operation(</span>
+<span class="hljs-meta">  summary = "${api.product-composite.delete-composite-product.description}",</span>
+<span class="hljs-meta">  description = "${api.product-composite.delete-composite-product.notes}")</span>
+<span class="hljs-meta">@ApiResponses(value = {</span>
+<span class="hljs-meta">  @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),</span>
+<span class="hljs-meta">  @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")</span>
+<span class="hljs-meta">})</span>
+<span class="hljs-meta">@DeleteMapping(value = "/product-composite/{productId}")</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">deleteProduct</span><span class="hljs-params">(</span><span class="hljs-meta">@PathVariable</span><span class="hljs-params"> </span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span>;
+</code></pre>
+    <p class="normal">For the full source code, see the Java interface <code class="inlineCode">ProductCompositeService</code> in the <code class="inlineCode">api</code> project.</p>
+    <p class="normal">We also need to, as before, add the descriptive text of the API documentation to the property file, <code class="inlineCode">application.yml</code>, in the <code class="inlineCode">product-composite</code> project:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">create-composite-product:</span>
+  <span class="hljs-attr">description:</span> <span class="hljs-string">Creates</span> <span class="hljs-string">a</span> <span class="hljs-string">composite</span> <span class="hljs-string">product</span>
+  <span class="hljs-attr">notes:</span> <span class="hljs-string">|</span>
+    <span class="hljs-comment"># Normal response</span>
+    <span class="hljs-string">The</span> <span class="hljs-string">composite</span> <span class="hljs-string">product</span> <span class="hljs-string">information</span> <span class="hljs-string">posted</span> <span class="hljs-string">to</span> <span class="hljs-string">the</span> <span class="hljs-string">API</span> <span class="hljs-string">will</span> <span class="hljs-string">be</span> 
+    <span class="hljs-string">split</span> <span class="hljs-string">up</span> <span class="hljs-string">and</span> <span class="hljs-string">stored</span> <span class="hljs-string">as</span> <span class="hljs-string">separate</span> <span class="hljs-string">product-info,</span> <span class="hljs-string">recommendation</span> 
+    <span class="hljs-string">and</span> <span class="hljs-string">review</span> <span class="hljs-string">entities.</span>
+    <span class="hljs-comment"># Expected error responses</span>
+    <span class="hljs-number">1</span><span class="hljs-string">.</span> <span class="hljs-string">If</span> <span class="hljs-string">a</span> <span class="hljs-string">product</span> <span class="hljs-string">with</span> <span class="hljs-string">the</span> <span class="hljs-string">same</span> <span class="hljs-string">productId</span> <span class="hljs-string">as</span> <span class="hljs-string">specified</span> <span class="hljs-string">in</span> <span class="hljs-string">the</span> 
+    <span class="hljs-string">posted</span> <span class="hljs-string">information</span> <span class="hljs-string">already</span> <span class="hljs-string">exists,</span> <span class="hljs-string">an</span> <span class="hljs-string">**422</span> <span class="hljs-bullet">-</span> <span class="hljs-string">Unprocessable</span> 
+    <span class="hljs-string">Entity**</span> <span class="hljs-string">error</span> <span class="hljs-string">with</span> <span class="hljs-string">a</span> <span class="hljs-string">"duplicate key"</span> <span class="hljs-string">error</span> <span class="hljs-string">message</span> <span class="hljs-string">will</span> <span class="hljs-string">be</span> 
+    <span class="hljs-string">Returned</span>
+<span class="hljs-attr">delete-composite-product:</span>
+  <span class="hljs-attr">description:</span> <span class="hljs-string">Deletes</span> <span class="hljs-string">a</span> <span class="hljs-string">product</span> <span class="hljs-string">composite</span>
+  <span class="hljs-attr">notes:</span> <span class="hljs-string">|</span>
+    <span class="hljs-comment"># Normal response</span>
+    <span class="hljs-string">Entities</span> <span class="hljs-string">for</span> <span class="hljs-string">product</span> <span class="hljs-string">information,</span> <span class="hljs-string">recommendations</span> <span class="hljs-string">and</span> <span class="hljs-string">reviews</span> 
+    <span class="hljs-string">related</span> <span class="hljs-string">to</span> <span class="hljs-string">the</span> <span class="hljs-string">specified</span> <span class="hljs-string">productId</span> <span class="hljs-string">will</span> <span class="hljs-string">be</span> <span class="hljs-string">deleted.</span>
+    <span class="hljs-string">The</span> <span class="hljs-string">implementation</span> <span class="hljs-string">of</span> <span class="hljs-string">the</span> <span class="hljs-string">delete</span> <span class="hljs-string">method</span> <span class="hljs-string">is</span> <span class="hljs-string">idempotent,</span> <span class="hljs-string">that</span> <span class="hljs-string">is,</span> 
+    <span class="hljs-string">it</span> <span class="hljs-string">can</span> <span class="hljs-string">be</span> <span class="hljs-string">called</span> <span class="hljs-string">several</span> <span class="hljs-string">times</span> <span class="hljs-string">with</span> <span class="hljs-string">the</span> <span class="hljs-string">same</span> <span class="hljs-string">response.</span>
+    <span class="hljs-string">This</span> <span class="hljs-string">means</span> <span class="hljs-string">that</span> <span class="hljs-string">a</span> <span class="hljs-string">delete</span> <span class="hljs-string">request</span> <span class="hljs-string">of</span> <span class="hljs-string">a</span> <span class="hljs-string">non-existing</span> <span class="hljs-string">product</span> <span class="hljs-string">will</span> 
+    <span class="hljs-string">return</span> <span class="hljs-string">**200</span> <span class="hljs-string">Ok**.</span>
+</code></pre>
+    <p class="normal">Using the <a id="_idIndexMarker426"/>Swagger UI viewer, the updated OpenAPI documentation will look like this:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_06.png" alt="Graphical user interface, text, application, email  Description automatically generated" width="878" height="517"/></figure>
+    <p class="packt_figref">Figure 6.6: Updated OpenAPI documentation</p>
+    <p class="normal">Later on in <a id="_idIndexMarker427"/>this chapter, we will use the Swagger UI viewer to try out the new composite API operations.</p>
+    <h2 id="_idParaDest-170" class="heading-2">Adding methods to the integration layer</h2>
+    <p class="normal">Before we<a id="_idIndexMarker428"/> can implement the new create and delete APIs in the composite services, we need to extend the integration layer so it can call the underlying create and delete operations in the APIs of the core microservices.</p>
+    <p class="normal">The methods in the integration layer for calling the create and delete operations in the three core microservices are straightforward and similar to each other, so we will only go through the source code for the methods that call the <code class="inlineCode">product</code> microservice.</p>
+    <p class="normal">The <code class="inlineCode">createProduct()</code> method looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Override</span>
+<span class="hljs-keyword">public</span> Product <span class="hljs-title">createProduct</span><span class="hljs-params">(Product body)</span> {
+    <span class="hljs-keyword">try</span> {
+        <span class="hljs-keyword">return</span> <span class="code-highlight"><strong class="hljs-slc">restTemplate.postForObject</strong></span>(
+                   productServiceUrl, body, Product.class);
+    } <span class="hljs-keyword">catch</span> (HttpClientErrorException ex) {
+        <span class="hljs-keyword">throw</span> <span class="code-highlight"><strong class="hljs-slc">handleHttpClientException</strong></span>(ex);
+    }
+}
+</code></pre>
+    <p class="normal">It simply delegates the responsibility of sending the HTTP request to the <code class="inlineCode">RestTemplate</code> object and delegates error handling to the helper method, <code class="inlineCode">handleHttpClientException</code>.</p>
+    <p class="normal">The <code class="inlineCode">deleteProduct()</code> method looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Override</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">deleteProduct</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span> {
+    <span class="hljs-keyword">try</span> {
+        <span class="code-highlight"><strong class="hljs-slc">restTemplate.delete</strong></span>(productServiceUrl + <span class="hljs-string">"/"</span> + productId);
+    } <span class="hljs-keyword">catch</span> (HttpClientErrorException ex) {
+        <span class="hljs-keyword">throw</span> handleHttpClientException(ex);
+    }
+}
+</code></pre>
+    <p class="normal">It is implemented in the same way as for the create method but performs an HTTP <code class="inlineCode">delete</code> request instead.</p>
+    <p class="normal">The full <a id="_idIndexMarker429"/>source code for the integration layer can be found in the <code class="inlineCode">ProductCompositeIntegration</code> class in the <code class="inlineCode">product-composite</code> project.</p>
+    <h2 id="_idParaDest-171" class="heading-2">Implementing the new composite API operations</h2>
+    <p class="normal">Now, we<a id="_idIndexMarker430"/> can implement the composite create and delete methods!</p>
+    <p class="normal">The composite create method will split up the aggregate product object into discrete objects for <code class="inlineCode">product</code>, <code class="inlineCode">recommendation</code>, and <code class="inlineCode">review</code> and call the corresponding create methods in the integration layer:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Override</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">createProduct</span><span class="hljs-params">(ProductAggregate body)</span> {
+    <span class="hljs-keyword">try</span> {
+        <span class="hljs-type">Product</span> <span class="hljs-variable">product</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">Product</span>(body.getProductId(), 
+        body.getName(), body.getWeight(), <span class="hljs-literal">null</span>);
+        <span class="code-highlight"><strong class="hljs-slc">integration.createProduct</strong></span>(product);
+        <span class="hljs-keyword">if</span> (body.getRecommendations() != <span class="hljs-literal">null</span>) {
+            body.getRecommendations().forEach(r -&gt; {
+                <span class="hljs-type">Recommendation</span> <span class="hljs-variable">recommendation</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> 
+                <span class="hljs-title">Recommendation</span>(body.getProductId(), 
+                r.getRecommendationId(), r.getAuthor(), r.getRate(), 
+                r.getContent(), <span class="hljs-literal">null</span>);
+                <span class="code-highlight"><strong class="hljs-slc">integration.createRecommendation</strong></span>(recommendation);
+            });
+        }
+        <span class="hljs-keyword">if</span> (body.getReviews() != <span class="hljs-literal">null</span>) {
+            body.getReviews().forEach(r -&gt; {
+                <span class="hljs-type">Review</span> <span class="hljs-variable">review</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">Review</span>(body.getProductId(), 
+                r.getReviewId(), r.getAuthor(), r.getSubject(), 
+                r.getContent(), <span class="hljs-literal">null</span>);
+                <span class="code-highlight"><strong class="hljs-slc">integration.createReview</strong></span>(review);
+            });
+        }
+    } <span class="hljs-keyword">catch</span> (RuntimeException re) {
+        LOG.warn(<span class="hljs-string">"createCompositeProduct failed"</span>, re);
+        <span class="hljs-keyword">throw</span> re;
+    }
+}
+</code></pre>
+    <p class="normal">The composite delete method simply calls the three delete methods in the integration layer to delete the corresponding entities in the underlying databases:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Override</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">deleteProduct</span><span class="hljs-params">(</span><span class="hljs-type">int</span><span class="hljs-params"> productId)</span> {
+    integration.deleteProduct(productId);
+    integration.deleteRecommendations(productId);
+    integration.deleteReviews(productId);
+}
+</code></pre>
+    <p class="normal">The full <a id="_idIndexMarker431"/>source code for the service implementation can be found in the <code class="inlineCode">ProductCompositeServiceImpl</code> class in the <code class="inlineCode">product-composite</code> project.</p>
+    <p class="normal">For happy-day scenarios, this implementation will work fine, but if we consider various error scenarios, we see that this implementation will cause trouble!</p>
+    <p class="normal">What if, for example, one of the underlying core microservices is temporarily not available, for instance, due to internal, network, or database problems?</p>
+    <p class="normal">This might result in partly created or deleted composite products. For the delete operation, this can be fixed if the requester simply calls the composite’s delete method until it succeeds. However, if the underlying problem remains for a while, the requester will probably give up, resulting in an inconsistent state of the composite product— which is not acceptable in most cases!</p>
+    <p class="normal">In the next chapter, <em class="chapterRef">Chapter 7</em>, <em class="italic">Developing Reactive Microservices</em>, we will see how we can address these types of shortcomings with synchronous APIs as a RESTful API.</p>
+    <p class="normal">For now, let’s move on with this fragile design in mind.</p>
+    <h2 id="_idParaDest-172" class="heading-2">Updating the composite service tests</h2>
+    <p class="normal">Testing <a id="_idIndexMarker432"/>composite services, as already mentioned in <em class="chapterRef">Chapter 3</em>, <em class="italic">Creating a Set of Cooperating Microservices</em> (refer to the <em class="italic">Adding automated microservice tests in isolation</em> section), is limited to using simple mock components instead of the actual core services. This restricts us from testing more complex scenarios, for example, error handling when trying to create duplicates in the underlying databases. </p>
+    <p class="normal">The tests for the composite create and delete API operations are therefore relatively simple:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">createCompositeProduct1</span><span class="hljs-params">()</span> {
+   <span class="hljs-type">ProductAggregate</span> <span class="hljs-variable">compositeProduct</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">ProductAggregate</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"</span><span class="hljs-string">name"</span>, 
+   <span class="hljs-number">1</span>, <span class="hljs-literal">null</span>, <span class="hljs-literal">null</span>, <span class="hljs-literal">null</span>);
+   postAndVerifyProduct(compositeProduct, OK);
+}
+<span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">createCompositeProduct2</span><span class="hljs-params">()</span> {
+    <span class="hljs-type">ProductAggregate</span> <span class="hljs-variable">compositeProduct</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">ProductAggregate</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"name"</span>, 
+        <span class="hljs-number">1</span>, singletonList(<span class="hljs-keyword">new</span> <span class="hljs-title">RecommendationSummary</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"a"</span>, <span class="hljs-number">1</span>, <span class="hljs-string">"c"</span>)),
+        singletonList(<span class="hljs-keyword">new</span> <span class="hljs-title">ReviewSummary</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"a"</span>, <span class="hljs-string">"s"</span>, <span class="hljs-string">"c"</span>)), <span class="hljs-literal">null</span>);
+    postAndVerifyProduct(compositeProduct, OK);
+}
+<span class="hljs-meta">@Test</span>
+<span class="hljs-keyword">void</span> <span class="hljs-title">deleteCompositeProduct</span><span class="hljs-params">()</span> {
+    <span class="hljs-type">ProductAggregate</span> <span class="hljs-variable">compositeProduct</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title">ProductAggregate</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"name"</span>, 
+        <span class="hljs-number">1</span>,singletonList(<span class="hljs-keyword">new</span> <span class="hljs-title">RecommendationSummary</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"a"</span>, <span class="hljs-number">1</span>, <span class="hljs-string">"c"</span>)),
+        singletonList(<span class="hljs-keyword">new</span> <span class="hljs-title">ReviewSummary</span>(<span class="hljs-number">1</span>, <span class="hljs-string">"</span><span class="hljs-string">a"</span>, <span class="hljs-string">"s"</span>, <span class="hljs-string">"c"</span>)), <span class="hljs-literal">null</span>);
+    postAndVerifyProduct(compositeProduct, OK);
+    deleteAndVerifyProduct(compositeProduct.getProductId(), OK);
+    deleteAndVerifyProduct(compositeProduct.getProductId(), OK);
+}
+</code></pre>
+    <p class="normal">The full <a id="_idIndexMarker433"/>source code for the service test can be found in the <code class="inlineCode">ProductCompositeServiceApplicationTests</code> class in the <code class="inlineCode">product-composite</code> project.</p>
+    <p class="normal">These are all the changes required in the source code. Before we can test the microservices together, we must learn how to add databases to the system landscape managed by Docker Compose.</p>
+    <h1 id="_idParaDest-173" class="heading-1">Adding databases to the Docker Compose landscape</h1>
+    <p class="normal">Now, we have<a id="_idIndexMarker434"/> all of the source code in place. Before we can start up the microservice landscape and try out the new APIs together with the new persistence layer, we must start up some databases.</p>
+    <p class="normal">We will bring MongoDB and MySQL into the system landscape controlled by Docker Compose and add configuration to our microservices so that they can find their <a id="_idIndexMarker435"/>databases when running.</p>
+    <h2 id="_idParaDest-174" class="heading-2">The Docker Compose configuration</h2>
+    <p class="normal">MongoDB and MySQL are<a id="_idIndexMarker436"/> declared as follows<a id="_idIndexMarker437"/> in the Docker Compose configuration file, <code class="inlineCode">docker-compose.yml</code>:</p>
+    <pre class="programlisting code"><code class="hljs-code">  <span class="hljs-attr">mongodb:</span>
+    <span class="hljs-attr">image:</span> <span class="code-highlight"><strong class="hljs-string-slc">mongo:6.0.4</strong></span>
+    <span class="hljs-attr">mem_limit:</span> <span class="hljs-string">512m</span>
+    <span class="hljs-attr">ports:</span>
+      <span class="hljs-bullet">-</span> <span class="code-highlight"><strong class="hljs-string-slc">"27017:27017"</strong></span>
+    <span class="hljs-attr">command:</span> <span class="hljs-string">mongod</span>
+    <span class="code-highlight"><strong class="hljs-attr-slc">healthcheck</strong></span><span class="hljs-attr">:</span>
+      <span class="hljs-attr">test:</span> <span class="hljs-string">"mongo --eval 'db.stats().ok'"</span>
+      <span class="hljs-attr">interval:</span> <span class="hljs-string">5s</span>
+      <span class="hljs-attr">timeout:</span> <span class="hljs-string">2s</span>
+      <span class="hljs-attr">retries:</span> <span class="hljs-number">60</span>
+  <span class="hljs-attr">mysql:</span>
+    <span class="hljs-attr">image:</span> <span class="code-highlight"><strong class="hljs-string-slc">mysql:8.0.32</strong></span>
+    <span class="hljs-attr">mem_limit:</span> <span class="hljs-string">512m</span>
+    <span class="hljs-attr">ports:</span>
+      <span class="hljs-bullet">-</span> <span class="hljs-string">"</span><span class="code-highlight"><strong class="hljs-string-slc">3306:3306</strong></span><span class="hljs-string">"</span>
+    <span class="hljs-attr">environment:</span>
+      <span class="hljs-bullet">-</span> <span class="code-highlight"><strong class="hljs-string-slc">MYSQL_ROOT_PASSWORD</strong></span><span class="hljs-string">=rootpwd</span>
+      <span class="hljs-bullet">-</span> <span class="code-highlight"><strong class="hljs-string-slc">MYSQL_DATABASE</strong></span><span class="hljs-string">=review-db</span>
+      <span class="hljs-bullet">-</span> <span class="code-highlight"><strong class="hljs-string-slc">MYSQL_USER</strong></span><span class="hljs-string">=user</span>
+      <span class="hljs-bullet">-</span> <span class="code-highlight"><strong class="hljs-string-slc">MYSQL_PASSWORD</strong></span><span class="hljs-string">=pwd</span>
+    <span class="code-highlight"><strong class="hljs-attr-slc">healthcheck</strong></span><span class="hljs-attr">:</span>
+      <span class="hljs-attr">test:</span> <span class="hljs-string">"/usr/bin/mysql --user=user --password=pwd --execute \"SHOW DATABASES;\""</span>
+      <span class="hljs-attr">interval:</span> <span class="hljs-string">5s</span>
+      <span class="hljs-attr">timeout:</span> <span class="hljs-string">2s</span>
+      <span class="hljs-attr">retries:</span> <span class="hljs-number">60</span>
+</code></pre>
+    <p class="normal">Notes from the preceding code:</p>
+    <ul>
+      <li class="bulletList">We will use the official Docker image for MongoDB v6.0.4 and MySQL 8.0.32 and forward their default ports <code class="inlineCode">27017</code> and <code class="inlineCode">3306</code> to the Docker host, also made available on <code class="inlineCode">localhost</code> when using Docker Desktop for Mac.</li>
+      <li class="bulletList">For MySQL, we also declare some environment variables, defining the following:<ul>
+          <li class="bulletList">The root password</li>
+          <li class="bulletList">The name of the database that will be created on container startup</li>
+          <li class="bulletList">A username and password for a user that is set up for the database on container startup</li>
+        </ul>
+      </li>
+      <li class="bulletList">We also declare a health check that Docker will run to determine the status of the MongoDB and MySQL databases.</li>
+    </ul>
+    <p class="normal">To avoid <a id="_idIndexMarker438"/>microservices trying to connect to databases before they are up and running, the <code class="inlineCode">product</code> and <code class="inlineCode">recommendation</code> services are declared as dependent on the MongoDB database, as follows:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">depends_on:</span>
+  <span class="hljs-attr">mongodb:</span>
+    <span class="hljs-attr">condition:</span> <span class="hljs-string">service_healthy</span>
+</code></pre>
+    <p class="normal">For the same reason, the <code class="inlineCode">review</code> service is declared as dependent on the MySQL database:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">depends_on:</span>
+  <span class="hljs-attr">mysql:</span>
+    <span class="hljs-attr">condition:</span> <span class="hljs-string">service_healthy</span>
+</code></pre>
+    <p class="normal">This means that Docker Compose will not start up the microservice containers until the database containers are launched and reported as healthy by their health checks.</p>
+    <h2 id="_idParaDest-175" class="heading-2">Database connection configuration</h2>
+    <p class="normal">With the<a id="_idIndexMarker439"/> database in place, we now need to set up the configuration for the core microservices so they know how to connect to their databases. This is set up in each core microservice’s configuration file, <code class="inlineCode">application.yml</code>, in the <code class="inlineCode">product-service</code>, <code class="inlineCode">recommendation-service</code>, and <code class="inlineCode">review-service</code> projects.</p>
+    <p class="normal">The configuration for the <code class="inlineCode">product</code> and <code class="inlineCode">recommendation</code> services are similar, so we will only look into the configuration of the <code class="inlineCode">product</code> service. The following part of the configuration is of interest:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="hljs-attr">spring.data.mongodb:</span>
+  <span class="hljs-attr">host:</span> <span class="code-highlight"><strong class="hljs-string-slc">localhost</strong></span>
+  <span class="hljs-attr">port:</span> <span class="code-highlight"><strong class="hljs-number-slc">27017</strong></span>
+  <span class="hljs-attr">database:</span> <span class="hljs-string">product-db</span>
+<span class="hljs-attr">logging:</span>
+ <span class="hljs-attr">level:</span>
+ <span class="hljs-attr">org.springframework.data.mongodb.core.</span><span class="code-highlight"><strong class="hljs-attr-slc">MongoTemplate</strong></span><span class="hljs-attr">:</span> <span class="code-highlight"><strong class="hljs-string-slc">DEBUG</strong></span>
+<span class="hljs-meta">---</span>
+<span class="hljs-attr">spring.config.activate.on-profile:</span> <span class="code-highlight"><strong class="hljs-string-slc">docker</strong></span>
+<span class="hljs-attr">spring.data.mongodb.host:</span> <span class="code-highlight"><strong class="hljs-string-slc">mongodb</strong></span>
+</code></pre>
+    <p class="normal">Important parts <a id="_idIndexMarker440"/>of the preceding code:</p>
+    <ul>
+      <li class="bulletList">When running without Docker using the default Spring profile, the database is expected to be reachable on <code class="inlineCode">localhost:27017</code>.</li>
+      <li class="bulletList">Setting the log level for <code class="inlineCode">MongoTemplate</code> to <code class="inlineCode">DEBUG</code> will allow us to see which MongoDB statements are executed in the log.</li>
+      <li class="bulletList">When running inside Docker using the Spring profile, <code class="inlineCode">docker</code>, the database is expected to be reachable on <code class="inlineCode">mongodb:27017</code>.</li>
+    </ul>
+    <p class="normal">The configuration for the <code class="inlineCode">review</code> service, which affects how it connects to its SQL database, looks like the following:</p>
+    <pre class="programlisting code"><code class="hljs-code"><span class="code-highlight"><strong class="hljs-attr-slc">spring.jpa.hibernate.ddl-auto</strong></span><span class="hljs-attr">:</span> <span class="hljs-string">update</span>
+<span class="hljs-attr">spring.datasource:</span>
+  <span class="hljs-attr">url:</span> <span class="hljs-string">jdbc:mysql://</span><span class="code-highlight"><strong class="hljs-string-slc">localhost</strong></span><span class="hljs-string">/review-db</span>
+  <span class="hljs-attr">username:</span> <span class="hljs-string">user</span>
+  <span class="hljs-attr">password:</span> <span class="hljs-string">pwd</span>
+<span class="hljs-attr">spring.datasource.hikari.</span><span class="code-highlight"><strong class="hljs-attr-slc">initializationFailTimeout</strong></span><span class="hljs-attr">:</span> <span class="hljs-number">60000</span>
+<span class="code-highlight"><strong class="hljs-attr-slc">logging</strong></span><span class="hljs-attr">:</span>
+ <span class="hljs-attr">level:</span>
+ <span class="hljs-attr">org.hibernate.SQL:</span> <span class="hljs-string">DEBUG</span>
+ <span class="hljs-attr">org.hibernate.type.descriptor.sql.BasicBinder:</span> <span class="hljs-string">TRACE</span>
+<span class="hljs-meta">---</span>
+<span class="hljs-attr">spring.config.activate.on-profile:</span> <span class="hljs-string">docker</span>
+<span class="hljs-attr">spring.datasource:</span>
+ <span class="hljs-attr">url:</span> <span class="hljs-string">jdbc:mysql://</span><span class="code-highlight"><strong class="hljs-string-slc">mysql</strong></span><span class="hljs-string">/review-db</span>
+</code></pre>
+    <p class="normal">Explanations <a id="_idIndexMarker441"/>for the preceding code:</p>
+    <ul>
+      <li class="bulletList">By default, Hibernate will be used by Spring Data JPA as JPA’s EntityManager.</li>
+      <li class="bulletList">The <code class="inlineCode">spring.jpa.hibernate.ddl-auto</code> property is used to tell Spring Data JPA to create new or update existing SQL tables during startup.</li>
+    </ul>
+    <div class="note">
+      <p class="normal"><strong class="keyWord">Note</strong>: It is strongly recommended to set the <code class="inlineCode">spring.jpa.hibernate.ddl-auto</code> property to <code class="inlineCode">none</code> or <code class="inlineCode">validate</code> in a production environment—this prevents Spring Data JPA from manipulating the structure of the SQL tables. For more information, see <a href="https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#howto-database-initialization"><span class="url">https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#howto-database-initialization</span></a>.</p>
+    </div>
+    <ul>
+      <li class="bulletList">When running without Docker, using the default Spring profile, the database is expected to be reachable on <code class="inlineCode">localhost</code> using the default port <code class="inlineCode">3306</code>.</li>
+      <li class="bulletList">By default, HikariCP is used by Spring Data JPA as the JDBC connection pool. To minimize startup problems on computers with limited hardware resources, the <code class="inlineCode">initializationFailTimeout</code> parameter is set to 60 seconds. This means that the Spring Boot application will wait for up to 60 seconds during startup to establish a database connection.</li>
+      <li class="bulletList">The log-level settings for Hibernate will cause Hibernate to print the SQL statements used and the actual values used. Please note that when used in a production environment, writing the actual values to the log should be avoided for privacy reasons.</li>
+      <li class="bulletList">When running inside Docker using the Spring profile, <code class="inlineCode">docker</code>, the database is expected to be reachable on the <code class="inlineCode">mysql</code> hostname using the default port <code class="inlineCode">3306</code>.</li>
+    </ul>
+    <p class="normal">With this configuration in place, we are ready to start up the system landscape. But before we do that, let’s learn how we can run database CLI tools.</p>
+    <h2 id="_idParaDest-176" class="heading-2">The MongoDB and MySQL CLI tools</h2>
+    <p class="normal">Once we have<a id="_idIndexMarker442"/> started to run some tests with the microservices, it will be interesting to see what data is actually stored in the microservices’ databases. Each database Docker container comes with CLI-based tools that can be used to query the database tables and collections. To be able to run the database CLI tools, the Docker Compose <code class="inlineCode">exec</code> command can be used.</p>
+    <p class="normal">The commands described in this section will be used when we get to the manual tests in the next section. Don’t try to run them now; they will fail since we have no databases up and running yet!</p>
+    <p class="normal">To start the <a id="_idIndexMarker443"/>MongoDB CLI tool, <code class="inlineCode">mongo</code>, inside the <code class="inlineCode">mongodb</code> container, run the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose exec mongodb mongosh ––quiet
+&gt;
+</code></pre>
+    <p class="normal">Enter <code class="inlineCode">exit</code> to leave the <code class="inlineCode">mongo</code> CLI.</p>
+    <p class="normal">To start the<a id="_idIndexMarker444"/> MySQL CLI tool, <code class="inlineCode">mysql</code>, inside<a id="_idIndexMarker445"/> the <code class="inlineCode">mysql</code> container and log in to <code class="inlineCode">review-db</code> using the user created at startup, run the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose exec mysql mysql -uuser -p review-db
+mysql&gt;
+</code></pre>
+    <div class="packt_tip">
+      <p class="normal">The <code class="inlineCode">mysql</code> CLI tool will prompt you for a password; you can find it in the <code class="inlineCode">docker-compose.yml</code> file. Look for the value of the environment variable <code class="inlineCode">MYSQL_PASSWORD</code>.</p>
+    </div>
+    <p class="normal">Enter <code class="inlineCode">exit</code> to leave the <code class="inlineCode">mysql</code> CLI.</p>
+    <p class="normal">We will see the usage of these tools in the next section.</p>
+    <p class="normal">If you prefer graphical database tools, you can run them locally as well, since both the MongoDB and the MySQL containers expose their standard ports on localhost.</p>
+    <h1 id="_idParaDest-177" class="heading-1">Manual tests of the new APIs and the persistence layer</h1>
+    <p class="normal">Now, we <a id="_idIndexMarker446"/>have everything in place to test the microservices together. We will build new Docker images and start up the system landscape using Docker Compose based on the Docker images. Next, we will use the Swagger UI viewer to run some manual tests. Finally, we will use the database CLI tools to see what data was inserted into the databases.</p>
+    <p class="normal">Build and start the system landscape with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter06
+./gradlew build &amp;&amp; docker-compose build &amp;&amp; docker-compose up
+</code></pre>
+    <p class="normal">Open Swagger UI in a web browser, <code class="inlineCode">http://localhost:8080/openapi/swagger-ui.html</code>, and perform the following steps on the web page:</p>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Click on the <strong class="screenText">ProductComposite</strong> service and the <strong class="screenText">POST</strong> method to expand them.</li>
+      <li class="numberedList">Click on the <strong class="screenText">Try it out</strong> button and go down to the body field.</li>
+      <li class="numberedList">Replace the default value, <code class="inlineCode">0</code>, of the <code class="inlineCode">productId</code> field with <code class="inlineCode">123456</code>.</li>
+      <li class="numberedList">Scroll down to the <strong class="screenText">Execute</strong> button and click on it.</li>
+      <li class="numberedList">Verify that the returned response code is <strong class="screenText">200</strong>.</li>
+    </ol>
+    <p class="normal">The following is a sample screenshot after hitting the <strong class="screenText">Execute</strong> button:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_07.png" alt="Graphical user interface, application  Description automatically generated" width="878" height="803"/></figure>
+    <p class="packt_figref">Figure 6.7: Testing the server response</p>
+    <p class="normal">In the log <a id="_idIndexMarker447"/>output from the <code class="inlineCode">docker-compose up</code> command, we should be able to see output like the following (abbreviated for increased readability):</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_08.png" alt="" role="presentation" width="878" height="108"/></figure>
+    <p class="packt_figref">Figure 6.8: Log output from docker-compose up</p>
+    <p class="normal">We can also use the database CLI tools to see the actual content in the different databases.</p>
+    <p class="normal">Look up <a id="_idIndexMarker448"/>the content in the <code class="inlineCode">product</code> service, that is, the <code class="inlineCode">products</code> collection in MongoDB, with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose exec mongodb mongosh product-db --quiet --eval "db.products.find()"
+</code></pre>
+    <p class="normal">Expect a response like this:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_09.png" alt="Text  Description automatically generated" width="878" height="313"/></figure>
+    <p class="packt_figref">Figure 6.9: Looking up products</p>
+    <p class="normal">Look up the content in the <code class="inlineCode">recommendation</code> service, that is, the <code class="inlineCode">recommendations</code> collection in MongoDB, with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose exec mongodb mongosh recommendation-db --quiet --eval "db.recommendations.find()"
+</code></pre>
+    <p class="normal">Expect a response like this:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_10.png" alt="Text  Description automatically generated" width="878" height="302"/></figure>
+    <p class="packt_figref">Figure 6.10: Looking up recommendations</p>
+    <p class="normal">Look up<a id="_idIndexMarker449"/> the content in the <code class="inlineCode">review</code> service, that is, the <code class="inlineCode">reviews</code> table in MySQL, with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">docker-compose exec mysql mysql -uuser -p review-db -e "select * from reviews"
+</code></pre>
+    <p class="normal">The <code class="inlineCode">mysql</code> CLI tool will prompt you for a password; you can find it in the <code class="inlineCode">docker-compose.yml</code> file. Look for the value of the environment variable <code class="inlineCode">MYSQL_PASSWORD</code>. Expect a response like the following:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_11.png" alt="" role="presentation" width="627" height="145"/></figure>
+    <p class="packt_figref">Figure 6.11: Looking up reviews</p>
+    <p class="normal">Bring down the system landscape by interrupting the <code class="inlineCode">docker-compose up</code> command with <em class="keystroke">Ctrl</em> + <em class="keystroke">C</em>, followed by the command <code class="inlineCode">docker-compose down</code>. After this, let us see how to update the automated tests in a microservice landscape.</p>
+    <h1 id="_idParaDest-178" class="heading-1">Updating the automated tests of the microservice landscape</h1>
+    <p class="normal">The <a id="_idIndexMarker450"/>automated tests of the microservice landscape, <code class="inlineCode">test-em-all.bash</code>, need to be updated so that they ensure that the database of each microservice has a known state before it runs the tests.</p>
+    <p class="normal">The script is <a id="_idIndexMarker451"/>extended with a setup function, <code class="inlineCode">setupTestdata()</code>, which uses the composite create and delete APIs to set up test data used by the tests.</p>
+    <p class="normal">The <code class="inlineCode">setupTestdata</code> function looks like this:</p>
+    <pre class="programlisting code"><code class="hljs-code">function <span class="hljs-title">setupTestdata</span><span class="hljs-params">()</span> {
+    body=\
+    <span class="hljs-string">'{"productId":1,"name":"product 1","weight":1, "recommendations":[</span>
+<span class="hljs-string">        {"recommendationId":1,"author":"author </span>
+<span class="hljs-string">         1","rate":1,"content":"content 1"},</span>
+<span class="hljs-string">        {"recommendationId":2,"author":"author </span>
+<span class="hljs-string">         2","rate":2,"content":"content 2"},</span>
+<span class="hljs-string">        {"recommendationId":3,"author":"author </span>
+<span class="hljs-string">         3","rate":3,"content":"content 3"}</span>
+<span class="hljs-string">    ], "reviews":[</span>
+<span class="hljs-string">        {"reviewId":1,"author":"author 1","subject":"subject </span>
+<span class="hljs-string">         1","content":"content 1"},</span>
+<span class="hljs-string">        {"reviewId":2,"author":"author 2","subject":"subject </span>
+<span class="hljs-string">         2","content":"content 2"},</span>
+<span class="hljs-string">        {"reviewId":3,"author":"author 3","subject":"subject </span>
+<span class="hljs-string">         3","content":"content 3"}</span>
+<span class="hljs-string">    ]}'</span>
+    recreateComposite <span class="hljs-number">1</span> <span class="hljs-string">"</span><span class="hljs-string">$body"</span>
+    body=\
+    <span class="hljs-string">'{"productId":113,"name":"product 113","weight":113, "reviews":[</span>
+<span class="hljs-string">    {"reviewId":1,"author":"author 1","subject":"subject </span>
+<span class="hljs-string">     1","content":"content 1"},</span>
+<span class="hljs-string">    {"reviewId":2,"author":"author 2","subject":"subject </span>
+<span class="hljs-string">     2","content":"content 2"},</span>
+<span class="hljs-string">    {"reviewId":3,"author":"author 3","subject":"subject </span>
+<span class="hljs-string">     3","content":"content 3"}</span>
+<span class="hljs-string">]}'</span>
+    recreateComposite <span class="hljs-number">113</span> <span class="hljs-string">"$body"</span>
+    body=\
+    <span class="hljs-string">'{"productId":213,"name":"product 213","weight":213, </span>
+<span class="hljs-string">    "recommendations":[</span>
+<span class="hljs-string">       {"recommendationId":1,"author":"author </span>
+<span class="hljs-string">         1","rate":1,"content":"content 1"},</span>
+<span class="hljs-string">       {"recommendationId":2,"author":"author </span>
+<span class="hljs-string">        2","rate":2,"content":"content 2"},</span>
+<span class="hljs-string">       {"recommendationId":3,"author":"author </span>
+<span class="hljs-string">        3","rate":3,"content":"content 3"}</span>
+<span class="hljs-string">]}'</span>
+    recreateComposite <span class="hljs-number">213</span> <span class="hljs-string">"$body"</span>
+}
+</code></pre>
+    <p class="normal">It uses a<a id="_idIndexMarker452"/> helper function, <code class="inlineCode">recreateComposite()</code>, to perform the actual requests to the delete and create APIs:</p>
+    <pre class="programlisting code"><code class="hljs-code">function <span class="code-highlight"><strong class="hljs-title-slc">recreateComposite</strong></span><span class="hljs-params">()</span> {
+    local productId=$<span class="hljs-number">1</span>
+    local composite=$<span class="hljs-number">2</span>
+    assertCurl <span class="hljs-number">200</span> <span class="hljs-string">"curl -X </span><span class="code-highlight"><strong class="hljs-string-slc">DELETE</strong></span><span class="hljs-string"> http://$HOST:$PORT/product-</span>
+<span class="hljs-string">    composite/${productId} -s"</span>
+    curl -X <span class="code-highlight"><strong class="hljs-slc">POST</strong></span> http:<span class="hljs-comment">//$HOST:$PORT/product-composite -H "Content-Type: </span>
+    application/json<span class="hljs-string">" --data "</span>$composite<span class="hljs-string">"</span>
+<span class="hljs-string">}</span>
+</code></pre>
+    <p class="normal">The <code class="inlineCode">setupTestdata</code> function<a id="_idIndexMarker453"/> is called directly after the <code class="inlineCode">waitForService</code> function:</p>
+    <pre class="programlisting con"><code class="hljs-con">waitForService curl -X DELETE http://$HOST:$PORT/product-composite/13
+setupTestdata
+</code></pre>
+    <p class="normal">The main purpose of the <code class="inlineCode">waitForService</code> function is to verify that all microservices are up and running. In the previous chapter, the get API on the composite product service was used. In this chapter, the delete API is used instead. When using the get API, only the <code class="inlineCode">product</code> core microservice is called if the entity is not found; the <code class="inlineCode">recommendation</code> and <code class="inlineCode">review</code> services will not be called to verify that they are up and running. The call to the delete API will also ensure that the <em class="italic">Not Found</em> test on <code class="inlineCode">productId 13</code> will succeed. In the next chapter, we will see how we can define specific APIs for checking the health state of a microservice landscape.</p>
+    <p class="normal">Execute the updated test script with the following command:</p>
+    <pre class="programlisting con"><code class="hljs-con">cd $BOOK_HOME/Chapter06
+./test-em-all.bash start stop
+</code></pre>
+    <p class="normal">The execution should end by writing a log message like this:</p>
+    <figure class="mediaobject"><img src="../Images/B19825_06_12.png" alt="Graphical user interface, text  Description automatically generated" width="513" height="74"/></figure>
+    <p class="packt_figref">Figure 6.12: Log message at the end of test execution</p>
+    <p class="normal">This <a id="_idIndexMarker454"/>concludes the updates on the automated tests <a id="_idIndexMarker455"/>of the microservice landscape.</p>
+    <h1 id="_idParaDest-179" class="heading-1">Summary</h1>
+    <p class="normal">In this chapter, we saw how we can use Spring Data to add a persistence layer to the core microservices. We used the core concepts of Spring Data, repositories, and entities to store data in both MongoDB and MySQL. The programming model is similar for a NoSQL database such as MongoDB and a SQL database such as MySQL, even though it’s not fully portable. We also saw how Spring Boot’s annotations, <code class="inlineCode">@DataMongoTest</code> and <code class="inlineCode">@DataJpaTest</code>, can be used to conveniently set up tests targeted for persistence; this is where a database is started automatically before the test runs, but no other infrastructure that the microservice will need at runtime, for example, a web server such as Netty, is started up. To handle the startup and teardown of databases, we have used Testcontainers, which runs the databases in Docker containers. This results in persistence tests that are easy to set up and that start with minimum overhead.</p>
+    <p class="normal">We have also seen how the persistence layer can be used by the service layer and how we can add APIs for creating and deleting entities, both core and composite.</p>
+    <p class="normal">Finally, we learned how convenient it is to start up databases such as MongoDB and MySQL at runtime using Docker Compose and how to use the new create and delete APIs to set up test data before running automated tests of the microservice-based system landscape.</p>
+    <p class="normal">However, one major concern was identified in this chapter. Updating (creating or deleting) a composite entity—an entity whose parts are stored in a number of microservices—using synchronous APIs can lead to inconsistencies, if not all involved microservices are updated successfully. This is, in general, not acceptable. This leads us into the next chapter, where we will look into why and how to build reactive microservices, that is, microservices that are scalable and robust.</p>
+    <h1 id="_idParaDest-180" class="heading-1">Questions</h1>
+    <ol class="numberedList" style="list-style-type: decimal;">
+      <li class="numberedList" value="1">Spring Data, a common programming model based on entities and repositories, can be used for different types of database engines. From the source code examples in this chapter, what are the most important differences in the persistence code for MySQL and MongoDB?</li>
+      <li class="numberedList">What is required to implement optimistic locking using Spring Data?</li>
+      <li class="numberedList">What is MapStruct used for?</li>
+      <li class="numberedList">What does it mean if an operation is idempotent and why is that useful?</li>
+      <li class="numberedList">How can we access the data that is stored in the MySQL and MongoDB databases without using the API?</li>
+    </ol>
+  </div>
+</div>
+</div>
+</body></html>
