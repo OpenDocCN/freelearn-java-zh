@@ -1,0 +1,261 @@
+<html><head></head><body>
+		<div id="_idContainer070">
+			<h1 id="_idParaDest-176"><em class="italic"><a id="_idTextAnchor187"/>Chapter 10</em>: Reactive Cloud-Native Applications</h1>
+			<p>Up until now, we have mainly talked about traditional cloud-native applications that adopt <strong class="bold">imperative programming</strong> with clearly defined input and output. Imperative programming is the oldest programming paradigm. Applications using this paradigm are built using a clearly defined sequence of instructions making it easier to understand. Its architecture requires that the connection services are predefined. </p>
+			<p>However, sometimes, a cloud-native application does not know which services it should call. Its purpose might be just sending or receiving messages or events and staying responsive and reactive. Thus, imperative programming no longer applies to these kinds of applications. Under such circumstances, you will need to rely on <strong class="bold">reactive programing</strong> and use an event-driven architecture to achieve reactive, responsive, and message-driven applications. We will discuss reactive cloud-native applications in this chapter.</p>
+			<p>First, you will learn the difference between imperative and reactive applications. Then we will talk about how to create reactive cloud-native applications using <strong class="bold">MicroProfile Reactive Messaging 2.0</strong>. </p>
+			<p>We will cover the following topics:</p>
+			<ul>
+				<li>Differentiating between imperative and reactive applications</li>
+				<li>Using <strong class="bold">MicroProfile Context Propagation</strong> to improve asynchronous programming</li>
+				<li>Developing reactive cloud-native applications using <strong class="bold">MicroProfile Reactive Messaging</strong></li>
+			</ul>
+			<p>To fully understand this chapter, you should have Java knowledge on multithreading, the <strong class="source-inline">CompletableFuture</strong> class, and <strong class="source-inline">CompletionStage</strong> interface from Java 8.</p>
+			<p>By the end of this chapter, you should be able to understand what reactive cloud-native applications are, how you can create reactive cloud-native applications that avoid block I/O problems, and be able to utilize messaging libraries such as Apache Kafka. </p>
+			<h1 id="_idParaDest-177"><a id="_idTextAnchor188"/>Differentiating between imperative and reactive applications</h1>
+			<p>When developing imperative applications, the application developers define how to perform a task. You may design a synchronous application to start with. However, to deal with heavy loads and improve performance, you might think about switching from synchronous programming to asynchronous programming to speed up by performing multiple tasks in parallel. When using synchronous programming, on hitting block I/O, a thread has to wait, and no other tasks can be performed on that thread. However, in the case of asynchronous programming, multiple threads can be dispatched to perform other tasks if one thread is blocked.</p>
+			<p>Asynchronous programming dispatches multiple threads but it does not fix the blocking I/O issues. If there are blockages, eventually the application will consume all threads. Consequently, the application will run out of resources. One of the characteristics of imperative programming is that one application needs to know which services to interact with. Under some circumstances, it might not know nor care about the downstream services. Therefore, imperative programming is not applicable in this kind of situation. Here, reactive programming comes to the rescue. </p>
+			<p>Reactive programming is a paradigm concerned with data streams and the propagation of changes. This paradigm is used to build a cloud-native application that is message-driven, resilient, and responsive. </p>
+			<p>A reactive application adopts the design principle from the <strong class="bold">Reactive Manifesto</strong>. The Reactive Manifesto (<a href="https://www.reactivemanifesto.org/">https://www.reactivemanifesto.org/</a>) outlines the following four characteristics:</p>
+			<ul>
+				<li><strong class="bold">Responsive</strong>: The application responds in a timely manner under all conditions.</li>
+				<li><strong class="bold">Elastic</strong>: The system stays responsive under various amounts of load, and can scale up or down based on demand.</li>
+				<li><strong class="bold">Resilient</strong>: The system is resilient in all situations.</li>
+				<li><strong class="bold">Message Driven</strong>: The system relies on asynchronous messaging as a communication channel among the components.</li>
+			</ul>
+			<p>Reactive applications use asynchronous programming to achieve temporal decoupling. As we mentioned previously, asynchronous programming involves dispatching more threads. Each thread normally requires some <strong class="bold">Security</strong>, <strong class="bold">Contexts and Dependency Injections</strong> (<strong class="bold">CDI</strong>), or <strong class="bold">Transaction</strong> context associated with it so that it can continue the process from the previous thread. However, if you use the <strong class="source-inline">java.util.concurrent.ForkJoinPool</strong> class for creating new threads, no context will be associated with the new thread that is dispatched. Therefore, to continue an unfinished task from one thread on a different new thread, you will need to push some context from the previous thread to the new threads for continued task execution. MicroProfile Context Propagation can be used to achieve this, which we will discuss next.</p>
+			<h1 id="_idParaDest-178"><a id="_idTextAnchor189"/>Using MicroProfile Context Propagation to manage context</h1>
+			<p>MicroProfile Context Propagation (<a href="https://download.eclipse.org/microprofile/microprofile-context-propagation-1.2/">https://download.eclipse.org/microprofile/microprofile-context-propagation-1.2/</a>) defines a mechanism for propagating context from the current thread to a new thread. The types of context include the following:</p>
+			<ul>
+				<li><strong class="bold">Application</strong>: This normally includes the thread context class loader as well as <strong class="source-inline">java:comp</strong>, <strong class="source-inline">java:module</strong>, and <strong class="source-inline">java:app</strong>.</li>
+				<li><strong class="bold">CDI</strong>: The scope of the CDI context, such as <strong class="source-inline">SessionScoped</strong> and <strong class="source-inline">ConversationScoped</strong>, is still active in the new unit of work, such as a new <strong class="source-inline">CompeletionStage</strong>.</li>
+				<li><strong class="bold">Security</strong>: This includes the credentials that are associated with the current thread.</li>
+				<li><strong class="bold">Transaction</strong>: This is the active transaction scope that is associated with the current thread. This context is not normally expected to be propagated, but cleared instead.</li>
+			</ul>
+			<p>Apart from the aforementioned context, an application can introduce custom context if needed.</p>
+			<p>To propagate the aforementioned context, this specification introduces two interfaces:</p>
+			<ul>
+				<li><strong class="source-inline">ManagedExecutor</strong>: This interface provides an asynchronous execution mechanism for defining thread context propagation.</li>
+				<li><strong class="source-inline">ThreadContext</strong>: This interface enables finer control over the capture and propagation of thread context. You can associate this interface with a particular function.</li>
+			</ul>
+			<p>In the following subsections, we will briefly discuss how to use the two aforementioned interfaces to propagate the context that was associated with the current thread across various types of units of work such as <strong class="source-inline">CompletionStage</strong>, <strong class="source-inline">CompletableFuture</strong>, <strong class="source-inline">Function</strong>, and <strong class="source-inline">Runnable</strong>. </p>
+			<h2 id="_idParaDest-179"><a id="_idTextAnchor190"/>Using ManagedExecutor to propagate context</h2>
+			<p><strong class="source-inline">ManagedExecutor</strong> differs from other known executors, such as <strong class="source-inline">ForkJoinPool</strong>, which do not have the facilities to propagate contexts. To use <strong class="source-inline">ManagedExecutor</strong> to propagate contexts, you will need to create an instance of <strong class="source-inline">ManagedExecutor</strong>, which can be achieved via the builder pattern:</p>
+			<p class="source-code">ManagedExecutor executor = ManagedExecutor.builder()</p>
+			<p class="source-code">        .cleared(ThreadContext.TRANSACTION)</p>
+			<p class="source-code">        .propagated(ThreadContext.ALL_REMAINING)</p>
+			<p class="source-code">        .maxAsync(10)</p>
+			<p class="source-code">        .build();</p>
+			<p>The aforementioned code snippet is used to create an executor object of <strong class="source-inline">ManagedExecutor</strong> that cleared <strong class="source-inline">Transaction</strong> context and propagated all the other remaining contexts. This executor supports a maximum of <strong class="source-inline">10</strong> concurrent executions. You can then invoke some method of the executor to create an object of <strong class="source-inline">CompletableFuture</strong> for asynchronous programming as follows:</p>
+			<p class="source-code">CompletableFuture&lt;Long&gt; stage1 =   executor.newIncompleteFuture();</p>
+			<p class="source-code">stage1.thenApply(function1).thenApply(function2);</p>
+			<p class="source-code">stage1.completeAsync(supplier); </p>
+			<p>The preceding code snippet demonstrates using the <strong class="source-inline">executor</strong> object to create an incomplete <strong class="source-inline">CompletableFuture</strong> <strong class="source-inline">stage1</strong>, which then executes <strong class="source-inline">function1</strong>. After <strong class="source-inline">function1</strong> completes, <strong class="source-inline">function2</strong> will then be executed. Finally, the future <strong class="source-inline">stage1</strong> will be completed with the given <strong class="source-inline">supplier</strong> function.</p>
+			<p>Apart from <strong class="source-inline">ManagedExecutor</strong>, another way to propagate context is to use the <strong class="source-inline">ThreadContext</strong> interface. Let's discuss it in more detail in the next section.</p>
+			<h2 id="_idParaDest-180"><a id="_idTextAnchor191"/>Using ThreadContext to propagate context</h2>
+			<p><strong class="source-inline">ThreadContext</strong> offers a fine-grained control for capturing and restoring context. To use <strong class="source-inline">ThreadContext</strong>, you need to create an instance of <strong class="source-inline">ThreadContext</strong>, which can be constructed via the builder pattern as follows:</p>
+			<p class="source-code">ThreadContextthreadContext = ThreadContext.builder()  .propagated(ThreadContext.APPLICATION, ThreadContext     .SECURITY).unchanged().cleared(ThreadContext       .ALL_REMAINING).build();</p>
+			<p>The aforementioned code snippet creates an instance of <strong class="source-inline">ThreadContext</strong> that propagates the application and security context from the current thread and clears other contexts. Afterward, you can create a <strong class="source-inline">CompletionStage</strong> instance by calling the <strong class="source-inline">threadContext.withContextCapture()</strong> method:</p>
+			<p class="source-code">CompletionStage stage =   threadContext.withContextCapture(someMethod);</p>
+			<p class="source-code">stage.thenApply(function1).thenAccept(aConsumer);</p>
+			<p>In the aforementioned code snippet, both the <strong class="source-inline">function1</strong> and <strong class="source-inline">aConsumer</strong> functions will inherit the application and security context from the current thread.</p>
+			<p>Alternatively, you can create a contextual function from a <strong class="source-inline">threadContext</strong> object and then provide this contextual function to <strong class="source-inline">CompletableFuture</strong>, as shown here:</p>
+			<p class="source-code">Function&lt;String, String&gt; aFunction =   threadContext.contextualFunction(function1);</p>
+			<p class="source-code">CompletableFuture.thenApply(aFunction)    .thenAccept(aConsumer);</p>
+			<p>In the preceding code snippet, when <strong class="source-inline">aFunction</strong> is executed, the thread that runs this <strong class="source-inline">aFunction</strong> will inherit the application and security context from its parent thread, which means the thread will be able to perform similar functions as the thread that creates the <strong class="source-inline">aFunction</strong> object, while the <strong class="source-inline">aConsumer</strong> function will not inherit the application and security context from its parent thread. In order to use Context Propagation, you need to make the APIs available to your application.</p>
+			<h3>Making the MicroProfile Context Propagation API available</h3>
+			<p>MicroProfile Context Propagation API JARs can be made available for Maven and Gradle projects. If you create a Maven project, you can directly add the following to your <strong class="source-inline">pom.xml</strong> file:</p>
+			<p class="source-code">&lt;dependency&gt;</p>
+			<p class="source-code">    &lt;groupId&gt;org.eclipse.microprofile.context-      propagation&lt;/groupId&gt;</p>
+			<p class="source-code">    &lt;artifactId&gt;microprofile-context-propagation-      api&lt;/artifactId&gt;</p>
+			<p class="source-code">    &lt;version&gt;1.2&lt;/version&gt;</p>
+			<p class="source-code">&lt;/dependency&gt;</p>
+			<p>Alternative, if you create a Gradle project, you need to add the following dependency:</p>
+			<p class="source-code">dependencies {</p>
+			<p class="source-code">  providedCompile org.eclipse.microprofile.context-    propagation: microprofile-context-propagation-api:1.2</p>
+			<p class="source-code">}</p>
+			<p>We have briefly discussed how to capture and restore contexts as part of asynchronous programming. As mentioned previously, asynchronous programming does not solve the blocking I/O issue but works around it by dispatching new threads if a thread is blocked. To solve the blocking I/O issue, you will need to consider building a reactive application. In the next section, we discuss using MicroProfile Reactive Messaging to help you build a reactive application.</p>
+			<h1 id="_idParaDest-181"><a id="_idTextAnchor192"/>Using MicroProfile Reactive Messaging to build a reactive application</h1>
+			<p><strong class="bold">MicroProfile Reactive Messaging 2.0</strong> (<a href="https://download.eclipse.org/microprofile/microprofile-reactive-messaging-2.0/">https://download.eclipse.org/microprofile/microprofile-reactive-messaging-2.0/</a>) provides a mechanism for building event-driven cloud-native applications. It enables decoupling between the services via messaging. MicroProfile Reactive Messaging provides the <strong class="source-inline">@Outgoing</strong> annotation for publishing messages and <strong class="source-inline">@Incoming</strong> for consuming messages. The following figure illustrates how messages travel from the publisher (<strong class="bold">Method A</strong>) to the consumer (<strong class="bold">Method B</strong>). The message can be sent to a messaging store, such as Apache Kafka, MQ, and so on, and will then be delivered to a consumer such as <strong class="bold">Method B</strong>:</p>
+			<div>
+				<div id="_idContainer069" class="IMG---Figure">
+					<img src="image/B17377_10_01.jpg" alt="Figure 10.1 – Messaging flow &#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 10.1 – Messaging flow </p>
+			<p>In Reactive Messaging, CDI beans are used to produce, process, and consume messages. These messages can be sent and received via remote brokers or various message transport layers such as Apache Kafka, MQ, and so on. Let's discuss a few key elements of MicroProfile Reactive <a id="_idIndexMarker1055"/>Messaging: messages, message<a id="_idIndexMarker1056"/> acknowledgment, channels, message consumption, message production, message processing, and <strong class="source-inline">Emitter</strong>.</p>
+			<h2 id="_idParaDest-182"><a id="_idTextAnchor193"/>Message</h2>
+			<p>A <strong class="bold">message</strong> is a<a id="_idIndexMarker1057"/> piece of information<a id="_idIndexMarker1058"/> wrapped in an envelope. Additionally, this piece of information can include an acknowledgment logic, which can be either positive or negative. The following are a few ways to produce a message:</p>
+			<ul>
+				<li><strong class="source-inline">Message.of(P p)</strong>: This method wraps the given payload <strong class="source-inline">p</strong> without any acknowledgment logic.</li>
+				<li><strong class="source-inline">Message.of(P p, Supplier&lt;CompletionStage&lt;Void&gt;&gt; ack)</strong>: This method wraps the given payload <strong class="source-inline">p</strong> and provides the <strong class="source-inline">ack</strong> acknowledgment logic.</li>
+				<li><strong class="source-inline">Message.of(P p, Supplier&lt;CompletionStage&lt;Void&gt;&gt; ack, Function&lt;Throwable, CompletionSTage&lt;&lt;Void&gt;&gt; nack)</strong>: This method wraps the given payload <strong class="source-inline">p</strong>, provides the <strong class="source-inline">ack</strong> acknowledgment logic and the <strong class="source-inline">nack</strong> negative acknowledgment logic.</li>
+			</ul>
+			<p>Alternatively, if you have a <strong class="source-inline">Message</strong> object, you can create a new <strong class="source-inline">Message</strong> object from it by getting its payload and then optionally supplying a new positive or negative acknowledgment, as shown here:</p>
+			<p class="source-code">Message&lt;T&gt; newMessage =   aMessage.withPayload(payload).withAck(...).withNack(...) </p>
+			<p>The aforementioned code snippet creates <strong class="source-inline">newMessage</strong> from <strong class="source-inline">aMessage</strong> and provides new payload, positive acknowledgment, and negative acknowledgment logic.</p>
+			<p>You might be wondering how to perform message acknowledgment and negative acknowledgment. We will discuss them in more detail in the next section.</p>
+			<h2 id="_idParaDest-183"><a id="_idTextAnchor194"/>Message acknowledgment </h2>
+			<p>All <a id="_idIndexMarker1059"/>messages<a id="_idIndexMarker1060"/> must be acknowledged either positively or negatively, and can be acknowledged either explicitly or implicitly using the MicroProfile Reactive Messaging implementation. </p>
+			<p>There<a id="_idIndexMarker1061"/> are two<a id="_idIndexMarker1062"/> different <a id="_idIndexMarker1063"/>types <a id="_idIndexMarker1064"/>of acknowledgment: <strong class="bold">positive acknowledgment</strong> and <strong class="bold">negative acknowledgment</strong>. Positive acknowledgment means messages were processed successfully whereas negative acknowledgment means messages were unsuccessfully processed. </p>
+			<p>Acknowledgment can be explicitly specified by the <strong class="source-inline">@Acknowlegment</strong> annotation. This annotation is used in conjunction with the <strong class="source-inline">@Incoming</strong> annotation. You can specify one of the following three acknowledgment policies:</p>
+			<ul>
+				<li><strong class="bold">@Acknowlegment(MANUAL)</strong>: You need to explicitly call <strong class="source-inline">Message#ack()</strong> to acknowledge the message being received.</li>
+				<li><strong class="bold">@Acknowledgment(PRE_PROCESSING)</strong>: A Reactive Messaging implementation that acknowledges the message before the annotated method is executed.</li>
+				<li><strong class="bold">@Acknowledgment(POST_PROCESSING)</strong>: A Reactive Messaging implementation that acknowledges the message once the method completes if the method does not emit data or the emitted data is acknowledged.</li>
+			</ul>
+			<p>The following is an example of a manual acknowledgment. The <strong class="source-inline">consume()</strong> method acknowledges the message consumption manually via calling the <strong class="source-inline">msg.ack()</strong> method on the <strong class="source-inline">msg</strong> object:</p>
+			<p class="source-code">@Incoming("channel-c")</p>
+			<p class="source-code">@Acknowledgment(Acknowledgment.Strategy.MANUAL)</p>
+			<p class="source-code">public CompletionStage&lt;Void&gt; consume(Message&lt;I&gt; msg) {</p>
+			<p class="source-code">  System.out.println("Received the message: " +     msg.getPayload());</p>
+			<p class="source-code">  return msg.ack();</p>
+			<p class="source-code">}</p>
+			<p>If the <strong class="source-inline">@Acknowledgment</strong> annotation is absent, what acknowledgment policy do you think should then be used? The answer to this is, it depends on the method signature where the <strong class="source-inline">@Incoming</strong> annotation is applied. The default acknowledgment is as follows:</p>
+			<ul>
+				<li>If the method parameter or return type contains the type of <strong class="source-inline">message</strong>, the default acknowledgment is <strong class="source-inline">MANUAL</strong>.</li>
+				<li>Otherwise, if the method is only annotated with <strong class="source-inline">@Incoming</strong>, the default acknowledgment is <strong class="source-inline">POST_PROCESSING</strong>. </li>
+				<li>Finally, if the method is annotated with both <strong class="source-inline">@Incoming</strong> and <strong class="source-inline">@Outgoing</strong>, the default acknowledgment is <strong class="source-inline">PRE_PROCESSING</strong>. </li>
+			</ul>
+			<p>Now that we have covered the necessary concepts of messages and their acknowledgment policies. You might be wondering where the message will be sent to or consumed <a id="_idIndexMarker1065"/>from, meaning its destination or source respectively. These are called channels, which we will discuss in the next section.</p>
+			<h2 id="_idParaDest-184"><a id="_idTextAnchor195"/>Channel</h2>
+			<p>A <strong class="bold">channel</strong> is a <a id="_idIndexMarker1066"/>string representing <a id="_idIndexMarker1067"/>the source or destination of messages. MicroProfile Reactive Messaging has two <a id="_idIndexMarker1068"/>types of channels:</p>
+			<ul>
+				<li><strong class="bold">Internal channels</strong>: These <a id="_idIndexMarker1069"/>channels are local to the application and allow for multi-step processing between the message source and message destination.</li>
+				<li><strong class="bold">External channels</strong>: These <a id="_idIndexMarker1070"/>channels connect to remote brokers or various message transport layers such as Apache Kafka, an AMQP broker, or other messaging technologies.</li>
+			</ul>
+			<p>Messages flow from an upstream channel and then to a downstream channel till they reach the consumer to have the messages consumed. Next, we discuss how these messages <a id="_idIndexMarker1071"/>are <a id="_idIndexMarker1072"/>consumed.</p>
+			<h2 id="_idParaDest-185"><a id="_idTextAnchor196"/>Message consumption using @Incoming</h2>
+			<p>A<a id="_idIndexMarker1073"/> message <a id="_idIndexMarker1074"/>can be consumed <a id="_idIndexMarker1075"/>by a method with the <strong class="source-inline">@Incoming</strong> annotation on a CDI bean. The following example consumes messages from the <strong class="source-inline">channel-a</strong> channel:</p>
+			<p class="source-code">@Incoming("channel-a")</p>
+			<p class="source-code">CompletionStage&lt;Void&gt; method(Message&lt;I&gt; msg) {</p>
+			<p class="source-code">    return message.ack();</p>
+			<p class="source-code">}</p>
+			<p>This method is called whenever a message is sent to the <strong class="source-inline">channel-a</strong> channel. This method acknowledges the received messages. The supported method signatures for consuming data are as follows:</p>
+			<ul>
+				<li><strong class="source-inline">Subscriber&lt;Message&lt;I&gt;&gt; consume(); Subscriber&lt;I&gt; consume();</strong></li>
+				<li><strong class="source-inline">SubscriberBuilder&lt;Message&lt;I&gt;, Void&gt; consume(); SubscriberBuilder&lt;I, Void&gt; consume();</strong></li>
+				<li><strong class="source-inline">void consum(I payload);</strong></li>
+				<li><strong class="source-inline">CompletionStage&lt;Void&gt; consume(Message&lt;I&gt; msg); CompletionStage&lt;?&gt; consume(I payload);</strong></li>
+			</ul>
+			<p>In the preceeding list, <strong class="source-inline">I</strong> is the incoming payload type.</p>
+			<p>Another way to receive messages is to inject either <strong class="source-inline">org.reactivestreams.Publisher</strong> or <strong class="source-inline">org.eclipse.microprofile.reactive.streams.operators.PublisherBuilder</strong> and use the <strong class="source-inline">@Channel</strong> annotation, as shown here:</p>
+			<p class="source-code">@Inject</p>
+			<p class="source-code">@Channel("channel-d")</p>
+			<p class="source-code">private Publisher&lt;String&gt; publisher;</p>
+			<p>The preceding code snippet means a <strong class="source-inline">publisher</strong> instance will be connected to the <strong class="source-inline">channel-d</strong> channel. Then a consumer can directly receive messages from the publisher.</p>
+			<p>We have <a id="_idIndexMarker1076"/>discussed <a id="_idIndexMarker1077"/>the messaging<a id="_idIndexMarker1078"/> flows and message consumption. Next, we look at how a message is generated.</p>
+			<h2 id="_idParaDest-186"><a id="_idTextAnchor197"/>Message production using @Outgoing</h2>
+			<p>A<a id="_idIndexMarker1079"/> method <a id="_idIndexMarker1080"/>on a CDI <a id="_idIndexMarker1081"/>bean with the <strong class="source-inline">@Outgoing</strong> annotation is a message producer. The following code snippet demonstrates message production:</p>
+			<p class="source-code">@Outgoing("channel-b")</p>
+			<p class="source-code">public Message&lt;Integer&gt; publish() {</p>
+			<p class="source-code">    return Message.of(123);</p>
+			<p class="source-code">}</p>
+			<p>In the aforementioned code snippet, the <strong class="source-inline">publish()</strong> method is called for every consumer request and it publishes the <strong class="source-inline">123</strong> message to the <strong class="source-inline">channel-b</strong> channel. Only one publisher can use <strong class="source-inline">@Outgoing</strong> with a specified channel name per application, which means only one publisher can publish messages to a particular channel. Otherwise, an error will occur during application deployment. After messages are published to a channel, consumers can consume messages from the specified channel. The supported method signatures for producing data are as follows:</p>
+			<ul>
+				<li><strong class="source-inline">Publisher&lt;Message&lt;O&gt;&gt; produce(); Publisher &lt;O&gt; produce();</strong></li>
+				<li><strong class="source-inline">PublisherBuilder&lt;Message&lt;O&gt;&gt; produce (); Publisher Builder&lt;O&gt; produce();</strong></li>
+				<li><strong class="source-inline">Message&lt;O&gt; produce(); O produce();</strong></li>
+				<li><strong class="source-inline">CompletionStage&lt;Message&lt;O&gt;&gt; produce(); CompletionStage&lt;O&gt; produce();</strong></li>
+			</ul>
+			<p>In the preceeding list, <strong class="source-inline">O</strong> is the outgoing payload class type.</p>
+			<p>A <a id="_idIndexMarker1082"/>method <a id="_idIndexMarker1083"/>can act as a message consumer and a message producer. This kind of method is called a <strong class="bold">message processor</strong>. </p>
+			<h2 id="_idParaDest-187"><a id="_idTextAnchor198"/>Message processing using both @Incoming and @Outgoing</h2>
+			<p>A<a id="_idIndexMarker1084"/> message <a id="_idIndexMarker1085"/>processor<a id="_idIndexMarker1086"/> is <a id="_idIndexMarker1087"/>a message producer<a id="_idIndexMarker1088"/> as<a id="_idIndexMarker1089"/> well as a consumer, which means it has both <strong class="source-inline">@Incoming</strong> and <strong class="source-inline">@Outgoing</strong> annotations. Let's look at this method here:</p>
+			<p class="source-code">@Incoming("channel-a")</p>
+			<p class="source-code">@Outgoing("channel-b")</p>
+			<p class="source-code">public Message&lt;Integer&gt; process(Message&lt;Integer&gt; message) {</p>
+			<p class="source-code">    return message.withPayload(message.getPayload() + 100);</p>
+			<p class="source-code">}</p>
+			<p>The <strong class="source-inline">process()</strong> method receives messages, which are integers, from the <strong class="source-inline">channel-a</strong> channel and then adds <strong class="source-inline">100</strong>. Afterward, it publishes the new integer to the <strong class="source-inline">channel-b</strong> channel. The supported method signatures for processing data are as follows:</p>
+			<ul>
+				<li><strong class="source-inline">Processor&lt;Message&lt;I&gt;, Message&lt;O&gt;&gt; process(); Processor&lt;I, O&gt; process();</strong></li>
+				<li><strong class="source-inline">ProcessorBuilder&lt;Message&lt;I&gt;, Message&lt;O&gt;&gt; process(); ProcessorBuilder&lt;I, O&gt; process();</strong></li>
+				<li><strong class="source-inline">PublisherBuilder&lt;Message&lt;O&gt;&gt; process(Message&lt;I&gt; msg); PublisherBuilder&lt;O&gt; process(I payload);</strong></li>
+				<li><strong class="source-inline">PublisherBuilder&lt;Message&lt;O&gt;&gt; process(PublisherBuilder&lt;Message&lt;I&gt;&gt; publisherBuilder); PublisherBuilder&lt;O&gt; process(PublisherBuilder&lt;I&gt; publisherBuilder);</strong></li>
+				<li><strong class="source-inline">Publisher&lt;Message&lt;O&gt;&gt; method(Publisher&lt;Message&lt;I&gt;&gt; publisher); Publisher&lt;O&gt; method(Publisher&lt;I&gt; publisher);</strong></li>
+				<li><strong class="source-inline">Message&lt;O&gt; process(Message&lt;I&gt; msg); O process(I payload);</strong></li>
+				<li><strong class="source-inline">CompletionStage&lt;Message&lt;O&gt;&gt; process(Message&lt;I&gt; msg); CompletionStage&lt;O&gt; process(I payload);</strong></li>
+			</ul>
+			<p>In the preceeding list, <strong class="source-inline">I</strong> is the incoming payload class type and <strong class="source-inline">O</strong> is the outgoing payload class type.</p>
+			<p>So far, message <a id="_idIndexMarker1090"/>consumption <a id="_idIndexMarker1091"/>and <a id="_idIndexMarker1092"/>production<a id="_idIndexMarker1093"/> are methods on CDI <a id="_idIndexMarker1094"/>beans. These <a id="_idIndexMarker1095"/>CDI beans can be <strong class="source-inline">Dependent</strong> or <strong class="source-inline">ApplicationScoped</strong>. We have already covered CDI in <a href="B17377_04_Final_SB_epub.xhtml#_idTextAnchor068"><em class="italic">Chapter 4</em></a><em class="italic">, Developing Cloud-Native Applications</em>. </p>
+			<p>We have covered message publication and message consumption via methods on CDI beans, which will be automatically triggered by the Reactive Messaging implementation when your application is up and running. You might be wondering what to do if you want to publish some messages whenever an endpoint is triggered. We will discuss how to do that in the next section.</p>
+			<h2 id="_idParaDest-188"><a id="_idTextAnchor199"/>Using Emitter to publish messages</h2>
+			<p>In <a id="_idIndexMarker1096"/>order<a id="_idIndexMarker1097"/> to<a id="_idIndexMarker1098"/> publish messages from a JAX-RS resource, you can inject an <strong class="source-inline">Emitter</strong> object and then call the <strong class="source-inline">send()</strong> method. Let's look at the following example:</p>
+			<p class="source-code">@Inject @Channel("channel-c")</p>
+			<p class="source-code">private Emitter&lt;String&gt; emitter;</p>
+			<p class="source-code">public void publishMessage() {</p>
+			<p class="source-code">    emitter.send("m");</p>
+			<p class="source-code">    emitter.send("n");</p>
+			<p class="source-code">    emitter.complete();</p>
+			<p class="source-code">}</p>
+			<p>In the aforementioned code snippet, first you can inject an <strong class="source-inline">Emitter</strong> with the target channel. Then, you can send messages by calling the <strong class="source-inline">emitter.send()</strong> method. This example directly sends a message payload. You can send a message by wrapping up the payload, as detailed here:</p>
+			<p class="source-code">@Inject @Channel("channel-e")</p>
+			<p class="source-code">private Emitter&lt;String&gt; emitter;</p>
+			<p class="source-code">public void publishMessage() {</p>
+			<p class="source-code">    emitter.send(Message.of("m");</p>
+			<p class="source-code">    emitter.send(Message.of("n");</p>
+			<p class="source-code">    emitter.send(Message.of("q")</p>
+			<p class="source-code">}</p>
+			<p>Often, the<a id="_idIndexMarker1099"/> speed of message publication may not be the same as that of message consumption. <strong class="bold">Back pressure</strong> can often occur when message publication is faster than message consumption. How do you handle back pressure? Normally, you can slow down the message producer; buffer the unconsumed messages; or drop the unconsumed messages. MicroProfile Reactive Messaging introduced the <strong class="source-inline">@OnOverflow</strong> annotation to handle back pressure when using <strong class="source-inline">Emitter</strong> to publish messages. Here is an example demonstrating how to use a buffering strategy to handle back pressure:</p>
+			<p class="source-code">@Inject @Channel("channel-d")</p>
+			<p class="source-code">@OnOverflow(value=OnOverflow.Strategy.BUFFER,   bufferSize=100)</p>
+			<p class="source-code">private Emitter&lt;String&gt; emitter;</p>
+			<p class="source-code">public void publishMessage() {</p>
+			<p class="source-code">    emitter.send("message1");</p>
+			<p class="source-code">    emitter.send("message2");</p>
+			<p class="source-code">    emitter.complete();</p>
+			<p class="source-code">}</p>
+			<p>In the preceding code snippet, an <strong class="source-inline">Emitter</strong> object <strong class="source-inline">emitter</strong> was connected to <strong class="source-inline">channel-d</strong> with the back pressure strategy of using a buffer with the capacity of <strong class="source-inline">100</strong> elements. The <strong class="source-inline">emitter</strong> object sent two messages and completed them. The <strong class="source-inline">@OnOverflow</strong> annotation<a id="_idIndexMarker1100"/> supports<a id="_idIndexMarker1101"/> the following <a id="_idIndexMarker1102"/>configuration, as shown in the following table:</p>
+			<p class="figure-caption">Table 10.1 – Back pressure strategies</p>
+			<p>We have learned how message production and consumption use the <strong class="source-inline">@Outgoing</strong> and <strong class="source-inline">@Incoming</strong> annotations. MicroProfile Reactive Messaging connects outgoing and incoming<a id="_idIndexMarker1103"/> channels<a id="_idIndexMarker1104"/> to <a id="_idIndexMarker1105"/>external technologies such as Apache Kafka, Web Socket, AMQP, JMS, and MQTT. The connection is achieved via a reactive messaging connector. We are going to discuss the connector in detail in the next section.</p>
+			<h2 id="_idParaDest-189"><a id="_idTextAnchor200"/>Using a connector to bridge to an external messaging technology</h2>
+			<p>A<a id="_idIndexMarker1106"/> connector can act as a publisher, consumer, or processor. It is a CDI bean, which implements the two MicroProfile Reactive Messaging interfaces <strong class="source-inline">IncomingConnectorFactory</strong> and <strong class="source-inline">OutgoingConnectorFactory</strong> to receive messages and dispatch messages respectively. Reactive Messaging implementations provide out-of-the-box connectors for supported message technologies, such as Kafka, MQTT, MQ, and so on. However, you can create a connector yourself if the connector you need was not provided by the implementor. Here is an example of a connector that connects to Apache Kafka:</p>
+			<p class="source-code">@ApplicationScoped</p>
+			<p class="source-code">@Connector("my.kafka")</p>
+			<p class="source-code">public class KafkaConnector implements   IncomingConnectorFactory, OutgoingConnectorFactory {</p>
+			<p class="source-code">    // ...</p>
+			<p class="source-code">}</p>
+			<p>Once a connector is defined, further configurations shown next are required to match the channels from your cloud-native application to the external messaging technologies bridged by the connector. In the following configurations, the <strong class="source-inline">channel-name</strong> must match the value in the <strong class="source-inline">@Incoming</strong> or <strong class="source-inline">@Outgoing</strong> annotations while <strong class="source-inline">attribute</strong> can be any kind of string:</p>
+			<ul>
+				<li><strong class="source-inline">mp.messaging.incoming.[channel-name].[attribute]</strong>: The property is used to map the channel with the annotation of <strong class="source-inline">@Incoming</strong> to the external <a id="_idIndexMarker1107"/>destination provided by the corresponding messaging technology.</li>
+				<li><strong class="source-inline">mp.messaging.outgoing.[channel-name].[attribute]</strong>: This property is to map the channel with the annotation of <strong class="source-inline">@Outgoing</strong> to the external destination provided by the corresponding messaging technology.</li>
+				<li><strong class="source-inline">mp.messaging.connector.[connector-name].[attribute]</strong>: This property is to specify the connector details.</li>
+			</ul>
+			<p>If your cloud-native application connects to Apache Kafka, you might supply the following configuration for the following consumer method:</p>
+			<p class="source-code">@Incoming("order")</p>
+			<p class="source-code">CompletionStage&lt;Void&gt; method(Message&lt;I&gt; msg) {</p>
+			<p class="source-code">    return message.ack();</p>
+			<p class="source-code">}</p>
+			<p>In the following configuration, the <strong class="source-inline">mp.messaging.incoming.order.connector</strong> property specifies the connector name as <strong class="source-inline">liberty-kafka</strong> and then specifies further configuration for that connector with the <strong class="source-inline">mp.messaging.connector.liberty-kafkabootstrap.servers</strong> property. Then it specifies the channel <strong class="source-inline">order </strong>by mapping the <strong class="source-inline">topic-order</strong> Kafka topic via the <strong class="source-inline">mp.messaging.incoming.order.topic</strong> property:</p>
+			<p class="source-code">mp.messaging.incoming.order.connector=liberty-kafka</p>
+			<p class="source-code">mp.messaging.connector.liberty-kafka.bootstrap.  servers=localhost:9092</p>
+			<p class="source-code">mp.messaging.incoming.order.topic=topic-order</p>
+			<p>We have covered MicroProfile Reactive Messaging. Let's put it all together. If you need to create a consumer that consumes messages from an event streaming system such as Apache Kafka, you just need to create a CDI bean and write a method with the <strong class="source-inline">@Incoming</strong> annotation to connect a particular channel. Similarly, if you need to produce messages, you will need to create a CDI bean and write a method with the <strong class="source-inline">@Outging</strong> annotation to connect with a producer channel. Finally, you configure the channel as <a id="_idIndexMarker1108"/>shown in the preceding configuration to state the channel is connected to the Apache Kafka connector. Open Liberty provides the <strong class="source-inline">liberty-kafka</strong> Kafka connector. This Open Liberty guide (<a href="https://openliberty.io/guides/microprofile-reactive-messaging.html">https://openliberty.io/guides/microprofile-reactive-messaging.html</a>) demonstrates how to create Java microservices.</p>
+			<p>To use the APIs from MicroProfile Reactive Messaging, you need to specify the Maven or Gradle dependencies as covered next.</p>
+			<h3>Making the MicroProfile Reactive Messaging API available</h3>
+			<p>MicroProfile <a id="_idIndexMarker1109"/>Reactive Messaging API JARs can be made available for Maven and Gradle projects. If you create a Maven project, you can directly add the following to your <strong class="source-inline">pom.xml</strong> file:</p>
+			<p class="source-code">&lt;dependency&gt;</p>
+			<p class="source-code">  &lt;groupId&gt;</p>
+			<p class="source-code">    org.eclipse.microprofile.reactive.messaging</p>
+			<p class="source-code">  &lt;/groupId&gt;</p>
+			<p class="source-code">  &lt;artifactId&gt;</p>
+			<p class="source-code">    microprofile-reactive-messaging-api</p>
+			<p class="source-code">  &lt;/artifactId&gt;</p>
+			<p class="source-code">  &lt;version&gt;2.0&lt;/version&gt;</p>
+			<p class="source-code">&lt;/dependency&gt;</p>
+			<p>Alternative, if you create a Gradle project, you need to add the following dependency:</p>
+			<p class="source-code">dependencies {</p>
+			<p class="source-code">  providedCompile org.eclipse.microprofile.reactive     .messaging: microprofile-reactive-messaging-api:2.0</p>
+			<p class="source-code">}</p>
+			<p>You have now<a id="_idIndexMarker1110"/> learned how to create a reactive cloud-native application for when you need to interact with messaging technologies and require a message-driven architecture.</p>
+			<h1 id="_idParaDest-190"><a id="_idTextAnchor201"/>Summary</h1>
+			<p>In this chapter, we have learned the differences between imperative and reactive applications. We discussed briefly how to use MicroProfile Context Propagation to propagate contexts for asynchronous programming and then covered MicroProfile Reactive Messaging concepts to discuss how to use Reactive Messaging to create a reactive cloud-native application. Through this chapter, you will now be able to connect the built application with your chosen messaging technologies such as Apache Kafka. You also now understand that whenever you need to create a message-driven application, you should consider using MicroProfile Reactive Messaging.</p>
+			<p>In the next chapter, we will cover MicroProfile GraphQL to learn how to use GraphQL in your cloud-native applications to improve performance if you need to frequently execute queries.</p>
+		</div>
+		<div>
+			<div id="_idContainer071">
+				<img src="image/Table_01.png" alt="Table 10.1 – Back pressure strategies&#13;&#10;"/>
+			</div>
+		</div>
+	</body></html>
