@@ -1,0 +1,726 @@
+<html><head></head><body>
+		<div id="_idContainer070">
+			<h1 id="_idParaDest-227"><em class="italic"><a id="_idTextAnchor226"/>Chapter 12</em>: Pagination and Dynamic Queries</h1>
+			<p>In this chapter, we'll talk about pagination and dynamic queries in jOOQ, two topics that work hand in hand in a wide range of applications to paginate and filter lists of products, items, images, posts, articles, and so on. </p>
+			<p>In this chapter, we will be covering the following topics:</p>
+			<ul>
+				<li>jOOQ offset pagination</li>
+				<li>jOOQ keyset pagination</li>
+				<li>Writing dynamic queries</li>
+				<li>Infinite scrolling and dynamic filters</li>
+			</ul>
+			<p>Let's get started!</p>
+			<h1 id="_idParaDest-228"><a id="_idTextAnchor227"/>Technical requirements</h1>
+			<p>The code for this chapter can be found on GitHub at <a href="https://github.com/PacktPublishing/jOOQ-Masterclass/tree/master/Chapter12">https://github.com/PacktPublishing/jOOQ-Masterclass/tree/master/Chapter12</a>.</p>
+			<h1 id="_idParaDest-229"><a id="_idTextAnchor228"/>Offset and keyset pagination</h1>
+			<p>Offset and keyset <a id="_idIndexMarker1183"/>pagination (or seek, as Markus Winand calls it) represent <a id="_idIndexMarker1184"/>two well-known techniques for paginating data while fetching it from the database. Offset pagination is quite popular because Spring Boot (more precisely, Spring Data Commons) provides two default implementations for it, via the <strong class="source-inline">Page</strong> and <strong class="source-inline">Slice</strong> APIs. Therefore, in terms of productivity, it's very convenient to rely on these implementations. However, in terms of performance, while your project evolves and data keeps accumulating, relying on offset pagination may lead to serious performance degradations. Nevertheless, as you'll see soon, jOOQ can help you to sweeten the situation.</p>
+			<p>Conversely, keyset <a id="_idIndexMarker1185"/>pagination is a technique that sustains high performance, being faster and more stable than offset pagination. Keyset pagination really shines on paginating large datasets and infinite scrolling, while it leads to almost the same performance as offset pagination, especially for relatively small datasets. However, can you guarantee that the amount of data will not grow over time (sometimes, quite fast)? If yes, then using <a id="_idIndexMarker1186"/>offset pagination should be okay. Otherwise, it is better to prevent this well-known performance issue right from the start and rely on keyset pagination. Don't think that this is premature optimization; think of it as the capability to make the right decisions depending on the business case you are modeling. And, as you'll see soon, jOOQ makes keyset pagination usage child's play.</p>
+			<h2 id="_idParaDest-230"><a id="_idTextAnchor229"/>Index scanning in offset and keyset</h2>
+			<p>Dealing with offset pagination<a id="_idIndexMarker1187"/> means you can ignore the performance penalty<a id="_idIndexMarker1188"/> induced by throwing away <em class="italic">n</em> records before reaching the desired offset. A larger <em class="italic">n</em> leads to a significant performance penalty that equally affects both the <strong class="source-inline">Page</strong> and <strong class="source-inline">Slice</strong> APIs. Another penalty is the extra <strong class="source-inline">SELECT COUNT</strong> needed to count the total number of records. This extra <strong class="source-inline">SELECT COUNT</strong> is specific to the <strong class="source-inline">Page</strong> API only, so it doesn't affect the <strong class="source-inline">Slice</strong> API. Basically, this is the main difference between the <strong class="source-inline">Page</strong> and <strong class="source-inline">Slice</strong> APIs; the former contains the total number of records (useful for computing the total number of pages), while the latter can only tell whether there is at least one more page available or this is the last page.</p>
+			<p>Lukas Eder has a very nice observation here: <em class="italic">"Another way I tend to think about this is: What's the business value of being able to jump to page 2712? What does that page number even mean? Shouldn't the search be refined with better filters instead? On the other hand, jumping to the *next* page from any page is a very common requirement."</em></p>
+			<p>An index scan in <a id="_idIndexMarker1189"/>offset will traverse the range of indexes from the beginning to the<a id="_idIndexMarker1190"/> specified offset. Basically, the offset represents the number of records that must be skipped before including them in the result set. So, the offset approach will traverse the already shown records, as shown in the following figure:</p>
+			<div>
+				<div id="_idContainer062" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.1.jpg" alt="Figure 12.1 – An index scan in offset and keyset pagination&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.1 – An index scan in offset and keyset pagination</p>
+			<p>On the other hand, the index <a id="_idIndexMarker1191"/>scan in the keyset pagination will traverse only the<a id="_idIndexMarker1192"/> required values, starting with the last previous value (it skips the values until the last value previously fetched). In the keyset, the performance remains approximately constant in relation to the increase of the table records.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">An important reference and compelling argument against using offset pagination is mentioned on<a id="_idIndexMarker1193"/> the <em class="italic">USE THE INDEX, LUKE!</em> website (<a href="https://use-the-index-luke.com/no-offset">https://use-the-index-luke.com/no-offset</a>). I strongly suggest you take some time and watch this great presentation by Markus Winand (<a href="https://www.slideshare.net/MarkusWinand/p2d2-pagination-done-the-postgresql-way?ref=https://use-the-index-luke.com/no-offset">https://www.slideshare.net/MarkusWinand/p2d2-pagination-done-the-postgresql-way?ref=https://use-the-index-luke.com/no-offset</a>), which covers important topics for tuning pagination-SQL, such as using indexes and row values (supported in PostgreSQL) in offset and keyset pagination.</p>
+			<p>Okay, after this summary of offset versus keyset pagination, let's see how jOOQ can mimic and even improve the default Spring Boot offset pagination implementation.</p>
+			<h1 id="_idParaDest-231"><a id="_idTextAnchor230"/>jOOQ offset pagination</h1>
+			<p>Spring Boot implementation of <a id="_idIndexMarker1194"/>offset pagination can be easily shaped via <strong class="source-inline">LIMIT … OFFSET</strong> (or <strong class="source-inline">OFFSET … FETCH</strong>) and <strong class="source-inline">SELECT COUNT</strong>. For instance, if we assume that a client gives us a page number (via the <strong class="source-inline">page</strong> argument) and <strong class="source-inline">size</strong> (the number of products to be displayed on <strong class="source-inline">page</strong>), then the following jOOQ query mimics the default Spring Boot pagination behavior for the <strong class="source-inline">PRODUCT</strong> table:</p>
+			<pre class="source-code">long total = ctx.fetchCount(PRODUCT);</pre>
+			<pre class="source-code">List&lt;Product&gt; result = ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">  .orderBy(PRODUCT.PRODUCT_ID)</pre>
+			<pre class="source-code">  .limit(size)</pre>
+			<pre class="source-code">  .offset(size * page)</pre>
+			<pre class="source-code">  .fetchInto(Product.class);</pre>
+			<p>If the client (for instance, the browser) expects as a response a serialization of the classical <strong class="source-inline">Page&lt;Product&gt;</strong> (<strong class="source-inline">org.springframework.data.domain.Page</strong>), then you can simply produce it, as shown here:</p>
+			<pre class="source-code">Page&lt;Product&gt; pageOfProduct = new PageImpl(result,</pre>
+			<pre class="source-code">  PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, </pre>
+			<pre class="source-code">    PRODUCT.PRODUCT_ID.getName())), total);</pre>
+			<p>However, instead of executing two <strong class="source-inline">SELECT</strong> statements, we can use the <strong class="source-inline">COUNT()</strong> window function to obtain the same result but with a single <strong class="source-inline">SELECT</strong>:</p>
+			<pre class="source-code">Map&lt;Integer, List&lt;Product&gt;&gt; result = ctx.select(</pre>
+			<pre class="source-code">    PRODUCT.asterisk(), count().over().as("total"))</pre>
+			<pre class="source-code">  .from(PRODUCT)</pre>
+			<pre class="source-code">  .orderBy(PRODUCT.PRODUCT_ID)</pre>
+			<pre class="source-code">  .limit(size)</pre>
+			<pre class="source-code">  .offset(size * page)</pre>
+			<pre class="source-code">  .fetchGroups(field("total", Integer.class), Product.class);</pre>
+			<p>This is already better than the default Spring Boot implementation. When you return this <strong class="source-inline">Map&lt;Integer, List&lt;Product&gt;&gt;</strong> to the client, you can return a <strong class="source-inline">Page&lt;Product&gt;</strong> as well:</p>
+			<pre class="source-code">Page&lt;Product&gt; pageOfProduct </pre>
+			<pre class="source-code">  = new PageImpl(result.values().iterator().next(),</pre>
+			<pre class="source-code">    PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, </pre>
+			<pre class="source-code">       PRODUCT.PRODUCT_ID.getName())),</pre>
+			<pre class="source-code">         result.entrySet().iterator().next().getKey());</pre>
+			<p>Most probably, you'll<a id="_idIndexMarker1195"/> prefer <strong class="source-inline">Page</strong> because it contains a set of metadata, such as the total number of records if we hadn't paginated (<strong class="source-inline">totalElements</strong>), the current page we're on (<strong class="source-inline">pageNumber</strong>), the actual page size (<strong class="source-inline">pageSize</strong>), the actual offsets of the returned rows (<strong class="source-inline">offset</strong>), and whether we are on the last page (<strong class="source-inline">last</strong>). You can find the previous examples in the bundled code as <em class="italic">PaginationCountOver</em>.</p>
+			<p>However, as Lukas Eder highlights in this article (<a href="https://blog.jooq.org/2021/03/11/calculating-pagination-metadata-without-extra-roundtrips-in-sql/">https://blog.jooq.org/2021/03/11/calculating-pagination-metadata-without-extra-roundtrips-in-sql/</a>), all this metadata can be obtained in a single SQL query; therefore, there is no need to create a <strong class="source-inline">Page</strong> object to have them available. In the bundled code (<em class="italic">PaginationMetadata</em>) you can practice Lukas's dynamic query via a REST controller.</p>
+			<h1 id="_idParaDest-232"><a id="_idTextAnchor231"/>jOOQ keyset pagination</h1>
+			<p>Keyset (or seek) pagination <a id="_idIndexMarker1196"/>doesn't have a default implementation in Spring Boot, but this shouldn't stop you from using it. Simply start by choosing a table's column that should act as the latest visited record/row (for instance, the id column), and use this column in the <strong class="source-inline">WHERE</strong> and <strong class="source-inline">ORDER BY</strong> clauses. The idioms relying on the ID column are as follows (sorting by multiple columns follows this same idea):</p>
+			<pre class="source-code">SELECT ... FROM ...</pre>
+			<pre class="source-code">WHERE id &lt; {last_seen_id}</pre>
+			<pre class="source-code">ORDER BY id DESC</pre>
+			<pre class="source-code">LIMIT {how_many_rows_to_fetch}</pre>
+			<pre class="source-code">SELECT ... FROM ...</pre>
+			<pre class="source-code">WHERE id &gt; {last_seen_id}</pre>
+			<pre class="source-code">ORDER BY id ASC</pre>
+			<pre class="source-code">LIMIT {how_many_rows_to_fetch}</pre>
+			<p>Or, like this:</p>
+			<pre class="source-code">SELECT ... FROM ...</pre>
+			<pre class="source-code">WHERE ... AND id &lt; {last_seen_id}</pre>
+			<pre class="source-code">ORDER BY id DESC</pre>
+			<pre class="source-code">LIMIT {how_many_rows_to_fetch}</pre>
+			<pre class="source-code">SELECT ... FROM ...</pre>
+			<pre class="source-code">WHERE ... AND id &gt; {last_seen_id}</pre>
+			<pre class="source-code">ORDER BY id ASC</pre>
+			<pre class="source-code">LIMIT {how_many_rows_to_fetch}</pre>
+			<p>Based on the <a id="_idIndexMarker1197"/>experience gained so far, expressing these queries in jOOQ should be a piece of cake. For instance, let's apply the first idiom to the <strong class="source-inline">PRODUCT</strong> table via <strong class="source-inline">PRODUCT_ID</strong>:</p>
+			<pre class="source-code">List&lt;Product&gt; result = ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">   .where(PRODUCT.PRODUCT_ID.lt(productId))</pre>
+			<pre class="source-code">   .orderBy(PRODUCT.PRODUCT_ID.desc())</pre>
+			<pre class="source-code">   .limit(size)</pre>
+			<pre class="source-code">   .fetchInto(Product.class);</pre>
+			<p>In MySQL, the rendered SQL is (where <strong class="source-inline">productId</strong> = <strong class="source-inline">20</strong> and <strong class="source-inline">size</strong> = <strong class="source-inline">5</strong>) as follows:</p>
+			<pre class="source-code">SELECT `classicmodels`.`product`.`product_id`,</pre>
+			<pre class="source-code">       `classicmodels`.`product`.`product_name`,</pre>
+			<pre class="source-code">       ...</pre>
+			<pre class="source-code">FROM `classicmodels`.`product`</pre>
+			<pre class="source-code">WHERE `classicmodels`.`product`.`product_id` &lt; 20</pre>
+			<pre class="source-code">ORDER BY `classicmodels`.`product`.`product_id` DESC</pre>
+			<pre class="source-code">LIMIT 5</pre>
+			<p>This was easy! You <a id="_idIndexMarker1198"/>can practice this case in <em class="italic">KeysetPagination</em>.</p>
+			<p>However, keyset pagination becomes a little bit trickier if the <strong class="source-inline">WHERE</strong> clause becomes more complicated. Fortunately, jOOQ saves us from this scenario via a synthetic clause named <strong class="source-inline">SEEK</strong>. Let's dive into it!</p>
+			<h2 id="_idParaDest-233"><a id="_idTextAnchor232"/>The jOOQ SEEK clause</h2>
+			<p>The jOOQ <a id="_idIndexMarker1199"/>synthetic <strong class="source-inline">SEEK</strong> clause simplifies the implementation of keyset pagination. Among its major advantages, the <strong class="source-inline">SEEK</strong> clause is type-safe and is capable of generating/emulating the correct/expected <strong class="source-inline">WHERE</strong> clause (including the emulation of row value expressions).</p>
+			<p>For instance, the previous keyset pagination example can be expressed using the <strong class="source-inline">SEEK</strong> clause, as shown here (<strong class="source-inline">productId</strong> is provided by the client):</p>
+			<pre class="source-code">List&lt;Product&gt; result = ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">  .orderBy(PRODUCT.PRODUCT_ID)</pre>
+			<pre class="source-code">  .seek(productId) </pre>
+			<pre class="source-code">  .limit(size)</pre>
+			<pre class="source-code">  .fetchInto(Product.class);</pre>
+			<p>Note that there is no explicit <strong class="source-inline">WHERE</strong> clause. jOOQ will generate it on our behalf, based on the <strong class="source-inline">seek()</strong> arguments. While this example may not look so impressive, let's consider another one. This time, let's paginate <strong class="source-inline">EMPLOYEE</strong> using the employee's office code and salary:</p>
+			<pre class="source-code">List&lt;Employee&gt; result = ctx.selectFrom(EMPLOYEE)</pre>
+			<pre class="source-code">  .orderBy(EMPLOYEE.OFFICE_CODE, EMPLOYEE.SALARY.desc())</pre>
+			<pre class="source-code">  .seek(officeCode, salary) </pre>
+			<pre class="source-code">  .limit(size)</pre>
+			<pre class="source-code">  .fetchInto(Employee.class);</pre>
+			<p>Both <strong class="source-inline">officeCode</strong> and <strong class="source-inline">salary</strong> are provided by the client, and they land into the following generated SQL sample (where <strong class="source-inline">officeCode</strong> = <strong class="source-inline">1</strong>, <strong class="source-inline">salary</strong> = <strong class="source-inline">75000</strong>, and <strong class="source-inline">size</strong> = <strong class="source-inline">10</strong>):</p>
+			<pre class="source-code">SELECT `classicmodels`.`employee`.`employee_number`,</pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code">FROM `classicmodels`.`employee`</pre>
+			<pre class="source-code">WHERE (`classicmodels`.`employee`.`office_code` &gt; '1'</pre>
+			<pre class="source-code">   OR (`classicmodels`.`employee`.`office_code` = '1'</pre>
+			<pre class="source-code">     AND `classicmodels`.`employee`.`salary` &lt; 75000))</pre>
+			<pre class="source-code">ORDER BY `classicmodels`.`employee`.`office_code`,</pre>
+			<pre class="source-code">         `classicmodels`.`employee`.`salary` DESC</pre>
+			<pre class="source-code">LIMIT 10</pre>
+			<p>Check out the<a id="_idIndexMarker1200"/> generated <strong class="source-inline">WHERE</strong> clause! I am pretty sure that you don't want to get your hands dirty and explicitly write this clause. How about the following example?</p>
+			<pre class="source-code">List&lt;Orderdetail&gt; result = ctx.selectFrom(ORDERDETAIL)</pre>
+			<pre class="source-code"> .orderBy(ORDERDETAIL.ORDER_ID, ORDERDETAIL.PRODUCT_ID.desc(),</pre>
+			<pre class="source-code">          ORDERDETAIL.QUANTITY_ORDERED.desc())</pre>
+			<pre class="source-code"> .seek(orderId, productId, quantityOrdered)</pre>
+			<pre class="source-code"> .limit(size)</pre>
+			<pre class="source-code"> .fetchInto(Orderdetail.class);</pre>
+			<p>And the following code is a sample of the generated SQL (where <strong class="source-inline">orderId</strong> = <strong class="source-inline">10100</strong>, <strong class="source-inline">productId</strong> = <strong class="source-inline">23</strong>, <strong class="source-inline">quantityOrdered</strong> = <strong class="source-inline">30</strong>, and <strong class="source-inline">size</strong> = <strong class="source-inline">10</strong>):</p>
+			<pre class="source-code">SELECT `classicmodels`.`orderdetail`.`orderdetail_id`,</pre>
+			<pre class="source-code">      ...</pre>
+			<pre class="source-code">FROM `classicmodels`.`orderdetail`</pre>
+			<pre class="source-code">WHERE (`classicmodels`.`orderdetail`.`order_id` &gt; 10100</pre>
+			<pre class="source-code">  OR (`classicmodels`.`orderdetail`.`order_id` = 10100</pre>
+			<pre class="source-code">  AND `classicmodels`.`orderdetail`.`product_id` &lt; 23)</pre>
+			<pre class="source-code">  OR (`classicmodels`.`orderdetail`.`order_id` = 10100</pre>
+			<pre class="source-code">  AND `classicmodels`.`orderdetail`.`product_id` = 23</pre>
+			<pre class="source-code">  AND `classicmodels`.`orderdetail`.`quantity_ordered` &lt; 30))</pre>
+			<pre class="source-code">ORDER BY `classicmodels`.`orderdetail`.`order_id`,</pre>
+			<pre class="source-code">         `classicmodels`.`orderdetail`.`product_id` DESC,</pre>
+			<pre class="source-code">         `classicmodels`.`orderdetail`.`quantity_ordered` DESC</pre>
+			<pre class="source-code">LIMIT 10</pre>
+			<p>After this example, I <a id="_idIndexMarker1201"/>think is obvious that you should opt for the <strong class="source-inline">SEEK</strong> clause and let jOOQ do its job! Look, you can even do this:</p>
+			<pre class="source-code">List&lt;Product&gt; result = ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code"> .orderBy(PRODUCT.BUY_PRICE, PRODUCT.PRODUCT_ID)</pre>
+			<pre class="source-code"> .seek(PRODUCT.MSRP.minus(PRODUCT.MSRP.mul(0.35)), </pre>
+			<pre class="source-code">     val(productId)) </pre>
+			<pre class="source-code"> .limit(size)</pre>
+			<pre class="source-code"> .fetchInto(Product.class);</pre>
+			<p>You can practice these examples in <em class="italic">SeekClausePagination</em>, next to the other examples, including using jOOQ-embedded keys as arguments of the <strong class="source-inline">SEEK</strong> clause.</p>
+			<h2 id="_idParaDest-234"><a id="_idTextAnchor233"/>Implementing infinite scroll</h2>
+			<p>Infinite scroll<a id="_idIndexMarker1202"/> is a classical usage of keyset pagination and is gaining popularity these days. For instance, let's assume that we plan to obtain something, as shown in this figure: </p>
+			<div>
+				<div id="_idContainer063" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.2.jpg" alt="Figure 12.2 – An infinite scroll&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.2 – An infinite scroll</p>
+			<p>So, we want an infinite scroll over the <strong class="source-inline">ORDERDETAIL</strong> table. At each scroll, we fetch the next <em class="italic">n</em> records via the <strong class="source-inline">SEEK</strong> clause:</p>
+			<pre class="source-code">public List&lt;Orderdetail&gt; fetchOrderdetailPageAsc(</pre>
+			<pre class="source-code">         long orderdetailId, int size) {</pre>
+			<pre class="source-code">  List&lt;Orderdetail&gt; result = ctx.selectFrom(ORDERDETAIL)</pre>
+			<pre class="source-code">    .orderBy(ORDERDETAIL.ORDERDETAIL_ID)</pre>
+			<pre class="source-code">    .seek(orderdetailId) </pre>
+			<pre class="source-code">    .limit(size)</pre>
+			<pre class="source-code">    .fetchInto(Orderdetail.class);</pre>
+			<pre class="source-code">  return result;</pre>
+			<pre class="source-code">}</pre>
+			<p>This method gets the<a id="_idIndexMarker1203"/> last visited <strong class="source-inline">ORDERDETAIL_ID</strong> and the number of records to fetch (<strong class="source-inline">size</strong>), and it returns a list of <strong class="source-inline">jooq.generated.tables.pojos.Orderdetail</strong>, which will be serialized in JSON format via a Spring Boot REST controller endpoint defined as <strong class="source-inline">@GetMapping("/orderdetail/{orderdetailId}/{size}")</strong>.</p>
+			<p>On the client side, we rely on the JavaScript Fetch API (of course, you can use XMLHttpRequest, jQuery, AngularJS, Vue, React, and so on) to execute an HTTP <strong class="source-inline">GET</strong> request, as shown here:</p>
+			<pre class="source-code">const postResponse </pre>
+			<pre class="source-code">   = await fetch('/orderdetail/${start}/${size}');</pre>
+			<pre class="source-code">const data = await postResponse.json();</pre>
+			<p>For fetching exactly three records, we replace <strong class="source-inline">${size}</strong> with <strong class="source-inline">3</strong>. Moreover, the <strong class="source-inline">${start}</strong> placeholder should be replaced by the last visited <strong class="source-inline">ORDERDETAIL_ID</strong>, so the <strong class="source-inline">start</strong> variable can be computed as the following:</p>
+			<pre class="source-code">start = data[size-1].orderdetailId;</pre>
+			<p>While scrolling, your <a id="_idIndexMarker1204"/>browser will execute an HTTP request at every three records, as shown here:</p>
+			<pre class="source-code">http://localhost:8080/orderdetail/0/3</pre>
+			<pre class="source-code">http://localhost:8080/orderdetail/3/3</pre>
+			<pre class="source-code">http://localhost:8080/orderdetail/6/3</pre>
+			<pre class="source-code">…</pre>
+			<p>You can check out this example in <em class="italic">SeekInfiniteScroll</em>. Next, let's see an approach for paginating <strong class="source-inline">JOIN</strong> statements.</p>
+			<h2 id="_idParaDest-235"><a id="_idTextAnchor234"/>Paginating JOINs via DENSE_RANK()</h2>
+			<p>Let's <a id="_idIndexMarker1205"/>assume that we want to paginate offices (<strong class="source-inline">OFFICE</strong>) with <a id="_idIndexMarker1206"/>employees (<strong class="source-inline">EMPLOYEE</strong>). If we apply a classical offset or keyset pagination to the <strong class="source-inline">JOIN</strong> between <strong class="source-inline">OFFICE</strong> and <strong class="source-inline">EMPLOYEE</strong>, then the result is prone to be truncated. Therefore, an office can be fetched with only a subset of its employees. For instance, while we think of a result page of size 3 as containing three offices with all their employees, we instead get a single office with three employees (even if this office has more employees). The following figure reveals what we expect versus what we get from a page of size 3 (offices):</p>
+			<div>
+				<div id="_idContainer064" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.3.jpg" alt="Figure 12.3 – Join pagination&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.3 – Join pagination</p>
+			<p>In order to obtain a result set like the one on the left-hand side of the preceding figure, we can rely on the <strong class="source-inline">DENSE_RANK()</strong> window function, which assigns a sequential number to different values of <strong class="source-inline">a</strong> within each group <strong class="source-inline">b</strong>, as shown in the following query:</p>
+			<pre class="source-code">Map&lt;Office, List&lt;Employee&gt;&gt; result = ctx.select().from(</pre>
+			<pre class="source-code">  select(OFFICE.OFFICE_CODE, OFFICE...,</pre>
+			<pre class="source-code">         EMPLOYEE.FIRST_NAME, EMPLOYEE...,</pre>
+			<pre class="source-code">         denseRank().over().orderBy(</pre>
+			<pre class="source-code">             OFFICE.OFFICE_CODE, OFFICE.CITY).as("rank"))</pre>
+			<pre class="source-code">  .from(OFFICE)</pre>
+			<pre class="source-code">  .join(EMPLOYEE)</pre>
+			<pre class="source-code">  .on(OFFICE.OFFICE_CODE.eq(EMPLOYEE.OFFICE_CODE)).asTable("t"))</pre>
+			<pre class="source-code">  .where(field(name("t", "rank")).between(start, end))</pre>
+			<pre class="source-code">  .fetchGroups(Office.class, Employee.class);</pre>
+			<p>The <strong class="source-inline">start</strong> and <strong class="source-inline">end</strong> variables represent the range of offices<a id="_idIndexMarker1207"/> set via <strong class="source-inline">DENSE_RANK()</strong>. The following<a id="_idIndexMarker1208"/> figure should clarify this aspect where <strong class="source-inline">start</strong> = <strong class="source-inline">1</strong> and <strong class="source-inline">end</strong> = <strong class="source-inline">3</strong> (the next page of three offices is between <strong class="source-inline">start</strong> = <strong class="source-inline">4</strong> and <strong class="source-inline">end</strong> = <strong class="source-inline">6</strong>):</p>
+			<div>
+				<div id="_idContainer065" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.4.jpg" alt="Figure 12.4 – The DENSE_RANK() effect&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.4 – The DENSE_RANK() effect</p>
+			<p>Here is a more compact version of the previous query, using the <strong class="source-inline">QUALIFY</strong> clause:</p>
+			<pre class="source-code">Map&lt;Office, List&lt;Employee&gt;&gt; result = </pre>
+			<pre class="source-code">  ctx.select(OFFICE.OFFICE_CODE, OFFICE...,       </pre>
+			<pre class="source-code">             EMPLOYEE.FIRST_NAME, EMPLOYEE...)</pre>
+			<pre class="source-code">     .from(OFFICE)</pre>
+			<pre class="source-code">     .join(EMPLOYEE)</pre>
+			<pre class="source-code">     .on(OFFICE.OFFICE_CODE.eq(EMPLOYEE.OFFICE_CODE))</pre>
+			<pre class="source-code">     .qualify(denseRank().over()</pre>
+			<pre class="source-code">        .orderBy(OFFICE.OFFICE_CODE, OFFICE.CITY)</pre>
+			<pre class="source-code">        .between(start, end))   </pre>
+			<pre class="source-code">     .fetchGroups(Office.class, Employee.class);</pre>
+			<p>You can check out these<a id="_idIndexMarker1209"/> examples (offset, keyset, and <strong class="source-inline">DENSE_RANK()</strong> queries) via three REST controller endpoints in <em class="italic">DenseRankPagination</em> for MySQL. In<a id="_idIndexMarker1210"/> all these cases, the returned <strong class="source-inline">Map&lt;Office, List&lt;Employee&gt;&gt;</strong> is serialized to JSON.</p>
+			<h2 id="_idParaDest-236"><a id="_idTextAnchor235"/>Paginating database views via ROW_NUMBER()</h2>
+			<p>Let's consider<a id="_idIndexMarker1211"/> the following figure, representing<a id="_idIndexMarker1212"/> a snapshot of a database view named <strong class="source-inline">PRODUCT_MASTER</strong> (it could be a regular table as well):</p>
+			<div>
+				<div id="_idContainer066" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.5.jpg" alt="Figure 12.5 – The PRODUCT_MASTER database view&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.5 – The PRODUCT_MASTER database view</p>
+			<p>Next, we want to paginate this view by <strong class="source-inline">PRODUCT_LINE</strong> (first column), so we have to take into account the fact that <strong class="source-inline">PRODUCT_LINE</strong> contains duplicates. While this is not an issue for offset pagination, it could produce weird results for keyset pagination relying only on <strong class="source-inline">PRODUCT_LINE</strong> and <strong class="source-inline">LIMIT</strong> (or counterparts) clauses. We can eliminate this issue by using the (<strong class="source-inline">PRODUCT_LINE</strong>, <strong class="source-inline">PRODUCT_NAME</strong>) combo in <strong class="source-inline">ORDER BY</strong> and <strong class="source-inline">WHERE</strong> predicate. This will work as expected because <strong class="source-inline">PRODUCT_NAME</strong> contains unique values.</p>
+			<p>However, let's try another approach, relying on the <strong class="source-inline">ROW_NUMBER()</strong> window function. This function assigns a database temporary sequence of values to rows. More precisely, the <strong class="source-inline">ROW_NUMBER()</strong> window function produces a sequence of values that starts from value 1 with an increment of 1. This is a temporary sequence of values (non-persistent) that is calculated dynamically at query execution time.</p>
+			<p>Based on <strong class="source-inline">ROW_NUMBER()</strong>, we can visualize <strong class="source-inline">PRODUCT_MASTER</strong>, as shown in this figure:</p>
+			<div>
+				<div id="_idContainer067" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.6.jpg" alt="Figure 12.6 – The ROW_NUMBER() effect&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.6 – The ROW_NUMBER() effect</p>
+			<p>In this <a id="_idIndexMarker1213"/>context, expressing pagination <a id="_idIndexMarker1214"/>can be done as follows:</p>
+			<pre class="source-code">var result = ctx.select().from(</pre>
+			<pre class="source-code">  select(PRODUCT_MASTER.PRODUCT_LINE,</pre>
+			<pre class="source-code">    PRODUCT_MASTER.PRODUCT_NAME, PRODUCT_MASTER.PRODUCT_SCALE,</pre>
+			<pre class="source-code">      rowNumber().over().orderBy(</pre>
+			<pre class="source-code">        PRODUCT_MASTER.PRODUCT_LINE).as("rowNum"))</pre>
+			<pre class="source-code"> .from(PRODUCT_MASTER).asTable("t"))</pre>
+			<pre class="source-code"> .where(field(name("t", "rowNum")).between(start, end))</pre>
+			<pre class="source-code"> .fetchInto(ProductMaster.class);</pre>
+			<p>Alternatively, we can make it more compact via the <strong class="source-inline">QUALIFY</strong> clause:</p>
+			<pre class="source-code">var result = ctx.select(PRODUCT_MASTER.PRODUCT_LINE,</pre>
+			<pre class="source-code">    PRODUCT_MASTER.PRODUCT_NAME, PRODUCT_MASTER.PRODUCT_SCALE)</pre>
+			<pre class="source-code"> .from(PRODUCT_MASTER)</pre>
+			<pre class="source-code"> .qualify(rowNumber().over()</pre>
+			<pre class="source-code">    .orderBy(PRODUCT_MASTER.PRODUCT_LINE).between(start, end))</pre>
+			<pre class="source-code"> .fetchInto(ProductMaster.class);</pre>
+			<p>Fetching the first page of size 5 can be done via <strong class="source-inline">start</strong> = <strong class="source-inline">1</strong> and <strong class="source-inline">end</strong> = <strong class="source-inline">5</strong>. Fetching the next page of size 5 <a id="_idIndexMarker1215"/>can be done via <strong class="source-inline">start</strong> = <strong class="source-inline">6</strong> and <strong class="source-inline">end</strong> = <strong class="source-inline">10</strong>. The complete example is available in<a id="_idIndexMarker1216"/> the bundler code as <em class="italic">RowNumberPagination</em> for MySQL. </p>
+			<p>Okay, that's enough about pagination. Next, let's tackle dynamic queries (filters).</p>
+			<h1 id="_idParaDest-237"><a id="_idTextAnchor236"/>Writing dynamic queries</h1>
+			<p>Commonly, a <a id="_idIndexMarker1217"/>dynamic query contains no or some fixed parts and some other parts that can be appended at runtime to form a query that corresponds to a certain scenario or use case. </p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">In jOOQ, even when they look like static queries (due to jOOQ's API design), every SQL is dynamic; therefore, it can be broken up into query parts that can be fluently glued back in any valid jOOQ query. We already have covered this aspect in <a href="B16833_03.xhtml#_idTextAnchor040"><em class="italic">Chapter 3</em></a>, <em class="italic">jOOQ Core Concepts</em>, in the <em class="italic">Understanding the jOOQ fluent API</em> section.</p>
+			<p>Dynamically creating an SQL statement on the fly is one of the favorite topics of jOOQ, so let's try to cover some approaches that can be useful in real applications.</p>
+			<h2 id="_idParaDest-238"><a id="_idTextAnchor237"/>Using the ternary operator</h2>
+			<p>The Java <a id="_idIndexMarker1218"/>ternary operator (<strong class="source-inline">?</strong>) is probably the simplest approach for shaping a query at runtime. Check out this sample:</p>
+			<pre class="source-code">public List&lt;ProductRecord&gt; fetchCarsOrNoCars(</pre>
+			<pre class="source-code">       float buyPrice, boolean cars) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">   .where((buyPrice &gt; 0f ? PRODUCT.BUY_PRICE.gt(</pre>
+			<pre class="source-code">       BigDecimal.valueOf(buyPrice)) : noCondition())</pre>
+			<pre class="source-code">     .and(cars ? PRODUCT.PRODUCT_LINE.in("Classic Cars", </pre>
+			<pre class="source-code">       "Motorcycles", "Trucks and Buses", "Vintage Cars") : </pre>
+			<pre class="source-code">   PRODUCT.PRODUCT_LINE.in("Plains","Ships", "Trains")))</pre>
+			<pre class="source-code">   .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>The <strong class="source-inline">PRODUCT.BUY_PRICE.gt(BigDecimal.valueOf(buyPrice))</strong> condition is appended <a id="_idIndexMarker1219"/>only if the passed <strong class="source-inline">buyPrice</strong> is greater than 0; otherwise, we rely on the handy <strong class="source-inline">noCondition()</strong> method. Next, depending on the <strong class="source-inline">cars</strong> flag, we shape the range of values for <strong class="source-inline">PRODUCT.PRODUCT_LINE.in()</strong>. Via this single jOOQ query, we can shape four different SQL queries at runtime, depending on the <strong class="source-inline">buyPrice</strong> and <strong class="source-inline">cars</strong> values.</p>
+			<h2 id="_idParaDest-239"><a id="_idTextAnchor238"/>Using jOOQ comparators</h2>
+			<p>The jOOQ <strong class="source-inline">Comparator</strong> API is quite <a id="_idIndexMarker1220"/>handy for toggling comparison operators in conditions while remaining fluent. For instance, let's assume that the client (user, service, and so on) can choose between two categories of employees – a category of all the sales reps and a category of non-sales reps. If the client chooses the first category, then we want to fetch all employees (<strong class="source-inline">EMPLOYEE</strong>) that have a <strong class="source-inline">salary</strong> less than <em class="italic">65,000</em>. However, if the client chooses the second category, then we want to fetch all employees (<strong class="source-inline">EMPLOYEE</strong>) that have a <strong class="source-inline">salary</strong> greater than or equal to <em class="italic">65,000</em>. Instead of writing two queries or using any other approach, we can rely on jOOQ's <strong class="source-inline">Comparator.IN</strong> and <strong class="source-inline">Comparator.NOT_IN</strong> (note that, in the case of <strong class="source-inline">NOT_IN</strong>, the projected column(s) should be <strong class="source-inline">NOT NULL</strong>), as follows:</p>
+			<pre class="source-code">List&lt;EmployeeRecord&gt; fetchEmployees(boolean isSaleRep) {</pre>
+			<pre class="source-code"> return ctx.selectFrom(EMPLOYEE)</pre>
+			<pre class="source-code">  .where(EMPLOYEE.SALARY.compare(isSaleRep </pre>
+			<pre class="source-code">     ? Comparator.IN : Comparator.NOT_IN,</pre>
+			<pre class="source-code">       select(EMPLOYEE.SALARY).from(EMPLOYEE)</pre>
+			<pre class="source-code">           .where(EMPLOYEE.SALARY.lt(65000))))</pre>
+			<pre class="source-code">           .orderBy(EMPLOYEE.SALARY)</pre>
+			<pre class="source-code">           .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>jOOQ provides a comprehensive list of built-in comparators, including <strong class="source-inline">EQUALS</strong>, <strong class="source-inline">GREATER</strong>, <strong class="source-inline">LIKE</strong>, and <strong class="source-inline">IS_DISTINCT_FROM</strong>. While you can find all of them covered in the jOOQ documentation, here is another example that uses <strong class="source-inline">Comparator.LESS</strong> and <strong class="source-inline">Comparator.GREATER</strong> to express in jOOQ a query that can be translated into four SQL queries, depending<a id="_idIndexMarker1221"/> on the values of <strong class="source-inline">buyPrice</strong> and <strong class="source-inline">msrp</strong>:</p>
+			<pre class="source-code">public List&lt;ProductRecord&gt; fetchProducts(</pre>
+			<pre class="source-code">                   float buyPrice, float msrp) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">    .where(PRODUCT.BUY_PRICE.compare(</pre>
+			<pre class="source-code">      buyPrice &lt; 55f ? Comparator.LESS : Comparator.GREATER,</pre>
+			<pre class="source-code">       select(avg(PRODUCT.MSRP.minus(</pre>
+			<pre class="source-code">        PRODUCT.MSRP.mul(buyPrice / 100f))))</pre>
+			<pre class="source-code">    .from(PRODUCT).where(PRODUCT.MSRP.coerce(Float.class)</pre>
+			<pre class="source-code">     .compare(msrp &gt; 100f ? </pre>
+			<pre class="source-code">         Comparator.LESS : Comparator.GREATER, msrp))))</pre>
+			<pre class="source-code">     .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>You can check out these examples next to others in <em class="italic">DynamicQuery</em>.</p>
+			<h2 id="_idParaDest-240"><a id="_idTextAnchor239"/>Using SelectQuery, InsertQuery, UpdateQuery, and DeleteQuery</h2>
+			<p>The goal of the <strong class="source-inline">SelectQuery</strong> (<strong class="source-inline">InsertQuery</strong>, <strong class="source-inline">UpdateQuery</strong>, and <strong class="source-inline">DeleteQuery</strong>) types is to allow the expression of dynamic queries in an imperative style. However, it is <a id="_idIndexMarker1222"/>recommended to avoid this imperative style and use a more functional style, as you'll see soon in this chapter. So, while you read this section, consider this sentence as a disclaimer. </p>
+			<p>When the previous <a id="_idIndexMarker1223"/>approaches<a id="_idIndexMarker1224"/> can't be used or the query becomes cluttered, it is time to turn your attention to the <strong class="source-inline">SelectQuery</strong> (<strong class="source-inline">InsertQuery</strong>, <strong class="source-inline">UpdateQuery</strong>, and <strong class="source-inline">DeleteQuery</strong>) APIs. These jOOQ APIs are very useful for expressing dynamic <a id="_idIndexMarker1225"/>queries because they contain dedicated methods for appending different parts of a query effortlessly (for example, conditions, joins, having, and order by).</p>
+			<h3>Using SelectQuery</h3>
+			<p>For instance, let's <a id="_idIndexMarker1226"/>assume that our application exposes a filter for optionally selecting a price range (<strong class="source-inline">startBuyPrice</strong> and <strong class="source-inline">endBuyPrice</strong>), the product vendor (<strong class="source-inline">productVendor</strong>), and the product scale (<strong class="source-inline">productScale</strong>) for ordering a <strong class="source-inline">PRODUCT</strong>. Based on the client selections, we should execute the proper <strong class="source-inline">SELECT</strong> query, so we start by writing a <strong class="source-inline">SelectQuery</strong>, as shown here:</p>
+			<pre class="source-code">SelectQuery select = ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">  .where(PRODUCT.QUANTITY_IN_STOCK.gt(0))</pre>
+			<pre class="source-code">  .getQuery();</pre>
+			<p>So far, this query doesn't involve any of the client selections. Furthermore, we take each client selection and rely on <strong class="source-inline">addConditions()</strong> to enrich them accordingly:</p>
+			<pre class="source-code">if (startBuyPrice != null &amp;&amp; endBuyPrice != null) {</pre>
+			<pre class="source-code">   select.addConditions(PRODUCT.BUY_PRICE</pre>
+			<pre class="source-code">         .betweenSymmetric(startBuyPrice, endBuyPrice));</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">if (productVendor != null) {</pre>
+			<pre class="source-code">    select.addConditions(PRODUCT.PRODUCT_VENDOR</pre>
+			<pre class="source-code">          .eq(productVendor));</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">if (productScale != null) {</pre>
+			<pre class="source-code">    select.addConditions(PRODUCT.PRODUCT_SCALE</pre>
+			<pre class="source-code">          .eq(productScale));</pre>
+			<pre class="source-code">}</pre>
+			<p>Finally, we execute the query and fetch the results:</p>
+			<pre class="source-code">select.fetch();</pre>
+			<p>Done! The<a id="_idIndexMarker1227"/> same thing can be expressed like this as well:</p>
+			<pre class="source-code">Condition condition = PRODUCT.QUANTITY_IN_STOCK.gt(0);</pre>
+			<pre class="source-code">if (startBuyPrice != null &amp;&amp; endBuyPrice != null) {</pre>
+			<pre class="source-code">    condition = condition.and(PRODUCT.BUY_PRICE</pre>
+			<pre class="source-code">       .betweenSymmetric(startBuyPrice, endBuyPrice));</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">if (productVendor != null) {</pre>
+			<pre class="source-code">    condition = condition.and(PRODUCT.PRODUCT_VENDOR</pre>
+			<pre class="source-code">       .eq(productVendor));</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">if (productScale != null) {</pre>
+			<pre class="source-code">    condition = condition.and(PRODUCT.PRODUCT_SCALE</pre>
+			<pre class="source-code">       .eq(productScale));</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">SelectQuery select = ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">   .where(condition)</pre>
+			<pre class="source-code">   .getQuery();</pre>
+			<pre class="source-code">select.fetch();</pre>
+			<p>If you don't have a <a id="_idIndexMarker1228"/>start condition (a fix condition), then you can start from a dummy <strong class="source-inline">true</strong> condition:</p>
+			<pre class="source-code">Condition condition = trueCondition();</pre>
+			<p>Besides <strong class="source-inline">trueCondition()</strong>, we can use <strong class="source-inline">falseCondition()</strong> or <strong class="source-inline">noCondition()</strong>. More details are available here: <a href="https://www.jooq.org/doc/latest/manual/sql-building/conditional-expressions/true-false-no-condition/">https://www.jooq.org/doc/latest/manual/sql-building/conditional-expressions/true-false-no-condition/</a>.</p>
+			<p>Next, use <strong class="source-inline">and()</strong>, <strong class="source-inline">or()</strong>, <strong class="source-inline">andNot()</strong>, <strong class="source-inline">andExists()</strong>, and so on to chain the optional conditions as you feel appropriate.</p>
+			<p>However, conditions are not the only flexible parts of a dynamic query. For instance, let's assume that we have a query that returns the office's cities and countries (<strong class="source-inline">OFFICE.CITY</strong> and <strong class="source-inline">OFFICE.COUNTRY</strong>). However, depending on client selections, this query should also return the employees from these offices (<strong class="source-inline">EMPLOYEE</strong>) and the sales of these employees (<strong class="source-inline">SALE</strong>). This means that our query should be dynamically appended with joins. Via the <strong class="source-inline">SelectQuery</strong> API, this can be done via <strong class="source-inline">addJoin()</strong> methods, exemplified here:</p>
+			<pre class="source-code">public List&lt;Record&gt; appendTwoJoins(</pre>
+			<pre class="source-code">       boolean andEmp, boolean addSale) {</pre>
+			<pre class="source-code">  SelectQuery select = ctx.select(OFFICE.CITY, </pre>
+			<pre class="source-code">       OFFICE.COUNTRY).from(OFFICE).limit(10).getQuery();</pre>
+			<pre class="source-code">  if (andEmp) {</pre>
+			<pre class="source-code">    select.addSelect(EMPLOYEE.FIRST_NAME, EMPLOYEE.LAST_NAME);</pre>
+			<pre class="source-code">    select.addJoin(EMPLOYEE, </pre>
+			<pre class="source-code">              OFFICE.OFFICE_CODE.eq(EMPLOYEE.OFFICE_CODE));</pre>
+			<pre class="source-code">    if (addSale) {</pre>
+			<pre class="source-code">     select.addSelect(SALE.FISCAL_YEAR, </pre>
+			<pre class="source-code">                SALE.SALE_, SALE.EMPLOYEE_NUMBER);</pre>
+			<pre class="source-code">     select.addJoin(SALE, JoinType.LEFT_OUTER_JOIN, </pre>
+			<pre class="source-code">          EMPLOYEE.EMPLOYEE_NUMBER.eq(SALE.EMPLOYEE_NUMBER));</pre>
+			<pre class="source-code">    }</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">return select.fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>As you can see, <strong class="source-inline">addJoin()</strong> comes in different flavors. Mainly, there is a set of <strong class="source-inline">addJoin()</strong> that implicitly generates an <strong class="source-inline">INNER JOIN</strong> (as <strong class="source-inline">addJoin(TableLike&lt;?&gt; tl, Condition cndtn)</strong>), a <a id="_idIndexMarker1229"/>set of <strong class="source-inline">addJoin()</strong> that allows us to specify the type of join via the <strong class="source-inline">JoinType</strong> enumeration (as  <strong class="source-inline">addJoin(TableLike&lt;?&gt; tl, JoinType jt, Condition... cndtns)</strong>), a set of <strong class="source-inline">addJoinOnKey()</strong> that generates the <strong class="source-inline">ON</strong> predicate based on the given foreign key (as <strong class="source-inline">addJoinOnKey(TableLike&lt;?&gt; tl, JoinType jt, ForeignKey&lt;?,?&gt; fk)</strong>), and a set of <strong class="source-inline">addJoinUsing()</strong> that relies on the <strong class="source-inline">USING</strong> clause (as <strong class="source-inline">addJoinUsing</strong><strong class="source-inline">(TableLike&lt;?&gt; table, Collection&lt;? extends Field&lt;?&gt;&gt; fields)</strong>). </p>
+			<p>Next to the <strong class="source-inline">addFoo()</strong> methods used/mentioned here, we have <strong class="source-inline">addFrom()</strong>, <strong class="source-inline">addHaving()</strong>, <strong class="source-inline">addGroupBy()</strong>, <strong class="source-inline">addLimit()</strong>, <strong class="source-inline">addWindow()</strong>, and so on. You can find all of them and their flavors in the jOOQ documentation.</p>
+			<p>Sometimes, we need to simply reuse a part of a query a number of times. For instance, the following figure is obtained by <strong class="source-inline">UNION</strong> the (near) same query:</p>
+			<div>
+				<div id="_idContainer068" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.7.jpg" alt="Figure 12.7 – Apply UNION to count and classify customer's payment&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.7 – Apply UNION to count and classify customer's payment</p>
+			<p>The query behind this <a id="_idIndexMarker1230"/>figure applies <strong class="source-inline">UNION</strong> to count and classifies the customers' payments based on the given classes, as shown here:</p>
+			<pre class="source-code">SELECT `classicmodels`.`customer`.`customer_number`,</pre>
+			<pre class="source-code">  count(*) AS `clazz_[0, 1]`, 0 AS `clazz_[2, 2]`, </pre>
+			<pre class="source-code">            0 AS `clazz_[3, 5]`, 0 AS `clazz_[6, 15]`</pre>
+			<pre class="source-code">FROM `classicmodels`.`customer`</pre>
+			<pre class="source-code">JOIN `classicmodels`.`payment` ON   </pre>
+			<pre class="source-code">  `classicmodels`.`customer`.`customer_number` </pre>
+			<pre class="source-code">    = `classicmodels`.`payment`.`customer_number`</pre>
+			<pre class="source-code">GROUP BY `classicmodels`.`customer`.`customer_number`</pre>
+			<pre class="source-code">HAVING count(*) BETWEEN 0 AND 1</pre>
+			<pre class="source-code">UNION</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">HAVING count(*) BETWEEN 2 AND 2</pre>
+			<pre class="source-code">UNION</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">HAVING count(*) BETWEEN 3 AND 5</pre>
+			<pre class="source-code">UNION</pre>
+			<pre class="source-code">SELECT `classicmodels`.`customer`.`customer_number`,</pre>
+			<pre class="source-code">       0, 0, 0, count(*)</pre>
+			<pre class="source-code">FROM `classicmodels`.`customer`</pre>
+			<pre class="source-code">JOIN `classicmodels`.`payment` ON   </pre>
+			<pre class="source-code">  `classicmodels`.`customer`.`customer_number` </pre>
+			<pre class="source-code">    = `classicmodels`.`payment`.`customer_number`</pre>
+			<pre class="source-code">GROUP BY `classicmodels`.`customer`.`customer_number`</pre>
+			<pre class="source-code">HAVING count(*) BETWEEN 6 AND 15</pre>
+			<p>However, if the number of classes varies (being an input parameter provided by the client), then the number of <strong class="source-inline">UNION</strong> statements also varies, and the <strong class="source-inline">HAVING</strong> clause must be appended <a id="_idIndexMarker1231"/>dynamically. First, we can isolate the fixed part of our query, like this:</p>
+			<pre class="source-code">private SelectQuery getQuery() {</pre>
+			<pre class="source-code">  return ctx.select(CUSTOMER.CUSTOMER_NUMBER)</pre>
+			<pre class="source-code">    .from(CUSTOMER)</pre>
+			<pre class="source-code">    .join(PAYMENT)</pre>
+			<pre class="source-code">    .on(CUSTOMER.CUSTOMER_NUMBER.eq(PAYMENT.CUSTOMER_NUMBER))</pre>
+			<pre class="source-code">    .groupBy(CUSTOMER.CUSTOMER_NUMBER)</pre>
+			<pre class="source-code">    .getQuery();</pre>
+			<pre class="source-code">}</pre>
+			<p>Next, we should <strong class="source-inline">UNION</strong> a <strong class="source-inline">getQuery()</strong> for each given class and generate the specific <strong class="source-inline">HAVING</strong> clause, but not before reading the following important note.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">Note that it is not possible to use the same instance of a <strong class="source-inline">SelectQuery</strong> on both sides of a set operation such as <strong class="source-inline">s.union(s)</strong>, so you'll need a new <strong class="source-inline">SelectQuery</strong> for each <strong class="source-inline">UNION</strong>. This seems to be a fixable bug, so this note may not be relevant when you read this book.</p>
+			<p>This can be done <a id="_idIndexMarker1232"/>as shown in this simple code:</p>
+			<pre class="source-code">public record Clazz(int left, int right) {}</pre>
+			<pre class="source-code">public List&lt;CustomerRecord&gt; classifyCustomerPayments(</pre>
+			<pre class="source-code">                                    Clazz... clazzes) {</pre>
+			<pre class="source-code">  SelectQuery[] sq = new SelectQuery[clazzes.length];</pre>
+			<pre class="source-code">  for (int i = 0; i &lt; sq.length; i++) {</pre>
+			<pre class="source-code">     sq[i] = getQuery(); // create a query for each UNION</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  sq[0].addSelect(count().as("clazz_[" + clazzes[0].left() </pre>
+			<pre class="source-code">    + ", " + clazzes[0].right() + "]"));</pre>
+			<pre class="source-code">  sq[0].addHaving(count().between(clazzes[0].left(), </pre>
+			<pre class="source-code">    clazzes[0].right()));</pre>
+			<pre class="source-code">  for (int i = 1; i &lt; sq.length; i++) {</pre>
+			<pre class="source-code">       sq[0].addSelect(val(0).as("clazz_[" + clazzes[i]</pre>
+			<pre class="source-code">         .left() + ", " + clazzes[i].right() + "]"));</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  for (int i = 1; i &lt; sq.length; i++) {</pre>
+			<pre class="source-code">     for (int j = 0; j &lt; i; j++) {</pre>
+			<pre class="source-code">         sq[i].addSelect(val(0));</pre>
+			<pre class="source-code">     }</pre>
+			<pre class="source-code">     sq[i].addSelect(count());</pre>
+			<pre class="source-code">     for (int j = i + 1; j &lt; sq.length; j++) {</pre>
+			<pre class="source-code">         sq[i].addSelect(val(0));</pre>
+			<pre class="source-code">     }</pre>
+			<pre class="source-code">     sq[i].addHaving(count().between(clazzes[i].left(), </pre>
+			<pre class="source-code">       clazzes[i].right()));</pre>
+			<pre class="source-code">     sq[0].union(sq[i]);</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  return sq[0].fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>Of course, you can try to write this much cleverly and more compact. A call of this method is <a id="_idIndexMarker1233"/>shown here:</p>
+			<pre class="source-code">List&lt;CustomerRecord&gt; result = classicModelsRepository</pre>
+			<pre class="source-code">  .classifyCustomerPayments(new Clazz(0, 1), new Clazz(2, 2), </pre>
+			<pre class="source-code">                   new Clazz(3, 5), new Clazz(6, 15));</pre>
+			<p>In order to check out these examples, refer to the <em class="italic">DynamicQuery</em> application.</p>
+			<h3>InsertQuery, UpdateQuery, and DeleteQuery</h3>
+			<p>Dynamic queries representing DML operations are also supported by jOOQ. <strong class="source-inline">InsertQuery</strong>, <strong class="source-inline">UpdateQuery</strong>, and <strong class="source-inline">DeleteQuery</strong> work on the same principle as <strong class="source-inline">SelectQuery</strong> and expose a comprehensive API intended to chain SQL parts into a valid and dynamic SQL query.</p>
+			<p>Let's see an example of <a id="_idIndexMarker1234"/>using <strong class="source-inline">InsertQuery</strong> to insert a <strong class="source-inline">PRODUCT</strong> (a classic car), based on data provided by the client, and return the generated identity:</p>
+			<pre class="source-code">public long insertClassicCar(</pre>
+			<pre class="source-code">    String productName, String productVendor, </pre>
+			<pre class="source-code">    String productScale, boolean price) {</pre>
+			<pre class="source-code">  InsertQuery iq = ctx.insertQuery(PRODUCT);</pre>
+			<pre class="source-code">  iq.addValue(PRODUCT.PRODUCT_LINE, "Classic Cars");</pre>
+			<pre class="source-code">  iq.addValue(PRODUCT.CODE, 599302);</pre>
+			<pre class="source-code">  if (productName != null) {</pre>
+			<pre class="source-code">    iq.addValue(PRODUCT.PRODUCT_NAME, productName);</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  if (productVendor != null) {</pre>
+			<pre class="source-code">    iq.addValue(PRODUCT.PRODUCT_VENDOR, productVendor);</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  if (productScale != null) {</pre>
+			<pre class="source-code">    iq.addValue(PRODUCT.PRODUCT_SCALE, productScale);</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  if (price) {</pre>
+			<pre class="source-code">    iq.addValue(PRODUCT.BUY_PRICE, </pre>
+			<pre class="source-code">           select(avg(PRODUCT.BUY_PRICE)).from(PRODUCT));</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  iq.setReturning(PRODUCT.getIdentity());</pre>
+			<pre class="source-code">  iq.execute();</pre>
+			<pre class="source-code">  return iq.getReturnedRecord()</pre>
+			<pre class="source-code">    .getValue(PRODUCT.getIdentity().getField(), Long.class);</pre>
+			<pre class="source-code">}</pre>
+			<p>As you'll see in the <a id="_idIndexMarker1235"/>jOOQ documentation, the <strong class="source-inline">InsertQuery</strong> API supports many more methods, such as <strong class="source-inline">addConditions()</strong>, <strong class="source-inline">onDuplicateKeyIgnore()</strong>, <strong class="source-inline">onConflict()</strong>, <strong class="source-inline">setSelect()</strong>, and <strong class="source-inline">addValueForUpdate()</strong>.</p>
+			<p>How about a dynamic<a id="_idIndexMarker1236"/> update or delete? Here is a very intuitive example of a <a id="_idIndexMarker1237"/>dynamic update:</p>
+			<pre class="source-code">public int updateProduct(float oldPrice, float value) {</pre>
+			<pre class="source-code">  UpdateQuery uq = ctx.updateQuery(PRODUCT);</pre>
+			<pre class="source-code">  uq.addValue(PRODUCT.BUY_PRICE, </pre>
+			<pre class="source-code">     PRODUCT.BUY_PRICE.plus(PRODUCT.BUY_PRICE.mul(value)));</pre>
+			<pre class="source-code">  uq.addConditions(PRODUCT.BUY_PRICE</pre>
+			<pre class="source-code">     .lt(BigDecimal.valueOf(oldPrice)));</pre>
+			<pre class="source-code">  return uq.execute();</pre>
+			<pre class="source-code">}</pre>
+			<p>And here's what code for a dynamic delete of sales (<strong class="source-inline">SALE</strong>) looks like:</p>
+			<pre class="source-code">public int deleteSale(int fiscalYear, double sale) {</pre>
+			<pre class="source-code">  DeleteQuery dq = ctx.deleteQuery(SALE);</pre>
+			<pre class="source-code">  Condition condition = SALE.FISCAL_YEAR</pre>
+			<pre class="source-code">    .compare(fiscalYear &lt;= 2003 </pre>
+			<pre class="source-code">       ? Comparator.GREATER : Comparator.LESS, fiscalYear);</pre>
+			<pre class="source-code">  if (sale &gt; 5000d) {</pre>
+			<pre class="source-code">     condition = condition.or(SALE.SALE_.gt(sale));</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  dq.addConditions(condition);</pre>
+			<pre class="source-code">  return dq.execute();</pre>
+			<pre class="source-code">}</pre>
+			<p>You can check out these examples in <em class="italic">DynamicQuery</em>. After exploring these APIs, take your time and challenge yourself to write your own dynamic queries. It's really fun and helps you get familiar with this amazingly simple but powerful API.</p>
+			<h2 id="_idParaDest-241"><a id="_idTextAnchor240"/>Writing generic dynamic queries</h2>
+			<p>Sooner or later, you'll<a id="_idIndexMarker1238"/> realize that what you need is a generic dynamic query. For instance, you may encounter a scenario that sounds like this. You need to select from an arbitrary table a number of arbitrary columns, based on arbitrary conditions. In such a scenario, it will be inefficient to duplicate the code only to vary the name of the table, columns, and conditions. So, most probably, you'll prefer a generic dynamic query, as shown here:</p>
+			<pre class="source-code">public &lt;R extends Record&gt; List&lt;R&gt; select(</pre>
+			<pre class="source-code">    Table&lt;R&gt; table, Collection&lt;SelectField&lt;?&gt;&gt; fields,  </pre>
+			<pre class="source-code">                               Condition... conditions) {</pre>
+			<pre class="source-code">   SelectQuery sq = ctx.selectQuery(table);</pre>
+			<pre class="source-code">   sq.addSelect(fields);</pre>
+			<pre class="source-code">   sq.addConditions(conditions);</pre>
+			<pre class="source-code">   return sq.fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>Calling this method can be done as shown in the following examples:</p>
+			<pre class="source-code">List&lt;ProductRecord&gt; rs1 = </pre>
+			<pre class="source-code">  classicModelsRepository.select(PRODUCT,</pre>
+			<pre class="source-code">     List.of(PRODUCT.PRODUCT_LINE, PRODUCT.PRODUCT_NAME, </pre>
+			<pre class="source-code">             PRODUCT.BUY_PRICE, PRODUCT.MSRP),</pre>
+			<pre class="source-code">     PRODUCT.BUY_PRICE.gt(BigDecimal.valueOf(50)), </pre>
+			<pre class="source-code">     PRODUCT.MSRP.gt(BigDecimal.valueOf(80)));</pre>
+			<pre class="source-code">List&lt;Record&gt; rs2 =   </pre>
+			<pre class="source-code">  classicModelsRepository.select(table("product"),</pre>
+			<pre class="source-code">     List.of(field("product_line"), field("product_name"), </pre>
+			<pre class="source-code">       field("buy_price"), field("msrp")),</pre>
+			<pre class="source-code">         field("buy_price").gt(50), field("msrp").gt(80));</pre>
+			<p>If you want to<a id="_idIndexMarker1239"/> rely only on the first type of call – that is, calls based on jOOQ-generated code – then you can enforce the type-safety of the generic method by replacing <strong class="source-inline">SelectField&lt;?&gt;</strong> with <strong class="source-inline">TableField&lt;R, ?&gt;</strong>, as follows:</p>
+			<pre class="source-code">public &lt;R extends Record&gt; List&lt;R&gt; select(</pre>
+			<pre class="source-code">    Table&lt;R&gt; table, Collection&lt;TableField&lt;R, ?&gt;&gt; fields, </pre>
+			<pre class="source-code">       Condition... conditions) {</pre>
+			<pre class="source-code">  SelectQuery sq = ctx.selectQuery(table);</pre>
+			<pre class="source-code">  sq.addSelect(fields);</pre>
+			<pre class="source-code">  sq.addConditions(conditions);</pre>
+			<pre class="source-code">  return sq.fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>This time, only the first call (<strong class="source-inline">List&lt;ProductRecord&gt; rs1 = …</strong>) compiles and works. The same thing applies to DML operations – for instance, inserting in an arbitrary table:</p>
+			<pre class="source-code">public &lt;R extends Record&gt; int insert (</pre>
+			<pre class="source-code">    Table&lt;R&gt; table, Map&lt;TableField&lt;R, ?&gt;, ?&gt; values) {</pre>
+			<pre class="source-code">    InsertQuery iq = ctx.insertQuery(table);</pre>
+			<pre class="source-code">   iq.addValues(values);</pre>
+			<pre class="source-code">   return iq.execute();</pre>
+			<pre class="source-code">}</pre>
+			<p>Here is a call example of the previous method:</p>
+			<pre class="source-code">int ri = classicModelsRepository.insert(PRODUCT,</pre>
+			<pre class="source-code">  Map.of(PRODUCT.PRODUCT_LINE, "Classic Cars", </pre>
+			<pre class="source-code">         PRODUCT.CODE, 599302,</pre>
+			<pre class="source-code">         PRODUCT.PRODUCT_NAME, "1972 Porsche 914"));</pre>
+			<p>Alternatively, for an<a id="_idIndexMarker1240"/> arbitrary update, we can write the following method:</p>
+			<pre class="source-code">public &lt;R extends Record&gt; int update(Table&lt;R&gt; table,</pre>
+			<pre class="source-code">    Map&lt;TableField&lt;R, ?&gt;, ?&gt; values, Condition... conditions) {</pre>
+			<pre class="source-code">  UpdateQuery uq = ctx.updateQuery(table);</pre>
+			<pre class="source-code">  uq.addValues(values);</pre>
+			<pre class="source-code">  uq.addConditions(conditions);</pre>
+			<pre class="source-code">  return uq.execute();</pre>
+			<pre class="source-code">}</pre>
+			<p>Here is a call example of the previous method:</p>
+			<pre class="source-code">int ru = classicModelsRepository.update(SALE, </pre>
+			<pre class="source-code">    Map.of(SALE.TREND, "UP", SALE.HOT, true), </pre>
+			<pre class="source-code">       SALE.TREND.eq("CONSTANT"));</pre>
+			<p>Alternatively, for an arbitrary delete, we can write the following method:</p>
+			<pre class="source-code">public &lt;R extends Record&gt; int delete(Table&lt;R&gt; table, </pre>
+			<pre class="source-code">       Condition... conditions) {</pre>
+			<pre class="source-code">  DeleteQuery dq = ctx.deleteQuery(table);</pre>
+			<pre class="source-code">  dq.addConditions(conditions);</pre>
+			<pre class="source-code">  return dq.execute();</pre>
+			<pre class="source-code">}  </pre>
+			<p>Here is a call<a id="_idIndexMarker1241"/> example of the previous method:</p>
+			<pre class="source-code">int rd1 = classicModelsRepository.delete(SALE, </pre>
+			<pre class="source-code">    SALE.TREND.eq("UP"));</pre>
+			<pre class="source-code">int rd2 = classicModelsRepository.delete(table("sale"),    </pre>
+			<pre class="source-code">    field("trend").eq("CONSTANT"));</pre>
+			<p>You can see these examples next to others in <em class="italic">GenericDynamicQuery</em>.</p>
+			<h2 id="_idParaDest-242"><a id="_idTextAnchor241"/>Writing functional dynamic queries</h2>
+			<p>Functional dynamic <a id="_idIndexMarker1242"/>queries take this topic to the next level. However, let's try to see how and why we should evolve a query from zero to functional implementation. Let's assume that we develop an application for an organization's sales department, and we have to write a query that filters sales (<strong class="source-inline">SALE</strong>) by fiscal year (<strong class="source-inline">SALE.FISCAL_YEAR</strong>). Initially (day 1), we can do it as shown here:</p>
+			<pre class="source-code">// Day 1</pre>
+			<pre class="source-code">public List&lt;SaleRecord&gt;</pre>
+			<pre class="source-code">  filterSaleByFiscalYear(int fiscalYear) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.FISCAL_YEAR.eq(fiscalYear))</pre>
+			<pre class="source-code">   .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>While everybody was satisfied with the result, we got a new request for a filter that obtains the sales of a certain trend (<strong class="source-inline">SALE.TREND</strong>). We've done this on day 1, so there is no problem to repeat it on day 2:</p>
+			<pre class="source-code">// Day 2</pre>
+			<pre class="source-code">public List&lt;SaleRecord&gt; filterSaleByTrend(String trend) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">    .where(SALE.TREND.eq(trend))</pre>
+			<pre class="source-code">    .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>This filter is the same as the filter from day 1, only that it has a different condition/filter. We realize that continuing like this will end up with a lot of similar methods that just repeat the code for different filters, which means a lot of <em class="italic">boilerplate</em> code. While reflecting on this aspect, we just got an urgent request for a filter of sales by fiscal year and trend. So, our horrible solution on day 3 is shown here:</p>
+			<pre class="source-code">// Day 3</pre>
+			<pre class="source-code">public List&lt;SaleRecord&gt; filterSaleByFiscalYearAndTrend(</pre>
+			<pre class="source-code">     int fiscalYear, String trend) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">    .where(SALE.FISCAL_YEAR.eq(fiscalYear)</pre>
+			<pre class="source-code">    .and(SALE.TREND.eq(trend)))</pre>
+			<pre class="source-code">    .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>After 3 days, we realize that this becomes unacceptable. The code becomes verbose, hard to maintain, and prone to errors. </p>
+			<p>On day 4, while looking for a solution, we noticed in the jOOQ documentation that the <strong class="source-inline">where()</strong> method also comes with <strong class="source-inline">where(Collection&lt;? extends Condition&gt; clctn)</strong> and <strong class="source-inline">where(Condition... cndtns)</strong>. This means that we can simplify our <a id="_idIndexMarker1243"/>solution to something like this:</p>
+			<pre class="source-code">// Day 4</pre>
+			<pre class="source-code">public List&lt;SaleRecord&gt;</pre>
+			<pre class="source-code">  filterSaleBy(Collection&lt;Condition&gt; cf) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">        .where(cf)</pre>
+			<pre class="source-code">        .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>This is quite nice because we can pass any set of conditions without modifying the <strong class="source-inline">filterSaleBy()</strong> method. Here is a call example:</p>
+			<pre class="source-code">List&lt;SaleRecord&gt; result = </pre>
+			<pre class="source-code">  classicModelsRepository.filterSaleBy(</pre>
+			<pre class="source-code">    List.of(SALE.FISCAL_YEAR.eq(2004), SALE.TREND.eq("DOWN"), </pre>
+			<pre class="source-code">          SALE.EMPLOYEE_NUMBER.eq(1370L)));</pre>
+			<p>However, this is not type-safe. For instance, the error from this call is discovered only at compile time (check out the code in bold):</p>
+			<pre class="source-code">List&lt;SaleRecord&gt; result =   </pre>
+			<pre class="source-code">  classicModelsRepository.filterSaleBy(</pre>
+			<pre class="source-code">     List.of(SALE.FISCAL_YEAR.eq(2004), SALE.TREND.eq("DOWN"), </pre>
+			<pre class="source-code">         EMPLOYEE.EMPLOYEE_NUMBER.eq(1370L)));</pre>
+			<p>Well, a new<a id="_idIndexMarker1244"/> day brings a new idea! On day 5, we defined an interface to prevent the type-safety issues from day 4. This is a functional interface, as shown here:</p>
+			<pre class="source-code">// Day 5</pre>
+			<pre class="source-code">@FunctionalInterface</pre>
+			<pre class="source-code">public interface SaleFunction&lt;Sale, Condition&gt; {</pre>
+			<pre class="source-code">    Condition apply(Sale s);</pre>
+			<pre class="source-code">}</pre>
+			<p>And <strong class="source-inline">filterSaleBy()</strong> becomes the following:</p>
+			<pre class="source-code">public List&lt;SaleRecord&gt; filterSaleBy(</pre>
+			<pre class="source-code">     SaleFunction&lt;Sale, Condition&gt; sf) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">    .where(sf.apply(SALE))</pre>
+			<pre class="source-code">    .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>Problem solved! This time, we can run this type-safe call:</p>
+			<pre class="source-code">List&lt;SaleRecord&gt; result = classicModelsRepository</pre>
+			<pre class="source-code">  .filterSaleBy(s -&gt; s.SALE_.gt(4000d));</pre>
+			<p>On day 6, Mark (our colleague) noticed this code, and he enlightens us that Java 8 already has this functional interface, which is called <strong class="source-inline">java.util.function.Function&lt;T, R&gt;</strong>. So, there is no need to define our <strong class="source-inline">SaleFunction</strong>, since <strong class="source-inline">Function</strong> can do the job, as shown here:</p>
+			<pre class="source-code">// Day 6</pre>
+			<pre class="source-code">public List&lt;SaleRecord&gt; filterSaleBy(</pre>
+			<pre class="source-code">       Function&lt;Sale, Condition&gt; f) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">    .where(f.apply(SALE))</pre>
+			<pre class="source-code">    .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>On day 7, we <a id="_idIndexMarker1245"/>noticed that calling <strong class="source-inline">filterSaleBy()</strong> works only for a single condition. However, we need to pass multi-conditions as well (as we did earlier when we were using <strong class="source-inline">Collection&lt;Condition&gt;</strong>). This led to the decision of modifying <strong class="source-inline">filterSaleBy()</strong> to accept an array of <strong class="source-inline">Function</strong>. The challenge is represented by applying this array of <strong class="source-inline">Function</strong>, and the solution relies on <strong class="source-inline">Arrays.stream(array)</strong> or <strong class="source-inline">Stream.of(array)</strong>, as shown here (use the one that you find more expressive; as an example, behind the scenes, <strong class="source-inline">Stream.of()</strong> calls <strong class="source-inline">Arrays.stream()</strong>):</p>
+			<pre class="source-code">// Day 7</pre>
+			<pre class="source-code">public List&lt;SaleRecord&gt; filterSaleBy(</pre>
+			<pre class="source-code">        Function&lt;Sale, Condition&gt;... ff) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">    .where(Stream.of(ff).map(f -&gt; f.apply(SALE))</pre>
+			<pre class="source-code">                        .collect(toList()))</pre>
+			<pre class="source-code">    .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>Now, we can write type-safe calls, like this one:</p>
+			<pre class="source-code">List&lt;SaleRecord&gt; result = classicModelsRepository</pre>
+			<pre class="source-code">     .filterSaleBy(s -&gt; s.SALE_.gt(4000d), </pre>
+			<pre class="source-code">                   s -&gt; s.TREND.eq("DOWN"), </pre>
+			<pre class="source-code">                   s -&gt; s.EMPLOYEE_NUMBER.eq(1370L));</pre>
+			<p>Cool! Day 8 was an important day because we managed to adjust this code to work for any table and conditions by writing it generically:</p>
+			<pre class="source-code">public &lt;T extends Table&lt;R&gt;, R extends Record&gt; List&lt;R&gt;</pre>
+			<pre class="source-code">    filterBy(T t, Function&lt;T, Condition&gt;... ff) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(t)</pre>
+			<pre class="source-code">  .where(Stream.of(ff).map(f -&gt; f.apply(t)).collect(toList()))</pre>
+			<pre class="source-code">  .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>Here are some <a id="_idIndexMarker1246"/>call samples:</p>
+			<pre class="source-code">List&lt;SaleRecord&gt; result1 </pre>
+			<pre class="source-code"> = classicModelsRepository.filterBy(SALE, </pre>
+			<pre class="source-code">    s -&gt; s.SALE_.gt(4000d), s -&gt; s.TREND.eq("DOWN"), </pre>
+			<pre class="source-code">    s -&gt; s.EMPLOYEE_NUMBER.eq(1370L));</pre>
+			<pre class="source-code">List&lt;EmployeeRecord&gt; result2 = classicModelsRepository</pre>
+			<pre class="source-code">  .filterBy(EMPLOYEE, e -&gt; e.JOB_TITLE.eq("Sales Rep"), </pre>
+			<pre class="source-code">            e -&gt; e.SALARY.gt(55000));</pre>
+			<pre class="source-code">List&lt;Record&gt; result3 = classicModelsRepository</pre>
+			<pre class="source-code">  .filterBy(table("employee"), </pre>
+			<pre class="source-code">   e -&gt; field("job_title", String.class).eq("Sales Rep"), </pre>
+			<pre class="source-code">   e -&gt; field("salary", Integer.class).gt(55000));</pre>
+			<p>On day 9, we start to consider tuning this query. For instance, instead of fetching all fields via <strong class="source-inline">selectFrom()</strong>, we decided to add an argument to receive the fields that should be fetched as a <strong class="source-inline">Collection&lt;TableField&lt;R, ?&gt;&gt;</strong>. Moreover, we decided to defer the <a id="_idIndexMarker1247"/>creation of such a collection until they are really used, and in order to accomplish this, we wrapped the collection in a <strong class="source-inline">Supplier</strong>, as shown here:</p>
+			<pre class="source-code">public &lt;T extends Table&lt;R&gt;, R extends Record&gt; List&lt;Record&gt;</pre>
+			<pre class="source-code"> filterBy(T t, Supplier&lt;Collection&lt;TableField&lt;R, ?&gt;&gt;&gt; </pre>
+			<pre class="source-code">          select, Function&lt;T, Condition&gt;... ff) {</pre>
+			<pre class="source-code">  return ctx.select(select.get())</pre>
+			<pre class="source-code">    .from(t)</pre>
+			<pre class="source-code">    .where(Stream.of(ff).map(</pre>
+			<pre class="source-code">       f -&gt; f.apply(t)).collect(toList()))</pre>
+			<pre class="source-code">    .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>Here is a call sample:</p>
+			<pre class="source-code">List&lt;Record&gt; result = classicModelsRepository.filterBy(SALE, </pre>
+			<pre class="source-code">   () -&gt; List.of(SALE.SALE_ID, SALE.FISCAL_YEAR),</pre>
+			<pre class="source-code">      s -&gt; s.SALE_.gt(4000d), s -&gt; s.TREND.eq("DOWN"), </pre>
+			<pre class="source-code">      s -&gt; s.EMPLOYEE_NUMBER.eq(1370L));</pre>
+			<p>Maybe you want to support a call like the following one as well:</p>
+			<pre class="source-code">List&lt;Record&gt; result = classicModelsRepository</pre>
+			<pre class="source-code">   .filterBy(table("sale"), </pre>
+			<pre class="source-code">    () -&gt; List.of(field("sale_id"), field("fiscal_year")),</pre>
+			<pre class="source-code">       s -&gt; field("sale").gt(4000d), </pre>
+			<pre class="source-code">       s -&gt; field("trend").eq("DOWN"), </pre>
+			<pre class="source-code">       s -&gt; field("employee_number").eq(1370L));</pre>
+			<p>In such a <a id="_idIndexMarker1248"/>case, replace <strong class="source-inline">TableField&lt;R, ?&gt;</strong> with <strong class="source-inline">SelectField&lt;?&gt;</strong>, as shown here:</p>
+			<pre class="source-code">public &lt;T extends Table&lt;R&gt;, R extends Record&gt; List&lt;Record&gt;</pre>
+			<pre class="source-code">  filterBy (T t, Supplier&lt;Collection&lt;SelectField&lt;?&gt;&gt;&gt; </pre>
+			<pre class="source-code">            select, Function&lt;T, Condition&gt;... ff) {</pre>
+			<pre class="source-code"> return ctx.select(select.get())</pre>
+			<pre class="source-code"> .from(t)</pre>
+			<pre class="source-code"> .where(Stream.of(ff).map(f -&gt; f.apply(t))</pre>
+			<pre class="source-code"> .collect(toList()))</pre>
+			<pre class="source-code"> .fetch();</pre>
+			<pre class="source-code">}   </pre>
+			<p>Done! I hope <a id="_idIndexMarker1249"/>you've found this story and examples useful and inspirational for your own functional generic dynamic queries. Until then, you can see these examples in the bundled code, named <em class="italic">FunctionalDynamicQuery</em>.</p>
+			<h1 id="_idParaDest-243"><a id="_idTextAnchor242"/>Infinite scrolling and dynamic filters</h1>
+			<p>In the last section of this chapter, let's bring together our two main topics – pagination and dynamic queries. Earlier, in the <em class="italic">Implementing infinite scroll</em> section, we implemented infinite scrolling for the <strong class="source-inline">ORDERDETAIL</strong> table. Now, let's add some filters for <strong class="source-inline">ORDERDETAIL</strong> that allows <a id="_idIndexMarker1250"/>a client to <a id="_idIndexMarker1251"/>choose the price and quantity ordered range, as shown in this figure:</p>
+			<div>
+				<div id="_idContainer069" class="IMG---Figure">
+					<img src="image/B16833_Figure_12.8.jpg" alt="Figure 12.8 – Infinite scrolling and dynamic filters&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 12.8 – Infinite scrolling and dynamic filters</p>
+			<p>We can easily implement<a id="_idIndexMarker1252"/> this behavior by fusing the powers of <strong class="source-inline">SEEK</strong> and <strong class="source-inline">SelectQuery</strong>:</p>
+			<pre class="source-code">public List&lt;Orderdetail&gt; fetchOrderdetailPageAsc(</pre>
+			<pre class="source-code">    long orderdetailId, int size, BigDecimal priceEach, </pre>
+			<pre class="source-code">      Integer quantityOrdered) {</pre>
+			<pre class="source-code">  SelectQuery sq = ctx.selectFrom(ORDERDETAIL)</pre>
+			<pre class="source-code">     .orderBy(ORDERDETAIL.ORDERDETAIL_ID)</pre>
+			<pre class="source-code">     .seek(orderdetailId)</pre>
+			<pre class="source-code">     .limit(size)</pre>
+			<pre class="source-code">     .getQuery();</pre>
+			<pre class="source-code">  if (priceEach != null) {</pre>
+			<pre class="source-code">   sq.addConditions(ORDERDETAIL.PRICE_EACH.between(</pre>
+			<pre class="source-code">    priceEach.subtract(BigDecimal.valueOf(50)), priceEach));</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  if (quantityOrdered != null) {</pre>
+			<pre class="source-code">    sq.addConditions(ORDERDETAIL.QUANTITY_ORDERED.between(</pre>
+			<pre class="source-code">      quantityOrdered - 25, quantityOrdered));</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  return sq.fetchInto(Orderdetail.class);</pre>
+			<pre class="source-code">}</pre>
+			<p>The following example URL involves loading the first page of three records that have prices<a id="_idIndexMarker1253"/> between <em class="italic">50</em> and <em class="italic">100</em>, and an order quantity between <em class="italic">50</em> and <em class="italic">75</em>: </p>
+			<pre class="source-code">http://localhost:8080/orderdetail/0/3</pre>
+			<pre class="source-code">        ?priceEach=100&amp;quantityOrdered=75</pre>
+			<p>You can find the complete example in <em class="italic">SeekInfiniteScrollFilter</em> for MySQL.</p>
+			<h1 id="_idParaDest-244"><a id="_idTextAnchor243"/>Summary</h1>
+			<p>This was a relatively short chapter about pagination and dynamic queries. As you saw, jOOQ excels on both topics and provides support and APIs that allow us to intuitively and quickly implement the simplest to the most complex scenarios. In the first part of this chapter, we covered offset and keyset pagination (including infinite scrolling, the fancy <strong class="source-inline">DENSE_RANK()</strong>, and the <strong class="source-inline">ROW_NUMBER()</strong> approach). In the second part, we covered dynamic queries, including the ternary operator, the <strong class="source-inline">Comparator</strong> API, the <strong class="source-inline">SelectQuery</strong>, <strong class="source-inline">InsertQuery</strong>, <strong class="source-inline">UpdateQuery</strong>, and <strong class="source-inline">DeleteQuery</strong> APIs, and their respective generic and functional dynamic queries. </p>
+			<p>In the next chapter, we will talk about exploiting SQL functions.</p>
+		</div>
+	</body></html>

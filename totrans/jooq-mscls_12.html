@@ -1,0 +1,1135 @@
+<html><head></head><body>
+		<div id="_idContainer055">
+			<h1 id="_idParaDest-163"><em class="italic"><a id="_idTextAnchor162"/>Chapter 9</em>: CRUD, Transactions, and Locking</h1>
+			<p>In this chapter, we'll cover a must-know mix of fundamental notions about CRUD operations, transactions, and locking. These three topics are heavily exploited in almost any database application. In a common scenario, an application has a significant number of CRUD operations that are executed in explicitly demarcated logical transactions and, in certain cases, they also need to explicitly control the concurrent access to data to prevent <strong class="bold">race conditions</strong>, <strong class="bold">lost updates</strong>, and other <strong class="bold">SQL phenomena</strong> (or SQL anomalies). </p>
+			<p>In this chapter, we will cover the following topics:</p>
+			<ul>
+				<li>CRUD</li>
+				<li>Navigating (updatable) records</li>
+				<li>Transactions</li>
+				<li>Locking</li>
+			</ul>
+			<p>Let's get started!</p>
+			<h1 id="_idParaDest-164"><a id="_idTextAnchor163"/>Technical requirements</h1>
+			<p>The code for this chapter can be found on GitHub at <a href="https://github.com/PacktPublishing/jOOQ-Masterclass/tree/master/Chapter09">https://github.com/PacktPublishing/jOOQ-Masterclass/tree/master/Chapter09</a>.</p>
+			<h1 id="_idParaDest-165"><a id="_idTextAnchor164"/>CRUD</h1>
+			<p>Besides the awesome <a id="_idIndexMarker846"/>DSL-fluent API for expressing complex SQL, jOOQ can be used to express <em class="italic">everyday</em> SQL operations as well. These are known as <strong class="bold">CRUD</strong> operations (<strong class="bold">Create</strong> (<strong class="source-inline">INSERT</strong>), <strong class="bold">Read</strong> (<strong class="source-inline">SELECT</strong>), <strong class="bold">Update</strong> (<strong class="source-inline">UPDATE</strong>), and <strong class="bold">Delete</strong> (<strong class="source-inline">DELETE</strong>)), and jOOQ facilitates them via a dedicated API that involves <strong class="source-inline">UpdatableRecord</strong> types. In other words, the jOOQ Code Generator generates a <strong class="source-inline">UpdatableRecord</strong> (a record that can be fetched and stored again in the database) for each table that has a primary key (not just a simple unique key!). Tables without a primary key (<strong class="source-inline">org.jooq.TableRecord</strong>) are rightly considered non-updatable by jOOQ. You can easily recognize a jOOQ <strong class="source-inline">UpdatableRecord</strong> because it has to extend the <strong class="source-inline">UpdatableRecordImpl</strong> class (simply inspect your generated records from <strong class="source-inline">jooq.generated.tables.records</strong>). Next, jOOQ exposes a CRUD API that allows you <a id="_idIndexMarker847"/>to operate directly on these updatable records instead of writing DSL-fluent queries (which fits better for complex queries that involve more than one table).</p>
+			<p>If you need a quick reminder about jOOQ records, please check out <a href="B16833_03.xhtml#_idTextAnchor040"><em class="italic">Chapter 3</em></a>, <em class="italic">jOOQ Core Concepts</em>. </p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">The jOOQ CRUD API fits like a glove for <strong class="bold">normalized</strong> databases, so for tables that have primary keys (simple or composed) or <a id="_idIndexMarker848"/>unique lifespans, a primary key is inserted only once into a table. Once it's been inserted, it cannot be changed or re-inserted after being deleted.</p>
+			<p class="callout">However, as you know, jOOQ tries to greet you in any case you have, so if you need updatable primary keys, then rely on <strong class="source-inline">Settings.updatablePrimaryKeys()</strong>.</p>
+			<p>The jOOQ CRUD API <a id="_idIndexMarker849"/>facilitates several operations, including insert (<strong class="source-inline">insert()</strong>), update (<strong class="source-inline">update()</strong>), delete (<strong class="source-inline">delete()</strong>), merge (<strong class="source-inline">merge()</strong>) and the handy store (<strong class="source-inline">store()</strong>). Besides these operations, we have the well-known <strong class="source-inline">selectFrom()</strong>, which is useful for reading (<strong class="source-inline">SELECT</strong>) from a single table directly into a <strong class="source-inline">Result</strong> of updatable records.</p>
+			<p>However, before we look at several CRUD examples, is important to know about a set of methods that can influence the behavior of updatable records and CRUD operations. These methods are <strong class="source-inline">attach()</strong>, <strong class="source-inline">detach()</strong>, <strong class="source-inline">original()</strong>, <strong class="source-inline">changed()</strong>, <strong class="source-inline">reset()</strong>, and <strong class="source-inline">refresh()</strong>.</p>
+			<h2 id="_idParaDest-166"><a id="_idTextAnchor165"/>Attaching/detaching updatable records</h2>
+			<p>Roughly, jOOQ updatable records are just Java objects that can live independently of the database and can be <a id="_idIndexMarker850"/>manipulated in memory. So long as an updatable record doesn't need to interact with the <a id="_idIndexMarker851"/>database, it can remain in the <strong class="bold">detached</strong> state. In this state, the updatable record doesn't hold any reference to the database or to <a id="_idIndexMarker852"/>the connection that created it. However, before <a id="_idIndexMarker853"/>interacting with the database (insert, delete, update, and so on), an updatable record must be <strong class="bold">attached</strong> to a valid <strong class="source-inline">Configuration</strong> that, among other things, has the coordinates to connect to the database that this updatable record will interact with. After an updatable record has been attached, it will remain like this for as long as the corresponding <strong class="source-inline">Configuration</strong> lives or until it is explicitly detached by calling <strong class="source-inline">detach()</strong>.</p>
+			<p>When we fetch updatable records from the database, jOOQ will automatically attach them to the currently used <strong class="source-inline">Configuration</strong> and implicitly to the involved database connection. This connection may be used internally for subsequent interactions with the fetched updatable records with the database. </p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">To be precise, jOOQ doesn't hold references to a JDBC <strong class="source-inline">Connection</strong> but to <strong class="source-inline">ConnectionProvider</strong> from <strong class="source-inline">Configuration</strong>. In terms of transactions or connection pooling, this might be relevant. For instance, if we are using a Spring <strong class="source-inline">TransactionAwareDataSourceProxy</strong>, an attached record can be fetched in one transaction and stored in another transparently.</p>
+			<p>Consider the following read operation:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(1L)).fetchSingle();</pre>
+			<p>The <strong class="source-inline">sr</strong> record was automatically attached by jOOQ to the <strong class="source-inline">Configuration</strong> part of <strong class="source-inline">ctx</strong>. Next, we can successfully execute other operations that interact with the database, such as <strong class="source-inline">sr.update()</strong>, <strong class="source-inline">sr.delete()</strong>, and so on. </p>
+			<p>Now, let's consider a brand-new record that's been created by the client, as follows:</p>
+			<pre class="source-code">SaleRecord srNew = new SaleRecord(...);</pre>
+			<p>Such records are not automatically attached to any existent <strong class="source-inline">Configuration</strong>. They haven't been fetched from the database, so jOOQ will justifiably expect that you'll explicitly/manually attach them to a <strong class="source-inline">Configuration</strong> whenever this is necessary (for instance, before calling <strong class="source-inline">sr.insert()</strong>). This can be done by explicitly calling the <strong class="source-inline">DSLContext.attach()</strong> or <strong class="source-inline">UpdatableRecord.attach()</strong> methods, as follows:</p>
+			<pre class="source-code">ctx.attach(srNew);</pre>
+			<pre class="source-code">srNew.attach(ctx.configuration());</pre>
+			<p>However, to <a id="_idIndexMarker854"/>avoid <a id="_idIndexMarker855"/>the <strong class="source-inline">attach()</strong> explicit call, we can rely on the <strong class="source-inline">DSLContext.newRecord()</strong> alternative. Since <strong class="source-inline">DSLContext</strong> contains the <strong class="source-inline">Configuration</strong> part, jOOQ <a id="_idIndexMarker856"/>will do the attachment <a id="_idIndexMarker857"/>automatically. So, here, you should use the following code snippet (if you want to populate the record from a POJO, then use the <strong class="source-inline">newRecord(Table&lt;R&gt; table, Object o)</strong> flavor):</p>
+			<pre class="source-code">SaleRecord srNew = ctx.newRecord(SALE);</pre>
+			<pre class="source-code">srNew.setFiscalYear(…);</pre>
+			<pre class="source-code">…</pre>
+			<p>Once <strong class="source-inline">srNew</strong> has been attached, we can execute operations that interact with the database. Attempting to execute such operations on a detached updatable record will lead to an exception that states <strong class="source-inline">org.jooq.exception.DetachedException</strong>: <em class="italic">Cannot execute query. No Connection configured.</em></p>
+			<p>An updatable record can be explicitly detached with <strong class="source-inline">UpdatableRecord.detach()</strong>:</p>
+			<pre class="source-code">srNew.detach(); // equivalent to srNew.attach(null);</pre>
+			<p>While an updatable record is serializable, the underlying <strong class="source-inline">Connection</strong> (or <strong class="source-inline">DataSource</strong>) of <strong class="source-inline">Configuration</strong> is non-serializable. Nevertheless, you don't have to detach records before serialization. The internals of <strong class="source-inline">DefaultConfiguration</strong> ensure that anything that isn't <strong class="source-inline">Serializable</strong> (for instance, <strong class="source-inline">DefaultConnectionProvider</strong>) isn't serialized. Re-attaching will still be necessary after de-serialization, though. Support for serialization on jOOQ radar will eventually be deprecated: <a href="https://github.com/jOOQ/jOOQ/issues/2359">https://github.com/jOOQ/jOOQ/issues/2359</a>.</p>
+			<p>From this, don't <a id="_idIndexMarker858"/>conclude that serializing/de-serializing records is a day-to-day task. Most of the time, records are used <a id="_idIndexMarker859"/>to populate views (for instance, via Thymeleaf) or they are exported as CSV, JSON, HTML, and so <a id="_idIndexMarker860"/>on via jOOQ support, as you'll see in the <a id="_idIndexMarker861"/>next chapter. None of these actions requires an explicit detach. </p>
+			<h2 id="_idParaDest-167"><a id="_idTextAnchor166"/>What's an original (updatable) record?</h2>
+			<p>Every (updatable) <a id="_idIndexMarker862"/>record holds a reference to its <em class="italic">current </em>values and its <em class="italic">original </em>values. </p>
+			<p>If the record was fetched from the database, then the fetched values represent the <em class="italic">original</em> and the <em class="italic">current</em> values at the same time. Next, the <em class="italic">current</em> values can be modified in memory, while the <em class="italic">original</em> values remain in place. For example, let's assume that the following query fetches the <strong class="source-inline">SALE.FISCAL_YEAR</strong> field, which is <em class="italic">2005</em> and that, after fetching it, we set it to <em class="italic">2002</em>:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(1L)).fetchSingle();</pre>
+			<pre class="source-code">// or, a little bit more concise</pre>
+			<pre class="source-code">SaleRecord sr = ctx.fetchSingle(SALE, SALE.SALE_ID.eq(1L));</pre>
+			<pre class="source-code">sr.setFiscalYear(2002);</pre>
+			<p>At this point, the <em class="italic">original</em> value of the fiscal year is <em class="italic">2005</em> and the <em class="italic">current</em> value is <em class="italic">2002</em>. After inserting/updating a record, the <em class="italic">current</em> values that have been inserted/updated become the <em class="italic">original</em> values. For instance, after updating <strong class="source-inline">sr</strong>, the <em class="italic">original</em> value of the fiscal year becomes <em class="italic">2002</em>, just like the <em class="italic">current</em> value. This way, <strong class="source-inline">sr</strong> mirrors the latest state of the database. So, after an update, the <em class="italic">original</em> values reflect only what has been sent to the database by default. Trigger-generated values are not fetched back by default. For that to work, <strong class="source-inline">Settings.returnAllOnUpdatableRecord()</strong> is required.</p>
+			<p>In the case of a new record, the <em class="italic">original</em> values are always <strong class="source-inline">null</strong> and remain like this until the record is inserted or updated. </p>
+			<p>Whenever we need the <em class="italic">original</em> values, we can call <strong class="source-inline">Record.original()</strong>. Without arguments, the <strong class="source-inline">original()</strong> method returns a brand-new record that's been populated with the <em class="italic">original</em> values. If <strong class="source-inline">sr</strong> is attached when calling <strong class="source-inline">original()</strong>, then <strong class="source-inline">srOriginal</strong> is attached as well; otherwise, it is detached:</p>
+			<pre class="source-code">SaleRecord srOriginal = sr.original();</pre>
+			<p>By specifying an argument as a <strong class="source-inline">Field</strong>, <strong class="source-inline">Name</strong>, <strong class="source-inline">String</strong>, or integer (index), we can extract the <em class="italic">original</em> value of a certain field. Here is a type-safe and a non-type-safe approach:</p>
+			<pre class="source-code">int fiscalYear = sr.original(SALE.FISCAL_YEAR);</pre>
+			<pre class="source-code">int fiscalYear = (int) sr.original("fiscal_year");</pre>
+			<p>Having the <em class="italic">current</em> and <em class="italic">original</em> values of a record in your hands can be useful for making decisions after <a id="_idIndexMarker863"/>comparing these values between them or with other values, for creating side-by-side views of original data and current data, and so on. In the bundled code, called <em class="italic">OriginalRecords</em> (available for MySQL), you can see an example of rendering a side-by-side view for a <strong class="source-inline">PRODUCT</strong> via Thymeleaf. The relevant Thymeleaf code is as follows:</p>
+			<pre class="source-code">&lt;tr&gt;</pre>
+			<pre class="source-code">  &lt;td&gt; Product Buy Price:&lt;/td&gt;</pre>
+			<pre class="source-code">  &lt;td th:text = "${product.original('buy_price')}"/&gt;&lt;/td&gt;     </pre>
+			<pre class="source-code">&lt;/tr&gt;</pre>
+			<pre class="source-code">&lt;tr&gt;</pre>
+			<pre class="source-code">  &lt;td&gt; Product MSRP:&lt;/td&gt; </pre>
+			<pre class="source-code">  &lt;td th:text = "${product.original('msrp')}"/&gt;&lt;/td&gt;      </pre>
+			<pre class="source-code">&lt;/tr&gt;</pre>
+			<p>You'll see something similar to <a id="_idIndexMarker864"/>the following:</p>
+			<div>
+				<div id="_idContainer040" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.1.jpg" alt="Figure 9.1 – Side-by-side view&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.1 – Side-by-side view</p>
+			<p>Next, let's focus on marking (updatable) records as changed/unchanged.</p>
+			<h2 id="_idParaDest-168"><a id="_idTextAnchor167"/>Marking (updatable) records as changed/unchanged</h2>
+			<p>A record <a id="_idIndexMarker865"/>whose <em class="italic">original</em> values are exactly the same as the <em class="italic">current</em> values is considered <em class="italic">unchanged</em>. By <a id="_idIndexMarker866"/>calling the <strong class="source-inline">Record.changed()</strong> flag method, we can find out if a record is considered as <em class="italic">changed</em> or <em class="italic">unchanged</em> by jOOQ. For instance, a record that has been fetched from the database and never modified is <em class="italic">unchanged</em>:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(1L)).fetchSingle();  </pre>
+			<pre class="source-code">sr.changed(); // false</pre>
+			<pre class="source-code">sr.setFiscalYear(2005);</pre>
+			<pre class="source-code">sr.changed(); // true</pre>
+			<p>Even if we set the same fiscal year that was fetched from the database (<em class="italic">2005</em>), this record is marked as <em class="italic">changed</em>. On the other hand, a brand-new record is considered <em class="italic">changed</em>:</p>
+			<pre class="source-code">SaleRecord sr = new SaleRecord(null, 2021, 453.2, 1504L, ...);</pre>
+			<pre class="source-code">sr.changed(); // true</pre>
+			<pre class="source-code">SaleRecord sr = new SaleRecord();</pre>
+			<pre class="source-code">sr.setFiscalYear(2021);</pre>
+			<pre class="source-code">sr.setSale(4500.25);</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">sr.changed(); // true</pre>
+			<p>Notice <a id="_idIndexMarker867"/>that <strong class="source-inline">changed()</strong> operates at the field level since it's a <strong class="source-inline">BitSet</strong> that's the same length as the number of record fields. In other words, each field of <a id="_idIndexMarker868"/>a record has the <strong class="source-inline">changed()</strong> flag method. All we have to do is pass the field as an argument of <strong class="source-inline">changed()</strong> as a <strong class="source-inline">Field</strong>, <strong class="source-inline">Name</strong>, <strong class="source-inline">String</strong>, or <strong class="source-inline">int</strong> (representing the index):</p>
+			<pre class="source-code">boolean changed = sr.changed(SALE.FISCAL_YEAR);</pre>
+			<pre class="source-code">boolean changed = sr.changed("fiscal_year");</pre>
+			<p>Whenever we attempt to insert or update a record, jOOQ inspects the <em class="italic">changed</em> flags to determine which fields should be part of the generated query. This is great, because by rendering only the <em class="italic">changed</em> fields, jOOQ allows <em class="italic">default</em> values (specified via <strong class="source-inline">CREATE TABLE</strong> DDL statements) to be set for the omitted fields. If none of the fields were <em class="italic">changed</em> then jOOQ can prevent an insert/update from being executed (we'll cover this in more detail later in this chapter).</p>
+			<p>However, we can enforce/suppress the execution of such statements by explicitly turning on (or off) the <em class="italic">changed</em> flag. We can do so by marking all the fields as <em class="italic">changed</em>/<em class="italic">unchanged</em>:</p>
+			<pre class="source-code">sr.changed(true/false); </pre>
+			<p>We can also do the same by marking only certain fields:</p>
+			<pre class="source-code">sr.changed(SALE.FISCAL_YEAR, true/false);</pre>
+			<pre class="source-code">sr.changed("fiscal_year", true/false);</pre>
+			<p>Pay <a id="_idIndexMarker869"/>attention to how you juggle these flags since is quite easy to mess things <a id="_idIndexMarker870"/>up and render some unfortunate DML statements. Next, let's talk about resetting records.</p>
+			<h2 id="_idParaDest-169"><a id="_idTextAnchor168"/>Resetting an (updatable) record</h2>
+			<p>By resetting a <a id="_idIndexMarker871"/>record, we <strong class="bold">reset</strong> all <a id="_idIndexMarker872"/>the <strong class="bold">current</strong><em class="italic"> </em>values to the <strong class="bold">original</strong><em class="italic"> </em>values and all the <strong class="bold">changed</strong> flags to <strong class="source-inline">false</strong>. This can be accomplished without interacting with the database. We can reset all the fields by using <strong class="source-inline">Record.reset()</strong>:</p>
+			<pre class="source-code">sr.reset();</pre>
+			<p>We can reset only certain fields by using <strong class="source-inline">reset(Field</strong>/<strong class="source-inline">Name</strong>/<strong class="source-inline">String</strong>/<strong class="source-inline">int)</strong>:</p>
+			<pre class="source-code">sr.reset(SALE.FISCAL_YEAR);</pre>
+			<pre class="source-code">sr.reset("fiscal_year");</pre>
+			<p>You'll see this method at work in the forthcoming sections. Finally, let's talk about how to refresh a record.</p>
+			<h2 id="_idParaDest-170"><a id="_idTextAnchor169"/>Refreshing an updatable record</h2>
+			<p>By refreshing an <a id="_idIndexMarker873"/>updatable record, we synchronize the record's original values with the database's latest <a id="_idIndexMarker874"/>state, and we revert the current<em class="italic"> </em>values in case they had been set. Practically, <strong class="source-inline">UpdatableRecord.refresh()</strong> is materialized in a <strong class="source-inline">SELECT</strong> round trip that loads the data in the original values of the record and sets all the changed flags to <strong class="source-inline">false</strong>. Refreshing all the fields of the record can be done as follows:</p>
+			<pre class="source-code">sr.refresh();</pre>
+			<p>You can partially refresh the updatable record using <strong class="source-inline">refresh</strong><strong class="source-inline">(Field&lt;?&gt;... fields)</strong> or <strong class="source-inline">refresh</strong><strong class="source-inline">(Collection&lt;? extends Field&lt;?&gt;&gt; fields)</strong>:</p>
+			<pre class="source-code">sr.refresh(SALE.FISCAL_YEAR, SALE.SALE_);</pre>
+			<p>In this case, <strong class="source-inline">SELECT</strong> is rendered to fetch only the specified fields. As you'll see shortly, this <strong class="source-inline">refresh()</strong> method is quite useful when mixed with optimistic locking. </p>
+			<p>You can <a id="_idIndexMarker875"/>find these <a id="_idIndexMarker876"/>examples in <em class="italic">SimpleCRUDRecords</em> (available for MySQL and PostgreSQL). Next, let's talk about inserting updatable records.</p>
+			<h2 id="_idParaDest-171"><a id="_idTextAnchor170"/>Inserting updatable records</h2>
+			<p>Just a quick note to be sure that this section is not misunderstood: <strong class="source-inline">insert()</strong> can be called <a id="_idIndexMarker877"/>on any <strong class="source-inline">TableRecord</strong>, not <a id="_idIndexMarker878"/>just the <strong class="source-inline">UpdatableRecord</strong> ones; no primary key is necessary for <strong class="source-inline">insert()</strong>.</p>
+			<p>Now, inserting updatable records can be done via <strong class="source-inline">UpdatableRecord.insert()</strong> and its overloads. Typically, we insert brand-new records or records that have been loaded from POJOs (for instance, via the <strong class="source-inline">from(POJO)</strong> or <strong class="source-inline">newRecord(Table&lt;R&gt; table, Object o)</strong> methods) that are considered and treated by jOOQ as new records. Here is a simple and classical example of creating and inserting an updatable record:</p>
+			<pre class="source-code">SaleRecord sr = ctx.newRecord(SALE);</pre>
+			<pre class="source-code">sr.setFiscalYear(2021);</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">sr.insert();</pre>
+			<p>However, if you create it like so, then you need to explicitly call <strong class="source-inline">attach()</strong>:</p>
+			<pre class="source-code">SaleRecord sr = new SaleRecord();</pre>
+			<pre class="source-code">sr.setFiscalYear(2021);</pre>
+			<pre class="source-code">...        </pre>
+			<pre class="source-code">ctx.attach(sr);</pre>
+			<pre class="source-code">sr.insert();   </pre>
+			<p>jOOQ generates and executes the <strong class="source-inline">INSERT</strong> statement. Moreover, by default, jOOQ tries to load any generated keys (the <strong class="source-inline">IDENTITY</strong>/<strong class="source-inline">SEQUENCE</strong> values, which are supported by most databases) from the database and turn them back into records that conform to the following note.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">The JDBC <strong class="source-inline">getGeneratedKeys()</strong> approach is only used when there's no better approach. In Db2, Firebird, MariaDB, Oracle, PostgreSQL, and, soon, H2, there is native <strong class="source-inline">RETURNING</strong> or <strong class="source-inline">&lt;data change delta table&gt;</strong> support that favors single round trips. Sometimes, if <strong class="source-inline">getGeneratedKeys()</strong> isn't supported, or only poorly, then an extra round trip may be needed with an extra <strong class="source-inline">SELECT</strong> statement. This is particularly true for many dialects when <strong class="source-inline">Settings.returnAllOnUpdatableRecord()</strong> is active.</p>
+			<p>So, calling <strong class="source-inline">sr.getSaleId()</strong> after <strong class="source-inline">INSERT</strong> will return the database-generated primary key. </p>
+			<p>Sometimes, you <a id="_idIndexMarker879"/>just need <a id="_idIndexMarker880"/>to re-insert the data that's contained in an updatable record. By default, since the record is <em class="italic">unchanged</em> after being inserted (<strong class="source-inline">changed()</strong> returns <strong class="source-inline">false</strong>), executing another <strong class="source-inline">insert()</strong> renders an <strong class="source-inline">INSERT</strong> of defaults (<strong class="source-inline">INSERT INTO sale VALUES (default, default, ...)</strong>). If the <strong class="source-inline">CREATE TABLE</strong> DDL doesn't provide default values for all the rendered defaults, then this will result in an error; that is, <em class="italic">Field 'foo' doesn't have a default value</em>. But, as you can see in the bundled code, this behavior can be controlled via <strong class="source-inline">withInsertUnchangedRecords(false)</strong>. Setting this flag to <strong class="source-inline">false</strong> will suppress any attempt to execute an <strong class="source-inline">INSERT</strong> of defaults.</p>
+			<p>To insert the same data without creating a new record, you can manually mark the record fields as changed (notice that we mark the primary key as <em class="italic">unchanged</em>, so it is omitted from the generated <strong class="source-inline">INSERT</strong> to avoid a duplicate key error):</p>
+			<pre class="source-code">sr.changed(true); </pre>
+			<pre class="source-code">sr.changed(SALE.SALE_ID, false); </pre>
+			<pre class="source-code">sr.insert();</pre>
+			<p>Of course, if you want to re-insert only certain fields, then mark only those fields as <em class="italic">changed</em>. On the other hand, if you want to re-insert the data and create a new record as well, then rely on the <strong class="source-inline">UpdatableRecord.copy()</strong> method. The <strong class="source-inline">copy()</strong> method is quite handy because it duplicates this record in memory, marks all fields as <em class="italic">changed</em>, and doesn't copy the primary key or any other main unique key:</p>
+			<pre class="source-code">SaleRecord srCopy = sr.copy();        </pre>
+			<pre class="source-code">srCopy.insert();  </pre>
+			<pre class="source-code">// or, shortly</pre>
+			<pre class="source-code">sr.copy().insert();</pre>
+			<p>More examples, including inserting without returning the generated primary key and inserting <a id="_idIndexMarker881"/>and returning all fields, can <a id="_idIndexMarker882"/>be found in the bundled code, <em class="italic">SimpleCRUDRecords </em>(available for MySQL and PostgreSQL). Next, let's focus on updating records.</p>
+			<h2 id="_idParaDest-172"><a id="_idTextAnchor171"/>Updating updatable records (this sounds funny)</h2>
+			<p>Typically, an updatable record is fetched from the database and is changed in memory. Subsequently, these changes are propagated to the database by calling <strong class="source-inline">UpdatableRecord.update()</strong> or its flavors, which allows us to nominate the fields that <a id="_idIndexMarker883"/>should be updated. Let's <a id="_idIndexMarker884"/>fetch a record and change it:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(1L)).fetchSingle();                </pre>
+			<pre class="source-code">        </pre>
+			<pre class="source-code">sr.setFiscalYear(2000);</pre>
+			<pre class="source-code">sr.setSale(1111.25);</pre>
+			<p>If we print <strong class="source-inline">sr</strong> at the console, then the result will look similar to the following:</p>
+			<div>
+				<div id="_idContainer041" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.2.jpg" alt="Figure 9.2 – Displaying the modified record on the console&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.2 – Displaying the modified record on the console</p>
+			<p>Notice that <strong class="source-inline">fiscal_year</strong> and <strong class="source-inline">sale</strong> are marked with an asterisk (<strong class="source-inline">*</strong>) by jOOQ. This asterisk highlights the fields that have been changed and that will participate in the following <strong class="source-inline">UPDATE</strong>:</p>
+			<pre class="source-code">sr.update();</pre>
+			<p>The rendered SQL in MySQL dialect is as follows (the rendered <strong class="source-inline">UPDATE</strong> relies on the primary key):</p>
+			<pre class="source-code">UPDATE `classicmodels`.`sale`</pre>
+			<pre class="source-code">SET `classicmodels`.`sale`.`fiscal_year` = 2000,</pre>
+			<pre class="source-code">    `classicmodels`.`sale`.`sale` = 1111.25</pre>
+			<pre class="source-code">WHERE `classicmodels`.`sale`.`sale_id` = 1</pre>
+			<p>By default, updating a record that is already up to date has no effect. Of course, if you rely <a id="_idIndexMarker885"/>on <strong class="source-inline">changed()</strong> to mark all/some <a id="_idIndexMarker886"/>fields as <em class="italic">changed</em>, then you force jOOQ to execute the corresponding <strong class="source-inline">UPDATE</strong>. You can practice forcing an update via <strong class="source-inline">Settings.withUpdateUnchangedRecords(UpdateUnchangedRecords)</strong> in the bundled code.</p>
+			<h2 id="_idParaDest-173"><a id="_idTextAnchor172"/>Deleting updatable records</h2>
+			<p>A fetched <a id="_idIndexMarker887"/>updatable record <a id="_idIndexMarker888"/>can be deleted via <strong class="source-inline">UpdatableRecord.delete()</strong>:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(5L)).fetchSingle();                </pre>
+			<pre class="source-code">                </pre>
+			<pre class="source-code">sr.delete();</pre>
+			<pre class="source-code">// MySQL rendered SQL</pre>
+			<pre class="source-code">DELETE FROM `classicmodels`.`sale` WHERE `classicmodels`</pre>
+			<pre class="source-code">  .`sale`.`sale_id` = 5</pre>
+			<p>As you can see, the rendered <strong class="source-inline">DELETE</strong> relies on the primary key (or main unique key). After <a id="_idIndexMarker889"/>deletion, all the fields <a id="_idIndexMarker890"/>of the deleted record are automatically marked as <em class="italic">changed</em>, so you can easily insert it again by calling <strong class="source-inline">insert()</strong>.</p>
+			<h2 id="_idParaDest-174"><a id="_idTextAnchor173"/>Merging updatable records</h2>
+			<p>Whenever we want to execute a <strong class="source-inline">MERGE</strong> statement for an updatable record (brand new or <a id="_idIndexMarker891"/>fetched from the database), we <a id="_idIndexMarker892"/>can call <strong class="source-inline">UpdatableRecord.merge()</strong>. In this case, jOOQ renders an <strong class="source-inline">INSERT ... ON DUPLICATE KEY UPDATE</strong> (this is emulated, depending on the used dialect), so it delegates the task of choosing between <strong class="source-inline">INSERT</strong> and <strong class="source-inline">UPDATE</strong> to the database. Here is an example:</p>
+			<pre class="source-code">SaleRecord srNew = ctx.newRecord(SALE);</pre>
+			<pre class="source-code">srNew.setFiscalYear(2000);</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">srNew.merge();</pre>
+			<p>In this case, <strong class="source-inline">srNew</strong> will be inserted. Here is another example:</p>
+			<pre class="source-code">SaleRecord srFetched = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(1L)).fetchSingle();                </pre>
+			<pre class="source-code">srFetched.setFiscalYear(2005);</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">srFetched.merge();</pre>
+			<p>Here, <strong class="source-inline">srFetched</strong> will <a id="_idIndexMarker893"/>be updated based on the primary <a id="_idIndexMarker894"/>key. Practically, jOOQ will render an SQL that updates the row, regardless of which (unique) key value is already present.</p>
+			<h2 id="_idParaDest-175"><a id="_idTextAnchor174"/>Storing updatable records</h2>
+			<p>Storing an updatable record can be done by calling the <strong class="source-inline">UpdatableRecord.store()</strong> method. This method results in an <strong class="source-inline">INSERT</strong> or an <strong class="source-inline">UPDATE</strong>, depending on the primary key's state. The decision of rendering an <strong class="source-inline">INSERT</strong> or <a id="_idIndexMarker895"/>an <strong class="source-inline">UPDATE</strong> is made <a id="_idIndexMarker896"/>by jOOQ, not by the database, as in the case of <strong class="source-inline">MERGE</strong>.</p>
+			<p>Typically, calling <strong class="source-inline">store()</strong> for new updatable records results in an <strong class="source-inline">INSERT</strong>:</p>
+			<pre class="source-code">SaleRecord srNew = ctx.newRecord(SALE);</pre>
+			<pre class="source-code">srNew.setFiscalYear(2000);</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">srNew.store(); // jOOQ render an INSERT</pre>
+			<p>If the updatable record was fetched from the database and its primary key was not changed, then jOOQ will render an <strong class="source-inline">UPDATE</strong>:</p>
+			<pre class="source-code">SaleRecord srFetched = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(5L)).fetchSingle();                </pre>
+			<pre class="source-code">srFetched.setFiscalYear(2005);</pre>
+			<pre class="source-code">srFetched.changed(SALE.SALE_, true);</pre>
+			<pre class="source-code">...</pre>
+			<pre class="source-code">srFetched.store(); // jOOQ render an UPDATE</pre>
+			<p>If the updatable record was fetched from the database and its primary key was changed, then jOOQ will render an <strong class="source-inline">INSERT</strong>:</p>
+			<pre class="source-code">srFetched.setSaleId(…);</pre>
+			<pre class="source-code">srFetched.store(); // jOOQ render an INSERT</pre>
+			<p>However, we can still force an <strong class="source-inline">UPDATE</strong> of the primary key via <strong class="source-inline">withUpdatablePrimaryKeys(true)</strong>:</p>
+			<pre class="source-code">DSLContext derivedCtx = ctx.configuration().derive(</pre>
+			<pre class="source-code">  new Settings().withUpdatablePrimaryKeys(true)).dsl();</pre>
+			<pre class="source-code">        </pre>
+			<pre class="source-code">SaleRecord sr = derivedCtx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(7L)).fetchSingle(); </pre>
+			<pre class="source-code">sr.setSaleId(...);</pre>
+			<pre class="source-code">sr.store(); // jOOQ render an UPDATE of primary key        </pre>
+			<p>However, as Lukas Eder shared: <em class="italic">"I think it's worth mentioning that updating primary keys is very much against all principles of normalization. It was introduced for those cases where users have very good reasons to do so, and those reasons are very rare (usually data migrations or fixing broken data, but even then, they're probably more likely to use SQL statements than updatable records)."</em></p>
+			<p>You can see these examples in <em class="italic">SimpleCRUDRecords </em>(available for MySQL and PostgreSQL). </p>
+			<p>On the <a id="_idIndexMarker897"/>other hand, if you prefer <a id="_idIndexMarker898"/>to work with POJOs and jOOQ's DAO, then you'll like to check out the examples from <em class="italic">SimpleDaoCRUDRecords</em> (available for MySQL and PostgreSQL). These examples relies on DAO's <strong class="source-inline">insert()</strong>, <strong class="source-inline">update()</strong>, <strong class="source-inline">delete()</strong>, and <strong class="source-inline">merge()</strong>. Moreover, you'll see the <strong class="source-inline">withReturnRecordToPojo()</strong> setting at work. Next, let's focus on using updatable records in web applications.</p>
+			<h2 id="_idParaDest-176"><a id="_idTextAnchor175"/>Using updatable records in HTTP conversations</h2>
+			<p>jOOQ's updatable <a id="_idIndexMarker899"/>records can be used in web applications or, in other words, in conversations that span across requests over the stateless HTTP protocol. Next, we'll <a id="_idIndexMarker900"/>develop several Spring Boot samples <a id="_idIndexMarker901"/>that are <a id="_idIndexMarker902"/>meant to highlight what we've learned so far.</p>
+			<h3>Using insert(), update(), and delete()</h3>
+			<p>Let's try to build a <a id="_idIndexMarker903"/>Spring Boot sample application <a id="_idIndexMarker904"/>that uses updatable records and <strong class="source-inline">insert()</strong>, <strong class="source-inline">update()</strong>, and <strong class="source-inline">delete()</strong>. While relying on the Spring MVC design pattern, let's <a id="_idIndexMarker905"/>consider the following scenario: our main goal is to provide a list of all bank transactions (<strong class="source-inline">BANK_TRANSACTION</strong>) that belong to the same payment (<strong class="source-inline">PAYMENT</strong>) of a certain customer. The user should be able to insert a new bank transaction and delete or modify an existing one.</p>
+			<h4>Listing all bank transactions</h4>
+			<p>The page <a id="_idIndexMarker906"/>that displays the bank transactions should look as follows (<em class="italic">transactions.html</em>):</p>
+			<div>
+				<div id="_idContainer042" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.3.jpg" alt="Figure 9.3 – All bank transactions of a certain payment&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.3 – All bank transactions of a certain payment</p>
+			<p>Let's start from the controller endpoint, which should be accessed to produce the output shown in the preceding screenshot:</p>
+			<pre class="source-code">@GetMapping("/transactions")</pre>
+			<pre class="source-code">public String loadAllBankTransactionOfCertainPayment(</pre>
+			<pre class="source-code">             SessionStatus sessionStatus, Model model) {</pre>
+			<pre class="source-code">  sessionStatus.setComplete();</pre>
+			<pre class="source-code"><strong class="bold">  model.addAttribute(ALL_BANK_TRANSACTION_ATTR,</strong></pre>
+			<pre class="source-code"><strong class="bold">    classicModelsService</strong></pre>
+			<pre class="source-code"><strong class="bold">      .loadAllBankTransactionOfCertainPayment());</strong></pre>
+			<pre class="source-code">  return "transactions";</pre>
+			<pre class="source-code">}</pre>
+			<p>In the highlighted code, we call the service that's responsible for accessing the repository that <a id="_idIndexMarker907"/>executes the query for fetching all the transactions for a certain payment. This query is quite simple (of course, in reality, you won't hardcode the values of <strong class="source-inline">CUSTOMER_NUMBER</strong> and <strong class="source-inline">CHECK_NUMBER</strong> – these can represent something such as the login payment credentials):</p>
+			<pre class="source-code">public Result&lt;BankTransactionRecord&gt; </pre>
+			<pre class="source-code">      fetchAllBankTransactionOfCertainPayment() {</pre>
+			<pre class="source-code">   return ctx.selectFrom(BANK_TRANSACTION)</pre>
+			<pre class="source-code">      .where(BANK_TRANSACTION.CUSTOMER_NUMBER.eq(333L)</pre>
+			<pre class="source-code">      .and(BANK_TRANSACTION.CHECK_NUMBER.eq("NF959653")))</pre>
+			<pre class="source-code">      .fetch();</pre>
+			<pre class="source-code">}</pre>
+			<p>Next, the fetched <strong class="source-inline">Result&lt;BankTransactionRecord&gt;</strong> is returned in the controller endpoint listed previously and stored in the model (Spring Boot's <strong class="source-inline">Model</strong>) as a request attribute named <strong class="source-inline">all</strong> (<strong class="source-inline">ALL_BANK_TRANSACTION_ATTR = "all"</strong>). To render the page that's returned from this controller endpoint (<em class="italic">transactions.html</em>) we can rely on the popular Thymeleaf template engine (of course, you can use any other template engine):</p>
+			<pre class="source-code">&lt;tr th:each="t : ${all}"&gt;</pre>
+			<pre class="source-code"> &lt;td&gt;&lt;span th:text="${t.transactionId}"&gt;ID&lt;/span&gt;&lt;/td&gt; </pre>
+			<pre class="source-code"> &lt;td&gt;&lt;span th:text="${t.bankName}"&gt;Bank Name&lt;/span&gt;&lt;/td&gt;</pre>
+			<pre class="source-code"> ...</pre>
+			<pre class="source-code"> &lt;td&gt;&lt;span th:text="${t.status}"&gt;Status&lt;/span&gt;&lt;/td&gt;   </pre>
+			<pre class="source-code">&lt;/tr&gt;</pre>
+			<p>From the <a id="_idIndexMarker908"/>returned page (<em class="italic">transactions.html</em>), we can choose to insert a new transaction or modify an existing one.</p>
+			<h4>Inserting a new bank transaction</h4>
+			<p>Inserting a new <a id="_idIndexMarker909"/>bank transaction can be done by rendering the link like so: </p>
+			<pre class="source-code">&lt;a href="/newbanktransaction"&gt;Insert new bank transaction&lt;/a&gt;</pre>
+			<p>This link reaches a controller endpoint that looks like this:</p>
+			<pre class="source-code">@GetMapping("/newbanktransaction")</pre>
+			<pre class="source-code">public String newBankTransaction(Model model) {</pre>
+			<pre class="source-code"><strong class="bold">  model.addAttribute(NEW_BANK_TRANSACTION_ATTR, </strong></pre>
+			<pre class="source-code"><strong class="bold">                        new BankTransactionRecord());</strong></pre>
+			<pre class="source-code">  return "newtransaction";</pre>
+			<pre class="source-code">}</pre>
+			<p>So, this controller endpoint creates a new <strong class="source-inline">BankTransactionRecord</strong> that is stored in the model via the <strong class="source-inline">NEW_BANK_TRANSACTION_ATTR</strong> request attribute. The returned page, <em class="italic">newtransaction.html</em>, is rendered like so:</p>
+			<div>
+				<div id="_idContainer043" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.4.jpg" alt="Figure 9.4 – Creating a new bank transaction&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.4 – Creating a new bank transaction</p>
+			<p>Pressing <a id="_idIndexMarker910"/>the <em class="italic">Save</em> button triggers a <strong class="source-inline">POST</strong> request that reaches the following controller endpoint (<strong class="source-inline">/new</strong>):</p>
+			<pre class="source-code">@PostMapping("/new")</pre>
+			<pre class="source-code">public String newBankTransaction(</pre>
+			<pre class="source-code"><strong class="bold">  @ModelAttribute BankTransactionRecord btr,</strong></pre>
+			<pre class="source-code">  RedirectAttributes redirectAttributes) {</pre>
+			<pre class="source-code">       </pre>
+			<pre class="source-code"><strong class="bold">  classicModelsService.newBankTransaction(btr);</strong></pre>
+			<pre class="source-code"><strong class="bold">  redirectAttributes.addFlashAttribute(</strong></pre>
+			<pre class="source-code"><strong class="bold">    INSERT_DELETE_OR_UPDATE_BANK_TRANSACTION_ATTR, btr);</strong></pre>
+			<pre class="source-code">  return "redirect:success";</pre>
+			<pre class="source-code">}</pre>
+			<p>So, Spring Boot populates the <strong class="source-inline">btr</strong> record with the submitted data, and we insert it into the database (before inserting it, in the service method (not listed here), we associate this new transaction with the corresponding payment via <strong class="source-inline">btr.setCustomerNumber()</strong> and <strong class="source-inline">btr.setCheckNumber()</strong>):</p>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">public int newBankTransaction(BankTransactionRecord btr) {</pre>
+			<pre class="source-code"><strong class="bold">  ctx.attach(btr);</strong></pre>
+			<pre class="source-code">  return btr.insert();</pre>
+			<pre class="source-code">}</pre>
+			<p>Since this is a <a id="_idIndexMarker911"/>new bank transaction, we must attach it before inserting it.</p>
+			<h4>Updating a bank transaction</h4>
+			<p>Let's consider that updating a bank transaction implies a four-step wizard. In the case of simple wizards, we <a id="_idIndexMarker912"/>can use a single <strong class="source-inline">&lt;form/&gt;</strong> that is submitted at the last step of the wizard. However, in the case of dynamic wizards, we must use one <strong class="source-inline">&lt;form/&gt;</strong> per panel since we must submit the data at each step to decide which is going to be the next panel and what it will contain. So, in such cases, we must implement a long HTTP conversation that's capable of storing the user data while navigating back and forth between the panels. Commonly, this is done by storing data via the client's HTTP session. </p>
+			<p>Let's keep it as simple as possible and assume that the four-step wizard looks as follows:</p>
+			<div>
+				<div id="_idContainer044" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.5.jpg" alt="Figure 9.5 – Four-step wizard&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.5 – Four-step wizard</p>
+			<p>Before entering this wizard, we must click on the <em class="italic">Modify</em> link that corresponds to the bank <a id="_idIndexMarker913"/>transaction that we plan to edit. This will hit the following controller endpoint while sending the transaction ID: </p>
+			<pre class="source-code">@GetMapping("/editbankname/{id}")</pre>
+			<pre class="source-code">public String loadBankTransaction(</pre>
+			<pre class="source-code">       @PathVariable(name = "id") Long id, Model model) {</pre>
+			<pre class="source-code"><strong class="bold">  model.addAttribute(BANK_TRANSACTION_ATTR, </strong></pre>
+			<pre class="source-code"><strong class="bold">    classicModelsService.loadBankTransaction(id));</strong></pre>
+			<pre class="source-code">  return "redirect:/editbankname";</pre>
+			<pre class="source-code">}</pre>
+			<p><strong class="source-inline">BankTransactionRecord</strong> can be fetched via the following repository method:</p>
+			<pre class="source-code">public BankTransactionRecord fetchBankTransaction(Long id) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(BANK_TRANSACTION)</pre>
+			<pre class="source-code">     .where(BANK_TRANSACTION.TRANSACTION_ID.eq(id))</pre>
+			<pre class="source-code">     .fetchSingle();</pre>
+			<pre class="source-code">}</pre>
+			<p>Since this is the transaction that should live across our wizard panels, we must store it in the model <a id="_idIndexMarker914"/>via the session attribute, <strong class="source-inline">BANK_TRANSACTION_ATTR = "bt"</strong>. Next, we must return the first panel of the wizard.</p>
+			<h3>Edit bank name</h3>
+			<p>Once we've edited the bank name, we must click on <em class="italic">Next</em> to submit the data. This reaches the following controller endpoint:</p>
+			<pre class="source-code">@PostMapping("/name")</pre>
+			<pre class="source-code">public String editBankName(</pre>
+			<pre class="source-code"><strong class="bold">   @ModelAttribute(BANK_TRANSACTION_ATTR) </strong></pre>
+			<pre class="source-code"><strong class="bold">                  BankTransactionRecord btr)</strong> {</pre>
+			<pre class="source-code">   return "redirect:editbankiban";</pre>
+			<pre class="source-code">}</pre>
+			<p>Here, we just allow Spring Boot to synchronize the <strong class="source-inline">btr</strong> session record with the submitted data. Next, we must return the second panel.</p>
+			<h3>Edit IBAN</h3>
+			<p>Once we've edited the bank name, we must edit the IBAN and click <em class="italic">Next</em> (we can also click <em class="italic">Back</em> and edit the bank name again). After editing the IBAN, the submitted data hits the controller endpoint:</p>
+			<pre class="source-code">@PostMapping("/iban")</pre>
+			<pre class="source-code">public String editBankIban(</pre>
+			<pre class="source-code"><strong class="bold">   @ModelAttribute(BANK_TRANSACTION_ATTR)  </strong></pre>
+			<pre class="source-code"><strong class="bold">      BankTransactionRecord btr)</strong> {</pre>
+			<pre class="source-code">   return "redirect:editcardtype";</pre>
+			<pre class="source-code">}</pre>
+			<p>Again, we <a id="_idIndexMarker915"/>allow Spring Boot to synchronize the <strong class="source-inline">btr</strong> session record with the submitted data. Next, we must return the third panel.</p>
+			<h3>Edit the card type</h3>
+			<p>Once we've edited the bank's IBAN, we must choose the card type and click <em class="italic">Next</em> (we can also click <em class="italic">Back</em> and edit the bank IBAN again). After choosing the card type, the submitted data hits the controller endpoint:</p>
+			<pre class="source-code">@PostMapping("/cardtype")</pre>
+			<pre class="source-code">public String editCardType(</pre>
+			<pre class="source-code"><strong class="bold">   @ModelAttribute(BANK_TRANSACTION_ATTR) </strong></pre>
+			<pre class="source-code"><strong class="bold">      BankTransactionRecord btr)</strong> {</pre>
+			<pre class="source-code">   return "redirect:editbanktransfer";</pre>
+			<pre class="source-code">}</pre>
+			<p>Again, we allow Spring Boot to synchronize the <strong class="source-inline">btr</strong> session record with the submitted data. Next, we must return the last panel.</p>
+			<h3>Edit the transferred amount</h3>
+			<p>Finally, we must edit the transferred amount and submit it to the controller endpoint:</p>
+			<pre class="source-code">@PostMapping("/transfer")</pre>
+			<pre class="source-code">public String updateBankTransfer(</pre>
+			<pre class="source-code"><strong class="bold">  @ModelAttribute(BANK_TRANSACTION_ATTR) </strong></pre>
+			<pre class="source-code"><strong class="bold">    BankTransactionRecord btr</strong>, SessionStatus sessionStatus,</pre>
+			<pre class="source-code">    RedirectAttributes redirectAttributes) {</pre>
+			<pre class="source-code"><strong class="bold">  classicModelsService.updateBankTransaction(btr);</strong></pre>
+			<pre class="source-code">  redirectAttributes.addFlashAttribute(</pre>
+			<pre class="source-code">    INSERT_DELETE_OR_UPDATE_BANK_TRANSACTION_ATTR, btr);</pre>
+			<pre class="source-code"><strong class="bold">  sessionStatus.setComplete();</strong></pre>
+			<pre class="source-code">  return "redirect:success";</pre>
+			<pre class="source-code">}</pre>
+			<p>The <strong class="source-inline">UPDATE</strong> method <a id="_idIndexMarker916"/>is used in a repository method, as follows:</p>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">public int updateBankTransaction(BankTransactionRecord btr) {</pre>
+			<pre class="source-code">  return btr.update();</pre>
+			<pre class="source-code">}</pre>
+			<p>Finally, we must clean up the HTTP session to remove the updatable record.</p>
+			<h4>Resetting the wizard data</h4>
+			<p>It is a common feature of any wizard to provide a <em class="italic">Reset</em> button for reverting the data from the <a id="_idIndexMarker917"/>current panel or from the entire wizard to the latest saved data. Our <em class="italic">Reset</em> button is relying on jOOQ's <strong class="source-inline">reset()</strong> method to reset the wizard (all three panels): </p>
+			<pre class="source-code">@GetMapping("/reset/{page}")</pre>
+			<pre class="source-code">    public String reset(</pre>
+			<pre class="source-code">    @PathVariable(name = "page") String page, Model model) {</pre>
+			<pre class="source-code"><strong class="bold">  if (model.containsAttribute(BANK_TRANSACTION_ATTR)) {</strong></pre>
+			<pre class="source-code"><strong class="bold">   ((BankTransactionRecord) model.getAttribute(</strong></pre>
+			<pre class="source-code"><strong class="bold">     BANK_TRANSACTION_ATTR)).reset();</strong></pre>
+			<pre class="source-code"><strong class="bold">  }</strong></pre>
+			<pre class="source-code">  return "redirect:/" + page;</pre>
+			<pre class="source-code">}</pre>
+			<p>Of course, you can use <strong class="source-inline">reset(Field</strong>/<strong class="source-inline">Name</strong>/<strong class="source-inline">String</strong>/<strong class="source-inline">int)</strong> to implement a reset per panel feature. Finally, let's delete a bank transaction.</p>
+			<h4>Deleting a bank transaction</h4>
+			<p>As shown <a id="_idIndexMarker918"/>in <em class="italic">Figure 9.5</em>, each panel of our wizard contains a <em class="italic">Delete</em> button, which allows us to delete this bank transaction. The code for its controller endpoint is as follows:</p>
+			<pre class="source-code">@GetMapping("/delete")</pre>
+			<pre class="source-code">public String deleteBankTransaction(</pre>
+			<pre class="source-code">  SessionStatus sessionStatus, Model model,</pre>
+			<pre class="source-code">          RedirectAttributes redirectAttributes) {</pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code"><strong class="bold">  BankTransactionRecord btr = (BankTransactionRecord) </strong></pre>
+			<pre class="source-code"><strong class="bold">    model.getAttribute(BANK_TRANSACTION_ATTR);</strong></pre>
+			<pre class="source-code"><strong class="bold">  classicModelsService.deleteBankTransaction(btr);</strong></pre>
+			<pre class="source-code">  sessionStatus.setComplete();</pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code">}</pre>
+			<p>And the <strong class="source-inline">DELETE</strong> is rendered by a call of <strong class="source-inline">delete()</strong> in the following repository method:</p>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">public int deleteBankTransaction(BankTransactionRecord btr) {</pre>
+			<pre class="source-code">  return btr.delete();</pre>
+			<pre class="source-code">}</pre>
+			<p>The complete code is called <em class="italic">CRUDRecords</em>. If you prefer to use POJOs and jOOQ's DAO, then <a id="_idIndexMarker919"/>check out <em class="italic">DaoCRUDRecords</em> and the REST version (for Postman, ARC, and so on), which is called <em class="italic">DaoCRUDRESTRecords</em>. These three applications are available for MySQL. For brevity, we skipped any validation and error handling code.</p>
+			<h3>Using merge() versus store()</h3>
+			<p>Let's consider <a id="_idIndexMarker920"/>the following scenario: we have loaded and displayed the payments (<strong class="source-inline">PAYMENT</strong>) of a certain customer (for instance, <strong class="source-inline">PAYMENT.CUSTOMER_NUMBER.eq(103L)</strong>). The user should be able to insert new payments for this customer or update the amount of an existing payment. To solve this task, we have two approaches that are almost the same. These are shown in the following screenshot:</p>
+			<div>
+				<div id="_idContainer045" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.6.jpg" alt="Figure 9.6 – Insert/update payment&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.6 – Insert/update payment</p>
+			<p>Regarding the design on the left-hand side, to insert a new payment, we can simply type a new (unique) <em class="italic">Check Number</em> (for instance, received via SMS) and the corresponding <em class="italic">Invoice Amount</em>. To update the <em class="italic">Invoice Amount</em> of an existing payment, we must type its current <em class="italic">Check Number</em> from the bottom table (for instance, to update the second payment <a id="_idIndexMarker921"/>from the table, we must type the <em class="italic">Check Number</em> <em class="italic">JM555205</em>).</p>
+			<p>Regarding the right-hand side design, to insert a new payment, we just type the <em class="italic">Invoice Amount</em>; the <em class="italic">Check Number</em> is auto-generated and pre-filled by the application. However, to update the <em class="italic">Invoice Amount</em> of an existing payment, we must load the payment first via the corresponding <em class="italic">Load</em> link in the bottom table. This will fetch the corresponding payment from the database so that we can type in the new amount value and update it.</p>
+			<h4>Implementing the left-hand side design via merge()</h4>
+			<p>Let's focus on the left-hand side design. After the user submits the payment form, Spring Boot <a id="_idIndexMarker922"/>creates a new <strong class="source-inline">PaymentRecord</strong> and populates it with the submitted data. Next, based on the submitted <em class="italic">Check Number</em>, we must determine if this is a new payment or an update of an existing payment to execute an <strong class="source-inline">INSERT</strong> or an <strong class="source-inline">UPDATE</strong>. So, it is time for <strong class="source-inline">merge()</strong> to do its job and render an SQL that delegates the task of choosing between <strong class="source-inline">INSERT</strong> and <strong class="source-inline">UPDATE</strong> to the database:</p>
+			<pre class="source-code">@PostMapping("/merge")</pre>
+			<pre class="source-code">public String mergePayment(PaymentRecord pr) {</pre>
+			<pre class="source-code">  <strong class="bold">classicModelsService.mergePayment(pr);</strong></pre>
+			<pre class="source-code">  return "redirect:payments";</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">public int mergePayment(PaymentRecord pr) {</pre>
+			<pre class="source-code">        </pre>
+			<pre class="source-code">   ctx.attach(pr);               </pre>
+			<pre class="source-code">      </pre>
+			<pre class="source-code">   return pr.merge();</pre>
+			<pre class="source-code">}</pre>
+			<p>That's all the important code! Notice that, before merging, we need to attach the relevant <strong class="source-inline">PaymentRecord</strong>. Remember that Spring Boot has created this record, so it is not attached to any <strong class="source-inline">Configuration</strong>.</p>
+			<p>Check <a id="_idIndexMarker923"/>out the complete application for this code, which is called <em class="italic">MergeRecords</em>. If you prefer to use POJOs and jOOQ's DAO, then check out <em class="italic">DaoMergeRecords</em>. Both applications are available for MySQL.</p>
+			<h4>Implementing the right-hand side design via store()</h4>
+			<p>If we wish to implement the right-hand side design, then we must start by preparing a brand-new <strong class="source-inline">PaymentRecord</strong> (for instance, we must generate the <em class="italic">Check Number</em>) and <a id="_idIndexMarker924"/>storing it via an HTTP session attribute (<strong class="source-inline">PAYMENT_ATTR</strong>). This <strong class="source-inline">PaymentRecord</strong> is returned to the user. However, if the user wants to update the <em class="italic">Invoice Amount</em> of an existing payment, then they have the option to click on the corresponding <em class="italic">Load</em> link in the bottom table. The following query can be used to fetch the relevant <strong class="source-inline">RecordPayment</strong>: </p>
+			<pre class="source-code">public PaymentRecord fetchPayment(Long nr, String ch) {</pre>
+			<pre class="source-code">  return ctx.selectFrom(PAYMENT)</pre>
+			<pre class="source-code">    .where(row(PAYMENT.CUSTOMER_NUMBER, PAYMENT.CHECK_NUMBER)</pre>
+			<pre class="source-code">    .eq(row(nr, ch)))</pre>
+			<pre class="source-code">    .fetchSingle();</pre>
+			<pre class="source-code">}</pre>
+			<p>The fetched <strong class="source-inline">PaymentRecord</strong> overrides the one from the HTTP session and is returned to <a id="_idIndexMarker925"/>the user. When the user submits the data, Spring Boot synchronizes the <strong class="source-inline">PaymentRecord</strong> value that's stored in <strong class="source-inline">PAYMENT_ATTR</strong> (which can be the new <strong class="source-inline">PaymentRecord</strong> or the fetched <strong class="source-inline">PaymentRecord</strong>) with the submitted data. This time, we can let jOOQ choose between <strong class="source-inline">INSERT</strong> and <strong class="source-inline">UPDATE</strong> via <strong class="source-inline">store()</strong> since this method distinguishes between a new <strong class="source-inline">PaymentRecord</strong> and a fetched <strong class="source-inline">PaymentRecord</strong> and acts accordingly:</p>
+			<pre class="source-code">@PostMapping("/store")</pre>
+			<pre class="source-code">public String storePayment(SessionStatus sessionStatus,</pre>
+			<pre class="source-code">            @ModelAttribute(PAYMENT_ATTR) PaymentRecord pr) {</pre>
+			<pre class="source-code">   pr.setCachingDate(LocalDateTime.now());</pre>
+			<pre class="source-code"><strong class="bold">   classicModelsService.storePayment(pr);</strong></pre>
+			<pre class="source-code">   sessionStatus.setComplete();</pre>
+			<pre class="source-code">   return "redirect:payments";</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">public int storePayment(PaymentRecord pr) {</pre>
+			<pre class="source-code">     </pre>
+			<pre class="source-code">  ctx.attach(pr);</pre>
+			<pre class="source-code">  return pr.store();</pre>
+			<pre class="source-code">}</pre>
+			<p>The application <a id="_idIndexMarker926"/>that uses <strong class="source-inline">store()</strong> is named <em class="italic">StoreRecords </em>(available for MySQL). Now, let's move on and talk about navigating (updatable) records.</p>
+			<h1 id="_idParaDest-177"><a id="_idTextAnchor176"/>Navigating (updatable) records</h1>
+			<p>jOOQ exposes <a id="_idIndexMarker927"/>several navigation methods that can be used for attached (updatable) records only (<strong class="source-inline">TableRecord</strong> and <strong class="source-inline">UpdatableRecord</strong>). To use these methods, please consider the following note.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">While these methods are very convenient/appealing, they are also a big N+1 risk. <strong class="source-inline">UpdatableRecord</strong> is great for CRUD, but if you aren't using CRUD, then you shouldn't use <strong class="source-inline">UpdatableRecord</strong>. It's better to project only the columns you need and try to use joins or other SQL utilities to fetch data from multiple tables.</p>
+			<p>These methods navigate based on the foreign key references. For instance, with an attached <strong class="source-inline">DepartmentRecord</strong>, we can navigate its parent (<strong class="source-inline">OFFICE</strong>) via <strong class="source-inline">fetchParent(ForeignKey&lt;R, O&gt; key)</strong>, as shown in the following example:</p>
+			<pre class="source-code">public OfficeRecord fetchOfficeOfDepartment(</pre>
+			<pre class="source-code">     DepartmentRecord dr) {</pre>
+			<pre class="source-code">  </pre>
+			<pre class="source-code">  return dr.fetchParent(Keys.DEPARTMENT_OFFICE_FK);</pre>
+			<pre class="source-code">  // or, Keys.DEPARTMENT_OFFICE_FK.fetchParent(dr);</pre>
+			<pre class="source-code">}</pre>
+			<p>The <strong class="source-inline">Keys.DEPARTMENT_OFFICE_FK</strong> foreign key was generated by the jOOQ Code Generator <a id="_idIndexMarker928"/>based on our <strong class="source-inline">CREATE TABLE</strong> DDL. In terms of MySQL dialect, jOOQ renders the following SQL:</p>
+			<pre class="source-code">SELECT </pre>
+			<pre class="source-code">  `classicmodels`.`office`.`office_code`, </pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code">  `classicmodels`.`office`.`location` </pre>
+			<pre class="source-code">FROM </pre>
+			<pre class="source-code">  `classicmodels`.`office` </pre>
+			<pre class="source-code">WHERE </pre>
+			<pre class="source-code">  `classicmodels`.`office`.`office_code` in (?)</pre>
+			<p>You can also fetch <strong class="source-inline">Table&lt;OfficeRecord&gt;</strong> via <strong class="source-inline">parent()</strong>:</p>
+			<pre class="source-code">Table&lt;OfficeRecord&gt; tor = </pre>
+			<pre class="source-code">   dr.parent(Keys.DEPARTMENT_OFFICE_FK);</pre>
+			<pre class="source-code">Table&lt;OfficeRecord&gt; tor = </pre>
+			<pre class="source-code">   Keys.DEPARTMENT_OFFICE_FK.parent(dr);</pre>
+			<p>Next, with an attached <strong class="source-inline">OfficeRecord</strong>, we can fetch the employees (<strong class="source-inline">EMPLOYEE</strong>) via <strong class="source-inline">fetchChildren(ForeignKey&lt;O,R&gt; key)</strong>, as follows:</p>
+			<pre class="source-code">public Result&lt;EmployeeRecord&gt;</pre>
+			<pre class="source-code">         fetchEmployeesOfOffice(OfficeRecord or) {</pre>
+			<pre class="source-code">  return or.fetchChildren(Keys.EMPLOYEE_OFFICE_FK);</pre>
+			<pre class="source-code">  // or, Keys.EMPLOYEE_OFFICE_FK.fetchChildren(or);</pre>
+			<pre class="source-code">}</pre>
+			<p>This time, the SQL that's rendered for the MySQL dialect is as follows:</p>
+			<pre class="source-code">SELECT </pre>
+			<pre class="source-code">  `classicmodels`.`employee`.`employee_number`, </pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code">  `classicmodels`.`employee`.`monthly_bonus` </pre>
+			<pre class="source-code">FROM </pre>
+			<pre class="source-code">  `classicmodels`.`employee` </pre>
+			<pre class="source-code">WHERE</pre>
+			<pre class="source-code">  `classicmodels`.`employee`.`office_code` in (?)</pre>
+			<p>You can also fetch <strong class="source-inline">Table&lt;OfficeRecord&gt;</strong> via <strong class="source-inline">children()</strong> (using <strong class="source-inline">children()</strong> is often <a id="_idIndexMarker929"/>preferable to <strong class="source-inline">fetchChildren()</strong> because it encourages writing queries rather than navigating <strong class="source-inline">UpdatableRecord</strong> directly):</p>
+			<pre class="source-code">Table&lt;EmployeeRecord&gt; ter = </pre>
+			<pre class="source-code">   or.children(Keys.EMPLOYEE_OFFICE_FK);</pre>
+			<pre class="source-code">Table&lt;EmployeeRecord&gt; ter = </pre>
+			<pre class="source-code">   Keys.EMPLOYEE_OFFICE_FK.children(or);</pre>
+			<p>Next, we can reuse <strong class="source-inline">fetchChildren()</strong> to fetch the customers (<strong class="source-inline">CUSTOMER</strong>) of a certain employee (<strong class="source-inline">EmployeeRecord</strong>). This will result in every <strong class="source-inline">CustomerRecord</strong> of that <strong class="source-inline">EmployeeRecord</strong>. Finally, with an attached <strong class="source-inline">CustomerRecord</strong>, we can fetch its details (<strong class="source-inline">CUSTOMERDETAIL</strong>) via <strong class="source-inline">fetchChild(ForeignKey&lt;O, R&gt; key)</strong>, as follows:</p>
+			<pre class="source-code">public CustomerdetailRecord    </pre>
+			<pre class="source-code">      fetchCustomerdetailOfCustomer(CustomerRecord cr) {</pre>
+			<pre class="source-code">  return cr.fetchChild(Keys.CUSTOMERDETAIL_CUSTOMER_FK);</pre>
+			<pre class="source-code">}</pre>
+			<p>The rendered SQL for the MySQL dialect is as follows:</p>
+			<pre class="source-code">SELECT </pre>
+			<pre class="source-code">  `classicmodels`.`customerdetail`.`customer_number`, </pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code">  `classicmodels`.`customerdetail`.`country` </pre>
+			<pre class="source-code">FROM </pre>
+			<pre class="source-code">  `classicmodels`.`customerdetail` </pre>
+			<pre class="source-code">WHERE </pre>
+			<pre class="source-code">  `classicmodels`.`customerdetail`.`customer_number` in (?)</pre>
+			<p>In the bundled code (<em class="italic">NavigationRecords</em>, which is available for MySQL), you can see all these methods <a id="_idIndexMarker930"/>collaborating to obtain something similar to the following:</p>
+			<div>
+				<div id="_idContainer046" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.7.jpg" alt="Figure 9.7 – Navigating between records&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.7 – Navigating between records</p>
+			<p>These methods are also quite handy for looping the parent/children of a record and taking some action. Here is an example of using <strong class="source-inline">fetchParent()</strong> to fetch the <strong class="source-inline">EmployeeRecord</strong> details of each <strong class="source-inline">SaleRecord</strong> that has less than <em class="italic">2,000</em> sales:</p>
+			<pre class="source-code">for (SaleRecord sale : ctx.fetch(SALE, SALE.SALE_.lt(2000d))){</pre>
+			<pre class="source-code">  if ("Sales Rep".equals(sale.fetchParent(</pre>
+			<pre class="source-code">            Keys.SALE_EMPLOYEE_FK).getJobTitle())) {</pre>
+			<pre class="source-code">      sale.delete();</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">}</pre>
+			<p>In the previous example, each call of <strong class="source-inline">fetchParent()</strong> executes a separate <strong class="source-inline">SELECT</strong>, which is far away from being a good choice. However, an interesting method that's helpful in this <a id="_idIndexMarker931"/>case is <strong class="source-inline">fetchParents()</strong>, which can fetch all the parents of a list of records in a single <strong class="source-inline">SELECT</strong>. This means that we can rewrite the previous query like so:</p>
+			<pre class="source-code">List&lt;SaleRecord&gt; sales </pre>
+			<pre class="source-code">    = ctx.fetch(SALE, SALE.SALE_.lt(2000d));</pre>
+			<pre class="source-code">List&lt;EmployeeRecord&gt; employees </pre>
+			<pre class="source-code">    = Keys.SALE_EMPLOYEE_FK.fetchParents(sales);</pre>
+			<pre class="source-code">for (SaleRecord sale : sales) {</pre>
+			<pre class="source-code">  for (EmployeeRecord employee : employees) {</pre>
+			<pre class="source-code">    if (Objects.equals(sale.getEmployeeNumber(), </pre>
+			<pre class="source-code">       employee.getEmployeeNumber()) &amp;&amp; "Sales Rep".equals(</pre>
+			<pre class="source-code">         employee.getJobTitle())) {</pre>
+			<pre class="source-code">       sale.delete();</pre>
+			<pre class="source-code">       break;</pre>
+			<pre class="source-code">    }</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">}</pre>
+			<p>If you need <strong class="source-inline">Table&lt;EmployeeRecord&gt;</strong>, then use <strong class="source-inline">parents()</strong>:</p>
+			<pre class="source-code">Table&lt;EmployeeRecord&gt; employeesTable </pre>
+			<pre class="source-code">   = Keys.SALE_EMPLOYEE_FK.parents(sales);</pre>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">Note that these kinds of loops are really bad from a performance perspective! </p>
+			<p class="callout">If there's no business logic in the client, it should be a single <strong class="source-inline">DELETE</strong> statement with a semi-join (for instance, an <strong class="source-inline">IN</strong> predicate). So, don't take these loop examples at face value. I know that this approach feels easier but I strongly recommend avoiding it. Don't implement such loops all over the application and then complain about jOOQ being slow, just like when people complain about Hibernate being slow when these navigational loops are simply wrong. </p>
+			<p class="callout">The only reason why anyone should ever process data row by row is that each row requires very complex business logic that can't be expressed in SQL or otherwise pushed into the database. People get this wrong in all languages, including PL/SQL. They loop over rows because it's convenient and they prefer 3GLs over SQL-the-4GL, and then they run queries on a row-by-row basis because they can. So, to justify the previous loops, we need to at least add some <strong class="source-inline">businessLogicHere(saleRecord)</strong> method calls to hint at the row-by-row approach being necessary in this particular case.</p>
+			<p>You can find these <a id="_idIndexMarker932"/>examples in <em class="italic">NavigationParentsRecords </em>(available for MySQL). Next, let's focus on using explicit transactions and jOOQ queries.</p>
+			<h1 id="_idParaDest-178"><a id="_idTextAnchor177"/>Transactions</h1>
+			<p>Among other benefits, transactions <a id="_idIndexMarker933"/>give us the ACID properties. We can distinguish between <em class="italic">read-only</em> and <em class="italic">read-write</em> transactions, different isolation levels, different propagation strategies, and so on. While Spring Boot supports a comprehensive transactional API (Spring TX) that's commonly used via <strong class="source-inline">@Transactional</strong> and <strong class="source-inline">TransactionTemplate</strong>, jOOQ comes with a simple transaction API (and an <strong class="source-inline">org.jooq.TransactionProvider</strong> SPI) that fits perfectly in the context of fluent style. </p>
+			<p>The following diagram highlights the main implementations of this SPI:</p>
+			<div>
+				<div id="_idContainer047" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.8.jpg" alt="Figure 9.8 – jOOQ transaction providers&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.8 – jOOQ transaction providers</p>
+			<p>Starting with jOOQ 3.17 we have support for transactions in R2DBC as well. So, jOOQ 3.17 come with support for reactive transactions.</p>
+			<p>Mainly, the <a id="_idIndexMarker934"/>jOOQ API for blocking transactions can be used like so:</p>
+			<pre class="source-code">ctx.transaction(configuration -&gt; {</pre>
+			<pre class="source-code">  DSL.using(configuration)...</pre>
+			<pre class="source-code">  // or, configuration.dsl()...</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">var result = ctx.transactionResult(configuration -&gt; {</pre>
+			<pre class="source-code">  return DSL.using(configuration)...</pre>
+			<pre class="source-code">  // or, return configuration.dsl()...</pre>
+			<pre class="source-code">}</pre>
+			<p>Here, we have <strong class="source-inline">transaction(TransactionalRunnable)</strong>, which returns <strong class="source-inline">void</strong> and <strong class="source-inline">transactionResult(TransactionalCallable)</strong> for returning a result. The former wraps the transactional code in jOOQ's <strong class="source-inline">org.jooq.TransactionalRunnable</strong> functional interface, while the latter wraps the transactional <a id="_idIndexMarker935"/>code in jOOQ's <strong class="source-inline">org.jooq.TransactionalCallable</strong> functional interface.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">Pay attention to the fact that, inside a jOOQ transaction, you must use <strong class="source-inline">DSLContext</strong> that's been obtained from the given (<strong class="bold">derived</strong>) <strong class="source-inline">configuration</strong>, not <strong class="source-inline">ctx</strong> (the injected <strong class="source-inline">DSLContext</strong>).</p>
+			<h2 id="_idParaDest-179"><a id="_idTextAnchor178"/>SpringTransactionProvider</h2>
+			<p>In terms <a id="_idIndexMarker936"/>of Spring Boot's context, jOOQ delegates the <a id="_idIndexMarker937"/>task of handling the transactions (<em class="italic">begin</em>, <em class="italic">commit</em>, and <em class="italic">rollback</em>) to <strong class="source-inline">SpringTransactionProvider</strong>, an implementation of the <strong class="source-inline">org.jooq.TransactionProvider</strong> SPI that's meant to allow Spring Transaction to be used with JOOQ. By default, you'll get a <em class="italic">read-write</em> transaction with no name (<strong class="source-inline">null</strong>) whose propagation is set to <strong class="source-inline">PROPAGATION_NESTED</strong>, and the isolation level is set to the default isolation level of the underlying database; that is, <strong class="source-inline">ISOLATION_DEFAULT</strong>.</p>
+			<p>If you ever want to decouple <strong class="source-inline">SpringTransactionProvider</strong> (for instance, to avoid potential incompatibilities between Spring Boot and jOOQ), then use the following code:</p>
+			<pre class="source-code">// affects ctx</pre>
+			<pre class="source-code">ctx.configuration().set((TransactionProvider) null); </pre>
+			<pre class="source-code">// create derived DSLContext</pre>
+			<pre class="source-code">ctx.configuration().derive((TransactionProvider) null).dsl();</pre>
+			<p>Once you've decoupled <strong class="source-inline">SpringTransactionProvider</strong>, jOOQ will execute the transaction via the jOOQ's <strong class="source-inline">DefaultTransactionProvider</strong> and <strong class="source-inline">DefaultConnectionProvider</strong> with <em class="italic">auto-commit</em> mode set to <strong class="source-inline">false</strong> (if it was <strong class="source-inline">true</strong> before the transaction, then jOOQ will restore it after the transaction). <strong class="source-inline">DefaultTransactionProvider</strong> supports nested transactions that have been implemented via JDBC's <strong class="source-inline">java.sql.Savepoint</strong>. In <a href="B16833_18.xhtml#_idTextAnchor338"><em class="italic">Chapter 18</em></a>,<em class="italic"> jOOQ SPI (Providers and Listeners)</em>, you'll learn how to implement a <strong class="source-inline">TransactionProvider</strong>, but for now, let's look at some examples of jOOQ transactions. Let's <a id="_idIndexMarker938"/>start from a simple transaction <a id="_idIndexMarker939"/>that highlights the commit/rollback:</p>
+			<pre class="source-code">ctx.transaction(configuration -&gt; {</pre>
+			<pre class="source-code">  DSL.using(configuration).delete(SALE) </pre>
+			<pre class="source-code">    .where(SALE.SALE_ID.eq(1L)).execute();</pre>
+			<pre class="source-code">  DSL.using(configuration).insertInto(TOKEN) </pre>
+			<pre class="source-code">    .set(TOKEN.SALE_ID, 1L).set(TOKEN.AMOUNT, 1000d)</pre>
+			<pre class="source-code">    .execute();</pre>
+			<pre class="source-code">  // at this point transaction should commit, but the error  </pre>
+			<pre class="source-code">  // caused by the previous INSERT will lead to rollback</pre>
+			<pre class="source-code">});</pre>
+			<p>If you want to handle/prevent rollbacks, then you can wrap the transactional code in a <strong class="source-inline">try-catch</strong> block and act as you consider; if you want to do some work (for instance, do some cleanup work) and roll back, then just throw the exception at the end of the <strong class="source-inline">catch</strong> block. Otherwise, by catching <strong class="source-inline">RuntimeException</strong>, we can prevent a rollback from occurring if something went wrong while executing the SQL statements from jOOQ:</p>
+			<pre class="source-code">ctx.transaction(configuration -&gt; {</pre>
+			<pre class="source-code">  try {</pre>
+			<pre class="source-code">      // same DMLs as in the previous example</pre>
+			<pre class="source-code">  } catch (RuntimeException e) {</pre>
+			<pre class="source-code">    System.out.println("I've decided that this error </pre>
+			<pre class="source-code">                       doesn't require rollback ...");</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">});</pre>
+			<p>jOOQ nested transactions look like Matrioska dolls. We nest the transactional code by nesting calls of <strong class="source-inline">transaction()</strong>/<strong class="source-inline">transactionResult()</strong>. Here, the transactions will be automatically demarcated by jOOQ with savepoints. Of course, no one is prevented <a id="_idIndexMarker940"/>from extracting these lambdas into <a id="_idIndexMarker941"/>methods and composing them as higher-order functions, just like you can compose Spring-annotated transactional methods.</p>
+			<p>Here is an example of nesting two jOOQ transactions:</p>
+			<pre class="source-code">public void nestedJOOQTransaction() {</pre>
+			<pre class="source-code">  ctx.transaction(outer -&gt; { </pre>
+			<pre class="source-code">    DSL.using(outer).delete(SALE) // or, outer.dsl()</pre>
+			<pre class="source-code">       .where(SALE.SALE_ID.eq(2L)).execute();</pre>
+			<pre class="source-code">    // savepoint created</pre>
+			<pre class="source-code">    DSL.using(outer).transaction(inner -&gt; {</pre>
+			<pre class="source-code">      DSL.using(inner).insertInto(TOKEN) // or, inner.dsl()</pre>
+			<pre class="source-code">        .set(TOKEN.SALE_ID, 1L)                                </pre>
+			<pre class="source-code">        .set(TOKEN.AMOUNT, 1000d).execute();</pre>
+			<pre class="source-code">    });</pre>
+			<pre class="source-code">  });</pre>
+			<pre class="source-code">}</pre>
+			<p>By default, if something goes wrong in one of the transactions, then the subsequent transactions (inner transactions) will not be executed and all the outer transactions will be <a id="_idIndexMarker942"/>rolled back. But sometimes, we may want to roll <a id="_idIndexMarker943"/>back only the current transaction and not affect the outer transactions, as shown in the following example:</p>
+			<pre class="source-code">ctx.transaction(outer -&gt; {</pre>
+			<pre class="source-code">  try {</pre>
+			<pre class="source-code">    DSL.using(outer).delete(SALE)</pre>
+			<pre class="source-code">       .where(SALE.SALE_ID.eq(1L)).execute();</pre>
+			<pre class="source-code">        // savepoint created</pre>
+			<pre class="source-code">        try {</pre>
+			<pre class="source-code">          DSL.using(outer)</pre>
+			<pre class="source-code">             .transaction(inner -&gt; {</pre>
+			<pre class="source-code">               DSL.using(inner).insertInto(TOKEN)</pre>
+			<pre class="source-code">                  .set(TOKEN.SALE_ID, 1L)         </pre>
+			<pre class="source-code">                  .set(TOKEN.AMOUNT, 1000d).execute();</pre>
+			<pre class="source-code">               });</pre>
+			<pre class="source-code">         } catch (RuntimeException e) { throw e; }</pre>
+			<pre class="source-code">  } catch (RuntimeException e) {</pre>
+			<pre class="source-code">    System.out.println("I've decided that this error doesn't </pre>
+			<pre class="source-code">         require rollback of the outer transaction ...");</pre>
+			<pre class="source-code">    // throw e; // rollback</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">});</pre>
+			<p>You can check out these examples in <em class="italic">JOOQTransaction </em>(available for MySQL). </p>
+			<h2 id="_idParaDest-180"><a id="_idTextAnchor179"/>ThreadLocalTransactionProvider</h2>
+			<p>Another jOOQ built-in transaction provider is <strong class="source-inline">ThreadLocalTransactionProvider</strong>. This provider implements thread-bound transaction <a id="_idIndexMarker944"/>semantics. In other words, a transaction <a id="_idIndexMarker945"/>and its associated <strong class="source-inline">Connection</strong> will never leave the thread that started the transaction.</p>
+			<p>An important requirement of <strong class="source-inline">ThreadLocalTransactionProvider</strong> is that we must pass a custom <strong class="source-inline">ConnectionProvider</strong> implementation directly to this provider instead of passing it to <strong class="source-inline">Configuration</strong>. We can write our own <strong class="source-inline">CustomProvider</strong> or rely on a jOOQ built-one such as <strong class="source-inline">MockConnectionProvider</strong> (for tests), <strong class="source-inline">DefaultConnectionProvider</strong>, <strong class="source-inline">DataSourceConnectionProvider</strong>, or <strong class="source-inline">NoConnectionProvider</strong>.</p>
+			<p>For instance, if we choose <strong class="source-inline">DataSourceConnectionProvider</strong>, then, in a Spring Boot application, we can use a <strong class="source-inline">DataSource</strong> (for instance, <strong class="source-inline">HikariDataSource</strong>) that has already been prepared by Spring Boot, as follows:</p>
+			<pre class="source-code">@Configuration</pre>
+			<pre class="source-code">public class JooqConfig {</pre>
+			<pre class="source-code">  @Bean</pre>
+			<pre class="source-code">  @ConditionalOnMissingBean(org.jooq.Configuration.class)</pre>
+			<pre class="source-code">  public DefaultConfiguration jooqConfiguration(</pre>
+			<pre class="source-code">          JooqProperties properties, DataSource ds) {</pre>
+			<pre class="source-code">    final DefaultConfiguration defaultConfig = </pre>
+			<pre class="source-code">      new DefaultConfiguration();</pre>
+			<pre class="source-code">    final ConnectionProvider cp = </pre>
+			<pre class="source-code">      new DataSourceConnectionProvider(ds);</pre>
+			<pre class="source-code">    defaultConfig</pre>
+			<pre class="source-code">     .set(properties.determineSqlDialect(ds))</pre>
+			<pre class="source-code">     .set(new ThreadLocalTransactionProvider(cp, true));</pre>
+			<pre class="source-code">    /* or, as a derived configuration</pre>
+			<pre class="source-code">    final org.jooq.Configuration derivedConfig = defaultConfig</pre>
+			<pre class="source-code">      .derive(properties.determineSqlDialect(ds))</pre>
+			<pre class="source-code">      .derive(new ThreadLocalTransactionProvider(cp, true));</pre>
+			<pre class="source-code">    */</pre>
+			<pre class="source-code">        </pre>
+			<pre class="source-code">    return defaultConfig;</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">}</pre>
+			<p>Alternatively, if you are using Spring Boot 2.5.0+, then you can profit from the <strong class="source-inline">DefaultConfigurationCustomizer</strong> functional interface. This interface defines a <a id="_idIndexMarker946"/>method called <strong class="source-inline">customize(DefaultConfiguration configuration)</strong>, which is a handy way <a id="_idIndexMarker947"/>to customize jOOQ's <strong class="source-inline">DefaultConfiguration</strong>:</p>
+			<pre class="source-code">@Configuration</pre>
+			<pre class="source-code">public class JooqConfig </pre>
+			<pre class="source-code">  implements DefaultConfigurationCustomizer {</pre>
+			<pre class="source-code">  private final DataSource ds;</pre>
+			<pre class="source-code">  public JooqConfig(DataSource ds) {</pre>
+			<pre class="source-code">    this.ds = ds;</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  @Override</pre>
+			<pre class="source-code">  public void customize(DefaultConfiguration configuration) {</pre>
+			<pre class="source-code">    configuration.set(new ThreadLocalTransactionProvider(</pre>
+			<pre class="source-code">            new DataSourceConnectionProvider(ds), true));</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">}</pre>
+			<p>Done! Now, we can inject the <strong class="source-inline">DSLContext</strong> information that's been built by Spring Boot based on our <strong class="source-inline">Configuration</strong> and take advantage of thread-bound transaction semantics, which <a id="_idIndexMarker948"/>is usually exactly what <a id="_idIndexMarker949"/>Spring uses. You can check out an example by looking at <em class="italic">ThreadLocalTransactionProvider{1,2}</em>, which is available for MySQL.</p>
+			<p>Next, let's talk about jOOQ asynchronous transactions.</p>
+			<h2 id="_idParaDest-181"><a id="_idTextAnchor180"/>jOOQ asynchronous transactions</h2>
+			<p>While <strong class="source-inline">transaction()</strong> and <strong class="source-inline">transactionResult()</strong> are synchronous, jOOQ also has <strong class="source-inline">transactionAsync()</strong> and <strong class="source-inline">transactionResultAsync()</strong>, which can be used to <a id="_idIndexMarker950"/>shape asynchronous transactions. Here <a id="_idIndexMarker951"/>are two asynchronous transactions that act independently of each other – they run in concurrent threads. The first one commits, while the second one rolls back:</p>
+			<pre class="source-code">// this transaction commits</pre>
+			<pre class="source-code">@Async</pre>
+			<pre class="source-code">public CompletableFuture&lt;Integer&gt; </pre>
+			<pre class="source-code">             executeFirstJOOQTransaction() {</pre>
+			<pre class="source-code">  return ctx.transactionResultAsync(configuration -&gt; {</pre>
+			<pre class="source-code">    int result = 0;</pre>
+			<pre class="source-code">    result += DSL.using(configuration).insertInto(TOKEN)</pre>
+			<pre class="source-code">      .set(TOKEN.SALE_ID, 1L).set(TOKEN.AMOUNT, 500d)</pre>
+			<pre class="source-code">      .execute();</pre>
+			<pre class="source-code">    result += DSL.using(configuration).insertInto(TOKEN)</pre>
+			<pre class="source-code">      .set(TOKEN.SALE_ID, 1L).set(TOKEN.AMOUNT, 1000d)</pre>
+			<pre class="source-code">      .execute();</pre>
+			<pre class="source-code">    return result;</pre>
+			<pre class="source-code">  }).toCompletableFuture();</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">// this transaction is roll backed</pre>
+			<pre class="source-code">@Async</pre>
+			<pre class="source-code">public CompletableFuture&lt;Integer&gt; </pre>
+			<pre class="source-code">          executeSecondJOOQTransaction() {</pre>
+			<pre class="source-code">  return ctx.transactionResultAsync(configuration -&gt; {</pre>
+			<pre class="source-code">    int result = 0;</pre>
+			<pre class="source-code">    result += DSL.using(configuration).delete(SALE)</pre>
+			<pre class="source-code">      .where(SALE.SALE_ID.eq(2L)).execute();</pre>
+			<pre class="source-code">    result += DSL.using(configuration).insertInto(TOKEN)</pre>
+			<pre class="source-code">      .set(TOKEN.SALE_ID, 2L).set(TOKEN.AMOUNT, 1000d)</pre>
+			<pre class="source-code">      .execute();</pre>
+			<pre class="source-code">    return result;</pre>
+			<pre class="source-code">  }).toCompletableFuture();</pre>
+			<pre class="source-code">}</pre>
+			<p>If you <a id="_idIndexMarker952"/>don't want to rely on the default <strong class="source-inline">Executor</strong> (<strong class="source-inline">ForkJoinPool.commonPool()</strong>), then use <strong class="source-inline">transactionAsync(Executor exctr, TransactionalRunnable tr)</strong> or <strong class="source-inline">transactionResultAsync(Executor exctr, TransactionalCallable&lt;T&gt; tc)</strong>, respectively. But unlike what <strong class="source-inline">CompletableFuture</strong> does, jOOQ will remember <strong class="source-inline">Executor</strong> in its <strong class="source-inline">CompletionStage</strong> implementation <a id="_idIndexMarker953"/>so that it doesn't have to be provided on every ensuing asynchronous call.</p>
+			<p>However, asynchronous transactions work very badly with Spring, which usually assumes thread-bound transactions. Go to <a href="https://github.com/spring-projects/spring-boot/issues/24049">https://github.com/spring-projects/spring-boot/issues/24049</a> to see a discussion about this.</p>
+			<p>Check out the complete code in <em class="italic">JOOQTransactionAsync </em>(available for MySQL). Next, let's look at some examples of using/choosing <strong class="source-inline">@Transactional</strong> or the jOOQ transaction API.</p>
+			<h2 id="_idParaDest-182"><a id="_idTextAnchor181"/>@Transactional versus the jOOQ transaction API</h2>
+			<p>Right off the bat, I wish to enforce an important <a id="_idIndexMarker954"/>note (most of you probably already know and respect these statements, but a quick reminder is always welcome).</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">A non-transactional-context refers to a context with no explicit transaction boundaries, <em class="italic">not</em> to a <a id="_idIndexMarker955"/>context with no physical database transaction. All database statements are executed in the context of a physical database transaction. </p>
+			<p class="callout">Without specifying the explicit boundaries of the transaction (via <strong class="source-inline">@Transactional</strong>, <strong class="source-inline">TransactionTemplate</strong>, the jOOQ transaction API, and so on), jOOQ <em class="italic">may</em> use a different database connection for each statement. Whether or not jOOQ uses a different connection per statement is defined by <strong class="source-inline">ConnectionProvider</strong>. This statement is true for <strong class="source-inline">DataSourceConnectionProvider</strong> (and even then, it depends on <strong class="source-inline">DataSource</strong>) but false for <strong class="source-inline">DefaultConnectionProvider</strong>. In the worst-case scenario, this means that the statements that define a <em class="italic">logical transaction</em> don't benefit from ACID and they are prone to lead to <em class="italic">race condition</em> bugs and SQL <em class="italic">phenomena</em>. Each statement is executed in a separate transaction (<em class="italic">auto-commit</em> mode), which may result in a high database connection acquisition request rate, which is not good! On medium/large applications, reducing the database connection acquisition request rate next to short transactions will sustain performance since your application will be ready to face high traffic (a high number of concurrent requests).</p>
+			<p class="callout">Never combine <strong class="source-inline">@Transactional</strong>/<strong class="source-inline">TransactionTemplate</strong> and the jOOQ transaction API to solve a task in common (the same is true for Java/Jakarta EE transactions, of course). This may lead to unexpected behaviors. So long as Spring transactions and jOOQ transactions are not interleaved, it is safe to use them in the same application.</p>
+			<p>The best way to use Spring transactions <em class="italic">only</em> consists of annotating your repository/service class with <strong class="source-inline">@Transactional(readOnly=true)</strong> and explicitly setting <strong class="source-inline">@Transactional</strong> only on methods <a id="_idIndexMarker956"/>that should be allowed to execute write statements. However, if the same repository/service uses jOOQ transactions as well, then you should explicitly annotate each method, not the class itself. This way, you avoid inheriting <strong class="source-inline">@Transactional(readOnly=true)</strong> in methods that explicitly use jOOQ transactions.</p>
+			<p>Now, let's consider several examples that are meant to reveal the best practices for using transactions. Let's start with the following snippet of code:</p>
+			<pre class="source-code">public void fetchWithNoTransaction() {</pre>
+			<pre class="source-code">   ctx.selectFrom(SALE).fetchAny();</pre>
+			<pre class="source-code">   ctx.selectFrom(TOKEN).fetchAny();          </pre>
+			<pre class="source-code">}</pre>
+			<p>This method runs in a non-transactional context and executes two read statements. Each read is executed by the database in a separate physical transaction that requires a separate database connection. Keep in mind that this may not be true, depending on <strong class="source-inline">ConnectionProvider</strong>. Relying on <strong class="source-inline">@Transactional(readOnly=true)</strong> is much better:</p>
+			<pre class="source-code">@Transactional(readOnly=true)</pre>
+			<pre class="source-code">public void fetchWithTransaction() {</pre>
+			<pre class="source-code">   ctx.selectFrom(SALE).fetchAny();</pre>
+			<pre class="source-code">   ctx.selectFrom(TOKEN).fetchAny();          </pre>
+			<pre class="source-code">}</pre>
+			<p>This time, a single database connection and a single transaction are used. <strong class="source-inline">readOnly</strong> come with a bunch of advantages, including that your team members cannot accidentally add write statements (such attempt result in an error), read-only transactions can be optimized at the database level (this is database vendor-specific), you must explicitly set the transaction isolation level as expected, and so on. </p>
+			<p>Moreover, having no transaction and setting auto-commit to <strong class="source-inline">true</strong> only makes sense if you execute a single read-only SQL statement, but it <a id="_idIndexMarker957"/>doesn't lead to any significant benefit. Therefore, even in such cases, it's better to rely on explicit (declarative) transactions.</p>
+			<p>However, if you consider that the <strong class="source-inline">readOnly=true</strong> flag isn't needed, then the following code can be executed in a jOOQ transaction as well (by default, this is a read-write transaction):</p>
+			<pre class="source-code">public void fetchWithTransaction() {</pre>
+			<pre class="source-code">  ctx.transaction(configuration -&gt; {</pre>
+			<pre class="source-code">    DSL.using(configuration).selectFrom(SALE).fetchAny();</pre>
+			<pre class="source-code">    DSL.using(configuration).selectFrom(TOKEN).fetchAny();</pre>
+			<pre class="source-code">    // Implicit commit executed here</pre>
+			<pre class="source-code">  });</pre>
+			<pre class="source-code">}</pre>
+			<p>Notice that, exactly like Spring's <strong class="source-inline">TransactionTemplate</strong> (which can be used as well), the jOOQ transaction can strictly demarcate the transactional code. In other words, the <strong class="source-inline">@Transactional</strong> annotation acquires the database connection and starts the transaction immediately when entering the method. Then, it commits the transaction at the end of the method. This means that the potentially non-transactional code of a <strong class="source-inline">@Transactional</strong> method (the code that shapes business logic that doesn't need to run in a transaction) still runs inside the current transaction, which can lead to a long-running transaction. On the other hand, jOOQ transactions (just like <strong class="source-inline">TransactionTemplate</strong>) allow us to isolate and orchestrate the transactional code to run in transactions and the rest of the code outside of transactions. Let's look at a scenario where using a jOOQ transaction (or <strong class="source-inline">TransactionTemplate</strong>) is a better choice than using <strong class="source-inline">@Transactional</strong>:</p>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">public void fetchAndStreamWithTransactional() {</pre>
+			<pre class="source-code">  ctx.update(EMPLOYEE).set(EMPLOYEE.SALARY, </pre>
+			<pre class="source-code">    EMPLOYEE.SALARY.plus(1000)).execute();   </pre>
+			<pre class="source-code">        </pre>
+			<pre class="source-code">  ctx.selectFrom(EMPLOYEE)</pre>
+			<pre class="source-code">     .fetch() // jOOQ fetches the whole result set into memory </pre>
+			<pre class="source-code">              // via the connection opened by @Transactional</pre>
+			<pre class="source-code">     .stream()// stream over the in-memory result set </pre>
+			<pre class="source-code">              // (database connection is active)     </pre>
+			<pre class="source-code">     .map()   // ... more time-consuming pipeline operations </pre>
+			<pre class="source-code">              // holds the transaction open</pre>
+			<pre class="source-code">     .forEach(System.out::println);</pre>
+			<pre class="source-code">}</pre>
+			<p>In this case, jOOQ fetches the whole result set into memory <a id="_idIndexMarker958"/>via the connection that's been opened by <strong class="source-inline">@Transactional</strong>. This means that the streaming operations (for instance, <strong class="source-inline">map()</strong>) don't need transactions, but Spring will close this transaction at the end of the method. This can result in a potentially long-running transaction. While we can avoid this issue by splitting the code into separate methods, we can also rely on a jOOQ transaction (or <strong class="source-inline">TransactionTemplate</strong>):</p>
+			<pre class="source-code">public void fetchAndStreamWithJOOQTransaction() {</pre>
+			<pre class="source-code">  Result&lt;EmployeeRecord&gt; result =   </pre>
+			<pre class="source-code">    ctx.transactionResult(configuration -&gt; {</pre>
+			<pre class="source-code">            </pre>
+			<pre class="source-code">      DSL.using(configuration).update(EMPLOYEE)</pre>
+			<pre class="source-code">         .set(EMPLOYEE.SALARY, EMPLOYEE.SALARY.plus(1000))</pre>
+			<pre class="source-code">         .execute();   </pre>
+			<pre class="source-code">            </pre>
+			<pre class="source-code">      return DSL.using(configuration).selectFrom(EMPLOYEE)</pre>
+			<pre class="source-code">                .fetch();</pre>
+			<pre class="source-code">  });</pre>
+			<pre class="source-code">        </pre>
+			<pre class="source-code">  result.stream() // stream over the in-memory result set </pre>
+			<pre class="source-code">                  // (database connection is closed)</pre>
+			<pre class="source-code">        .map()    // ... more time-consuming pipeline </pre>
+			<pre class="source-code">                  // operations, but the transaction is closed</pre>
+			<pre class="source-code">        .forEach(System.out::println);</pre>
+			<pre class="source-code">}</pre>
+			<p>This is much better because we've removed the streaming operations from the transaction.</p>
+			<p>In terms of executing one or more DML operations <a id="_idIndexMarker959"/>in a method, it should be annotated with <strong class="source-inline">@Transactional</strong>, explicitly use the jOOQ transaction API, or use <strong class="source-inline">TransactionTemplate</strong> to demarcate the transactional code. Otherwise, Spring Boot will report an <strong class="source-inline">SQLException</strong>: <em class="italic">Connection is read-only. Queries leading to data modification are not allowed</em>. You can see such an example next to the previous examples in <em class="italic">SpringBootTransactional </em>(available for MySQL).</p>
+			<p>It is a well-known shortcoming of Spring transactions that <strong class="source-inline">@Transactional</strong> is ignored if it is added to a <strong class="source-inline">private</strong>, <strong class="source-inline">protected</strong>, or package-protected method or to a method that's been defined in the same class as where it is invoked. By default, <strong class="source-inline">@Transactional</strong> only works on <strong class="source-inline">public</strong> methods that should be added to classes and are different from where they are invoked. However, this issue can easily be avoided by using the jOOQ transaction API or <strong class="source-inline">TransactionTemplate</strong>, which don't suffer from these issues. You can explore some examples by looking at the <em class="italic">JOOQTransactionNotIgnored </em>application (available for MySQL).</p>
+			<p>A strong argument for choosing the Spring transactions for our jOOQ queries is that we can benefit from Spring transactions' isolation <a id="_idIndexMarker960"/>levels and propagation strategies. In the bundled code, you can find a suite of seven applications – one for each of the seven propagation levels supported by Spring transactions – that exemplifies the usage of jOOQ queries and Spring transaction propagations. These applications are called <em class="italic">Propagation{Foo}</em> and are available for MySQL.</p>
+			<p>In conclusion, jOOQ queries can <a id="_idIndexMarker961"/>be used in the following circumstances:</p>
+			<ul>
+				<li>Only with Spring transactions (you can take advantage of Spring transactions' features at full capacity)</li>
+				<li>Only with jOOQ transactions (in the context of Spring Boot, you'll get read-write, nested transactions that rely on the database's isolation level)</li>
+				<li>By combining them without interleaving Spring with jOOQ transactions to accomplish common tasks (in other words, once you open a Spring transaction, ensure that any subsequent inner transaction is a Spring one as well. If you open a jOOQ transaction, then ensure that any subsequent inner transaction is a jOOQ one.)</li>
+			</ul>
+			<h1 id="_idParaDest-183"><a id="_idTextAnchor182"/>Hooking reactive transactions</h1>
+			<p>As mentioned <span class="superscript"><a id="_idIndexMarker962"/></span>earlier, starting with jOOQ 3.17, we can take advantage of reactive transactions or transactions in R2DBC. Reactive transactions are easy to use via <strong class="source-inline">Publisher</strong>, as they have the same semantics as JDBC’s blocking APIs Here is an example of how to write a nested reactive transaction:</p>
+			<pre class="source-code">Flux&lt;?&gt; flux = Flux.from(</pre>
+			<pre class="source-code"> ctx.transactionPublisher(outer -&gt; Flux.from(</pre>
+			<pre class="source-code">  DSL.using(outer).delete(SALE) // or, outer.dsl()</pre>
+			<pre class="source-code">                 .where(SALE.SALE_ID.eq(2L)))</pre>
+			<pre class="source-code">     .thenMany(Flux.from(</pre>
+			<pre class="source-code">     DSL.using(outer).transactionPublisher( // or, outer.dsl()</pre>
+			<pre class="source-code">      inner -&gt; Flux.from(</pre>
+			<pre class="source-code">      DSL.using(inner).insertInto(TOKEN) // or, inner.dsl()</pre>
+			<pre class="source-code">                      .set(TOKEN.SALE_ID, 1L)</pre>
+			<pre class="source-code">                      .set(TOKEN.AMOUNT, 1000d)</pre>
+			<pre class="source-code">      )))</pre>
+			<pre class="source-code">  )));</pre>
+			<pre class="source-code">flux.subscribe();</pre>
+			<p>Being in Spring Boot, this example relies on<span class="superscript"><a id="_idIndexMarker963"/></span> Project Reactor (<a href="https://projectreactor.io/">https://projectreactor.io/</a>), but you can use any other reactive library. More examples are available in the bundled code for MySQL, <em class="italic">jOOQReactiveTransaction</em>.</p>
+			<h1 id="_idParaDest-184"><a id="_idTextAnchor183"/>Locking</h1>
+			<p><strong class="bold">Locking</strong> is used to orchestrate <a id="_idIndexMarker964"/>concurrent access to data to prevent <em class="italic">race condition</em> threads, deadlocks, <em class="italic">lost updates</em>, and other SQL <em class="italic">phenomena</em>.</p>
+			<p>Among the most popular locking mechanisms, we have <strong class="bold">optimistic</strong> and <strong class="bold">pessimistic</strong><em class="italic"> locking</em>. As you'll see <a id="_idIndexMarker965"/>shortly, jOOQ supports both of them for CRUD operations. So, let's start with <em class="italic">optimistic locking</em>.</p>
+			<h2 id="_idParaDest-185"><a id="_idTextAnchor184"/>Optimistic locking overview</h2>
+			<p><em class="italic">Optimistic locking</em> is commonly <a id="_idIndexMarker966"/>related to the <strong class="bold">lost updates</strong> SQL phenomena, so <a id="_idIndexMarker967"/>let's quickly overview this anomaly.</p>
+			<p>A <em class="italic">lost update</em> is a popular anomaly that can seriously affect data integrity. A transaction reads a record and uses <a id="_idIndexMarker968"/>this information to make business decisions (for instance, decisions that may lead to that record being modified) without being aware that, in the meantime, a concurrent transaction has modified that record and committed it. When the first transaction commits, it is unaware of the lost update. This may cause data integrity issues (for example, the inventory can report a negative value, a certain payment <a id="_idIndexMarker969"/>can be lost, and so on). </p>
+			<p>Consider the scenario shown in the following diagram:</p>
+			<div>
+				<div id="_idContainer048" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.9.jpg" alt="Figure 9.9 – Lost update phenomena&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.9 – Lost update phenomena</p>
+			<p>If we take this scenario step-by-step, then the following occurs:</p>
+			<ol>
+				<li>John and Mary fetch the invoice amount (<em class="italic">2,300</em>) of the same payment.</li>
+				<li>Mary considers that the current invoice amount is too much, so she updates the amount from <em class="italic">2,300</em> to <em class="italic">2,000</em>.</li>
+				<li>John's transaction is not aware of Mary's update.</li>
+				<li>John considers that <a id="_idIndexMarker970"/>the current invoice amount is not enough, so he updates the amount to <em class="italic">2,800</em>, without being aware of Mary's decision.</li>
+			</ol>
+			<p>This anomaly affects the <strong class="bold">Read Committed</strong> isolation level and can be avoided by setting the <strong class="bold">Repeatable Read</strong> or <strong class="bold">Serializable</strong> isolation level. For the <strong class="bold">Repeatable Read</strong> isolation level without <strong class="bold">Multi-Version Concurrency Control</strong> (<strong class="bold">MVCC</strong>), the database uses <a id="_idIndexMarker971"/>shared locks to reject other transactions' attempts to modify an already fetched record.</p>
+			<p>However, in the presence of MVCC databases, there is no need for locks since we can use the <a id="_idIndexMarker972"/>application-level optimistic locking mechanism. Typically, application-level <a id="_idIndexMarker973"/>optimistic locking starts by adding an integer field (typically named <strong class="source-inline">version</strong>) to the corresponding table(s). By default, this field is 0, and each <strong class="source-inline">UPDATE</strong> attempts to increment it by 1, as shown in the following diagram (this is also known as <em class="italic">versioned</em> optimistic locking):</p>
+			<div>
+				<div id="_idContainer049" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.10.jpg" alt="Figure 9.10 – Versioned optimistic locking (via numeric field)&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.10 – Versioned optimistic locking (via numeric field)</p>
+			<p>This time, John is aware of Mary's decision, so he can make further decisions based on this information. In application-level optimistic locking, the application is responsible for handling the <strong class="source-inline">version</strong> field. The application should set the <strong class="source-inline">version</strong> value and append the proper <strong class="source-inline">WHERE</strong> clause to the executed <strong class="source-inline">UPDATE</strong>/<strong class="source-inline">DELETE</strong> to check the <strong class="source-inline">version</strong> value <a id="_idIndexMarker974"/>against the database. Moreover, if no <strong class="source-inline">UPDATE</strong>/<strong class="source-inline">DELETE</strong> has happened <a id="_idIndexMarker975"/>because <strong class="source-inline">WHERE version=?</strong> failed, then the application is responsible for signaling this behavior, meaning that the corresponding transaction contains <em class="italic">stale</em> data. Commonly, it does this by throwing a meaningful exception. As you'll see next, jOOQ aligns with this behavior.</p>
+			<p>With long conversations that span several (HTTP) requests, besides the application-level optimistic locking mechanism, you must keep the old data snapshots (for instance, jOOQ updatable records). In web applications, they can be stored in the HTTP session.</p>
+			<h2 id="_idParaDest-186"><a id="_idTextAnchor185"/>jOOQ optimistic locking </h2>
+			<p>By default, the jOOQ optimistic <a id="_idIndexMarker976"/>locking mechanism for CRUD <a id="_idIndexMarker977"/>operations is disabled. It can be enabled via the <strong class="source-inline">withExecuteWithOptimisticLocking()</strong> setting, as shown here:</p>
+			<pre class="source-code">@Configuration</pre>
+			<pre class="source-code">public class JooqSetting {</pre>
+			<pre class="source-code">  @Bean</pre>
+			<pre class="source-code">  public Settings jooqSettings() {</pre>
+			<pre class="source-code">    return new Settings()</pre>
+			<pre class="source-code">      .withExecuteWithOptimisticLocking(true);             </pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">}</pre>
+			<p>Of course, you can toggle this setting locally by using a <strong class="bold">derived</strong> <strong class="source-inline">Configuration</strong> as well.</p>
+			<h3>jOOQ optimistic locking via SELECT … FOR UPDATE</h3>
+			<p>At this point, without <a id="_idIndexMarker978"/>further settings, jOOQ will intercept any CRUD <strong class="source-inline">UPDATE</strong>/<strong class="source-inline">DELETE</strong> (executed explicitly via <strong class="source-inline">update()</strong>/<strong class="source-inline">delete()</strong> or generated via <strong class="source-inline">merge()</strong>/<strong class="source-inline">store()</strong>), and will attempt to determine if the record contains <em class="italic">stale</em> data. For this, jOOQ acquires a database-exclusive read/write lock for the involved data via <strong class="source-inline">SELECT … FOR UPDATE</strong>, which is practically done via pessimistic locking. Next, jOOQ compares the fetched data with the data to be updated/deleted. Practically, the fetched data is compared against the <em class="italic">original</em> values of the record to be updated/deleted. If the record data is not <em class="italic">stale</em>, then jOOQ executes <strong class="source-inline">UPDATE</strong>/<strong class="source-inline">DELETE</strong> against the database; otherwise, it will throw a specific <strong class="source-inline">org.jooq.exception.DataChangedException</strong>.</p>
+			<p>For instance, before <a id="_idIndexMarker979"/>updating the amount of a payment (<strong class="source-inline">PAYMENT.INVOICE_AMOUNT</strong>), jOOQ will execute the following <strong class="source-inline">SELECT</strong> (MySQL dialect):</p>
+			<pre class="source-code">SELECT </pre>
+			<pre class="source-code">  `classicmodels`.`payment`.`customer_number`, </pre>
+			<pre class="source-code">  ... </pre>
+			<pre class="source-code">FROM `classicmodels`.`payment` WHERE </pre>
+			<pre class="source-code">  (`classicmodels`.`payment`.`customer_number` = ? AND </pre>
+			<pre class="source-code">  `classicmodels`.`payment`.`check_number` = ?) <strong class="bold">FOR UPDATE</strong></pre>
+			<p>It's quite easy to enable this type of optimistic locking, but it has two main shortcomings: it uses exclusive locks and is applied to all CRUD <strong class="source-inline">DELETE</strong>/<strong class="source-inline">UPDATE</strong>, which means it's also applied to all tables.</p>
+			<p>However, jOOQ also supports optimistic locking via the TIMESTAMP or VERSION fields. This kind of implementation is more popular, so let's look at this next.</p>
+			<h3>jOOQ optimistic locking via the TIMESTAMP/VERSION fields</h3>
+			<p>We already <a id="_idIndexMarker980"/>know from the previous section <a id="_idIndexMarker981"/>that jOOQ optimistic locking is enabled via the <strong class="source-inline">withExecuteWithOptimisticLocking(true)</strong> flag. Next, we must add a field of the <strong class="source-inline">TIMESTAMP</strong> type (for TIMESTAMP optimistic locking) or the <strong class="source-inline">INT</strong> type (for VERSION optimistic locking) for the corresponding table(s). For instance, let's add the <strong class="source-inline">PAYMENT</strong> table (for the MySQL dialect):</p>
+			<pre class="source-code">CREATE TABLE `payment` (</pre>
+			<pre class="source-code">  `customer_number` Bigint NOT NULL,</pre>
+			<pre class="source-code">  `check_number` Varchar(50) NOT NULL,</pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code">  `version` INT NOT NULL DEFAULT 0, </pre>
+			<pre class="source-code">  `modified` TIMESTAMP NOT NULL DEFAULT NOW(),</pre>
+			<pre class="source-code">  CONSTRAINT `payment_pk` </pre>
+			<pre class="source-code">    PRIMARY KEY (`customer_number`,`check_number`),</pre>
+			<pre class="source-code">  ...</pre>
+			<pre class="source-code">) ENGINE=InnoDB DEFAULT CHARSET=latin1;</pre>
+			<p>Of course, you don't have to add both of them! Decide what type of optimistic locking you need <a id="_idIndexMarker982"/>and add the corresponding field. Next, we <a id="_idIndexMarker983"/>must inform the jOOQ Code Generator about the fact that these fields should be used for optimistic locking. We can do so programmatically or declaratively. For Maven applications, you can do this via <strong class="source-inline">&lt;recordVersionFields/&gt;</strong> or <strong class="source-inline">recordTimestampFields/&gt;</strong>, respectively:</p>
+			<pre class="source-code">&lt;database&gt;</pre>
+			<pre class="source-code">  &lt;!-- numeric column for versioned optimistic locking --&gt;</pre>
+			<pre class="source-code">  &lt;recordVersionFields&gt;version&lt;/recordVersionFields&gt;</pre>
+			<pre class="source-code">  &lt;!-- timestamp column for versioned optimistic locking --&gt;</pre>
+			<pre class="source-code">  &lt;recordTimestampFields&gt;modified&lt;/recordTimestampFields&gt;</pre>
+			<pre class="source-code">&lt;/database&gt;</pre>
+			<p>For Gradle, please look at the bundled code.</p>
+			<p>At this point, jOOQ optimistic locking based on the TIMESTAMP/VERSION fields is ready to be used. Two jOOQ flags are useful for controlling (enable/disable) optimistic locking based on the TIMESTAMP/VERSION fields. These two flags are set to <strong class="source-inline">true</strong> by default (<strong class="source-inline">withUpdateRecordVersion()</strong> and <strong class="source-inline">withUpdateRecordTimestamp()</strong>), so you don't have to enable them explicitly. However, you can use them to disable this type of optimistic locking.</p>
+			<p>Nevertheless, at this point, there is an important aspect that you should be aware of. So far, jOOQ uses <a id="_idIndexMarker984"/>optimistic locking based on the TIMESTAMP/VERSION fields for any record of the <strong class="source-inline">PaymentRecord</strong> type, that is updated/deleted, but <a id="_idIndexMarker985"/>it still employees <strong class="source-inline">SELECT … FOR UPDATE</strong> for the rest of the records that execute CRUD <strong class="source-inline">UPDATE</strong>/<strong class="source-inline">DELETE</strong> statements. If this is not what you need, then you can explicitly enable the jOOQ flag setting (disabled by default); that is, <strong class="source-inline">withExecuteWithOptimisticLockingExcludeUnversioned()</strong>. For instance, you can instruct jOOQ to use only optimistic locking based on the TIMESTAMP/VERSION fields, like this:</p>
+			<pre class="source-code">@Bean // VERSION field (numeric)</pre>
+			<pre class="source-code">public Settings jooqSettings() {</pre>
+			<pre class="source-code">  return new Settings()       </pre>
+			<pre class="source-code">   .withUpdateRecordVersion(true) // it can be omitted</pre>
+			<pre class="source-code">   .withExecuteWithOptimisticLocking(true)</pre>
+			<pre class="source-code">   .withExecuteWithOptimisticLockingExcludeUnversioned(true);</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">@Bean // TIMESTAMP field (timestamp)</pre>
+			<pre class="source-code">public Settings jooqSettings() {</pre>
+			<pre class="source-code">  return new Settings()       </pre>
+			<pre class="source-code">   .withUpdateRecordTimestamp(true) // it can be omitted </pre>
+			<pre class="source-code">   .withExecuteWithOptimisticLocking(true)</pre>
+			<pre class="source-code">   .withExecuteWithOptimisticLockingExcludeUnversioned(true); </pre>
+			<pre class="source-code">}</pre>
+			<p>So, if we group all these settings into a logical diagram, we can obtain something:</p>
+			<div>
+				<div id="_idContainer050" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.11.jpg" alt="Figure 9.11 – jOOQ optimistic locking settings&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.11 – jOOQ optimistic locking settings</p>
+			<p>If you can choose between versions and timestamps, then go for versions. jOOQ has to support <a id="_idIndexMarker986"/>timestamps too if a legacy system uses <a id="_idIndexMarker987"/>them, or for quick wins, but with timestamps, there's always the risk of a lack of precision. For instance, when two updates happen in a very short time, the timestamps may still be the same. This can't happen with versions.</p>
+			<p>Next, let's try to apply the jOOQ optimist locking based on the VERSION field to the <em class="italic">StoreRecords</em> application (the application that's available for MySQL that uses <strong class="source-inline">store()</strong> was created in the <em class="italic">Using merge() versus store()</em> section).</p>
+			<h3>Let's look at some code</h3>
+			<p>I assume that <a id="_idIndexMarker988"/>you are already familiar with the <em class="italic">StoreRecords</em> code that shapes the following scenario: we must load and display the payments (<strong class="source-inline">PAYMENT</strong>) of a certain customer (for instance, <strong class="source-inline">PAYMENT.CUSTOMER_NUMBER.eq(103L)</strong>). The user should be able to insert new payments for this customer or update the amount of an existing payment via a user interface, as shown in the following screenshot:</p>
+			<div>
+				<div id="_idContainer051" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.12.jpg" alt="Figure 9.12 – INSERT/UPDATE PAYMENT&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.12 – INSERT/UPDATE PAYMENT</p>
+			<p>Behind <a id="_idIndexMarker989"/>the scenes, we use <strong class="source-inline">store()</strong>:</p>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">public int storePayment(PaymentRecord pr) {</pre>
+			<pre class="source-code">     </pre>
+			<pre class="source-code">  ctx.attach(pr);       </pre>
+			<pre class="source-code">  return pr.store();</pre>
+			<pre class="source-code">}</pre>
+			<p>Here, if two concurrent transactions update the same payment, then our code is prone to the <em class="italic">lost updates</em> anomaly, so we must engage in optimistic locking. </p>
+			<p>So far, we've already added the <strong class="source-inline">version</strong> field to <strong class="source-inline">PAYMENT</strong>:</p>
+			<pre class="source-code">CREATE TABLE `payment` (</pre>
+			<pre class="source-code">   ...</pre>
+			<pre class="source-code">   `version` INT NOT NULL DEFAULT 0, </pre>
+			<pre class="source-code">   ...</pre>
+			<pre class="source-code">}</pre>
+			<p>We have also <a id="_idIndexMarker990"/>added the settings for enabling jOOQ optimistic locking based on the VERSION field, so we have set the following:</p>
+			<pre class="source-code">&lt;database&gt; </pre>
+			<pre class="source-code">  &lt;recordVersionFields&gt;version&lt;/recordVersionFields&gt;</pre>
+			<pre class="source-code">&lt;/database&gt;</pre>
+			<p>We have also set the following:</p>
+			<pre class="source-code">@Bean</pre>
+			<pre class="source-code">public Settings jooqSettings() {</pre>
+			<pre class="source-code"> return new Settings()                     </pre>
+			<pre class="source-code">  .withExecuteWithOptimisticLocking(true)</pre>
+			<pre class="source-code">  .withExecuteWithOptimisticLockingExcludeUnversioned(true); </pre>
+			<pre class="source-code">}</pre>
+			<p>So far, so good! From the perspective of optimistic locking, the interesting part starts when we call the <strong class="source-inline">store()</strong> method. If we attempt to store a new <strong class="source-inline">PaymentRecord</strong>, then <strong class="source-inline">store()</strong> will produce an <strong class="source-inline">INSERT</strong> statement that is not affected by optimistic locking. However, if this <strong class="source-inline">PaymentRecord</strong> needs to be updated, then optimistic locking will enrich the <strong class="source-inline">WHERE</strong> clause of the generated <strong class="source-inline">UPDATE</strong> (the same goes for <strong class="source-inline">DELETE</strong>) with an explicit check of the <strong class="source-inline">version</strong> number, as shown in the following MySQL <strong class="source-inline">UPDATE</strong>:</p>
+			<pre class="source-code">UPDATE </pre>
+			<pre class="source-code">  `classicmodels`.`payment` </pre>
+			<pre class="source-code">SET </pre>
+			<pre class="source-code">  `classicmodels`.`payment`.`invoice_amount` = ?, </pre>
+			<pre class="source-code">  `classicmodels`.`payment`.`version` = ? </pre>
+			<pre class="source-code">WHERE </pre>
+			<pre class="source-code">  (</pre>
+			<pre class="source-code">    `classicmodels`.`payment`.`customer_number` = ? </pre>
+			<pre class="source-code">    and `classicmodels`.`payment`.`check_number` = ? </pre>
+			<pre class="source-code">    and `classicmodels`.`payment`.`version` = ?</pre>
+			<pre class="source-code">  )</pre>
+			<p>If the <strong class="source-inline">version</strong> number from the database doesn't match the version number from the <strong class="source-inline">WHERE</strong> clause, then this record contains <em class="italic">stale</em> data (another transaction has modified this data). This will <a id="_idIndexMarker991"/>lead to a jOOQ <strong class="source-inline">DataChangedException</strong> that can be handled in our controller endpoint, as shown here:</p>
+			<pre class="source-code">@PostMapping("/store")</pre>
+			<pre class="source-code">public String storePayment(SessionStatus sessionStatus,    </pre>
+			<pre class="source-code">  RedirectAttributes redirectAttributes,</pre>
+			<pre class="source-code">  @ModelAttribute(PAYMENT_ATTR) PaymentRecord pr, </pre>
+			<pre class="source-code">  BindingResult bindingResult) {</pre>
+			<pre class="source-code">  if (!bindingResult.hasErrors()) {</pre>
+			<pre class="source-code">    try {</pre>
+			<pre class="source-code">        classicModelsService.storePayment(pr);</pre>
+			<pre class="source-code">        sessionStatus.setComplete();</pre>
+			<pre class="source-code">    } catch (org.jooq.exception.DataChangedException e) {</pre>
+			<pre class="source-code">        bindingResult.reject("", </pre>
+			<pre class="source-code">          "Another user updated the data.");</pre>
+			<pre class="source-code">    }</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  if (bindingResult.hasErrors()) {</pre>
+			<pre class="source-code">      redirectAttributes.addFlashAttribute(</pre>
+			<pre class="source-code">        BINDING_RESULT, bindingResult);            </pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  return "redirect:payments";</pre>
+			<pre class="source-code">}</pre>
+			<p>So, if <strong class="source-inline">DataChangedException</strong> occurs, then we must add a global error in <strong class="source-inline">BindingResult</strong> that contains the message <em class="italic">Another user updated the data</em>. This message will be <a id="_idIndexMarker992"/>rendered via Thymeleaf next to a button labeled <em class="italic">Refresh</em>, as shown in the following screenshot:</p>
+			<div>
+				<div id="_idContainer052" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.13.jpg" alt="Figure 9.13 – Signaling stale data to the user&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.13 – Signaling stale data to the user</p>
+			<p>Remember jOOQ's <strong class="source-inline">refresh()</strong> method? This is the perfect place to highlight its usability because the user should see the latest state of the record. This is the perfect job for <strong class="source-inline">refresh()</strong>. In this case, the <strong class="source-inline">reset()</strong> method doesn't help since <strong class="source-inline">reset()</strong> restores the record to its in-memory original values, which is a different thing. So, let's use <strong class="source-inline">refresh()</strong> to execute a <strong class="source-inline">SELECT</strong> that will fetch the latest state of this <strong class="source-inline">PaymentRecord</strong>: </p>
+			<pre class="source-code">@GetMapping(value = "/refresh")</pre>
+			<pre class="source-code">public String refreshPayment(Model model) {</pre>
+			<pre class="source-code">  if (model.containsAttribute(PAYMENT_ATTR)) {</pre>
+			<pre class="source-code">         classicModelsService.refreshPayment(</pre>
+			<pre class="source-code">     (PaymentRecord) model.getAttribute(PAYMENT_ATTR));</pre>
+			<pre class="source-code">  } </pre>
+			<pre class="source-code">  return "redirect:payments";</pre>
+			<pre class="source-code">}</pre>
+			<pre class="source-code">public void refreshPayment(PaymentRecord pr) {</pre>
+			<pre class="source-code">                </pre>
+			<pre class="source-code">  pr.refresh();</pre>
+			<pre class="source-code">}</pre>
+			<p>After refreshing, the user sees the data that was updated earlier by the concurrent transaction and can <a id="_idIndexMarker993"/>decide whether they wish to continue with their update. To reproduce this scenario, follow these steps:</p>
+			<ol>
+				<li value="1">Launch two browsers (mainly, two users or HTTP sessions).</li>
+				<li>In both, use the <em class="italic">Load</em> link to fetch the same payment.</li>
+				<li>For user A, update the invoice amount and click <em class="italic">Finish</em>. This should successfully update the payment.</li>
+				<li>For user B, update the invoice amount and click <em class="italic">Finish</em>. Since user A already updated this payment, you should see the message shown in the preceding screenshot.</li>
+				<li>Click <em class="italic">Refresh</em>. Now, you should see the invoice amount that was set by user A.</li>
+				<li>For user B, try to update again. This time, it will work as expected.</li>
+			</ol>
+			<p>In a conclusion, if an explicit <strong class="source-inline">UPDATE</strong>/<strong class="source-inline">DELETE</strong> or <strong class="source-inline">UPDATE</strong> resulted from calling <strong class="source-inline">store()</strong>, jOOQ VERSION/TIMESTAMP optimistic locking will enrich the <strong class="source-inline">WHERE</strong> clause of the generated <strong class="source-inline">UPDATE</strong>/<strong class="source-inline">DELETE</strong> with an explicit check of the numeric values of timestamp fields. In the case of calling <strong class="source-inline">merge()</strong>, an explicit <strong class="source-inline">INSERT</strong> or <strong class="source-inline">UPDATE</strong> is rendered, depending on whether the numeric/timestamp values are present or not in the record.</p>
+			<p>The complete code <a id="_idIndexMarker994"/>for this example can be found in <em class="italic">OLVersionStoreRecords</em>. The alternative, which is for using a TIMESTAMP field, can be found in <em class="italic">OLTimestampStoreRecords</em>. Finally, the <strong class="source-inline">SELECT … FOR UPDATE</strong> solution can be found in <em class="italic">OLPLStoreRecords</em>. All of them are available for MySQL.</p>
+			<h3>Retrying a failed transaction</h3>
+			<p>Let's consider that our scenario gets updated. If a transaction didn't update a payment with an invoice <a id="_idIndexMarker995"/>amount larger than the current amount, then this transaction should be retried without user interaction (so, in this case, we don't care about the lost updates). Otherwise, the user should see the current amount and perform the update from the interface (there will be no <em class="italic">Refresh</em> button since the refresh should be done automatically).</p>
+			<p>But how can we retry a failed transaction from the application? In Spring Boot, this is equivalent to executing the failed <strong class="source-inline">@Transactional storePayment(PaymentRecord pr)</strong> method again, which can be done via Spring Retry. Once you've added Spring Retry (see the bundled code), you must adjust the <strong class="source-inline">storePayment(PaymentRecord pr)</strong> method, as shown here:</p>
+			<pre class="source-code">@Transactional</pre>
+			<pre class="source-code">@Retryable(</pre>
+			<pre class="source-code">  value = org.jooq.exception.DataChangedException.class,</pre>
+			<pre class="source-code">  maxAttempts = 2, backoff = @Backoff(delay = 100))</pre>
+			<pre class="source-code">public int storePayment(PaymentRecord pr) {</pre>
+			<pre class="source-code">  int stored = 0;</pre>
+			<pre class="source-code">  try {</pre>
+			<pre class="source-code">      ctx.attach(pr);</pre>
+			<pre class="source-code">      stored = pr.store();</pre>
+			<pre class="source-code">  } catch (org.jooq.exception.DataChangedException e) {</pre>
+			<pre class="source-code">    BigDecimal invoiceAmount = pr.getInvoiceAmount();</pre>
+			<pre class="source-code">    pr.refresh();</pre>
+			<pre class="source-code">    if (invoiceAmount.doubleValue() &gt; </pre>
+			<pre class="source-code">           pr.getInvoiceAmount().doubleValue()) {</pre>
+			<pre class="source-code">      pr.setInvoiceAmount(invoiceAmount);</pre>
+			<pre class="source-code">      throw e;</pre>
+			<pre class="source-code">    }</pre>
+			<pre class="source-code">    throw new OptimisticLockingRetryFailed(e.getMessage());</pre>
+			<pre class="source-code">  }</pre>
+			<pre class="source-code">  return stored;</pre>
+			<pre class="source-code">}</pre>
+			<p>So, this time, we catch <strong class="source-inline">DataChangedException</strong> and analyze the <em class="italic">current</em> value of the invoice amount against the refreshed record (the latest state from the database). If the current amount is larger than the fetched amount, then we set it in place of the fetched <a id="_idIndexMarker996"/>amount and throw the caught <strong class="source-inline">DataChangedException</strong>. This will trigger the Spring Retry mechanism, will should retry this transaction. Otherwise, we must throw a custom <strong class="source-inline">OptimisticLockingRetryFailed</strong> exception, which will lead to an explicit message for the user. You can practice this example in <em class="italic">OLRetryVersionStoreRecords </em>(available for MySQL).</p>
+			<h2 id="_idParaDest-187"><a id="_idTextAnchor186"/>Pessimistic locking overview</h2>
+			<p>Pessimistic locking is <a id="_idIndexMarker997"/>about locking rows (or cells) via exclusive/shared <a id="_idIndexMarker998"/>locks until the transaction that acquired these locks finishes its tasks. Depending on the lock's strength, other transactions may partially interact with these rows/cells or they will have to abort or wait for the resource <a id="_idIndexMarker999"/>to become available (lock-free). From the <a id="_idIndexMarker1000"/>well-known <strong class="source-inline">SELECT … FOR UPDATE</strong> (exclusive read/write lock for rows (record lock)) and <strong class="source-inline">SELECT … FOR UPDATE OF</strong> (exclusive read/write locks for cells specific to Oracle) to <strong class="source-inline">SELECT … FOR UPDATE NOWAIT</strong> and <strong class="source-inline">SELECT … FOR UPDATE WAIT n</strong> (also specific to Oracle), to the more relaxed <strong class="source-inline">SELECT ... FOR UPDATE SKIP LOCKED</strong>, <strong class="source-inline">SELECT … FOR SHARE</strong>, and PostgreSQL-specific <strong class="source-inline">SELECT … FOR NO KEY UPDATE</strong> and <strong class="source-inline">SELECT … FOR KEY SHARE</strong>, jOOQ supports them all.</p>
+			<h2 id="_idParaDest-188"><a id="_idTextAnchor187"/>jOOQ pessimistic locking</h2>
+			<p>As we mentioned in the <em class="italic">Pessimistic locking overview</em> section, jOOQ supports a significant <a id="_idIndexMarker1001"/>number of locks of the <strong class="source-inline">SELECT … FOR FOO</strong> type. For instance, we <a id="_idIndexMarker1002"/>can explicitly call <strong class="source-inline">SELECT … FOR UPDATE</strong> via <strong class="source-inline">forUpdate()</strong>:</p>
+			<pre class="source-code">ctx.selectFrom(PRODUCTLINE)</pre>
+			<pre class="source-code">   .where(PRODUCTLINE.PRODUCT_LINE.eq("Classic Cars"))</pre>
+			<pre class="source-code">   .forUpdate()</pre>
+			<pre class="source-code">   .fetchSingle();</pre>
+			<p>If transaction A executes this statement, then it locks the corresponding rows. The other transaction, transaction B, must wait for transaction A to release this exclusive lock before performing its tasks on the same resource. Check out this scenario in the <em class="italic">ForUpdate </em>application (available for MySQL) – pay attention that this application results in an exception: <strong class="source-inline">MySQLTransactionRollbackException</strong>: <em class="italic">Lock wait timeout exceeded; try restarting transaction</em>. Also, check out <em class="italic">ForUpdateForeignKey </em>(available for PostgreSQL) – this example highlights the effect of <strong class="source-inline">FOR UPDATE</strong> on foreign keys that's caused by the fact this lock affects the referenced rows from other tables as well, not just the rows from the current table.</p>
+			<p>So, remaining in the same context, <strong class="source-inline">SELECT … FOR UPDATE</strong> locks all the selected rows across all the involved tables (listed in the <strong class="source-inline">FROM</strong> clause, joined, and so on). If table X and table Y are involved in such a case, then <strong class="source-inline">SELECT … FOR UPDATE</strong> locks the rows of both tables, even if transaction A affects only rows from table X. On the other hand, transaction B needs to acquire locks from table Y, but it cannot do so until transaction A releases the locks on tables X and Y. </p>
+			<p>For such scenarios, Oracle has <strong class="source-inline">SELECT … FOR UPDATE OF</strong>, which allows us to nominate the columns that should be locked. In this case, Oracle only acquires <a id="_idIndexMarker1003"/>locks on the rows of the table(s) that have the <a id="_idIndexMarker1004"/>column name listed in <strong class="source-inline">FOR UPDATE OF</strong>. For instance, the following statements only lock rows from <strong class="source-inline">PRODUCTLINE</strong>, even if the <strong class="source-inline">PRODUCT</strong> table is also involved:</p>
+			<pre class="source-code">ctx.select(PRODUCTLINE.PRODUCT_LINE, PRODUCTLINE.CODE, </pre>
+			<pre class="source-code">     PRODUCT.PRODUCT_LINE, PRODUCT.PRODUCT_NAME, </pre>
+			<pre class="source-code">     PRODUCT.PRODUCT_SCALE)</pre>
+			<pre class="source-code">   .from(PRODUCTLINE).join(PRODUCT).onKey()</pre>
+			<pre class="source-code">   // lock only rows from PRODUCTLINE</pre>
+			<pre class="source-code">   .forUpdate().of(PRODUCTLINE.PRODUCT_LINE, PRODUCTLINE.CODE)</pre>
+			<pre class="source-code">   .fetch();</pre>
+			<p>Since the <strong class="source-inline">PRODUCT</strong> table isn't locked, another statement can obtain locks on its rows:</p>
+			<pre class="source-code">ctx.select(PRODUCTLINE.PRODUCT_LINE, PRODUCTLINE.CODE, </pre>
+			<pre class="source-code">           PRODUCT.PRODUCT_LINE, PRODUCT.PRODUCT_NAME, </pre>
+			<pre class="source-code">           PRODUCT.PRODUCT_SCALE)</pre>
+			<pre class="source-code">   .from(PRODUCTLINE).join(PRODUCT).onKey()</pre>
+			<pre class="source-code">   // lock only rows from PRODUCT</pre>
+			<pre class="source-code">   .forUpdate().of(PRODUCT.PRODUCT_NAME)</pre>
+			<pre class="source-code">   .fetch();</pre>
+			<p>If we remove <strong class="source-inline">.of(PRODUCT.PRODUCT_NAME)</strong>, then this statement will attempt to lock rows from <strong class="source-inline">PRODUCTLINE</strong> as well, so it will have to wait for the lock to release on that table. You can check out this example by going to the <em class="italic">ForUpdateOf </em>application (available for Oracle).</p>
+			<p>If a transaction were to acquire a lock or fail immediately, then we should use <strong class="source-inline">SELECT … FOR UPDATE NOWAIT</strong>:</p>
+			<pre class="source-code">ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">   .forUpdate() </pre>
+			<pre class="source-code">   .noWait() // acquire the lock or fails immediately</pre>
+			<pre class="source-code">   .fetch();</pre>
+			<p>However, if the <a id="_idIndexMarker1005"/>transaction needs to wait for a fixed amount <a id="_idIndexMarker1006"/>of time, then we must rely on the <strong class="source-inline">SELECT … FOR UPDATE WAIT n</strong> lock (Oracle), where <strong class="source-inline">n</strong> is the time to wait, given in seconds:</p>
+			<pre class="source-code">ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">   .forUpdate()                           </pre>
+			<pre class="source-code">   .wait(15) </pre>
+			<pre class="source-code">   .fetch();</pre>
+			<p>You can check out an example in <em class="italic">ForUpdateWait </em>(available for Oracle). As you'll see, transaction A acquires a lock immediately, while transaction B waits for a certain amount of time before acquiring a lock on the same resource. If this time expires before transaction A releases the lock, then you'll get an error stating <em class="italic">ORA-30006: resource busy; acquire with WAIT timeout expired</em>.</p>
+			<p>Let's consider the following scenario: to provide a high-quality description of products, we have reviewers that analyze each product and write a proper description. Since this is a concurrent process on the <strong class="source-inline">PRODUCT</strong> table, the challenge consists of coordinating the reviewers so that they don't review the same product at the same time. To pick a product for review, the reviewer should skip the products that have already been reviewed (<strong class="source-inline">PRODUCT.PRODUCT_DESCRIPTION.eq("PENDING")</strong>) and the products that are currently in review. This is what we call a concurrent table-based queue (also known as job queues or batch queues).</p>
+			<p>This is a job for <strong class="source-inline">SKIP LOCKED</strong>. This SQL option is available in many databases (Oracle, MySQL 8, PostgreSQL 9.5, and so on) and it instructs the database to skip the locked rows and to lock the rows that have not been locked previously:</p>
+			<pre class="source-code">Result&lt;ProductRecord&gt; products = ctx.selectFrom(PRODUCT)</pre>
+			<pre class="source-code">  .where(PRODUCT.PRODUCT_DESCRIPTION.eq("PENDING"))</pre>
+			<pre class="source-code">  .orderBy(PRODUCT.PRODUCT_ID).limit(3)</pre>
+			<pre class="source-code">  .forUpdate()</pre>
+			<pre class="source-code">  .skipLocked()</pre>
+			<pre class="source-code">  .fetch();</pre>
+			<p>If transaction A executes this statement, then it may lock the <strong class="source-inline">PENDING</strong> products with IDs <em class="italic">1</em>, <em class="italic">2</em>, and <em class="italic">3</em>. While transaction A holds this lock, transaction B executes the same statement and will lock the <strong class="source-inline">PENDING</strong> products with IDs <em class="italic">4</em>, <em class="italic">5</em>, and <em class="italic">6</em>. You can see this scenario in <em class="italic">ForUpdateSkipLocked </em>(available for MySQL).</p>
+			<p>A weaker form of <strong class="source-inline">SELECT … FOR UPDATE</strong> is the <strong class="source-inline">SELECT … FOR SHARE</strong> query. This ensures <a id="_idIndexMarker1007"/>referential integrity when inserting child records for a <a id="_idIndexMarker1008"/>parent. For instance, transaction A executes the following:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .forShare() </pre>
+			<pre class="source-code">   .fetchSingle();</pre>
+			<pre class="source-code">ctx.insertInto(TOKEN)</pre>
+			<pre class="source-code">   .set(TOKEN.SALE_ID, sr.getSaleId())</pre>
+			<pre class="source-code">   .set(TOKEN.AMOUNT, 1200.5)                            </pre>
+			<pre class="source-code">   .execute();</pre>
+			<p>However, transaction B cannot <strong class="source-inline">UPDATE</strong> if transaction A holds the <strong class="source-inline">SHARE</strong> lock:</p>
+			<pre class="source-code">ctx.update(SALE)</pre>
+			<pre class="source-code">   .set(SALE.SALE_, SALE.SALE_.plus(1000))</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .execute();</pre>
+			<p>Also, transaction C cannot <strong class="source-inline">DELETE</strong>:</p>
+			<pre class="source-code">ctx.delete(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .execute();</pre>
+			<p>You can check out this example in <em class="italic">ForShare </em>(available for PostgreSQL).</p>
+			<p>Starting with version 9.3, PostgreSQL supports two more locking clauses: <strong class="source-inline">SELECT … FOR NO KEY UPDATE</strong> and <strong class="source-inline">SELECT … FOR KEY SHARE</strong>. The former acts similarly to the <strong class="source-inline">FOR UPDATE</strong> locking clause but it does not block <strong class="source-inline">SELECT … FOR KEY SHARE</strong>. For instance, transaction A uses <strong class="source-inline">SELECT … FOR NO KEY UPDATE</strong>:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .forNoKeyUpdate()</pre>
+			<pre class="source-code">   .fetchSingle();</pre>
+			<pre class="source-code">ctx.insertInto(TOKEN)</pre>
+			<pre class="source-code">   .set(TOKEN.SALE_ID, sr.getSaleId())</pre>
+			<pre class="source-code">   .set(TOKEN.AMOUNT, 1200.5)</pre>
+			<pre class="source-code">   .execute();</pre>
+			<p>Even if <a id="_idIndexMarker1009"/>transaction A holds a lock on this resource, transaction <a id="_idIndexMarker1010"/>B can acquire a <strong class="source-inline">SELECT … FOR KEY SHARE</strong>:</p>
+			<pre class="source-code">ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .forKeyShare()</pre>
+			<pre class="source-code">   .fetchSingle();</pre>
+			<p>However, transaction C cannot acquire a <strong class="source-inline">SELECT … FOR SHARE</strong> on this resource if transaction A doesn't release its lock:</p>
+			<pre class="source-code">ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .forShare()</pre>
+			<pre class="source-code">   .fetchSingle();</pre>
+			<p>You can check out this example in <em class="italic">ForNoKeyUpdate </em>(available for PostgreSQL).</p>
+			<p>Finally, <strong class="source-inline">SELECT … FOR KEY SHARE</strong> is the weakest lock. For instance, transaction A acquires the following type of lock:</p>
+			<pre class="source-code">SaleRecord sr = ctx.selectFrom(SALE)</pre>
+			<pre class="source-code">                   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">                   .forKeyShare()</pre>
+			<pre class="source-code">                   .fetchSingle();</pre>
+			<pre class="source-code">ctx.insertInto(TOKEN)</pre>
+			<pre class="source-code">   .set(TOKEN.SALE_ID, sr.getSaleId())</pre>
+			<pre class="source-code">   .set(TOKEN.AMOUNT, 1200.5)                            </pre>
+			<pre class="source-code">   .execute();</pre>
+			<p>While transaction <a id="_idIndexMarker1011"/>A holds this lock, transaction B can perform <a id="_idIndexMarker1012"/>updates if it doesn't attempt to update <strong class="source-inline">SALE_ID</strong>:</p>
+			<pre class="source-code">ctx.update(SALE)</pre>
+			<pre class="source-code">   .set(SALE.SALE_, SALE.SALE_.plus(1000))</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .execute();</pre>
+			<p>Transaction B will have to wait for transaction A to release the lock since it attempts to update <strong class="source-inline">SALE_ID</strong>:</p>
+			<pre class="source-code">ctx.update(SALE)</pre>
+			<pre class="source-code">   .set(SALE.SALE_ID, SALE.SALE_ID.plus(50))</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .execute(); </pre>
+			<p>Finally, transaction C <a id="_idIndexMarker1013"/>cannot <strong class="source-inline">DELETE</strong> if transaction A holds <a id="_idIndexMarker1014"/>the <strong class="source-inline">KEY SHARE</strong> lock:</p>
+			<pre class="source-code">ctx.delete(SALE)</pre>
+			<pre class="source-code">   .where(SALE.SALE_ID.eq(2L))</pre>
+			<pre class="source-code">   .execute();</pre>
+			<p>You can see this example in <em class="italic">ForNoKeyUpdate </em>(available for PostgreSQL).</p>
+			<h2 id="_idParaDest-189"><a id="_idTextAnchor188"/>Deadlocks</h2>
+			<p>Deadlocks are not specific to databases – they can occur in any scenario involving a concurrency <a id="_idIndexMarker1015"/>environment (concurrency control) and they mainly define a situation <a id="_idIndexMarker1016"/>when two processes cannot advance because they are waiting for each other to finish (release the lock). In the case of a database, a classical deadlock can be represented like so:</p>
+			<div>
+				<div id="_idContainer053" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.14.jpg" alt="Figure 9.14 – A classical case of a deadlock&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.14 – A classical case of a deadlock</p>
+			<p>Here, we have two transactions that don't use explicit locks (the database itself relies on locks since it detects whether a transaction has attempted to modify data). Transaction A has acquired a lock on the <strong class="source-inline">SALE</strong> resource, and it doesn't release it until it manages to acquire another lock on the <strong class="source-inline">ORDER</strong> resource, which is currently locked by transaction B. At the same time, transaction B holds a lock on the <strong class="source-inline">ORDER</strong> resource, and it doesn't release it until it manages to acquire a lock on the <strong class="source-inline">SALE</strong> resource, which is currently locked by transaction A. You can see this scenario exemplified in <em class="italic">Deadlock </em>(available for MySQL).</p>
+			<p>However, using explicit <a id="_idIndexMarker1017"/>locks doesn't mean that deadlocks cannot happen <a id="_idIndexMarker1018"/>anymore. For instance, in <em class="italic">DeadlockShare </em>(available for MySQL), you can see explicit usage of <strong class="source-inline">SELECT … FOR SHARE</strong> that causes a deadlock. It is very important to understand what each type of lock does and what other locks are permitted (if any) while a certain lock is present. The following table covers the common locks:</p>
+			<div>
+				<div id="_idContainer054" class="IMG---Figure">
+					<img src="image/B16833_Figure_9.15.jpg" alt="Figure 9.15 – Lock acquisition permissions&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 9.15 – Lock acquisition permissions</p>
+			<p>Databases automatically scan transactions to discover deadlocks (or the so-called lock-wait cycles). When a deadlock occurs, the database attempts to fix it by aborting one of the transactions. This releases the lock and allows the other transaction to progress. In this context, always rely on <strong class="source-inline">NOWAIT</strong> or explicit short timeouts to avoid deadlocks. While the database can recover after a deadlock, it can only do so after the timeout (if any). So, a long timeout means keeping a database connection busy for a long time, and this is a performance penalty. Moreover, locking too much data may affect scalability.</p>
+			<h1 id="_idParaDest-190"><a id="_idTextAnchor189"/>Summary</h1>
+			<p>I'm glad that you've come this far and that we've managed to cover the three main topics of this chapter – CRUD, transactions, and locking. At this point, you should be familiar with jOOQ UpdatableRecords and how they work in the context of CRUD operations. Among other things, we've learnt about cool stuff such as the must-know <strong class="source-inline">attach()</strong>/<strong class="source-inline">detach()</strong>, the handy <strong class="source-inline">original()</strong> and <strong class="source-inline">reset()</strong>, and the fancy <strong class="source-inline">store()</strong> and <strong class="source-inline">refresh()</strong> operations. After that, we learned how to handle transactions in the context of Spring Boot and jOOQ APIs before tackling optimistic and pessimistic locking in jOOQ.</p>
+			<p>In the next chapter, we'll learn how to batching, bulking and loading files into the database via jOOQ. We'll also do single-thread and multi-thread batching.</p>
+		</div>
+	</body></html>
