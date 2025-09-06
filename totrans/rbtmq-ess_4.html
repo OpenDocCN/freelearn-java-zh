@@ -1,0 +1,225 @@
+<html><head></head><body>
+        <section>
+
+                            <header class="header-title chapter-title">
+                    Tweaking Message Delivery
+                </header>
+            
+            <article>
+                
+<p>What happens to messages that end up stuck in queues? Do they just disappear? What is the best way to prevent messages from being dropped silently, without warning? In this chapter, we will <span>answers these questions thoroughly, looking in detail at </span><span>message</span> <strong>time to live</strong> <span>(</span><strong>TTL</strong><span>) and dead-letter exchanges and queues. This chapter will also cover how the broker should react if a message cannot be routed to a specific queue using a mandatory flag. Additionally, the chapter will explain policies and the default exchange.</span></p>
+<p><span>Expect to learn important information about the following topics:</span></p>
+<ul>
+<li>Handling dead letters</li>
+<li>Making delivery m<span>andatory </span></li>
+</ul>
+<h1 id="uuid-050fb29a-8d6b-4de2-8514-a1c564416654"><span class="fontstyle0">Technical requirements</span></h1>
+<p class="mce-root">The code files of this chapter can be found on GitHub at<span> <a href="https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter04">https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter04</a></span>.</p>
+<h1 id="uuid-fecac923-9e13-4b34-ae75-5a62c7bffc9c">Handling dead letters</h1>
+<p>Things are going very well at <strong>Complete Car</strong> (<strong>CC</strong>). The driver-information message feature is gaining traction as more and more drivers join the company. After a few months of activity, one thing becomes clear: not all taxi drivers log in to the application every day, which leads to messages piling up in taxi inbox queues.</p>
+<p>Though the amount of data is not detrimental to the system, the idea of having messages lying around in queues, potentially forever, is not satisfactory. Imagine a taxi driver logging in after a couple of weeks of vacation and being flooded with obsolete messages—this is the negative type of user experience that CC is keen to avoid.</p>
+<p>CC decides to address this by specifying a new rule: after one week, any message that is not delivered will be dealt with in one of two ways:</p>
+<ul>
+<li>It will be emailed to the user if it's an important information message.</li>
+<li>It will be discarded if it's an information message concerning the current traffic situation or other important information:</li>
+</ul>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-1055 image-border" src="assets/2698fa62-27a5-4b24-a0f5-7091f839eff7.png" style="width:40.75em;height:8.33em;"/></p>
+<div class="CDPAlignCenter CDPAlign packt_figref"><span>Fig 4.1: Email important information messages, discard other messages</span></div>
+<p>The developers look at what is offered in terms of message expiration in RabbitMQ and list the following possible options that can be implemented:</p>
+<ul>
+<li>Standard AMQP message expiration property for published messages</li>
+<li>Custom RabbitMQ extension that allows users to define a message TTL per queue</li>
+<li>Custom RabbitMQ extension that allows users to define a TTL for the queue itself</li>
+</ul>
+<p>The first option is interesting because it is a standard AMQP option; however, after reading more about how it is supported in RabbitMQ, it turns out that these messages are only discarded when the message reaches the head, or beginning, of a queue. Even if they have expired, the messages would still sit in the queue, which would defeat the purpose of what they're trying to achieve. CC rules out the last option as well, as they do not want the queue to be deleted. This leaves us with the second option of configuring each taxi inbox queue with a TTL that is enforced by RabbitMQ whether the queue is being consumed or not.</p>
+<p>This is all fine and dandy, but what actually happens to messages when they expire? CC wants to consume these important messages in order to email them. So how do we achieve this? This is where RabbitMQ's <strong>dead letter exchange</strong> (<strong>DLX</strong>) comes in handy.</p>
+<p>A dead letter is a message that can't be delivered, either because the intended target cannot be accessed or because it has expired. In the case of CC, messages that reach their TTL will become dead letters.</p>
+<p>RabbitMQ offers the option to automatically route these dead letters to a specific exchange, a so-called DLX. Since CC wants to receive messages sent to this exchange, they must bind a queue to it, consume it, and take care of received messages. This queue acts as a <strong>dead letter queue</strong> (<strong>DLQ</strong>), the ultimate destination for dead messages.</p>
+<p>The following diagram illustrates the overall DLX architecture that CC intends to roll out:</p>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-661 image-border" src="assets/a7f8f9de-5464-4306-bd1d-b90418bd6ea9.png" style="width:127.08em;height:33.08em;"/></p>
+<div class="CDPAlignCenter CDPAlign packt_figref">Fig 4.2: Dead-letter-handling architecture</div>
+<p>A message that reaches its TTL is rerouted via the dead letter exchange to the <strong>taxi-</strong><strong>dlx</strong> queue and finally handled by the consumer.</p>
+<p>Note that when messages expire, they are published to the DLX using the original routing key they had when they were delivered to their taxi inbox queue. This behavior can be modified as RabbitMQ allows the definition of a specific routing key to use when messages are published to the DLX. The default suits CC, as the original routing key is an interesting bit of information they will use to find out the ID of the taxi. Therefore, the DLX exchange is constructed as a fanout in order to have all messages routed in the DLQ, whatever their original routing key may have been.</p>
+<p>The battle plan is ready. It's now time to roll it out!</p>
+<h2 id="uuid-057e644d-db92-44ca-8c14-c183dcee6b6b">Refactoring queues</h2>
+<p>The first step in rolling out this architecture consists of configuring the taxi queues with the desired TTL of one week and a dead letter exchange equal to <kbd>taxi-dlx</kbd>.</p>
+<p>By using the RabbitMQ extensions to AMQP, this can be achieved by respectively defining the <kbd>'x-message-ttl'</kbd> and <kbd>"x-dead-letter-exchange"</kbd> arguments when declaring the queue. Messages published to a queue that expires after the TTL are rerouted to the exchange with the given <kbd>x-dead-letter-routing-key</kbd>.</p>
+<p>It’s tempting to jump right to the code editor and modify the Ruby code written in <a href="4e1d39f3-47d1-4423-916c-2c2c01c75887.xhtml">Chapter 3</a>, <em>Sending Messages to Multiple Taxi Drivers</em>, by using the following arguments:</p>
+<pre># Declare a queue for a taxi inbox 1<br/>queue1 = channel.queue('taxi-inbox.1', <br/>  durable: true, <br/>  arguments:{<br/>    'x-message-ttl'=&gt; 604800000, <br/>    'x-dead-letter-exchange'=&gt; 'taxi-dlx', <br/>    'x-dead-letter-routing-key'=&gt; 'taxi-inbox.1'<br/>  }<br/>)</pre>
+<p class="mce-root">However, this would be wrong on several levels. The main issue is that the declaration would be changing from a queue with no arguments to one with three arguments. Remember that in <a href="377ec533-342d-4a08-9011-7176de197886.xhtml">Chapter 2</a>, <em>Creating a Taxi Application</em>, queue (or exchange) declaration is idempotent only if all the parameters that are used are the same. Any discrepancy in the declaration yields an exception and will be punished with an immediate channel termination.</p>
+<div class="packt_tip">Make it a habit to double-check that the same attributes/parameters are always used when declaring existing queues and exchanges. Any difference will cause errors and terminate channels.</div>
+<p>The other problem is that this change will only apply when taxi drivers log in. This is when the taxi queue is declared; however, it would not fulfill the requirement to apply the expiration rule to all existing queues independent of user actions. Finally, another thing to consider is that if these properties were configured at the queue declaration level, any change to one of them would require us to delete and recreate all of the queues. Clearly, the TTL and DLX configurations are cross-cutting concerns and should be configured in a more global fashion. Is that even possible?</p>
+<p>The answer is yes! RabbitMQ has a simple and elegant solution to this problem in the concept of policies. RabbitMQ supports policies that define specific behaviors, and these policies can be applied to queues or exchanges. Policies are applied not only when a queue or exchange is declared, but also to an existing queue or exchange. </p>
+<p>Both the queue message TTL and dead letter exchange are configurable via policies, but only a single policy can apply to a queue or exchange. Therefore, CC will craft a policy that combines both the TTL and DLX settings and apply it to all taxi inbox queues. This cannot be achieved via the AMQP protocol or by using the RabbitMQ client. Instead, the powerful command-line tools provided by RabbitMQ are the best way to achieve the policies needed.</p>
+<p>This strategy to refactor the existing queues is achieved with the following single command-line operation:</p>
+<pre>$ sudo rabbitmqctl set_policy -p cc-dev-vhost Q_TTL_DLX "taxi\.\d+" '{"message-ttl":604800000, "dead-letter-exchange":"taxi-dlx"}' <br/>--apply-to queues</pre>
+<p>Let's take some time to dissect the preceding command:</p>
+<ul>
+<li> <kbd>sudo rabbitmqctl set_policy</kbd>: This part of the command uses the <kbd>set_policy</kbd> control command.</li>
+<li><kbd>-p cc-dev-vhost</kbd>: This part of the command applies the message to the development virtual host.</li>
+<li><kbd>Q_TTL_DLX</kbd>: This part of the command names the policy to make it obvious that it pertains to queue TTL and dead letter exchange.</li>
+<li><kbd>"taxi\.\d+"</kbd>: This part of the command uses some regex to apply the entire command to the taxi queues only by selecting them by name.</li>
+<li><kbd>'{"message-ttl":604800000, "dead-letter-exchange":"taxi-dlx"}'</kbd>: This part of the command uses a policy definition composed of a TTL of seven days in milliseconds and the name of the DLX.</li>
+<li><kbd>--apply-to queues</kbd>: This part of the command ensures that this policy is only applied to queues, which is somewhat redundant with the regex, but acts as a safety net because it selects RabbitMQ entities by type instead of name.</li>
+</ul>
+<p>Ready to run this command? Not so fast—the <kbd>"taxi-dlx"</kbd> exchange must be created and bound to the <kbd>"taxi-dlq"</kbd> queue. Applying this policy right now means that there will be seven days available to roll out the missing exchange and queue. Sure, this is plenty of time, but smart developers don't like to work against the clock if they can avoid it.</p>
+<p>Instead of running the command right now, take the time to create the infrastructure in charge of dealing with the dead letters and roll it out to the application before applying the <kbd>"Q_TTL_DLX"</kbd> policy.</p>
+<p>The policies are now set up, and it's time to add some code for the missing exchanges and queues.</p>
+<h2 id="uuid-304302ff-b961-4c22-834a-5267d9c748fa">Undertaking messages</h2>
+<p>The necessary infrastructure must be created to deal with expired messages. The dead letter queue needs to be declared, as well as the new dead letter fanout exchange. These need to be bound to each other.</p>
+<p>The following needs to be done:</p>
+<ul>
+<li>Declare the <kbd>taxi-dlq</kbd> queue.</li>
+<li>Declare the <kbd>taxi-dlx</kbd> fanout exchange.</li>
+<li>Bind the <kbd>taxi-dlq</kbd> to the <kbd>taxi-dlx</kbd> fanout.</li>
+<li>Create a subscriber of the <kbd>taxi-dlq</kbd> queue that consumes and emails the dead letters.</li>
+</ul>
+<p>To implement this behavior, simply add the exchange and queue with the following code to create the exchange and bind the queue to it:</p>
+<ol>
+<li>Start by declaring two queues with <kbd>x-message-ttl</kbd> set to <kbd>604800000</kbd>:</li>
+</ol>
+<pre style="padding-left: 60px">queue1 = channel.queue('taxi-inbox.1', durable: true,<br/>  arguments: {'x-message-ttl'=&gt; 604800000, 'x-dead-letter-exchange'=&gt; 'taxi-dlx'})<br/><br/>queue2 = channel.queue('taxi-inbox.2', durable: true,<br/>  arguments: {'x-message-ttl'=&gt; 604800000, 'x-dead-letter-exchange'=&gt; 'taxi-dlx'})</pre>
+<ol start="2">
+<li>Declare a fanout exchange <kbd>taxi-fanout</kbd>:</li>
+</ol>
+<pre style="padding-left: 60px">exchange = channel.fanout('taxi-fanout')</pre>
+<ol start="3">
+<li>Bind both queues to the exchange:</li>
+</ol>
+<pre style="padding-left: 60px">queue1.bind(exchange, routing_key: "")<br/>queue2.bind(exchange, routing_key: "")</pre>
+<ol start="4">
+<li>Declare a dead letter queue, <kbd>taxi-dlq</kbd>:</li>
+</ol>
+<pre style="padding-left: 60px">taxi_dlq = channel.queue('taxi-dlq', durable: true)</pre>
+<ol start="5">
+<li>Declare a dead letter fanout exchange, <kbd>taxi-dlx</kbd>:</li>
+</ol>
+<pre style="padding-left: 60px">dlx_exchange = channel.fanout('taxi-dlx')</pre>
+<ol start="6">
+<li>Now <kbd>taxi-dlx</kbd> needs to be bound to <kbd>taxi-dlq</kbd>:</li>
+</ol>
+<pre style="padding-left: 60px">taxi_dlq.bind(dlx_exchange, routing_key: "")</pre>
+<ol start="7">
+<li>Finally, publish a message:</li>
+</ol>
+<pre style="padding-left: 60px">exchange.publish("Hello! This is an information message!",   key: "")</pre>
+<p>As you can see, this is just a standard fanout exchange declaration along with the related queue declaration and binding. The same logic was used when implementing the public address system in <a href="4e1d39f3-47d1-4423-916c-2c2c01c75887.xhtml">Chapter 3</a>, <em>Sending Messages to Multiple Drivers</em>.</p>
+<div class="packt_tip">To simplify things even more, make sure that you log enough contextual data when an exception occurs. Always consider what information will be needed to perform forensics for a particular exception, if necessary.</div>
+<p>After rolling out this code to the application servers, note that the dead letter exchange and queue have been correctly created. Now it is time to set the <kbd>"Q_TTL_DLX"</kbd> policy, as shown in the following code:</p>
+<pre>$ sudo rabbitmqctl set_policy <br/>-p cc-dev-vhost Q_TTL_DLX "taxi-inbox\.\d+ " '{"message-ttl":604800000, "dead-letter-exchange":"taxi-dlx"}' --apply-to queues
+<br/>Setting policy "Q_TTL_DLX" for pattern "taxi-inbox\.\d+ " to "{\"message-ttl\":604800000, \"dead-letter-exchange\":\"taxi-dlx\"}" with priority "0" ...
+...done.</pre>
+<p>After running this script, use the management console to see what's been changed on the user inbox queue definitions.</p>
+<p class="mce-root"/>
+<p>The following screenshot shows a few of these queues:</p>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-662 image-border" src="assets/87912e1d-5b01-4c2b-9340-01304c9b04e1.png" style="width:208.00em;height:78.75em;"/></p>
+<div class="packt_figref CDPAlignCenter CDPAlign"><span>Fig </span>4.3: The Q_TTL_DLX policy is applied to all taxi queues</div>
+<p>The following screenshot demonstrates that the <span class="packt_screen">Q_TTL_DLX</span> policy has been applied to the taxi queue, while other queues, such as <kbd>taxi-dlq</kbd>, haven't been affected:</p>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-663 image-border" src="assets/8a7d7c12-fa47-4b75-9de1-52ccf8b5f2fa.png" style="width:197.00em;height:79.33em;"/></p>
+<div class="packt_figref CDPAlignCenter CDPAlign">Fig 4.4: The Q_TTL_DLX policy is applied to the taxi-inbox.1 queue</div>
+<p>In the management interface, click on the <span class="packt_screen">Admin</span> tab and then the <span class="packt_screen">Policies</span> tab (on the right). Note how the custom policy is visible in the following screenshot:</p>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-664 image-border" src="assets/3b96d66e-7c30-42ed-9a3f-a4b418353ddb.png" style="width:72.17em;height:39.67em;"/></p>
+<div class="caption packt_figref CDPAlignCenter CDPAlign">Fig 4.5: The Q_TTL_DLX policy is in the admin view</div>
+<p>At this point, any message created that will stay for more than 7 days in a taxi queue will be unmercifully moved to the <kbd>taxi_dlq</kbd>, consumed, potentially emailed, and buried for real! But what should be done with the existing messages that were created before the policy was rolled out?</p>
+<p>There is, unfortunately, no out-of-the-box solution to this problem, so the somewhat drastic measure to purge all the queues that are not empty and have no active subscribers must be taken. This is rough, but it is the only way to get out of the current situation. Moreover, it's a solution that is easily implemented with a simple script.</p>
+<p>Thus far, the <kbd>rabbitmqctl</kbd> script has been used to manage the RabbitMQ broker. The next steps require the installation of a new script that comes bundled with the management console installed in <a href="4f4722d3-131f-4c38-9ea0-4c03e8545175.xhtml">Chapter 1</a>, <em>A Rabbit Springs to Life</em>. This script, called <kbd>rabbitmqadmin</kbd>, can be downloaded by simply browsing to a particular URL in the management interface, namely <kbd>http://localhost:15672/cli/</kbd>. After following the displayed download instructions, install the script in a location that makes it available to all users (typically <kbd>/usr/local/bin</kbd> on a Linux machine).</p>
+<div class="packt_infobox">More information on the <kbd>rabbitmqadmin</kbd> script can be found at <a href="http://www.rabbitmq.com/management-cli.html">http://www.rabbitmq.com/management-cli.html</a>.</div>
+<p>The following code shows how to create a script that will drop all consumerless queues that are not empty:</p>
+<pre>#!/bin/bash
+
+queues_to_purge=`rabbitmqctl list_queues -p cc-dev-vhost name messages_ready consumers | grep "taxi\.[[:digit:]]\+[[:space:]]\+[1-9][[:digit:]]*[[:space:]]\+0" | awk '{ print $1}'`
+
+for queue in $queues_to_purge ; do
+    echo -n "Purging $queue ... "
+    rabbitmqadmin -V cc-dev-vhost -u cc-admin -p taxi123 purge queue name=$queue
+done</pre>
+<p>Note that both <kbd>rabbitmqctl</kbd> and <kbd>rabbitmqadmin</kbd> were used to achieve the goal, the former with the ability to list specific attributes of queues in a way that's easy to parse and the latter with the ability to purge queues. After executing this script as a superuser, the state of the RabbitMQ broker is fit for purpose and the TTL and DLX policies will keep it that way in the long run!</p>
+<p>CC now wants to send out a survey to all customers that have completed a ride with the taxi a few minutes after the completed ride. Let's see how it is possible to use dead letter exchanges and TTL to delay message delivery within RabbitMQ.</p>
+<h3 id="uuid-d91aceb4-9123-4ff6-b8e6-4878d3b94be2">Delayed messages with RabbitMQ</h3>
+<p>While finishing off the work with this feature, the back office realizes that they can publish messages with a fixed delay so that consumers don’t see them immediately. This is a perfect feature for their survey, which should be sent out to customers 5 minutes after a finished ride. The AMQP protocol doesn't have a native delayed queue feature, but one can easily be emulated by combining the message TTL function and the dead-lettering function. </p>
+<div class="packt_tip">
+<p>The Delayed Message Plugin is available for RabbitMQ 3.5.3 and later versions of RabbitMQ. The Delayed Message Plugin adds a new exchange type to RabbitMQ. It is possible to delay messages routed via that exchange by adding a delay header to a message. You can read more about the plugin at <a href="https://github.com/rabbitmq/rabbitmq-delayed-message-exchange">https://github.com/rabbitmq/rabbitmq-delayed-message-exchange</a>.</p>
+</div>
+<p>CC decides to publish survey request messages to a delayed queue once the driver has marked a ride as completed. All survey request messages are set to expire after a TTL of 5 minutes. The routing key of the message is then changed to the same as the destination queue name. This means that the survey request message will end up in the queue from which the survey request should be sent.</p>
+<p>The following is an example of the code that CC would use. <span>Messages are first delivered to</span> the <kbd>DELAYED_QUEUE</kbd> called <kbd>work.later</kbd>. After 300,000 ms, messages are dead lettered and routed to the <kbd>DESTINATION_QUEUE</kbd> called <kbd>work.now</kbd>: </p>
+<ol>
+<li><span>We start by assigning the variables:</span></li>
+</ol>
+<pre style="padding-left: 60px">DELAYED_QUEUE='work.later'<br/>DESTINATION_QUEUE='work.now'</pre>
+<ol start="2">
+<li><span>After that, we define the publish method. There are a lot of things happening here:</span></li>
+</ol>
+<ul>
+<li style="padding-left: 60px"><span>First, the delayed queue</span>, <kbd>DELAYED_QUEUE</kbd>, <span>is declared and <kbd>x-dead-letter-exchange</kbd> is set to the default queue.</span></li>
+<li style="padding-left: 60px"><span>A routing key for dead-lettering messages is set via the <kbd>x-dead-letter-routing-key</kbd> argument to <kbd>DESTINATION_QUEUE</kbd>.</span></li>
+<li style="padding-left: 60px"><span>The number of milliseconds to delay a message is specified in the message TTL <kbd>x-message-ttl</kbd> argument.</span></li>
+</ul>
+<ol start="3">
+<li>Finally, a message is published to the default exchange, where <kbd>DELAYED_QUEUE</kbd> is used as a routing key:</li>
+</ol>
+<pre style="padding-left: 60px">def publish<br/>  channel = connection.create_channel<br/>  <br/>  channel.queue(DELAYED_QUEUE, arguments: {<br/>    'x-dead-letter-exchange' =&gt; '', <br/>    'x-dead-letter-routing-key' =&gt; DESTINATION_QUEUE,<br/>    'x-message-ttl' =&gt; 300000<br/>  })<br/><br/>  channel.default_exchange.publish 'message content', routing_key: DELAYED_QUEUE<br/>    puts "#{Time.now}: Published the message"<br/>    channel.close<br/>end</pre>
+<ol start="4">
+<li>Then we define the subscribe method and handle the message:</li>
+</ol>
+<pre style="padding-left: 60px">def subscribe<br/>  channel = connection.create_channel<br/>  q = channel.queue DESTINATION_QUEUE, durable: true<br/>  q.subscribe do |delivery, headers, body|<br/>    puts "#{Time.now}: Got the message"<br/>  end<br/>end</pre>
+<ol start="5">
+<li>Lastly, we call both methods:</li>
+</ol>
+<pre style="padding-left: 60px">subscribe()<br/>publish()</pre>
+<p>That's it! The survey request feature is implemented. But, of course, a new feature is requested immediately. The back office wants to be able to send messages to single drivers and to also make sure that all drivers, even drivers without a RabbitMQ taxi inbox, receive the message. Let's look at the mandatory delivery of messages in RabbitMQ.</p>
+<h1 id="uuid-94fad707-a9d2-4fe5-9d13-c612db08b238">Making delivery mandatory</h1>
+<p>So far, the back office team at CC has been relying only on emails to interact with <em>individual</em> drivers. CC recently added the RabbitMQ-powered system discussed in <a href="4e1d39f3-47d1-4423-916c-2c2c01c75887.xhtml">Chapter 3</a>, <em>Sending Messages to Multiple Taxi Drivers</em>, allowing the back office to send information messages to all drivers. They now want to explore the possibility of sending messages to individual drivers from the back office service. Furthermore, if possible, CC would like drivers who do not have an inbox queue set up on RabbitMQ to get the message emailed to them immediately.</p>
+<p>In terms of messaging architecture, this is a known territory—the exact same model was put in place in <a href="377ec533-342d-4a08-9011-7176de197886.xhtml">Chapter 2</a>, <em>Creating a Taxi Application</em>, for client-to-taxi messages, as illustrated in the following diagram: </p>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-669 image-border" src="assets/b7f2b129-f8ab-44ab-844b-a6cc54321137.png" style="width:134.08em;height:60.75em;"/></p>
+<div class="caption packt_figref CDPAlignCenter CDPAlign">Fig 4.6: The back office team will use the taxi direct exchange for direct messages to drivers</div>
+<p>A direct exchange is used. The only difference is that, unlike the main application, the back office will not create and bind a taxi queue prior to sending a message. Instead, the back office will have to somehow detect that no such queue exists already and revert to email delivery for the message.</p>
+<p>What's unclear is how to achieve the second part of these requirements: how can the back office check for the existence of a queue? The AMQP specification doesn't specify a direct way to do this. The RabbitMQ management plugin exposes a REST API that could be used to check the existence of a queue, which is a tempting approach, but not what AMQP offers by default, which is preferred. Moreover, this could expose the process to a check-then-act type of race condition.</p>
+<p>Indeed, the queue could be created by another process after it is verified that it doesn't exist. Digging deep into the AMQP specification uncovers a feature that will handle this more elegantly, namely mandatory delivery. The <kbd>mandatory</kbd> field is part of the AMQP specification that tells RabbitMQ how to react if a message cannot be routed to a queue.</p>
+<div class="packt_tip">Consider the management REST API of RabbitMQ for cases when the AMQP specification doesn't have any way to support the functionality required. You can access the REST API documentation on the RabbitMQ broker at <kbd>http://localhost:15672/api/</kbd>.</div>
+<p>When a message is published on an exchange with the <kbd>mandatory</kbd> flag set to <kbd>true</kbd>, it will be returned by RabbitMQ if the message cannot be delivered to a queue. A message cannot be delivered to a queue either because no queue is bound to the exchange or because none of the bound queues have a routing key that would match the routing rules of the exchange. In the current case, this would mean that no taxi inbox queue is bound to a routing key that matches the taxi ID.</p>
+<p>The trick with returned messages is that RabbitMQ doesn't return them synchronously as a response to the publish operation: it returns them in an asynchronous fashion. This means that, for the developer, a specific message handler will have to be registered with RabbitMQ in order to receive the returned messages.</p>
+<p>This leads to the overall architecture illustrated in the following diagram:</p>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-670 image-border" src="assets/93516428-6fa5-42a2-8683-183185be0952.png" style="width:134.00em;height:61.00em;"/></p>
+<div class="packt_figref CDPAlignCenter CDPAlign">Fig 4.7: A dedicated handler takes care of returned messages</div>
+<p><span>Messages published to a queue that does not exist are returned to the return handler. This handler is now in charge of making sure that the information message reaches the driver in some other way—for example, through email.</span></p>
+<p>The default exchange type will be described before the new back office sender will be implemented.</p>
+<h2 id="uuid-2ffd5b3b-e010-4d26-bb5e-7383365b2472">Default exchanges in RabbitMQ</h2>
+<p>Each time a queue is created, it gets automatically bound to the default exchange with its queue name as the routing key. By publishing a message to the default exchange using the queue name as the routing key, the message will end up in the designated queue. This is also something that is going to be added into the following code example, in the <em>Implementing the back office sender </em><span>section.</span><span> </span></p>
+<p>What is this mysterious default exchange? It is a direct and durable exchange named <kbd>" "</kbd> (an empty string) that is automatically created by RabbitMQ for each virtual host.</p>
+<p>To make the default exchange visible in the management console, its empty string name is rendered as the AMQP default, as shown in the following screenshot:</p>
+<p class="CDPAlignCenter CDPAlign"><img class="aligncenter size-full wp-image-671 image-border" src="assets/cf0f4854-9d45-48c6-9a46-83f359885da5.png" style="width:67.25em;height:41.67em;"/></p>
+<div class="packt_figref CDPAlignCenter CDPAlign"><span>Fig </span>4.8: The default exchange is one among several built-in exchanges</div>
+<p>As you can see, there are a host of other predeclared exchanges that are automatically created for every virtual host. They are easy to spot because their names start with <span class="packt_screen">amq</span>. These exchanges are meant for testing and prototyping purposes only, so there is no need to use them in production.</p>
+<div class="packt_infobox">Sending messages to the default exchange is a convenient way to reach a particular queue; however, do not overuse this pattern. It creates tight coupling between producers and consumers because the producer becomes aware of particular queue names.</div>
+<p>With this explained, it's now time to add the necessary code to build this feature that was requested by the back office, which is implemented if a driver doesn't have an existing inbox queue.</p>
+<h2 id="uuid-7c9a2352-6f74-4cca-9ed9-1a5e24a7c4ca">Implementing the back office sender</h2>
+<p>CC's back office is now adding support for messages that were sent to drivers without a taxi inbox queue, messages that were returned. The Ruby client library, among other libraries, supports this feature very elegantly. The following is the required code to support the mandatory delivery of messages to taxi inboxes and to handle potentially returned messages.</p>
+<p>Start out by requiring the <kbd>bunny</kbd> client library and then set up a connection and a channel to RabbitMQ, as described in <a href="377ec533-342d-4a08-9011-7176de197886.xhtml">Chapter 2</a>, <em>Creating a Taxi Application</em>:</p>
+<pre>require "bunny"<br/> connection = Bunny.new ENV["RABBITMQ_URI"]<br/> <br/> connection.start<br/> channel = connection.create_channel</pre>
+<p>Then, declare a default exchange:</p>
+<pre>exchange = channel.default_exchange</pre>
+<p>A return handler is created, which handles the returned message:</p>
+<pre>exchange.on_return do |return_info, properties, content|<br/>  puts "A returned message!"<br/>end</pre>
+<p>Next, declare a durable inbox queue—in this example, named <kbd>taxi-inbox.100</kbd>:</p>
+<pre>queue = channel.queue("taxi-inbox.100", durable: true)</pre>
+<p><span>Subscribe to messages from RabbitMQ and give a simple notification to the developer. At this point, an email is sent, but please note that this example is kept short on purpose and doesn't include the method for actually sending the email:</span></p>
+<pre>queue.subscribe do |delivery_info, properties, content|<br/>  puts "A message is consumed."<br/>end</pre>
+<p>Messages are published with <kbd>routing_key</kbd> to target a particular taxi with the <kbd>mandatory</kbd> flag set to <kbd>true</kbd>. Since this queue is created and exists, this message should not be returned:</p>
+<pre>exchange.publish("A message published to a queue that does exist, it should NOT be returned", :mandatory =&gt; true, :routing_key =&gt; queue.name)</pre>
+<p>Another mandatory message is published, but this time to a random queue. This message is going to be returned and handled by the return handler:</p>
+<pre>exchange.publish("A message published to a queue that does not exist, it should be returned", :mandatory =&gt; true, :routing_key =&gt; "random-key")</pre>
+<p>Finally, close the connection:</p>
+<pre>connection.close</pre>
+<p>The preceding code example includes one message published to a queue that exists, while the other message is published to a queue with a random key name, a queue that does not exist. More code examples can be found at <a href="http://rubybunny.info/articles/exchanges.html">http://rubybunny.info/articles/exchanges.html</a>.<a href="http://rubybunny.info/articles/exchanges.html"/></p>
+<p>That is all! The feature is ready to go live. Messages are returned asynchronously and there is no need to handle them the right way.</p>
+<h1 id="uuid-54815551-942b-48ee-bdb9-03b22c5f7c61">Summary</h1>
+<p>This chapter included information about message TTL and explored how to use message property name expiration values while looking at other important topics about tweaking message delivery. The information also described the use of dead-letter exchanges and queues. The chapter then took a look at how to use the default exchange and how to send mandatory messages.</p>
+<p>CC is growing into a proper company and its platform is keeping right up with new features to meet the demands of drivers, customers, and back-office staff.</p>
+<p>So far, only asynchronous interactions with RabbitMQ have been discussed, which makes sense because it's the core premise of messaging. That said, it's possible to perform synchronous operations too, as the next chapter demonstrates. The following chapter will include information on the direct interaction between the taxi and the client. What will the next feature rollout entail? The only way to find out is to keep reading!</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>
