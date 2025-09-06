@@ -1,0 +1,628 @@
+<html><head></head><body>
+		<div>
+			<div id="_idContainer228" class="Content">
+			</div>
+		</div>
+		<div id="_idContainer229" class="Content">
+			<h1 id="_idParaDest-247"><a id="_idTextAnchor332"/>11. Macros</h1>
+		</div>
+		<div id="_idContainer236" class="Content">
+			<p class="callout-heading"><a id="_idTextAnchor333"/>Learning objectives</p>
+			<p class="callout">In this chapter, you will learn how Clojure macros work and how to write them. Macros are a very powerful feature of Clojure that simply does not exist in many other non-Lisp languages. Writing macros requires learning some new concepts and some new skills. This chapter will take you through the basic concepts: distinguishing between compile-time and run-time execution, quoting strategies and macro hygiene.</p>
+			<p class="callout">By the end of this chapter, you will be able to automatically generate functions and craft custom environments to streamline your code.</p>
+			<h1 id="_idParaDest-248"><a id="_idTextAnchor334"/>Introduction</h1>
+			<p><strong class="bold">Macros</strong> have been a distinctive feature of Lisps for decades. They are sometimes presented as a superpower native to the world of Lisp. While macros do exist in other languages, for many decades, Lisps have had the most complete macro systems. Why is this? Languages from the Lisp family share the ability to write code that modifies itself. People often talk about "code as data": Lisp programs, with their nested sets of parentheses called <strong class="bold">s-expressions</strong>, are in fact lists. And Lisps, as languages, are good at manipulating lists. The name "Lisp" originally came from "LISt Processor" when the language was first invented in 1958. As a result, Lisps can be made to operate on the code of Lisp programs. Usually, this means that a program modifies its own code.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">The term <strong class="bold">homoiconicity</strong> is often applied to Lisps. While the exact meaning of this term depends on who is talking, it generally means that Lisps are written in forms that they can manipulate themselves and that these same structures are more or less mirrored inside the Lisp interpreter or compiler. </p>
+			<p>Sometimes, this is called <strong class="bold">metaprogramming</strong>: writing a program that will write your program for you. If that sounds too good to be true, it's because it is. Macros can't do everything for you, of course. They can write parts of your program, though, and make your code easier to write by removing some of the boilerplate and other forms of repetition, or by transforming the language's syntax to better fit the problem at hand.</p>
+			<p>Has this ever happened to you? You're working on a large project and you find yourself writing function after function, method after method, and they are almost identical. You know the DRY principle: <em class="italic">Don't Repeat Yourself</em>. "Maybe I'm missing an abstraction here, maybe I could simplify this," you think to yourself. Yet when you try, there is always <em class="italic">one</em> piece of code that needs to be different and can't be abstracted away. It might be some conditional logic that is different each time. So, you give up on a cleaner solution and keep typing away. Macros might have helped.</p>
+			<p>Here's a slightly more concrete scenario. You're writing code with a lot of Boolean logic. After a few days, it starts to feel as though just about every function in your code base has a few of these:</p>
+			<p class="source-code">(and</p>
+			<p class="source-code">  (or (&gt; x 23) (&gt; y 55))</p>
+			<p class="source-code">  (or (= c d) (= e f))</p>
+			<p class="source-code">  (or (&gt; a 55) (&gt; b 55)))</p>
+			<p>The logic is slightly different each time, so you can't write a function, yet the logic is so similar each time that you feel like you're constantly repeating yourself. What if you could just write this instead?</p>
+			<p class="source-code">(and-ors (&gt; x 23) (&gt; y 55) | (= c d) (= e f) | (&gt; a 55) (&gt; b 55))</p>
+			<p>Well, you can. With a macro. </p>
+			<p>This eliminates one level of nested parentheses, so it's easier to type. It might even be easier to read. </p>
+			<p>There are a couple of reasons this would be impossible with a function. The most important reason is that a macro such as <strong class="source-inline">and-ors</strong> preserves the "short-circuiting" property of <strong class="source-inline">and</strong> (which is a macro itself). As soon as one of the conditions fails, evaluation stops and the remaining conditions are ignored, with possible performance benefits, or to avoid possible side effects. The other reason is that we're able to use <strong class="source-inline">|</strong> as a separation symbol without having to define it before using the macro. It's like being able to define our own language operators. </p>
+			<p>This kind of "magic" is possible because macros are executed before your code is compiled. Their purpose is to transform your source code before it goes to the compiler. If this sounds complicated and confusing, well, sometimes, it is. By building on concrete examples, however, you'll quickly realize that though macros aren't magical, they can be useful. And though they can be very complex, they don't always have to be. Understanding how they work will also help you avoid using them when they are not the best solution.</p>
+			<p>Clojure provides a modern macro system that is largely based on – and improves – the Common Lisp macro system, and as such, it is an extremely powerful tool. In spite of this power, Clojure programmers generally write far fewer macros than Common Lisp programmers, or Scheme or Racket programmers. The reasons for this are probably varied. Most books about macros, in any Lisp, start out by warning that macros should only be used when you're absolutely sure that a function will not work. Often, Clojure's functional programming is useful and powerful enough that writing a macro isn't really necessary.</p>
+			<p>Sometimes, though, a macro can be the best solution to a problem or can help simplify code that would otherwise be complicated and/or repetitive. Learning to write macros is also a rite of passage for any self-respecting Clojure programmer. So, let's go!</p>
+			<h1 id="_idParaDest-249"><a id="_idTextAnchor335"/>What is a Macro?</h1>
+			<p>A macro is a piece of code that is executed before your code is compiled. The code contained inside a macro call is transformed into something different and then passed on to the compiler. In Clojure, macros are defined by calling <strong class="source-inline">defmacro</strong>. A call to <strong class="source-inline">defmacro</strong> looks fairly similar to a call to <strong class="source-inline">defn</strong>:</p>
+			<p class="source-code">(defmacro my-macro</p>
+			<p class="source-code">  "Macro for showing how to write macros"</p>
+			<p class="source-code">  [param]</p>
+			<p class="source-code">  ;;TODO: do something</p>
+			<p class="source-code">  )</p>
+			<p>Despite this apparent similarity, there is a huge difference between macros and functions. Unlike functions, macros are not called at runtime. When your program finally starts running, the macros have already been called. The code they produce has already been included in your program <em class="italic">as if you had typed it in yourself</em>:</p>
+			<div>
+				<div id="_idContainer230" class="IMG---Figure">
+					<img src="image/B14502_11_01.jpg" alt="Figure 11.1: Separating compile time from runtime is the key to understanding macros &#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 11.1: Separating compile time from runtime is the key to understanding macros </p>
+			<p>Keep this idea in mind while you think about and work with macros: any macro in your code could, in principle, be replaced by code that you type out yourself. Some macros are very complex and it would be extremely difficult and painstaking to replace them with hand-written code, but with enough time, patience, and expertise, it would theoretically be possible. Just as you write your code before you run it, macros are expanded before your code is run.</p>
+			<h2 id="_idParaDest-250">A<a id="_idTextAnchor336"/> Very Minimal Macro</h2>
+			<p>Let's start with a very simple, and not very useful, macro:</p>
+			<p class="source-code">(defmacro minimal-macro []</p>
+			<p class="source-code">  '(println "I'm trapped inside a macro!"))</p>
+			<p>This looks a lot like a function definition. We could just as easily write this:</p>
+			<p class="source-code">(defn minimal-function []</p>
+			<p class="source-code">  (println "I'm trapped inside a function!"))</p>
+			<p>If we run both of these at the REPL, the results are also identical:</p>
+			<p class="source-code">user&gt; (minimal-macro)</p>
+			<p class="source-code">I'm trapped inside a macro!</p>
+			<p class="source-code">nil</p>
+			<p class="source-code">user&gt; (minimal-function)</p>
+			<p class="source-code">I'm trapped inside a function!</p>
+			<p class="source-code">nil</p>
+			<p>There is only one meaningful difference between these two definitions, and it is a very small one. Do you see it? It's the <strong class="source-inline">'</strong>, which is shorthand for the <strong class="source-inline">quote</strong> special form. Despite its small size, it makes a huge difference.</p>
+			<p>When we run <strong class="source-inline">minimal-function</strong>, the Clojure runtime simply executes the call to <strong class="source-inline">println</strong>. When we run <strong class="source-inline">minimal-macro</strong>, the macro actually inserts the <strong class="source-inline">(println "I'm trapped inside a macro!")</strong> statement into your source code before the Clojure runtime reads it. To be more precise, we say that Clojure <strong class="bold">expands</strong> the macro.</p>
+			<p>The best way to appreciate the difference between <strong class="source-inline">minimal-macro</strong> and <strong class="source-inline">minimal-function</strong> is to use Clojure's <strong class="source-inline">macroexpand</strong> function, which translates a call to a macro into actual code.</p>
+			<p>Here's the result of calling <strong class="source-inline">macroexpand</strong> on a call to <strong class="source-inline">minimal-function</strong>:</p>
+			<p class="source-code">user&gt; (macroexpand '(minimal-function))</p>
+			<p class="source-code">(minimal-function)</p>
+			<p>This seems a little redundant, and for good reason: <strong class="source-inline">(minimal-function)</strong> is not a macro, and so only expands into itself.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">When calling <strong class="source-inline">macroexpand</strong>, it's important to quote the form you are expanding. Otherwise, <strong class="source-inline">macroexpand</strong> will try to expand the results of the call to <strong class="source-inline">minimal-function</strong>. Because <strong class="source-inline">println</strong> returns <strong class="source-inline">nil</strong>, the result would be <strong class="source-inline">nil</strong>, and there would be nothing to expand. Whenever you get surprising results from <strong class="source-inline">macroexpand</strong>, make sure that you haven't forgotten to quote the macro.</p>
+			<p>Expanding <strong class="source-inline">(minimal-macro)</strong> is quite different, though:</p>
+			<p class="source-code">user&gt; (macroexpand '(minimal-macro))</p>
+			<p class="source-code">(println "I'm trapped inside a macro!")</p>
+			<p>When we type <strong class="source-inline">(minimal-macro)</strong> at the REPL, it is expanded into the <strong class="source-inline">println</strong> expression, exactly as if you had typed it out yourself. Notice that the expanded form is no longer quoted. (As you're probably starting to guess, quoting is an important part of macro writing.)</p>
+			<h2 id="_idParaDest-251">C<a id="_idTextAnchor337"/>ompile Time and Run Time</h2>
+			<p>To see the importance of quoting, let's try writing a macro without the <strong class="source-inline">'</strong> at the beginning:</p>
+			<p class="source-code">(defmacro mistaken-macro []</p>
+			<p class="source-code">  (println "I'm trapped... somewhere!"))</p>
+			<p>Calling this macro in the REPL yields the same results:</p>
+			<p class="source-code">user&gt; (mistaken-macro)</p>
+			<p class="source-code">I'm trapped... somewhere!</p>
+			<p class="source-code">nil</p>
+			<p>What's wrong with that? <strong class="source-inline">mistaken-macro</strong> seems to work just as well as the others… Or does it? Let's try expanding it:</p>
+			<p class="source-code">user&gt; (macroexpand '(mistaken-macro))</p>
+			<p class="source-code">I'm trapped... somewhere!</p>
+			<p class="source-code">nil</p>
+			<p>That's strange! The output is the same as when we call the macro directly, yet it is totally different from both <strong class="source-inline">minimal-function</strong>, which just expanded to itself, and <strong class="source-inline">minimal-macro</strong>, which expanded into the <strong class="source-inline">println</strong> expression. So, what is really going on here? And why did removing the <strong class="source-inline">quote</strong> apostrophe make such a difference?</p>
+			<p>The fact that calling <strong class="source-inline">(mistaken-macro)</strong> produces the same output as the other forms could almost be called a coincidence. The call to <strong class="source-inline">println</strong> happens, but it happens at compile time. And because <strong class="source-inline">println</strong> returns nil, <strong class="source-inline">(mistaken-macro)</strong> expands to exactly that: <strong class="source-inline">nil</strong>. This is also why we see the <strong class="source-inline">"I'm trapped…"</strong> message when we call <strong class="source-inline">macroexpand</strong>: that message is a side effect of the macro expansion!</p>
+			<p>The difference between <strong class="source-inline">minimal-macro</strong> and <strong class="source-inline">mistaken-macro</strong> is that the former, by quoting the form, actually returns a <strong class="bold">list</strong> that is not executed until runtime. The list that is returned contains the <strong class="source-inline">println</strong> symbol and the message string. <strong class="source-inline">mistaken-macro</strong>, on the other hand, expands to <strong class="source-inline">nil</strong> because it calls <strong class="source-inline">println</strong> immediately, at expansion time.</p>
+			<p>There are several important points here that we will build on in the rest of this chapter:</p>
+			<ul>
+				<li>Code is actually run when macros are expanded, and when the code is run. This is why <strong class="source-inline">mistaken-macro</strong> actually prints out a message.</li>
+				<li>Understanding the difference between compile time and runtime is important.</li>
+				<li>Quoting is important because it is one of the ways that you, as a programmer, control which code is executed when the macro is expanded, and which code is run at runtime.</li>
+			</ul>
+			<p>Remember: a macro is code that writes code. Let's write a slightly more sophisticated macro that will expand to an arbitrary number of <strong class="source-inline">println</strong> calls. Our goal is for the macro to expand to this if we provide <strong class="source-inline">3</strong> as a parameter:</p>
+			<p class="source-code">(do</p>
+			<p class="source-code">  (println "Macro")</p>
+			<p class="source-code">  (println "Macro")</p>
+			<p class="source-code">  (println "Macro"))</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">When working with macros, it is always a good idea to start by thinking about the code you want the macro to produce and then work back to how you will produce it.</p>
+			<p>Rather than thinking of this as a series of steps to execute, it's best to think of it as a list containing a symbol (<strong class="source-inline">do</strong>) and a series of sub-lists, each containing a symbol and a string. Thinking of <strong class="source-inline">do</strong> and <strong class="source-inline">println</strong> as symbols rather than a special form and a function is a good approach because, at expansion time, we just want to make sure that the form we end up producing has the correct symbols in the right order. Thinking of <strong class="source-inline">println</strong> as "just a symbol" is how the macroexpansion code "thinks" about it too if it is quoted.</p>
+			<p>To produce a list of lists, we might use <strong class="source-inline">repeat</strong>:</p>
+			<p class="source-code">user&gt; (repeat 3 '(println "Macro"))</p>
+			<p class="source-code">((println "Macro")</p>
+			<p class="source-code"> (println "Macro")</p>
+			<p class="source-code"> (println "Macro"))</p>
+			<p>There's that single quotation mark again. If we left it out, we would get <strong class="source-inline">(nil nil nil nil nil)</strong>. And thanks to quoting, none of those calls to <strong class="source-inline">println</strong> are ever called. We are getting close to our target code and we haven't even called <strong class="source-inline">defmacro</strong> yet.</p>
+			<p>The only thing missing is the initial <strong class="source-inline">do</strong> symbol. Adding a value to the front of a list is fairly easy too, as long as we quote it:</p>
+			<p class="source-code">user&gt; (cons 'do (repeat 3 '(println "Macro")))</p>
+			<p class="source-code">(do</p>
+			<p class="source-code"> (println "Macro")</p>
+			<p class="source-code"> (println "Macro")</p>
+			<p class="source-code"> (println "Macro"))</p>
+			<p>There's our code! All that's left is to wrap this up as a macro:</p>
+			<p class="source-code">user&gt; (defmacro multi-minimal [n-times]</p>
+			<p class="source-code">        (cons 'do (repeat n-times '(println "Macro"))))</p>
+			<p>When we call the macro directly, it seems to work:</p>
+			<p class="source-code">user&gt; (multi-minimal 3)</p>
+			<p class="source-code">Macro</p>
+			<p class="source-code">Macro</p>
+			<p class="source-code">Macro</p>
+			<p class="source-code">nil</p>
+			<p>And <strong class="source-inline">macroexpand</strong> confirms it:</p>
+			<p class="source-code">user&gt; (macroexpand '(multi-minimal 3))</p>
+			<p class="source-code">(do</p>
+			<p class="source-code"> (println "Macro")</p>
+			<p class="source-code"> (println "Macro")</p>
+			<p class="source-code"> (println "Macro"))</p>
+			<p>The point here is to show that a macro is code that writes code. The contents of <strong class="source-inline">multi-minimal</strong> don't look very much like the output. We could even go further and wrap them in a function:</p>
+			<p class="source-code">user&gt; (defn multi-min [n-times]</p>
+			<p class="source-code">        (cons 'do (repeat n-times '(println "Macro"))))</p>
+			<p class="source-code">#'user/multi-min</p>
+			<p class="source-code">user&gt; (defmacro multi-minimal-two [n-times]</p>
+			<p class="source-code">        (multi-min n-times))</p>
+			<p class="source-code">#'user/multi-minimal-two</p>
+			<p class="source-code">user&gt; (multi-minimal-two 3)</p>
+			<p class="source-code">Macro</p>
+			<p class="source-code">Macro</p>
+			<p class="source-code">Macro</p>
+			<p class="source-code">nil</p>
+			<p>As we'll see later, some macros look a little bit like templates, but there is nothing that requires their definitions to resemble the code that is output. Breaking the code-building code out into a separate function can be a useful pattern, especially for debugging.</p>
+			<h2 id="_idParaDest-252">R<a id="_idTextAnchor338"/>untime Parameters</h2>
+			<p>Obviously, we can't expect this particular macro to be very useful. Still, it would be nice if it would print something besides "macro." What if we gave it a second parameter – a string to be passed on to all those <strong class="source-inline">println</strong> calls? There's already one parameter; adding a second one should be easy enough… right?</p>
+			<p>Let's try just adding a parameter and passing that to <strong class="source-inline">println</strong>:</p>
+			<p class="source-code">user&gt; (defmacro parameterized-multi-minimal [n-times s]</p>
+			<p class="source-code">        (cons 'do (repeat n-times '(println s))))</p>
+			<p class="source-code">#'user/parameterized-multi-minimal</p>
+			<p>Unfortunately, this doesn't work:</p>
+			<p class="source-code">user&gt; (parameterized-multi-minimal 3 "My own text.")</p>
+			<p class="source-code">Syntax error compiling at (Chapter11:localhost:58838(clj)*:49:36).</p>
+			<p class="source-code">Unable to resolve symbol: s in this context</p>
+			<p>What's wrong? As always, when we don't understand what is wrong with a macro, we reach for <strong class="source-inline">macroexpand</strong>:</p>
+			<p class="source-code">user&gt; (macroexpand '(parameterized-multi-minimal 3 "My own text."))</p>
+			<p class="source-code">(do (println s) (println s) (println s))</p>
+			<p>By the time the macro has been expanded, the <strong class="source-inline">s</strong> parameter has disappeared. Where did it go? Unlike <strong class="source-inline">defn</strong>, <strong class="source-inline">defmacro</strong> does not provide a context for runtime variable bindings. The original <strong class="source-inline">n-times</strong> parameter is available while the macro is being expanded, but afterward, the macro itself has been replaced by the code it produced. There is no trace left of <strong class="source-inline">n-times</strong>, or <strong class="source-inline">s</strong>.</p>
+			<p>Of course, there must be a way around this, since macros would be rather useless if they didn't accept parameters. If we want there to be a context, we just need to create that context explicitly ourselves in quoted code that will still be present at runtime. In a case like this, the simplest solution would be a <strong class="source-inline">let</strong> binding. We need to change our target code to something like this:</p>
+			<p class="source-code">(let [string-to-print "My own text."]</p>
+			<p class="source-code">  (println string-to-print)</p>
+			<p class="source-code">  (println string-to-print)</p>
+			<p class="source-code">  (println string-to-print))</p>
+			<p>Why is the <strong class="source-inline">let</strong> binding called <strong class="source-inline">string-to-print</strong> and not <strong class="source-inline">s</strong>? Remember that when the code is finally run, <strong class="source-inline">s</strong> and <strong class="source-inline">n-times</strong> are no longer present as symbols. <strong class="source-inline">n-times</strong> is present in a way since it is what determined how many <strong class="source-inline">println</strong> calls end up in the expanded expression. The <strong class="source-inline">s</strong> parameter from the call to the macro needs to live on, not as <strong class="source-inline">string-to-print</strong>, but as the string bound to <strong class="source-inline">string-to-print</strong>. In other words, in the preceding target code, <strong class="source-inline">s</strong> is there: it's <strong class="source-inline">"My own text"</strong>.</p>
+			<p>We can do this by using some of Clojure's list-manipulating power to carefully build the exact code that we need, that is, a <strong class="source-inline">let</strong> binding containing a sub-list of <strong class="source-inline">println</strong> expressions:</p>
+			<p class="source-code">(defmacro parameterized-multi-minimal [n-times s]</p>
+			<p class="source-code">  (concat (list 'let ['string-to-print s])</p>
+			<p class="source-code">          (repeat n-times '(println string-to-print))))</p>
+			<p>We'll check to make sure it works:</p>
+			<p class="source-code">user&gt; (parameterized-multi-minimal 3 "My own text.")</p>
+			<p class="source-code">My own text.</p>
+			<p class="source-code">My own text.</p>
+			<p class="source-code">My own text.</p>
+			<p class="source-code">nil</p>
+			<p>This time, <strong class="source-inline">s</strong> is not quoted when we bind it to <strong class="source-inline">string-to-print</strong>. When the macro is expanded, the value of <strong class="source-inline">s</strong> will be inserted into the list that the macro is going to return. Items such as <strong class="source-inline">let</strong> and <strong class="source-inline">string-to-print</strong> are quoted, because we don't want their values in the macro expansion; we want them to appear as symbols.</p>
+			<p>To achieve this, we've had to do some tricky quoting, applying a single quote to some items and not to others. This is why we used <strong class="source-inline">list</strong> instead of <strong class="source-inline">'()</strong>. The single quote is a shortcut for writing <strong class="source-inline">(quote…)</strong>. <strong class="source-inline">quote</strong> is a special form and its effect is to quote everything inside the parentheses, including sub-lists. Sometimes, this is exactly what we want, as with <strong class="source-inline">'(println string-to-print)</strong>. We need both items in that list to appear as symbols, not as values. <strong class="source-inline">list</strong> simply returns a list. By using <strong class="source-inline">list</strong>, we can choose which items should be quoted or not.</p>
+			<p>This is not an optimal quoting solution. Shortly, we'll see that Clojure proposes another more sophisticated syntax that makes this easier. The underlying principles are the same, however, so it's good to see how the mechanics of quoting work.</p>
+			<p>There is one more noteworthy (or simply strange) thing in this version of the macro. Why are we using <strong class="source-inline">concat</strong> to join the list and the results of the call to <strong class="source-inline">repeat</strong>? Previously, we wrapped all the <strong class="source-inline">println</strong> calls inside a <strong class="source-inline">do</strong> expression. Now that we have a <strong class="source-inline">let</strong> block, this isn't necessary anymore. At the same time, we still need to make sure that the <strong class="source-inline">println</strong> calls aren't wrapped in a list. Using <strong class="source-inline">concat</strong> solves the immediate problem but it is not an elegant solution. In the next section, the new quoting syntax will make this easier as well.</p>
+			<h1 id="_idParaDest-253">S<a id="_idTextAnchor339"/>yntax Quoting</h1>
+			<p>A lot of the art of writing macros lies in mastering the separation between expansion code and output code. A lot of the control over that separation depends on deciding what gets quoted when the macro is expanded and what does not get quoted. The previous example started to reveal the limits of the standard <strong class="source-inline">quote</strong> special form. Once a list has been quoted, all its symbols and sub-lists are <strong class="source-inline">quote</strong>d as well. As such, <strong class="source-inline">quote</strong> is a fairly heavy-handed tool.</p>
+			<p>For this reason, Clojure, like many Lisps, provides a more sophisticated quoting mechanism called <strong class="bold">syntax quoting</strong>. Syntax quoting uses <strong class="source-inline">'</strong>, the backtick character, instead of the standard single quote. When used by itself, the backtick has more or less the same behavior as <strong class="source-inline">quote</strong>: all symbols and sub-lists are quoted by default. The difference is that syntax quoting allows us to mark certain forms, sub-lists, or symbols that should not be quoted.</p>
+			<p>With syntax quoting, we can simplify our macro from the previous section:</p>
+			<p class="source-code">(defmacro parameterized-with-syntax [n-times s]</p>
+			<p class="source-code">        '(do ~@(repeat n-times '(println ~s))))</p>
+			<p>How does this work? There are three new things here:</p>
+			<ul>
+				<li>The <strong class="source-inline">syntax-quote</strong> backtick, in front of the <strong class="source-inline">do</strong> form and the <strong class="source-inline">println</strong> form</li>
+				<li>The <strong class="source-inline">~</strong>, the tilde, in front of the <strong class="source-inline">s</strong> symbol</li>
+				<li>The <strong class="source-inline">~@</strong> in front of the <strong class="source-inline">repeat</strong> form</li>
+			</ul>
+			<p>The <strong class="source-inline">syntax-quote</strong> backticks initiate syntax quoting. Then, we can see two different ways of preventing quoting on child elements. The simplest of the two is the tilde in <strong class="source-inline">'(println ~s)</strong>: the <strong class="source-inline">println</strong> symbol, where the list itself will be quoted when the macro is expanded, but <strong class="source-inline">~s</strong> will evaluate to the value of <strong class="source-inline">s</strong>. The tilde is called <strong class="source-inline">unquote</strong>. Thanks to <strong class="source-inline">unquote</strong>, we can now insert the value of <strong class="source-inline">s</strong> into each <strong class="source-inline">println</strong> call and we no longer need to wrap the entire expression in a <strong class="source-inline">let</strong> expression.</p>
+			<p><strong class="source-inline">~@</strong> is called <strong class="source-inline">unquote-splicing</strong> and does two things at once. Like <strong class="source-inline">unquote</strong>, it prevents quoting on the expression it is attached to. Unlike <strong class="source-inline">unquote</strong>, though, it only works on lists because its role is to splice the contents of the list into the containing list. Before, we had to use <strong class="source-inline">cons</strong> or <strong class="source-inline">concat</strong> to avoid ending up with all the <strong class="source-inline">(println "String!")</strong> expressions wrapped inside a list.</p>
+			<p>Expanded, a call to the new macro looks like this:</p>
+			<p class="source-code">user&gt; (macroexpand '(parameterized-with-syntax 3 "Syntax quoting!"))</p>
+			<p class="source-code">(do</p>
+			<p class="source-code"> (clojure.core/println "Syntax quoting!")</p>
+			<p class="source-code"> (clojure.core/println "Syntax quoting!")</p>
+			<p class="source-code"> (clojure.core/println "Syntax quoting!"))</p>
+			<p>You may notice a slight difference relative to some of the previous macro expansions: the <strong class="source-inline">println</strong> symbols are namespaced! This is an important feature for writing robust macros that we will explore shortly when we get to the topic of macro hygiene. First, though, let's practice using our new macro skills.</p>
+			<h2 id="_idParaDest-254"><a id="_idTextAnchor340"/>Exercise 11.01: The and-ors Macro</h2>
+			<p>At the beginning of this chapter, to whet your appetite for macro magic, we showed you a macro called <strong class="source-inline">and-ors</strong>. Its purpose was to make it easier to write nested Boolean logic when you have lots of expressions with or contained in an overarching <strong class="source-inline">and</strong> expression. </p>
+			<p>Consider this function (hopefully, real code would have more descriptive parameter names!):</p>
+			<p class="source-code">(defn validate-params</p>
+			<p class="source-code">  [a b c d]</p>
+			<p class="source-code">  (and</p>
+			<p class="source-code">    (or (&gt; a 5) (&gt; a b))</p>
+			<p class="source-code">    (or (= b a) (&gt; b 5))</p>
+			<p class="source-code">    (or (&gt; a c) (&gt; c 5) (= c b))</p>
+			<p class="source-code">    (or (= a d) (&gt; d 5))))</p>
+			<p>Logic like this is inherently hard to read, especially when there are lots of conditions. </p>
+			<p>Let's suppose that you are writing a library that will contain lots of important business logic that is mostly expressed with a long series of Boolean operators, as in the preceding function. Anything we can do to make it simpler will help the overall readability of your code base. The <strong class="source-inline">and-ors</strong> macro would be a welcome improvement. Instead of the nested <strong class="source-inline">or</strong> expressions in the preceding function, you could write this:</p>
+			<p class="source-code">(defn validate-params</p>
+			<p class="source-code">  [a b c d]</p>
+			<p class="source-code">  (and-ors</p>
+			<p class="source-code">    (&gt; a 5) (&gt; a b) |</p>
+			<p class="source-code">    (= b a) (&gt; b 5) |</p>
+			<p class="source-code">    (&gt; a c) (&gt; c 5) (= c b) |</p>
+			<p class="source-code">    (= a d) (&gt; d 5)))</p>
+			<p>This is an admittedly minor improvement, but it does remove some parentheses and generally helps put the accent on the logical expressions themselves. Now, we just need to figure out how to make this work:</p>
+			<ol>
+				<li>Start with a skeleton for <strong class="source-inline">defmacro</strong>: <p class="source-code">(defmacro and-ors [&amp; or-exps]</p><p class="source-code">  ;; TODO: write a macro</p><p class="source-code">  )</p><p>Just like with functions, macros can be variadic and accept an unknown number of  arguments. This is exactly what we need here since we don't know how many <strong class="source-inline">or</strong> expressions there will be.</p></li>
+				<li>Write the logic that will split the list of <strong class="source-inline">or-exps</strong> each time there is a <strong class="source-inline">|</strong> symbol:<p class="source-code">(defmacro and-ors [&amp; or-exps]</p><p class="source-code">  (let [groups (remove (partial = '(|)) (partition-by (partial = '|) or-exps))]</p><p class="source-code">    ;; TODO: do something finally</p><p class="source-code">    ))</p><p>Breaking the list of arguments in <strong class="source-inline">or-exps</strong> into sub-lists is a simple sequence operation. There are several ways to do this, including writing a small external function. Here, we've chosen to use <strong class="source-inline">partition-by</strong>. Remember, <strong class="source-inline">partition-by</strong> takes a function that it uses to decide where to break a list. The list is broken every time the function returns a different response. We only care about whether the current item is <strong class="source-inline">|</strong> or something else, which is exactly what <strong class="source-inline">(partial = '|)</strong> will do. The only trick here is that we need to quote the <strong class="source-inline">|</strong> symbol to make sure that we are talking about the symbol itself and not its value. (Which is good, since it doesn't have a value.)</p><p>Splitting on the <strong class="source-inline">|</strong> symbols leaves the symbols as sub-lists. You can try this in the REPL if you quote the <strong class="source-inline">|</strong> symbol in the input:</p><p class="source-code">user&gt; (partition-by (partial = '|) [1 2 '| 3 4])</p><p class="source-code">((1 2) (|) (3 4))</p><p class="source-code"> </p><p>We need to remove the <strong class="source-inline">(|)</strong> sublist from the results. We'll use <strong class="source-inline">remove</strong> for this:</p><p class="source-code">(remove #(= '(|) %) (partition-by (partial = '|) or-exps))</p><p class="callout-heading">Note</p><p class="callout">The <strong class="source-inline">|</strong> symbol has now disappeared from our code. It will not be present in any way in the compiled code. This is why we don't have to worry about it being defined or namespaced. From the point of view of the compiled code, it's like it was never there in the first place.</p><p>Now, we have our <strong class="source-inline">groups</strong> binding, which contains a list of lists.</p></li>
+				<li>Prepare to output the outer <strong class="source-inline">and</strong> expression.<p>The structure we want to create is that of an <strong class="source-inline">and</strong> expression containing zero or more expressions. So first, we need the <strong class="source-inline">and</strong> expression:</p><p class="source-code">(defmacro and-ors [&amp; or-exps]</p><p class="source-code">  (let [groups (remove (partial = '(|)) (partition-by (partial = '|) or-exps))]</p><p class="source-code">    '(and</p><p class="source-code">        ;; TODO: the ors</p><p class="source-code">        )))</p><p>Here, the important thing is the quoting. The backtick in front of <strong class="source-inline">(and…)</strong> starts the syntax quoting. This ensures, first of all, that the <strong class="source-inline">(and…)</strong> form will be output, and secondly that we will be able to use <strong class="source-inline">splice-insert</strong> to include the new <strong class="source-inline">or</strong> expressions.</p></li>
+				<li>Convert each sub-list into an <strong class="source-inline">or</strong> expression.<p>Here is the complete macro:</p><p class="source-code">(defmacro and-ors [&amp; or-exps]</p><p class="source-code">  (let [groups (remove (partial = '(|)) (partition-by (partial = '|) or-exps))]</p><p class="source-code">    '(and</p><p class="source-code">        ~@(map (fn [g] '(or ~@g)) groups))))</p><p>The call to <strong class="source-inline">map</strong> will return a list. Since we don't want an extra set of parentheses inside the <strong class="source-inline">(and…)</strong> expression, we use <strong class="source-inline">insert-splice</strong> here. Inside the anonymous mapping function, we need to start syntax quoting again since it was suspended by the <strong class="source-inline">~@</strong> in front of <strong class="source-inline">(map…)</strong>. That's why we've put the backtick in front of <strong class="source-inline">(or…)</strong>. The same process is more or less repeated since each element in <strong class="source-inline">groups</strong> is a list of items to be placed inside an <strong class="source-inline">(or…)</strong> expression.</p></li>
+				<li>Test and macroexpand your new macro:<p class="source-code">user&gt; (and-ors (&gt; 5 3) (= 6 6) | (&gt; 6 3) | (= 5 5 5))</p><p class="source-code">true</p><p>It seems to work. Let's try it with nested <strong class="source-inline">and-ors</strong>:</p><p class="source-code">user&gt; (and-ors </p><p class="source-code">        (and-ors (= 3 3) | (= 5 5) (= 6 8))</p><p class="source-code">          | </p><p class="source-code">          (&gt; 5 3) (= 6 6) </p><p class="source-code">          | </p><p class="source-code">          (&gt; 6 3) </p><p class="source-code">          | </p><p class="source-code">          (= 5 5 5))</p><p class="source-code">true</p><p>Macroexpansion will show us whether we are getting exactly what we originally wanted. To avoid expanding the <strong class="source-inline">and</strong> and <strong class="source-inline">or</strong> macros, we'll use a different version of <strong class="source-inline">macroexpand</strong> here, called <strong class="source-inline">macroexpand-1</strong>. The difference between the two is that, when a macro expansion contains other macros, <strong class="source-inline">macroexpand</strong> will continue, recursively, to expand all of the nested macros, while <strong class="source-inline">macroexpand-1</strong> will stop after the first macro. When writing your own macros, <strong class="source-inline">macroexpand-1</strong> is often more intuitive because it prevents us from seeing the details of built-in macros, such as <strong class="source-inline">let</strong> or, as in this example, <strong class="source-inline">and</strong> or <strong class="source-inline">or</strong>:</p><p class="source-code">user&gt; (macroexpand-1 '(and-ors (&gt; 5 3) (= 6 6) | (&gt; 6 3) | (= 5 5 5)))</p><p class="source-code">(clojure.core/and</p><p class="source-code">  (clojure.core/or (&gt; 5 3) (= 6 6))</p><p class="source-code">  (clojure.core/or (&gt; 6 3))</p><p class="source-code">  (clojure.core/or (= 5 5 5)))</p><p>This exercise shows how even a four-line macro can allow you to introduce what could be a useful syntactical improvement. The decision to write a macro such as <strong class="source-inline">and-ors</strong> would be based on whether or not it was starting to be painful to write all those repetitive Booleans in your code base.</p></li>
+			</ol>
+			<h2 id="_idParaDest-255">E<a id="_idTextAnchor341"/>xercise 11.02: An Automatic HTML Library</h2>
+			<p>In this exercise, you will write a macro that, given a list of items, automatically creates a function for each item. This can be useful in situations where you need a large number of very similar functions.</p>
+			<p>Back in <em class="italic">Chapter 6</em>, <em class="italic">Recursion and Looping</em>, you built a library that translated Clojure vectors into HTML, using keywords to identify the HTML tags. In that system, an HTML element would be written like this:</p>
+			<p class="source-code">[:h1 "First things first"]</p>
+			<p>The output would be as follows: </p>
+			<p class="source-code">&lt;h1&gt;First things first&lt;/h1&gt;</p>
+			<p>Recently, a co-worker decided to rewrite the library using functions rather than vectors. With this new approach, an HTML element would be written as a function:</p>
+			<p class="source-code">(h1 {:class "intro"} "First things first")</p>
+			<p>Functions can be nested so that developers can write entire HTML pages in their source code. </p>
+			<p>Unfortunately, your co-worker left before they could finish the project and you've been asked to take over.</p>
+			<p>You can view what the new library looks like at <a href="https://packt.live/2Gf4bn9">https://packt.live/2Gf4bn9</a>.</p>
+			<p>As you read through the code, you start to see how the library was supposed to work, and also why it was abandoned. You realize that, like your former colleague, you don't feel like writing out a separate function for every element in the HTML spec! It would be a long, buggy process of copying and pasting hard-to-maintain code. Looking closer, you start to suspect that your former colleague had the same idea. The last function, <strong class="source-inline">tag-fn</strong>, looks suspiciously like an attempt to generalize the approach. It also includes a rather clever use of <strong class="source-inline">mapcat</strong>, similar to the wrap-unwrap technique from <em class="italic">Chapter 4</em>, <em class="italic">Mapping and Filtering</em>, so that a list of items can be spliced into a containing list. Unfortunately, the file ends there.</p>
+			<p>Using <strong class="source-inline">tag-fn</strong> to produce a function for each element seems like a good idea. It still means defining a <strong class="source-inline">var</strong> for each kind of HTML element. Your code would look like this:</p>
+			<p class="source-code">(def p (tag-fn "p"))</p>
+			<p class="source-code">(def ul (tag-fn "ul"))</p>
+			<p class="source-code">(def li (tag-fn "li"))</p>
+			<p class="source-code">(def h1 (tag-fn "h1"))</p>
+			<p class="source-code">(def h2 (tag-fn "h2"))</p>
+			<p class="source-code">(def h3 (tag-fn "h3"))</p>
+			<p class="source-code">(def h4 (tag-fn "h4"))</p>
+			<p class="source-code">;; etc. etc. etc.</p>
+			<p>This is a lot better than typing out all those functions, but it still seems too repetitive. Maybe a macro could help?</p>
+			<p>With the right macro, we could just copy a list of elements from the HTML specification, wrap them in quotes, and run our macro once while loading the source file:</p>
+			<p class="source-code">(define-html-tags "p" "ul" "li" "h1" "h2" "h3" "h4")</p>
+			<p>The output would be a series of <strong class="source-inline">def</strong> expressions, just like what we have in the preceding code. Let's have a look:</p>
+			<ol>
+				<li value="1">Set up a new project directory with an empty <strong class="source-inline">deps.edn</strong>. Copy the <strong class="source-inline">htmlgen.clj</strong> file from this book's GitHub repository (<a href="https://packt.live/2Gf4bn9">https://packt.live/2Gf4bn9</a>). You will add your code to the bottom of the file.</li>
+				<li>First, sketch out the code you want to produce. Because we need to be able to produce an arbitrary number of functions, our macro will return a list of <strong class="source-inline">def</strong> forms. It will be simpler to enclose those forms in a <strong class="source-inline">do</strong> expression:<p class="source-code">(do</p><p class="source-code">  (def h1 (tag-fn "h1"))</p><p class="source-code">  (def h2 (tag-fn "h2"))</p><p class="source-code">  (def h3 (tag-fn "h3"))</p><p class="source-code">  (def h4 (tag-fn "h4")))</p></li>
+				<li>Write the skeleton for the macro with syntax quoting applied to the <strong class="source-inline">do</strong> expression:<p class="source-code">(defmacro define-html-tags [&amp; tags]</p><p class="source-code">  '(do</p><p class="source-code">      ;; TODO: macro code</p><p class="source-code">      ))</p><p class="callout-heading">Note</p><p class="callout">We give the macro a <strong class="bold">variadic</strong> call signature: <strong class="source-inline">[&amp; tags]</strong>. We'll come back to this later.</p></li>
+				<li>Map over the arguments in <strong class="source-inline">tags</strong> to produce a series of <strong class="source-inline">def</strong> expressions:<p class="source-code">(defmacro define-html-tags [&amp; tags]</p><p class="source-code">  '(do</p><p class="source-code">      ~@(map (fn [tagname]</p><p class="source-code">              '(def ~(symbol tagname) (tag-fn ~tagname)))</p><p class="source-code">            tags)))</p><p>There are several things to note here. Look carefully at what is quoted and what is not: the use of <strong class="source-inline">unquote-splice</strong> (<strong class="source-inline">~@</strong>) ensures that the elements returned by <strong class="source-inline">map</strong> are the direct children of the <strong class="source-inline">do</strong> expression. Then, with <strong class="source-inline">syntax-quote</strong> (<strong class="source-inline">'</strong>), we quote the entire <strong class="source-inline">def</strong> expression, except for what is going to become the name of the var we are defining, which we protect from quoting with <strong class="source-inline">unquote</strong> (<strong class="source-inline">~</strong>). Finally, the <strong class="source-inline">tag-fn</strong> expression inherits its quoting from the backtick in front of <strong class="source-inline">def</strong>. We still need to use <strong class="source-inline">unquote</strong> so that the <strong class="source-inline">tagname</strong> value, something like <strong class="source-inline">"h1"</strong>, is inserted rather than just the <strong class="source-inline">tagname</strong> symbol itself.</p><p>The <strong class="source-inline">symbol</strong> function is needed here because the input is a string. <strong class="source-inline">tag-fn</strong> takes a string, but its name needs to be a symbol.</p></li>
+				<li>Test the new macro. Evaluate the macro definition and then use it to define some HTML element functions:<p class="source-code">(define-html-tags "h1" "h2" "h3" "h4" "h5" "p" "div" "span")</p><p>By copying an official list of HTML tags, you can quickly implement the entire standard. From inside the <strong class="source-inline">packt-clojure.htmlgen</strong> namespace, you are now able to generate HTML elements with your new functions:</p><p class="source-code">packt-clj.htmlgen&gt; (div</p><p class="source-code">                      (h1 "First things first")</p><p class="source-code">                      (p {:class "intro"} "What's the best way to get started?"))</p><p class="source-code">"&lt;div&gt;&lt;h1&gt;First things first&lt;/h1&gt;&lt;p class=\"intro\"&gt;What's the best way to get started?&lt;/p&gt;&lt;/div&gt;"</p><p>It works. You've fulfilled the requirements of the assignment and management is satisfied… for now, at least.</p><p>Automatically producing a large number of functions is a task that macros are well adapted for. A macro like this one is little more than a template for a function.  Macros can do much more, of course, but sometimes, mass-producing simple functions is exactly what you need.</p></li>
+			</ol>
+			<p>In this exercise, the macro we wrote was variadic. It accepts a variable number of arguments and its parameter list looks like this: <strong class="source-inline">[&amp; tag]</strong>. It might be tempting to rewrite the macro so that it accepts a list or a vector of tag names. That way, we could define our list and then call the macro on it separately. Here's our macro, rewritten to accept a list instead:</p>
+			<p class="source-code">(defmacro define-html-tags-from-list [tags]</p>
+			<p class="source-code">  '(do</p>
+			<p class="source-code">     ~@(map (fn [tagname]</p>
+			<p class="source-code">              '(def ~(symbol tagname) (tag-fn ~tagname)))</p>
+			<p class="source-code">            tags)))</p>
+			<p>Unfortunately, this doesn't work:</p>
+			<div>
+				<div id="_idContainer231" class="IMG---Figure">
+					<img src="image/B14502_11_02.jpg" alt="Figure 11.2: At compile time, a symbol such as heading-tags is just a symbol, not a list&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 11.2: At compile time, a symbol such as heading-tags is just a symbol, not a list</p>
+			<p>The macro fails because, at compile time, <strong class="source-inline">heading-tags</strong> is not a list yet. The macro only "sees" a symbol and, just like the error says, it doesn't know how to create a sequence from a symbol. The macro code in the exercise needs access to the actual tag name at compile time. </p>
+			<p>This is one reason why <strong class="source-inline">apply</strong> can't be used on macros:</p>
+			<p class="source-code">packt-clj.htmlgen&gt; (apply define-html-tags ["br" "p" "a"])</p>
+			<p class="source-code">Syntax error compiling at (Exercise01:localhost:52997(clj)*:116:24).</p>
+			<p class="source-code">Can't take value of a macro: #'packt-clojure.htmlgen/define-html-tags</p>
+			<p>By the time the call to <strong class="source-inline">apply</strong> is made, the code is already running and it's too late for the macro to be expanded. For the same reason, a macro cannot be passed as an argument to a function such as <strong class="source-inline">map</strong> or <strong class="source-inline">filter</strong>. While macros bring great flexibility to a language, there is always a cost to using a macro instead of a function.</p>
+			<h2 id="_idParaDest-256">Ex<a id="_idTextAnchor342"/>ercise 11.03: Expanding the HTML Library</h2>
+			<p>Your team was impressed with how quickly you implemented all the known HTML elements as functions and now, the HTML generating library is becoming more popular inside your organization. As often happens with successful libraries, the developers using it are starting to run into problems. One of the most common frustrations that's expressed by members of your team is that it is awkward to wrap a list of elements inside a containing element.</p>
+			<p>Here is a simple example of a common use case: creating an unordered list (<strong class="source-inline">&lt;ul&gt;</strong>) by mapping over a list of strings, transforming each string into a list item (<strong class="source-inline">&lt;li&gt;</strong>). Thanks to how the original <strong class="source-inline">tag-fn</strong> was written to handle sequences as well as strings, the code for creating an HTML list from a vector of items is fairly simple:</p>
+			<p class="source-code">(ul (map li ["item 1" "item2"]))</p>
+			<p>However, this pattern arises so often in your co-workers' code that they are starting to complain that your library forces them to be redundant. "Why," they ask, "can't this be simpler? We know that a <strong class="source-inline">ul</strong>, when given a list, will result in a <strong class="source-inline">(map li…)</strong> call. Can't that be automatic?"</p>
+			<p>"Well," you reply, "of course it can." After some thought, you decide that you want your colleagues to be able to write this instead:</p>
+			<p class="source-code">(ul-&gt;li ["item 1" "item 2"])</p>
+			<p>And this won't just apply to <strong class="source-inline">ul</strong>. <strong class="source-inline">ol-&gt;li</strong> would be just as useful. Some of the table elements could use the same thing: <strong class="source-inline">table-&gt;tr</strong> and <strong class="source-inline">tbody-&gt;tr</strong> would be quite useful for lists of table rows (<strong class="source-inline">&lt;tr&gt;</strong>), as would <strong class="source-inline">tr-&gt;td</strong> for table rows (<strong class="source-inline">&lt;tr&gt;</strong>) containing lists of table cells (<strong class="source-inline">&lt;td&gt;</strong>). You decide to write a second, specialized macro called <strong class="source-inline">define-html-list-tags</strong> that will take tag name pairs and define the corresponding functions:</p>
+			<ol>
+				<li value="1">In the same file as the previous exercise, define a helper function to build the new functions. It will be called <strong class="source-inline">subtag-fn</strong> and will be simpler than <strong class="source-inline">tag-fn</strong> because it doesn't need to handle as many different cases:<p class="source-code">(defn subtag-fn [tagname subtag]</p><p class="source-code">  (fn [content]</p><p class="source-code">    (str</p><p class="source-code">      (-&gt;opening-tag tagname nil)</p><p class="source-code">      (apply str (map subtag content))</p><p class="source-code">      (-&gt;end-tag tagname))))</p><p>The contents of the function should appear relatively familiar. The only new piece of code here is <strong class="source-inline">(map subtag content)</strong>. For a function such as <strong class="source-inline">ul→li</strong>, the <strong class="source-inline">li</strong> function (which we assume is already defined – make sure <strong class="source-inline">define-html-tags</strong> is called first!) is called on each item in the <strong class="source-inline">content</strong> argument.</p></li>
+				<li>Test the helper function. The helper function will be called at runtime, so it is easy to test:<p class="source-code">packt-clj.htmlgen&gt; ((subtag-fn "ul" li) ["Item 1" "Item 2"])</p><p class="source-code">"&lt;ul&gt;&lt;li&gt;Item 1&lt;/li&gt;&lt;li&gt;Item 2&lt;/li&gt;&lt;/ul&gt;"</p><p>Note again that this works because the <strong class="source-inline">li</strong> function has already been defined. We pass it in as a symbol – <strong class="source-inline">li</strong>, without quotes – and not as a string like <strong class="source-inline">"ul"</strong>. The <strong class="source-inline">ul</strong> function won't be defined until after the macro has been run.</p><p>There is one small problem here, however: we can't optionally pass in a map of attributes. This breaks the interface we've established for the other functions, so we need to fix that before moving on.</p></li>
+				<li>Add a second arity to the anonymous function returned by <strong class="source-inline">subtag-fn</strong>:<p class="source-code">(defn subtag-fn [tagname subtag]</p><p class="source-code">  (fn subtag-function-builder</p><p class="source-code">    ([content]</p><p class="source-code">     (subtag-function-builder nil content))</p><p class="source-code">    ([attrs content]</p><p class="source-code">       (str</p><p class="source-code">         (-&gt;opening-tag tagname attrs)</p><p class="source-code">         (apply str (map subtag content))</p><p class="source-code">         (-&gt;end-tag tagname)))))</p><p>This code highlights two interesting features of anonymous functions. First of all, they support multiple arities, which makes them just as flexible as their <strong class="source-inline">defn</strong> defined counterparts. Secondly, despite being anonymous, they can have names. This feature exists in other languages, such as JavaScript, and can be useful for debugging purposes. When reading error messages, having a function name can be a big help. Naming an anonymous function in Clojure has another advantage, in that the function can refer to itself this way. Thus, in the preceding code, the single version of the function can fill in the <strong class="source-inline">attrs</strong> argument with <strong class="source-inline">nil</strong> and then call the double argument version. This way, we don't have to write the function's logic twice.</p></li>
+				<li>Test the new <strong class="source-inline">subtag-fn</strong>:<p class="source-code">packt-clj.htmlgen&gt; ((subtag-fn "ul" li) {:class "my-class"} ["Item 1" "Item 2"])</p><p class="source-code">"&lt;ul class=\"my-class\"&gt;&lt;li&gt;Item 1&lt;/li&gt;&lt;li&gt;Item 2&lt;/li&gt;&lt;/ul&gt;"</p><p>This works. Now, let's try the single-argument form:</p><p class="source-code">packt-clj.htmlgen&gt; ((subtag-fn "ul" li) ["Item 1" "Item 2"])</p><p class="source-code">"&lt;ul&gt;&lt;li&gt;Item 1&lt;/li&gt;&lt;li&gt;Item 2&lt;/li&gt;&lt;/ul&gt;"</p><p>It still works too!</p></li>
+				<li>Write the macro that will define functions such as <strong class="source-inline">ul-&gt;li</strong>.<p>As always, the first step in designing a macro is to decide how it should be called. A call to this macro should look like this:</p><p class="source-code">(define-html-list-tags ["ul" "li"] ["ol" "li"])</p><p class="callout-heading">Note</p><p class="callout">We use two item vectors here to group tags together. As we mentioned earlier, it would be impossible to define these inputs elsewhere and replace them with a symbol in the call to <strong class="source-inline">define-html-list</strong>. </p><p>We can use the same variadic form as in the previous version:</p><p class="source-code">(defmacro define-html-list-tags [&amp; tags-with-subtags]</p><p class="source-code">  '(do</p><p class="source-code">     ~@(map (fn [[tagname subtag]]</p><p class="source-code">              '(do</p><p class="source-code">                 (def ~(symbol tagname) (tag-fn ~tagname))</p><p class="source-code">                 (def ~(symbol (str tagname "-&gt;" subtag)) (subtag-fn ~tagname ~(symbol subtag)))))</p><p class="source-code">            tags-with-subtags)))</p><p>To understand what is happening here, let's start from inside the anonymous function that's been passed to <strong class="source-inline">map</strong>. The first line should look familiar:</p><p class="source-code">(def ~(symbol tagname) (tag-fn ~tagname))</p><p>This is exactly the same as in the <strong class="source-inline">define-html-tags</strong> macro from the previous exercise. Even though we're going to define <strong class="source-inline">ul-&gt;li</strong>, we still need to define the <strong class="source-inline">ul</strong> function.</p><p>The next line is where we define functions such as <strong class="source-inline">ul-&gt;li</strong>:</p><p class="source-code">(def ~(symbol (str tagname "-&gt;" subtag)) (subtag-fn ~tagname ~(symbol subtag)))</p><p>This definition follows the same pattern as in the preceding code, except that we use <strong class="source-inline">str</strong> to build the symbol that will be the name of the function and we turn the subtag string into a symbol as well.</p><p>Both of these definitions are wrapped in a <strong class="source-inline">do</strong> expression, and the output from <strong class="source-inline">map</strong> is, in turn, wrapped in a single <strong class="source-inline">do</strong>. Expanded, it looks like this:</p><p class="source-code">packt-clj.htmlgen&gt; (macroexpand '(define-html-list-tags ["ul" "li"] ["ol" "li"]))</p><p class="source-code">(do</p><p class="source-code"> (do</p><p class="source-code">  (def ul (packt-clj.htmlgen/tag-fn "ul"))</p><p class="source-code">  (def ul-&gt;li (packt-clj.htmlgen/subtag-fn "ul" li)))</p><p class="source-code"> (do</p><p class="source-code">  (def ol (packt-clj.htmlgen/tag-fn "ol"))</p><p class="source-code">  (def ol-&gt;li (packt-clj.htmlgen/subtag-fn "ol" li))))</p></li>
+				<li>Test the new macro:<p class="source-code">packt-clj.htmlgen&gt; (define-html-list-tags ["ul" "li"] ["ol" "li"])</p><p class="source-code">#'packt-clj.htmlgen/ol-&gt;li</p><p class="source-code">packt-clj.htmlgen&gt; (ol-&gt;li ["Item 1" "Item 2"])</p><p class="source-code">"&lt;ol&gt;&lt;li&gt;Item 1&lt;/li&gt;&lt;li&gt;Item 2&lt;/li&gt;&lt;/ol&gt;"</p><p class="source-code">packt-clj.htmlgen&gt; (ol-&gt;li {:class "my-class"} ["Item 1" "Item 2"])</p><p class="source-code">"&lt;ol class=\"my-class\"&gt;&lt;li&gt;Item 1&lt;/li&gt;&lt;li&gt;Item 2&lt;/li&gt;&lt;/ol&gt;"</p><p>It works.</p></li>
+			</ol>
+			<p>In the previous exercise, it may seem inelegant to use nested <strong class="source-inline">do</strong> expressions. We would certainly never write code this way by hand! For code produced by a macro, however, it really isn't a problem. This doesn't mean that macros should expand into convoluted code. Simple is always better. However, most of the time, no human will need to read this code. Someone (probably you) might have to read and debug the code of your macro, so keeping it as simple as possible will generally be worth it, even at the cost of a few extra nested <strong class="source-inline">do</strong> expressions or some other repetitive code oddity.</p>
+			<p>We could, of course, use <strong class="source-inline">mapcat</strong> to create a flat list:</p>
+			<p class="source-code">(defmacro define-html-list-tags-with-mapcat [&amp; tags-with-subtags]</p>
+			<p class="source-code">  '(do</p>
+			<p class="source-code">     ~@(mapcat (fn [[tagname subtag]]</p>
+			<p class="source-code">                 ['(def ~(symbol tagname) (tag-fn ~tagname))</p>
+			<p class="source-code">                  '(def ~(symbol (str tagname "-&gt;" subtag)) (subtag-fn ~tagname ~(symbol subtag)))])</p>
+			<p class="source-code">            tags-with-subtags)))</p>
+			<p>There is a subtle difference here, in that the syntax-quoting has been moved from the containing <strong class="source-inline">(do…)</strong> expression to the <strong class="source-inline">(def…)</strong> expressions themselves. At runtime, the vector will no longer exist, so we don't want to quote it.</p>
+			<p>This version produces nicer code when expanded:</p>
+			<p class="source-code">packt-clj.htmlgen&gt; (macroexpand '(define-html-list-tags-with-mapcat ["ul" "li"] ["ol" "li"]))</p>
+			<p class="source-code">(do</p>
+			<p class="source-code"> (def ul (packt-clj.htmlgen/tag-fn "ul"))</p>
+			<p class="source-code"> (def ul-&gt;li (packt-clj.htmlgen/subtag-fn "ul" li))</p>
+			<p class="source-code"> (def ol (packt-clj.htmlgen/tag-fn "ol"))</p>
+			<p class="source-code"> (def ol-&gt;li (packt-clj.htmlgen/subtag-fn "ol" li)))</p>
+			<p>Your mileage may vary, but in general, simplifying your macro code is more important than producing elegant expansions. The macro is the code you will need to debug.</p>
+			<p>In this and the previous exercise, we used <strong class="source-inline">def</strong>, along with helper functions that built new functions. Nothing prevents you from writing macros that define new functions with <strong class="source-inline">defn</strong>.</p>
+			<h1 id="_idParaDest-257">Ma<a id="_idTextAnchor343"/>cros in ClojureScript</h1>
+			<p>The distinction between <strong class="bold">compile time</strong> and <strong class="bold">runtime</strong> is perhaps the most important concept to grasp when learning about macros. Before going further into the consequences of this distinction, it's worth looking at how it affects macros in ClojureScript, where compilation and execution have a slightly more complex relationship than they do in JVM Clojure.</p>
+			<p>ClojureScript runs in a JavaScript runtime, like the browser or Node.js. This is possible because ClojureScript code is first compiled by the ClojureScript compiler, which is a program written in Clojure and runs on the JVM. This means that ClojureScript programs, once they're compiled and running, no longer have access to the compilation phase.</p>
+			<p>This has several consequences for working with macros in ClojureScript, the most important of which is that ClojureScript macros cannot be defined in <strong class="source-inline">.cljs</strong> files </p>
+			<p>alongside other ClojureScript code. Instead, they are defined in separate files with either the <strong class="source-inline">.clj</strong> file extension or the cross-compiling <strong class="source-inline">.cljc</strong> extension.</p>
+			<p>In the GitHub repository accompanying this book, there is a minimal <strong class="source-inline">ClojureScript project</strong> that illustrates this. It contains two namespaces: <strong class="source-inline">minmacros/core.cljs</strong> and <strong class="source-inline">minmacros/macros.cljc</strong>. </p>
+			<p>The <strong class="source-inline">minmacros/core.cljs</strong> namespace uses special syntax to require the macros in <strong class="source-inline">minmacros/macros.cljc</strong>. Here's the entire content:</p>
+			<p class="source-code">(ns minmacros.core</p>
+			<p class="source-code">  (:require-macros [minmacros.macros :as mm]))</p>
+			<p class="source-code">(println "Hello from clojurescript")</p>
+			<p class="source-code">(mm/minimal-macro)</p>
+			<p>This is the only situation where specifying <strong class="source-inline">:require-macros</strong> is necessary. It does not exist in JVM Clojure, only in ClojureScript. If <strong class="source-inline">minmacros/macros.cljc</strong> contained functions that we also wanted to import, we would have to require the namespace separately:</p>
+			<p class="source-code">(ns minmacros.core</p>
+			<p class="source-code">  (:require-macros [minmacros.macros :as mm])</p>
+			<p class="source-code">  (:require [minmacros.macros :as mm]))</p>
+			<p>Note that we can use the same namespace alias in both cases. This is because the macroexpansion phase is totally separate from the code execution phase.</p>
+			<p>To see these macros in action, copy the complete <strong class="source-inline">Chapter11/minmacros</strong> directory from GitHub (<a href="https://packt.live/2TQHTjQ">https://packt.live/2TQHTjQ</a>). In your Terminal, change to the <strong class="source-inline">minmacros</strong> directory. From there, you can run this from the command line:</p>
+			<p class="source-code">$ clj --main cljs.main --compile minmacros.core --repl</p>
+			<p>If you're on Windows, you'll need to download a copy of <strong class="source-inline">cljs.jar</strong> from <a href="https://packt.live/36m0O8q">https://packt.live/36m0O8q</a>. Then, assuming that <strong class="source-inline">cljs.jar</strong> is in your working directory, you can run this command:</p>
+			<p class="source-code">$ java -cp "cljs.jar;src" cljs.main --compile minmacros.core --repl</p>
+			<p>In your Terminal, the output from <strong class="source-inline">println</strong> should appear before the REPL prompt:</p>
+			<div>
+				<div id="_idContainer232" class="IMG---Figure">
+					<img src="image/B14502_11_03.jpg" alt="Figure 11.3: Output on the Terminal&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 11.3: Output on the Terminal</p>
+			<p>The second of these, <strong class="source-inline">minmacros/macros.cljc</strong>, is written just like any other Clojure namespace. This is, in fact, a requirement, since it will be compiled on the JVM. Even if the macros here target a JavaScript <em class="italic">runtime</em>, the macroexpansion code can't contain any JavaScript-specific code. However, the expanded code can contain ClojureScript-specific code, since it will be run in the browser or in an environment such as Node.js.</p>
+			<p>For example, using JavaScript's native string functions inside your macro would not work. Consider this (admittedly contrived) example, where we try to use the JavaScript string method called <strong class="source-inline">includes</strong> as a test in the macroexpansion code:</p>
+			<p class="source-code">(defmacro js-macro [symbol-name]</p>
+			<p class="source-code">  '(def ~(symbol symbol-name)</p>
+			<p class="source-code">     ~(if (.includes symbol-name "b")</p>
+			<p class="source-code">       "Hello"</p>
+			<p class="source-code">       "Goodbye")))</p>
+			<p>Java strings do not have an <strong class="source-inline">includes</strong> method, so when we try to invoke this macro at the REPL, we get an error:</p>
+			<p class="source-code">cljs.user=&gt; (minmacros.macros/js-macro "hello")</p>
+			<p class="source-code">Unexpected error (IllegalArgumentException) macroexpanding minmacros.macros/js-macro at (&lt;cljs repl&gt;:1:1).</p>
+			<p class="source-code">No matching method includes found taking 1 args for class java.lang.String</p>
+			<p>The Java-based ClojureScript compiler cannot use a JavaScript string method; thus, the macroexpansion fails.</p>
+			<p>While using JavaScript-specific code during macroexpansion is impossible, it is perfectly fine to use a macro to create code that will only <em class="italic">run</em> on a JavaScript platform. Here's an equally contrived macro that does just that:</p>
+			<p class="source-code">(defmacro runtime-includes [function-name character]</p>
+			<p class="source-code">  '(defn ~(symbol function-name) []</p>
+			<p class="source-code">     (if (.includes "Clojurescript macros" ~character)</p>
+			<p class="source-code">       "Found it!"</p>
+			<p class="source-code">       "Not here...")))</p>
+			<p>In the REPL, we can define and call a function that returns either <strong class="source-inline">"Found it!"</strong> or <strong class="source-inline">"Not here…"</strong>:</p>
+			<p class="source-code">cljs.user=&gt; (load-file "minmacros/core.cljs")</p>
+			<p class="source-code">nil</p>
+			<p class="source-code">cljs.user=&gt; Hello from clojurescript</p>
+			<p class="source-code">I'm trapped inside a Clojurescript macro!</p>
+			<p class="source-code">cljs.user=&gt; (minmacros.macros/runtime-includes "hello" "m")</p>
+			<p class="source-code">#'cljs.user/hello</p>
+			<p class="source-code">cljs.user=&gt; (hello)</p>
+			<p class="source-code">"Found it!"</p>
+			<p class="source-code">cljs.user=&gt; </p>
+			<p>In practice, this kind of issue will rarely arise. It would be extremely rare for macroexpansion code to require some kind of help from the underlying platform. If you find yourself doing this, on either platform, it's probably a sign that you need to rethink what you're trying to accomplish with your macro. The point of these examples is to help illustrate how the details of the ClojureScript compilation process can be important when writing macros. When writing macros, it's always very important to distinguish between compile time and runtime; with ClojureScript, the distance between the two is much greater. Once these issues are accounted for, though, the actual process of writing macros in ClojureScript is identical to writing Clojure macros.</p>
+			<h1 id="_idParaDest-258">Mac<a id="_idTextAnchor344"/>ro Hygiene</h1>
+			<p>Like most programming languages, Clojure provides a lot of resources for avoiding name collisions. Namespaces, <strong class="source-inline">let</strong> bindings, and lexical scope, all help to make it fairly difficult to override variables by choosing the wrong name. Because they operate in a different space, and at a different time, macros have the potential to go around some of those guardrails. <strong class="bold">Macro hygiene</strong> is the art of writing macros that avoid <strong class="bold">variable capture</strong>. Variable capture is what happens when a symbol produced by a macro coincides with a macro in the surrounding environment.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">The term <strong class="bold">variable capture</strong> has its origins in other languages of the Lisp family. Unlike Clojure, most Lisps do not have immutable data structures, so the word "variable" is perfectly appropriate. We'll continue to say "variable capture," even though most Clojure "variables" aren't really variables.</p>
+			<p>Here's a quick example. Earlier in this chapter, we tried to write a macro like this:</p>
+			<p class="source-code">user&gt; (defmacro parameterized-multi-minimal [n-times s]</p>
+			<p class="source-code">        (cons 'do (repeat n-times '(println s))))</p>
+			<p class="source-code">#'user/parameterized-multi-minimal</p>
+			<p>This macro didn't work. It produced this error:</p>
+			<p class="source-code">user&gt; (parameterized-multi-minimal 5 "error?")</p>
+			<p class="source-code">Syntax error compiling at (Exercise01:localhost:52997(clj)*:121:36).</p>
+			<p class="source-code">Unable to resolve symbol: s in this context</p>
+			<p>The reason for this was that the <strong class="source-inline">s</strong> parameter disappears after expansion. As a result, <strong class="source-inline">(println s)</strong> fails because, at runtime, there is no <strong class="source-inline">s</strong>. What if <strong class="source-inline">s</strong> is already defined, though? We can do the following:</p>
+			<p class="source-code">user&gt; (let [s "Wrong"]</p>
+			<p class="source-code">        (parameterized-multi-minimal 2 "Right"))</p>
+			<p class="source-code">Wrong</p>
+			<p class="source-code">Wrong</p>
+			<p class="source-code">nil</p>
+			<p>Even though there is no syntax error, this really is <em class="italic">wrong</em>. Depending on the context, this macro will not behave the same way. The real argument, "<strong class="source-inline">Right</strong>", is obscured by a variable in the environment, "<strong class="source-inline">Wrong</strong>". It's easy to imagine how code like this could produce wildly unpredictable results. The macro writer has no knowledge of or control over whatever <strong class="source-inline">s</strong> might be bound to in the environment where the macro is called.</p>
+			<p>The Clojure macro system provides some protection against this kind of problem. We've already seen one of them. The <strong class="source-inline">syntax-quote</strong> backtick causes symbols to be assigned to the namespace where the macro is defined:</p>
+			<p class="source-code">user&gt; '(my-symbol 5)</p>
+			<p class="source-code">(user/my-symbol 5)</p>
+			<p>This provides an initial degree of protection against variable capture since a namespaced symbol can't be confused with core Clojure functions or with local <strong class="source-inline">let</strong> bindings. The <strong class="source-inline">let</strong> macro, in fact, won't allow a namespaced symbol to be used as a binding.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">When looking at the expansion of a macro you are working on, if you see symbols that have been assigned to the current namespace, it's probably a sign that those symbols are vulnerable to variable capture.</p>
+			<p>Let's try a slightly more realistic example. Here's a macro that defines a <strong class="source-inline">let</strong>-like environment where the <strong class="source-inline">body</strong> parameter can be evaluated. This is a common structure for macros, where the macro sets up and possibly tears down a specialized environment. The environment might be a database connection, an open file or, like in this example, just a series of bindings that make it easier to write your code. This macro will take an integer and symbol and then provide an environment with automatic bindings for the integer as a string, as an integer, and as a Java <strong class="source-inline">double</strong>. The symbol parameter is then used to define the <strong class="source-inline">-as-string</strong>, <strong class="source-inline">-as-int</strong>, and <strong class="source-inline">-as-double</strong> bindings, which can be used in the code provided as the <strong class="source-inline">body</strong>:</p>
+			<p class="source-code">(defmacro let-number [[binding n] body]</p>
+			<p class="source-code">  '(let [~(symbol (str binding "-as-string"))  (str ~n)</p>
+			<p class="source-code">         ~(symbol (str binding "-as-int")) (int ~n)</p>
+			<p class="source-code">         ~(symbol (str binding "-as-double")) (double ~n)]</p>
+			<p class="source-code">     ~body))</p>
+			<p>In a simple case, the <strong class="source-inline">let-int</strong> macro could be used like this:</p>
+			<p class="source-code">user&gt; (let-number [my-int 5]</p>
+			<p class="source-code">        (type my-int-as-string))</p>
+			<p class="source-code">java.lang.String</p>
+			<p>This result just shows that <strong class="source-inline">my-int-as-string</strong> is indeed defined and that the integer <strong class="source-inline">5</strong> has been coerced into a string.</p>
+			<p>Look what happens, though, when one of the internal bindings is already defined and is used in the macro parameter:</p>
+			<p class="source-code">user&gt; (let [my-int-as-int 1000]</p>
+			<p class="source-code">        (let-number [my-int (/ my-int-as-int 2)]</p>
+			<p class="source-code">        (str "The result is: " my-int-as-double)))</p>
+			<p class="source-code">"The result is: 250.0"</p>
+			<p>Even when working with macros, 1,000 divided by 2 should be 500 and not 250! What happened? The problem here is that with a macro, the <strong class="source-inline">(/ my-int-as-int 2)</strong> parameter is not evaluated before being passed to the macro. The macro doesn't "know" about the value 500. It only "sees" the code that is present at compile time. The expanded version of this macro call provides a better view of what is happening:</p>
+			<p class="source-code">user&gt; (macroexpand-1 '(let-number [my-int (/ my-int-as-int 2)]</p>
+			<p class="source-code">                      (str "The result is: " my-int-as-double)))</p>
+			<p class="source-code">(clojure.core/let</p>
+			<p class="source-code"> [my-int-as-string</p>
+			<p class="source-code">  (clojure.core/str (/ my-int-as-int 2))</p>
+			<p class="source-code">  my-int-as-int</p>
+			<p class="source-code">  (clojure.core/int (/ my-int-as-int 2))</p>
+			<p class="source-code">  my-int-as-double</p>
+			<p class="source-code">  (clojure.core/double (/ my-int-as-int 2))]</p>
+			<p class="source-code"> (str "The result is: " my-int-as-double))</p>
+			<p>The first thing to notice is that <strong class="source-inline">(/ my-int-as-int 2)</strong> appears three times. When <strong class="source-inline">my-int-as-double</strong> is defined, the local binding, <strong class="source-inline">my-int-as-int</strong>, supersedes the original binding. If the original binding was 1,000, the local <strong class="source-inline">my-int-as-int</strong> is defined as 500. When <strong class="source-inline">my-int-as-double</strong> is defined, <strong class="source-inline">my-int-as-int</strong> becomes 500, which is then divided by two one more time.</p>
+			<p>This is a subtle variable capture bug that could have disastrous consequences. Most of the time, everything would work correctly. Then, from time to time, the results would be inexplicably incorrect. Staring for hours at the source code would not help since the actual bug is only visible when the code is expanded. While it may seem like a strange edge case, a bug like this could actually occur fairly easily with nested <strong class="source-inline">let-number</strong> macros.</p>
+			<h2 id="_idParaDest-259">Avo<a id="_idTextAnchor345"/>iding Variable Capture with Automatic Gensyms</h2>
+			<p>Luckily, there is a solution for a macro such as <strong class="source-inline">let-number</strong>, which is to evaluate the argument only once and then store the result in a local binding that can then be used for further calculations:</p>
+			<p class="source-code">(defmacro let-number [[binding n] body]</p>
+			<p class="source-code">  '(let [result# ~n</p>
+			<p class="source-code">         ~(symbol (str binding "-as-string"))  (str result#)</p>
+			<p class="source-code">         ~(symbol (str binding "-as-int")) (int result#)</p>
+			<p class="source-code">         ~(symbol (str binding "-as-double")) (double result#)]</p>
+			<p class="source-code">     ~body))</p>
+			<p>In the first line of the <strong class="source-inline">let</strong> bindings, the calculation represented by <strong class="source-inline">n</strong> is performed and bound to <strong class="source-inline">result#</strong>. All of the following bindings then use <strong class="source-inline">result#</strong> to produce their particular versions: <strong class="source-inline">string</strong>, <strong class="source-inline">integer</strong>, <strong class="source-inline">double</strong>. This is a very good habit to have when writing macros: avoid calculating things twice.</p>
+			<p>First, let's make sure this works:</p>
+			<p class="source-code">user&gt; (let [my-int-as-int 1000.0]</p>
+			<p class="source-code">        (let-number [my-int (/ my-int-as-int 2)]</p>
+			<p class="source-code">          (str "The result is: " my-int-as-double)))</p>
+			<p class="source-code">"The result is: 500.0"</p>
+			<p>That's better. The <strong class="source-inline">(/ my-int-as-int 2)</strong> expression is only evaluated once and the result is correct now. Multiple evaluations of code inside a macro could have other unintended consequences if the repeated code has side effects.</p>
+			<p>There is one remaining question, though: why do we write <strong class="source-inline">result#</strong> instead of just <strong class="source-inline">result</strong>? This is an example of Clojure's macro system helping us avoid other kinds of errors. The suffix on the <strong class="source-inline">result</strong> symbol has a special meaning when it's used in a syntax-quoted expression. In those cases, Clojure's syntax quoting transforms <strong class="source-inline">result</strong> into what is called a <strong class="bold">gensym</strong>, a <em class="italic">generated symbol</em> with a name that is guaranteed to be unique. In the code produced by the <strong class="source-inline">let-number</strong> macro, you won't see a binding to a symbol named <strong class="source-inline">result</strong> or even <strong class="source-inline">result#</strong>. Instead, there will be something like <strong class="source-inline">result__15090__auto__</strong>. That's a generated, unique symbol. Gensyms are a key component in Clojure's macro system because, when used effectively, they prevent name collisions between symbols that have been produced by a macro and symbols present in the environment where the macro is called, or in code that is a macro argument. In the REPL, you can produce your own gensyms:</p>
+			<p class="source-code">user&gt; '(result#)</p>
+			<p class="source-code">(result__15099__auto__)</p>
+			<p class="source-code">user&gt; '(result#)</p>
+			<p class="source-code">(result__15103__auto__)</p>
+			<p>Each time, a different symbol is produced, unless the symbols are in the same syntax-quoted expression:</p>
+			<p class="source-code">user&gt; '(= result# result#)</p>
+			<p class="source-code">(clojure.core/= result__15111__auto__ result__15111__auto__)</p>
+			<p>This is what allows gensyms to be used to refer to the same thing. It can also be a limitation since, often, you need to use more than one syntax-quoted expression inside a macro. We'll show you how to deal with those cases a little later.</p>
+			<p>To understand the importance of this, imagine a version of <strong class="source-inline">let-number</strong> where the result of <strong class="source-inline">n</strong> was assigned to <strong class="source-inline">result</strong> without the <strong class="source-inline">#</strong> suffix. Because of this, the <strong class="source-inline">result</strong> binding would be available inside the code in the <strong class="source-inline">body</strong> parameter. Most of the time, this would not be a problem, as long as the <strong class="source-inline">body</strong> code did not use a value named <strong class="source-inline">result</strong>. If there was a collision, though, the direct consequence would be a very nasty bug.</p>
+			<p>Consider this use of the macro while using <strong class="source-inline">result</strong> without the protection afforded by the <strong class="source-inline">#</strong> suffix. To do that, we need to insert the literal result symbol into the expanded code. This will require using a little macro trick where we unquote and then quote the symbol, like this <strong class="source-inline">~'result</strong>. The<a id="_idTextAnchor346"/> initial unquote suspends the syntax quoting and then the single quotation mark applies a standard quote that does not use namespacing.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">The unquote-quote pattern should generally be avoided because gensyms are much safer. However, a simple quoted symbol can be useful in certain cases, especially when a symbol is supposed to have a special syntactical meaning inside the macro, as we saw with the <strong class="source-inline">|</strong> in <em class="italic">Exercise 11.01</em>, <em class="italic">The and-ors Macro</em>.</p>
+			<p>We get the following macro code:</p>
+			<p class="source-code">user&gt; (defmacro bad-let-number [[binding n] body]</p>
+			<p class="source-code">        '(let [~'result ~n</p>
+			<p class="source-code">               ~(symbol (str binding "-as-string"))  (str ~'result)</p>
+			<p class="source-code">               ~(symbol (str binding "-as-int")) (int ~'result)</p>
+			<p class="source-code">               ~(symbol (str binding "-as-double")) (double ~'result)]</p>
+			<p class="source-code">           ~body))</p>
+			<p>Using this macro could be dangerous:</p>
+			<p class="source-code">(le<a id="_idTextAnchor347"/>t [result 42]</p>
+			<p class="source-code">  (bad-let-number [my-int 1000]</p>
+			<p class="source-code">    (= result 1000)))  ;; Would return "true"</p>
+			<p>This would be extremely confusing. We expect the <strong class="source-inline">result</strong> in the initial <strong class="source-inline">let</strong> binding to be the same as the <strong class="source-inline">result</strong> in the <strong class="source-inline">let-number</strong> binding. Debugging this error would require exploring the inner workings of the macro and would probably be a long, painful process. Gensyms protect against this kind of problem and Clojure makes them easy to use.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">Not all Lisps have automatic gensyms. In Common Lisp, macro writers have to call the <strong class="source-inline">gensym</strong> function explicitly. Clojure also has a <strong class="source-inline">gensym</strong> function, which can be used to create gensyms outside of a syntax-quoted environment. We'll use the <strong class="source-inline">gensym</strong> function ourselves a little later</p>
+			<p>As a general rule, any bindings in a macro that are not part of the exposed interface should be defined with gensyms. In the <strong class="source-inline">let-number</strong> macro, bindings such as <strong class="source-inline">my-int-as-string</strong> are an exposed part of the interface and, as such, require real symbol names. Bindings such as <strong class="source-inline">result#</strong>, which only are used "behind the scenes" (at compile time), should be protected with gensyms.</p>
+			<h2 id="_idParaDest-260">Exe<a id="_idTextAnchor348"/>rcise 11.04: Monitoring Functions</h2>
+			<p>In this exercise, we will write a macro for creating functions. The functions will be wrapped inside logic that adds some extra behavior to an otherwise ordinary function.</p>
+			<p>These days, you're working for a company that provides Software as a Service to other companies. Management wants to rethink the prices that are charged to customers. They want to know, at a very fine-grained level, which services are the most expensive to provide and which customers are consuming the most resources.</p>
+			<p>Your job is to develop a system for logging the computation time of some of the important, high-level functions in the code base. At first, you thought that you would have to go through the entire code base and add timing and reporting logic every time one of these high-level functions is called. Then, you remembered macros. You've decided to write a proof-of-concept macro to show to your boss.</p>
+			<p>The high-level functions you want to measure all have, among others, a <strong class="source-inline">client-id</strong> parameter. You'll use that parameter to provide feedback to the monitoring framework. One requirement is that the data will be sent, even if an exception is thrown. Collecting detailed error statistics will be useful for monitoring and diagnostics.</p>
+			<p>The macro will be invoked instead of <strong class="source-inline">defn</strong> when defining the functions. In addition to the standard arguments to <strong class="source-inline">defn</strong>, the macro will also take a function that will be called to send data to the monitoring system. Let's get started:</p>
+			<ol>
+				<li value="1">In a REPL, set up an outline for the macro:<p class="source-code">(defmacro defmonitored</p><p class="source-code">  [fn-name tx-fn args &amp; body-elements]</p><p class="source-code">  ;; TODO: everything</p><p class="source-code">  )</p><p>This means that, when defining a function that needs to be monitored, we'll write something like this, assuming that <strong class="source-inline">send-to-framework</strong> is a function that has already been defined:</p><p class="source-code">(defmonitored my-func send-to-framework</p><p class="source-code">              [an-arg another-arg client-id]...)</p><p>Calling the function will be no different from calling any other function, as long as there is a <strong class="source-inline">client-id</strong> argument:</p><p class="source-code">(my-func an-arg another-arg 42)</p></li>
+				<li>Establish the basic layout of the macro's internals. There will be two parts: on the outside, some compile-time <strong class="source-inline">let</strong> bindings, and on the inside, a syntax-quoted <strong class="source-inline">(defn…)</strong> expression:<p class="source-code">(defmacro defmonitored</p><p class="source-code">  [fn-name tx-fn &amp; args-and-body]</p><p class="source-code">  (let [</p><p class="source-code">        ;; TODO: compile time let bindings</p><p class="source-code">        ]</p><p class="source-code">    '(defn ~fn-name ~[]</p><p class="source-code">       ;; TODO: the defn template</p><p class="source-code">       )))</p><p>The outer <strong class="source-inline">let</strong> bindings will set up some of the values that will be used in the more "template"-like <strong class="source-inline">defn</strong> part.</p><p>We've placed the <strong class="source-inline">fn-name</strong>, unquoted, and an empty parameter list inside the call to <strong class="source-inline">defn</strong>. Even if it doesn't do anything yet, the macro should already compile, and you should be able to use it to define a function:</p><p class="source-code">user&gt; (defmonitored my-func identity [])</p><p class="source-code">#'user/my-func</p><p class="source-code">user&gt; (my-func)</p><p class="source-code">nil</p></li>
+				<li>As you already know, the Clojure <strong class="source-inline">defn</strong> macro allows us to define multiple arities for the same function. This really means that there are two different structures that a function definition can have. First there is the single arity that we use most of the time:<p class="source-code">(defn a-func [arg1 arg2]</p><p class="source-code">  (+ arg1 arg2))</p><p>Multiple arity functions have several "bodies."  Each "body" is a list that starts out with the argument list, which is specific to that arity, and then includes the corresponding code:</p><p class="source-code">(defn b-func </p><p class="source-code">  ([arg1] arg1)</p><p class="source-code">  ([arg1 arg2]</p><p class="source-code">   (+ arg1 arg2))</p><p class="source-code">  ([arg1 arg2 arg3]</p><p class="source-code">    (* (+ arg1 arg2) arg3)))</p><p>Because we want <strong class="source-inline">defmonitored</strong> to act as a replacement for <strong class="source-inline">defn</strong>, we need to be able to handle these two different structures.</p><p>Much of what we are going to do now requires us to have access to the code inside each of the function bodies, if there are multiple arities. To avoid having to deal with two separate cases, that is, single and multiple arities, we are going to check to see which kind we have. If we have just one arity, we will wrap the argument list and the function body in a list so that it has the same structure as the multiple arity variety.</p><p>A function like this is correct, even if it only has one arity:</p><p class="source-code">(defn a-func</p><p class="source-code">  ([arg] (println arg)))</p><p>To do this, we add a <strong class="source-inline">vector?</strong> check:</p><p class="source-code">(defmacro defmonitored</p><p class="source-code">  [fn-name tx-fn &amp; args-and-body]</p><p class="source-code">  (let [pre-arg-list (take-while (complement sequential?) args-and-body)</p><p class="source-code">        fn-content (drop-while (complement sequential?) args-and-body)</p><p class="source-code">        fn-bodies (if (vector? (first fn-content))</p><p class="source-code">                    '(~fn-content)</p><p class="source-code">                    fn-content)]</p><p class="source-code">    '(defn ~fn-name ~@pre-arg-list</p><p class="source-code">       ;; TODO: more magic</p><p class="source-code">       ~@fn-bodies)))</p><p>When the first item in <strong class="source-inline">fn-content</strong> is an argument list, we use syntax quoting, and then <strong class="source-inline">unquote</strong>, to enclose the function body in a list.</p></li>
+				<li>To handle the multiple arities, we need to deal with each function body separately. This sounds like a good time to write a function that can be called on each one.<p>We'll call the <strong class="source-inline">wrap-fn-body</strong> function to deal with this. Even though this is a function and not a macro, it will be called at compile time, so all our macro-writing skills are still applicable here.</p><p>The function will repeat the basic structure of the macro: <strong class="source-inline">let</strong> bindings on the outside and a syntax-quoted "template" on the inside. This time, we'll start with the bindings:</p><p class="source-code">(defn wrap-fn-body [fn-name tx-fn b]</p><p class="source-code">  (let [arg-list (first b)</p><p class="source-code">        client-id-arg (first (filter #(= 'client-id %) arg-list))</p><p class="source-code">        fn-body (rest b)]</p><p class="source-code">    ;; TODO: the body</p><p class="source-code">    ))</p><p>We know that the first item in a function body is the argument list. That's easy to extract, just like <strong class="source-inline">fn-body</strong>, which is everything that's not the argument list.</p></li>
+				<li>Add a check for the <strong class="source-inline">client-id</strong> parameter in the argument list. Our goal is to be able to measure function use per client, so we absolutely need a <strong class="source-inline">client-id</strong> argument. If it's missing, the code should fail. To do this, we'll simply check the <strong class="source-inline">arg-list</strong> binding:<p class="source-code">(defn wrap-fn-body [fn-name tx-fn b]</p><p class="source-code">  (let [arg-list (first b)</p><p class="source-code">        client-id-arg (first (filter #(= 'client-id %) arg-list))</p><p class="source-code">        fn-body (rest b)]</p><p class="source-code">       (when-not (first (filter #(= % 'client-id) arg-list))</p><p class="source-code">      (throw (ex-info "Missing client-id argument" {})))</p><p class="source-code">    ;; TODO: the body</p><p class="source-code">    ))</p><p>We can safely use the "unquote/quote" pattern here on the <strong class="source-inline">client-id</strong> symbol, rather than a gensym, because we know the <strong class="source-inline">client-id</strong> will not be picked up accidentally from the surrounding code, precisely because it will be in the argument list.</p></li>
+				<li>It's finally time to write the "template" part. This is a longer block of code, but it is really quite simple. We'll come back and explain some of the quoting strategies here later:<p class="source-code">'(~arg-list</p><p class="source-code">  (let [start-time# (System/nanoTime)]</p><p class="source-code">    (try</p><p class="source-code">      (let [result# (do  ~@fn-body)]</p><p class="source-code">        (~tx-fn {:name ~(name fn-name)</p><p class="source-code">                 :client-id ~'client-id</p><p class="source-code">                 :status :complete</p><p class="source-code">                 :start-time start-time#</p><p class="source-code">                 :end-time (System/nanoTime)})</p><p class="source-code">        result#)</p><p class="source-code">      (catch Exception e#</p><p class="source-code">        (~tx-fn {:name ~(name fn-name)</p><p class="source-code">                 :client-id ~'client-id</p><p class="source-code">                 :status :error</p><p class="source-code">                 :start-time start-time#</p><p class="source-code">                 :end-time (System/nanoTime)})</p><p class="source-code">        (throw e#)))))</p><p>The overall pattern is fairly simple. The heart of the function is in the inner <strong class="source-inline">let</strong> binding, where, in the expanded code, we will bind the <strong class="source-inline">result#</strong> gensym to the output resulting from calling the actual code, which is still in <strong class="source-inline">fn-body</strong>.</p><p>Once we have that result, we send off some information to <strong class="source-inline">tx-fn</strong> by using <strong class="source-inline">System/nanoTime</strong> as our <strong class="source-inline">:end-time</strong>. This "heart" of the function is then wrapped in two things, the first of which is a <strong class="source-inline">try</strong>/<strong class="source-inline">catch</strong> form. If there's an exception, we send a slightly different message via <strong class="source-inline">tx-fn</strong>. And finally, the outer <strong class="source-inline">let</strong> binding is where we establish the <strong class="source-inline">start-time#</strong> binding so that we can also report when the function started.</p><p>Note that we were required to use several automatic gensyms: <strong class="source-inline">start-time#</strong>, <strong class="source-inline">end-time#</strong>, <strong class="source-inline">results#</strong>, and even <strong class="source-inline">e#</strong>, the exception.</p></li>
+				<li>Put it all back together.<p>Here's the complete <strong class="source-inline">wrap-fn-body</strong> function:</p><p class="source-code">(defn wrap-fn-body [fn-name tx-fn b]</p><p class="source-code">  (let [arg-list (first b)</p><p class="source-code">        fn-body (rest b)]</p><p class="source-code">    (when-not (first (filter #(= % 'client-id) arg-list))</p><p class="source-code">      (throw (ex-info "Missing client-id argument" {})))</p><p class="source-code">    '(~arg-list</p><p class="source-code">      (let [start-time# (System/nanoTime)]</p><p class="source-code">        (try</p><p class="source-code">          (let [result# (do  ~@fn-body)]</p><p class="source-code">            (~tx-fn {:name ~(name fn-name)</p><p class="source-code">                    :client-id ~'client-id</p><p class="source-code">                     :status :complete</p><p class="source-code">                     :start-time start-time#</p><p class="source-code">                    :end-time (System/nanoTime)})</p><p class="source-code">            result#)</p><p class="source-code">          (catch Exception e#</p><p class="source-code">            (~tx-fn {:name ~(name fn-name)</p><p class="source-code">                     :client-id ~'client-id</p><p class="source-code">                     :status :error</p><p class="source-code">                     :start-time start-time#</p><p class="source-code">                     :end-time (System/nanoTime)})</p><p class="source-code">            (throw e#)))))))</p><p>Now, call <strong class="source-inline">wrap-fn-body</strong> from the final <strong class="source-inline">defmonitored</strong> macro. You can do this by mapping over the list of function bodies. Naturally, <strong class="source-inline">map</strong> will wrap them in a list, which we don't want, so we "unquote-splice" (<strong class="source-inline">~@</strong>) the list:</p><p class="source-code">(defmacro defmonitored</p><p class="source-code">  [fn-name tx-fn &amp; args-and-body]</p><p class="source-code">  (let [pre-arg-list (take-while (complement sequential?) args-and-body)</p><p class="source-code">        fn-content (drop-while (complement sequential?) args-and-body)</p><p class="source-code">        fn-bodies (if (vector? (first fn-content))</p><p class="source-code">                    '(~fn-content)</p><p class="source-code">                    fn-content)]</p><p class="source-code">    '(defn ~fn-name ~@pre-arg-list</p><p class="source-code">       ~@(map (partial wrap-fn-body fn-name tx-fn) fn-bodies))))</p></li>
+				<li>Test the macro, using <strong class="source-inline">println</strong> as the reporting function. First, define a simple function:<p class="source-code">user&gt; (defmonitored my-func println [client-id m]  (assoc m :client client-id))</p><p class="source-code">#'user/my-func</p><p>The <strong class="source-inline">my-func</strong> function seems to work:</p><p class="source-code">user&gt; (my-func 32 {:data 123})</p><p class="source-code">{:client-id 32, :name my-func, :start-time 770791427794572, :end-time 770791428448202, :status :complete}</p><p class="source-code">{:data 123, :client 32}</p><p>Let's try some problematic cases. We'll start by throwing an exception:</p><p class="source-code">user&gt; (defmonitored exception-func println [client-id] (throw (ex-info "Boom!" {})))</p><p>The output is as follows:</p></li>
+			</ol>
+			<div>
+				<div id="_idContainer233" class="IMG---Figure">
+					<img src="image/B14502_11_04.jpg" alt="Figure 11.4: An exception, timed, recorded, and reported&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 11.4: An exception, timed, recorded, and reported</p>
+			<p>What about if we try to define a function that doesn't have a <strong class="source-inline">client-id</strong> argument?</p>
+			<p class="source-code">user&gt; (defmonitored no-client-func println [no-client-id] (+ 1 1))</p>
+			<p>The output is as follows:</p>
+			<div>
+				<div id="_idContainer234" class="IMG---Figure">
+					<img src="image/B14502_11_05.jpg" alt="Figure 11.5: The exception we threw during macroexpansion appears as a syntax error&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">F<a id="_idTextAnchor349"/>igure 11.5: The exception we threw during macroexpansion appears as a syntax error</p>
+			<p>The <strong class="source-inline">defmonitored</strong> macro shows how macros can be used to modify Clojure itself. The situation called for a <strong class="source-inline">defn</strong> with extra capabilities, so that is what we wrote. It would, of course, be possible to accomplish the same thing by wrapping functions inside a "timing and reporting" function. But this would be much more intrusive than simply writing <strong class="source-inline">defmonitored</strong> instead of <strong class="source-inline">defn</strong>.</p>
+			<h2 id="_idParaDest-261">When <a id="_idTextAnchor350"/>to Use Manual gensyms</h2>
+			<p>When using Clojure's automatic gensyms, such as <strong class="source-inline">result#</strong>, it's important to remember that they are a feature of syntax quoting. Writing <strong class="source-inline">result#</strong> outside of a syntax-quoted expression won't throw an exception, but none of the magic happens:</p>
+			<p class="source-code">user&gt; (macroexpand '(def my-number# 5))</p>
+			<p class="source-code">(def my-number# 5)</p>
+			<p>On the other hand, if we syntax-quote <strong class="source-inline">my-number#</strong>, the "magic" comes back:</p>
+			<p class="source-code">user&gt; (macroexpand '(def 'my-number# 5))</p>
+			<p class="source-code">(def 'my-number__14717__auto__ 5)</p>
+			<p>This will usually not be a problem. It's easy to remember that automatic gensyms only work inside syntax quoting. There is another important thing to remember, though: an automatic gensym is only valid inside the scope of the syntax-quoted expression where it was originally defined. This means that, with nested syntax-quoted expressions, a <strong class="source-inline">result#</strong> in the outer expression will not expand to the same gensym as a <strong class="source-inline">result#</strong> in the inner expression. Let's try an example.</p>
+			<p>Consider this little macro:</p>
+			<p class="source-code">(defmacro fn-context [v &amp; symbol-fn-pairs]</p>
+			<p class="source-code">  '(let [v# ~v]</p>
+			<p class="source-code">     ~@(map (fn [[sym f]]</p>
+			<p class="source-code">              '(defn ~sym [x#]</p>
+			<p class="source-code">                 (f v# x#))) (partition 2 symbol-fn-pairs))))</p>
+			<p>This macro is supposed to allow us to define multiple functions inside a <strong class="source-inline">let</strong> block so that each function refers, via a <strong class="bold">closure</strong>, to the same binding. We want it to produce code that, conceptually, at least, looks roughly like this:</p>
+			<p class="source-code">(let [common-value 5]</p>
+			<p class="source-code">  (defn adder [n] (+ common-value 5))</p>
+			<p class="source-code">  (defn subtractor [n] (- common-value 5))</p>
+			<p class="source-code">  (defn multiplier [n] (* common-value 5)))</p>
+			<p>To define those functions, we would write this:</p>
+			<p class="source-code">(fn-context 5 adder + subtractor - multiplier *)</p>
+			<p>The <strong class="source-inline">symbol-fn-pairs</strong> argument is expected to be an alternating series of symbols that will become the names of the functions, and some will become functions as well. We then use <strong class="source-inline">partition-by</strong> in the body of the macro to organize this list into pairs. (In production code, we would probably want to check that <strong class="source-inline">symbol-fn-pairs</strong> contains an even number of items, just as <strong class="source-inline">let</strong> complains if there is an odd number of items in its bindings.)</p>
+			<p>Let's see if this macro works as advertised:</p>
+			<p class="source-code">user&gt; (fn-context 5 adder + subtractor - multiplier *)</p>
+			<p class="source-code">Syntax error compiling at (Activity:localhost:52217(clj)*:246:15).</p>
+			<p class="source-code">Unable to resolve symbol: v__14896__auto__ in this context</p>
+			<p>Oh no! What happened?</p>
+			<p>Before we use <strong class="source-inline">macroexpand</strong> to start debugging, we can tell that the problem is related in some way to the <strong class="source-inline">v#</strong> binding because the <strong class="source-inline">v__14896__auto__</strong> gensym is prefixed with a <strong class="source-inline">v</strong>.</p>
+			<p>Macro expansions are hard to read, especially when there are a lot of gensyms, which are, let's face it, hardly things of beauty when expanded. Start by trying to find the symbol mentioned in the syntax error message. We'll use <strong class="source-inline">macroexpand-1</strong> here, to avoid expanding the <strong class="source-inline">let</strong> and <strong class="source-inline">defn</strong> macros:</p>
+			<p class="source-code">user&gt; (macroexpand-1 '(fn-context 5 adder + subtractor - multiplier *))</p>
+			<p class="source-code">(clojure.core/let</p>
+			<p class="source-code"> [v__14897__auto__ 5]</p>
+			<p class="source-code"> (clojure.core/defn</p>
+			<p class="source-code">  adder</p>
+			<p class="source-code">  [x__14895__auto__]</p>
+			<p class="source-code">  (+ v__14896__auto__ x__14895__auto__))</p>
+			<p class="source-code"> (clojure.core/defn</p>
+			<p class="source-code">  subtractor</p>
+			<p class="source-code">  [x__14895__auto__]</p>
+			<p class="source-code">  (- v__14896__auto__ x__14895__auto__))</p>
+			<p class="source-code"> (clojure.core/defn</p>
+			<p class="source-code">  multiplier</p>
+			<p class="source-code">  [x__14895__auto__]</p>
+			<p class="source-code">  (* v__14896__auto__ x__14895__auto__)))</p>
+			<p>The problem here is that, in the initial <strong class="source-inline">let</strong> binding, <strong class="source-inline">v#</strong> becomes <strong class="source-inline">v__14897__auto__</strong>. Later, inside each of the function definitions, we want to use that binding, but unfortunately, in each of the functions, <strong class="source-inline">v#</strong> has been replaced with a slightly different gensym, which is <strong class="source-inline">v__14896__auto__</strong>. Suddenly, the syntax error makes more sense: in each function, we're trying to use a non-existent binding.</p>
+			<p>Why did <strong class="source-inline">v#</strong> fail in this case? The problem here is that we have two separate syntax-quoted expressions. The first is the top-level <strong class="source-inline">let</strong>, where <strong class="source-inline">v#</strong> is used initially. Then, we use <strong class="source-inline">unquote-splice</strong> to splice the list of functions into the <strong class="source-inline">let</strong> expression. Inside the anonymous function that's passed to <strong class="source-inline">map</strong>, we use the syntax-quoting backtick one more time to return the <strong class="source-inline">defn</strong> form. And this is where we get into trouble. Because we are no longer in the same syntax-quoted expression, <strong class="source-inline">v#</strong> does not expand to the same gensym. As a result, the two symbols are treated as totally separate values and we get a syntax error.</p>
+			<p>This is a time when we can't use automatic gensyms. Instead, we'll have to do this the old-fashioned way and use the <strong class="source-inline">gensym</strong> function ourselves. Here's how:</p>
+			<p class="source-code">(defmacro fn-context [v &amp; symbol-fn-pairs]</p>
+			<p class="source-code">  (let [common-val-gensym (gensym "common-val-")]</p>
+			<p class="source-code">    '(let [~common-val-gensym ~v]</p>
+			<p class="source-code">       ~@(map (fn [[sym f]]</p>
+			<p class="source-code">                '(defn ~sym [x#]</p>
+			<p class="source-code">                   (~f ~common-val-gensym x#))) (partition 2 symbol-fn-pairs)))))</p>
+			<p>The primary difference here is that we've wrapped the body of the first version of the macro in a separate <strong class="source-inline">let</strong> expression that is not quoted. This means that it will be present at compile time but will disappear at runtime in the expanded code. In this outer <strong class="source-inline">let</strong> expression, we call <strong class="source-inline">gensym</strong> and assign its value to <strong class="source-inline">common-val-gensym</strong>. At compile time, we'll refer to the gensym with this symbol. Because our <strong class="source-inline">let</strong> expression wraps the entire body of the macro, <strong class="source-inline">common-val-gensym</strong> will have the same value throughout the entire macro.</p>
+			<p>Let's test it:</p>
+			<p class="source-code">user&gt; (fn-context 5 adder + subtractor - multiplier *)</p>
+			<p class="source-code">#'user/multiplier</p>
+			<p class="source-code">user&gt; (adder 5)</p>
+			<p class="source-code">10</p>
+			<p class="source-code">user&gt; (subtractor 12)</p>
+			<p class="source-code">-7</p>
+			<p class="source-code">user&gt; (multiplier 10)</p>
+			<p class="source-code">50</p>
+			<p>Any reasonably complex macro will likely have more than one syntax-quoted expression, so knowing when to manually create and assign gensyms can be important. This knowledge can help avoid some hard-to-debug situations where your code looks correct but just doesn't work.</p>
+			<p>As a side note, the <strong class="source-inline">fn-context</strong> macro could easily be replaced with a functional solution by using the <strong class="source-inline">partial</strong> function. Remember, <strong class="source-inline">partial</strong> takes a function and one or more arguments and returns a function identical to the original, except that the first one or more arguments are already "filled in." Thus, instead of using a macro and <strong class="source-inline">defn</strong> forms, we can simply define new functions using <strong class="source-inline">def</strong> and <strong class="source-inline">partial</strong>:</p>
+			<p class="source-code">user&gt; (let [x 100]</p>
+			<p class="source-code">        (def adder (partial + x))</p>
+			<p class="source-code">        (def subtractor (partial - x))</p>
+			<p class="source-code">        (def multiplier (partial * x)))</p>
+			<p class="source-code">#'user/multiplier</p>
+			<p class="source-code">user&gt; (adder 5)</p>
+			<p class="source-code">105</p>
+			<p>The possibilities offered by functional programming in Clojure are such that it is fairly rare to find a problem, in day-to-day coding, that can only be expressed as a macro. Authors of libraries will tend to use macros slightly more often, for those times when it is important to have a very clear interface for some code. Perhaps the greatest advantage of Clojure macros is that most of the time, we don't need to write them: either library authors have already done so or there is a solution on the functional side. And then, of course, if we really must write a macro, Clojure provides some excellent tools for doing so.</p>
+			<p>In this chapter, we've taken a close look at several of the most common traps in macro writing. By taking these into consideration, you should be able to write effective macros. They should also serve as a reminder of why macros should be avoided when it is convenient to do so: writing and debugging macros can be a difficult and error-prone task. In the right circumstances, macros can be an extremely powerful tool for removing boilerplate and other forms of repetition from source code.</p>
+			<h2 id="_idParaDest-262">Activ<a id="_idTextAnchor351"/>ity 11.01: A Tennis CSV Macro</h2>
+			<p>In some of the earlier chapters, we worked with tennis data contained in CSV files. Each time, we used a standard Clojure macro called <strong class="source-inline">with-open</strong>, and each time, we followed an almost identical pattern where the file's contents are threaded (with the <strong class="source-inline">-&gt;&gt;</strong> macro) through a series of transformations:</p>
+			<ol>
+				<li value="1">Read the contents using the <strong class="source-inline">clojure.data.csv</strong> library's <strong class="source-inline">read-csv</strong> function.</li>
+				<li>Transform each line from the input file into a map using the <strong class="source-inline">semantic-csv</strong> library's <strong class="source-inline">mappify</strong> function.</li>
+				<li>Cast some of the fields to numeric values using <strong class="source-inline">semantic-csv</strong>'s <strong class="source-inline">cast-with</strong> function.</li>
+				<li>Remove some of the unnecessary data fields by using <strong class="source-inline">map</strong> to call <strong class="source-inline">select-keys</strong> on each item in the dataset.</li>
+				<li>End with a call to <strong class="source-inline">doall</strong> to make sure we avoid returning a lazy sequence that would not be able to be completed once the file had been closed.</li>
+			</ol>
+			<p>Each of these steps added some repetitious boilerplate to your code. The result is that each time you want to write a function that analyzes one of these CSV files, you end up repeating the same code over and over again, which is tedious and error-prone to write, and hard to read because the important logic in your code is buried in boilerplate.</p>
+			<p>Due to the success of the tennis data on the data-driven sports journalism website you work for, you now write a lot of functions with this identical pattern. You've decided it's time to make your life easier by cleaning up this code with a nice macro called <strong class="source-inline">with-tennis-csv</strong>. </p>
+			<p>Your goal is to write a macro called <strong class="source-inline">with-tennis-csv</strong> that will encapsulate most or all of the repetitive steps for accessing the CSV data.</p>
+			<h2 id="_idParaDest-263">Inter<a id="_idTextAnchor352"/>face Design</h2>
+			<p>The macro should accept the following as arguments:</p>
+			<ul>
+				<li>The CSV filename (a string).</li>
+				<li>The mappings from field names to types for <strong class="source-inline">cast-with</strong> (a map of keywords to functions).</li>
+				<li>A list of keywords to keep. If an empty list is supplied, all the keywords will be kept.</li>
+				<li>An arbitrary number of Clojure forms. These forms must accept and return a list of maps.</li>
+			</ul>
+			<p>The Clojure forms will be inserted in the middle of the <strong class="source-inline">-&gt;&gt;</strong> chain of expressions:</p>
+			<div>
+				<div id="_idContainer235" class="IMG---Figure">
+					<img src="image/B14502_11_06.jpg" alt="Figure 11.6: Inserting the Clojure form&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="figure-caption">Figure 11.6: Inserting the Clojure form</p>
+			<p>The macro caller will supply the forms that will be placed inside the chain of transformations.</p>
+			<p>Because the Clojure forms will be used inside a double-arrow threading macro, <strong class="source-inline">-&gt;&gt;</strong> their final argument must be omitted.</p>
+			<p>The following <strong class="source-inline">blowout</strong> function illustrates a possible use of the macro you want to write. The function takes a CSV file path and a threshold and then returns a list of matches where the winner won by more than <strong class="source-inline">threshold</strong> games. The results are narrowed to three fields: the names of the two players and the number of games by which the winner defeated the loser:</p>
+			<p class="source-code">(defn <a id="_idTextAnchor353"/>blowouts [csv threshold]</p>
+			<p class="source-code">  (with-tennis-csv csv</p>
+			<p class="source-code">    {:winner_games_won sc/-&gt;int :loser_games_won sc/-&gt;int}</p>
+			<p class="source-code">    [:winner_name :loser_name :games_diff]</p>
+			<p class="source-code">    (map #(assoc % :games_diff (- (:winner_games_won %) (:loser_games_won %))))</p>
+			<p class="source-code">    (filter #(&gt; (:games_diff %) threshold))))</p>
+			<h2 id="_idParaDest-264">Implem<a id="_idTextAnchor354"/>entation</h2>
+			<p>The central challenge here is making sure that the forms are correctly inserted into the <strong class="source-inline">-&gt;&gt;</strong> threading macro.</p>
+			<p>Make sure that none of the arguments are evaluated more than once inside the macro:</p>
+			<ol>
+				<li value="1">Start by determining what the call to <strong class="source-inline">with-tennis-csv</strong> should expand to in the preceding example.</li>
+				<li>Set up your project with the necessary dependencies in a <strong class="source-inline">deps.edn</strong> file and require the necessary libraries in a <strong class="source-inline">tennis-macro</strong> namespace.</li>
+				<li>Determine what the arguments to your macro will be. Don't forget that it should accept an arbitrary number of forms to be threaded.</li>
+				<li>In your macro, as a syntax-quoted "template," insert all the parts of the target code that will always be present, no matter how the macro is called.</li>
+				<li>Insert the expressions to be threaded.</li>
+				<li>Find a way to only apply <strong class="source-inline">select-keys</strong> if keys have been supplied and can be selected.</li>
+			</ol>
+			<p>To test your macro, you can use the CSV files we've been using all along: <a href="https://packt.live/2Rn7PSx">https://packt.live/2Rn7PSx</a>.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">The solution for this activity can be found on page 733.</p>
+			<h1 id="_idParaDest-265">Summar<a id="_idTextAnchor355"/>y</h1>
+			<p>In this chapter, we've explored Clojure's macro system, as well as many of the issues surrounding macros. By now, you should have a grasp of the fundamental concepts of macros, starting with the difference between compile-time and runtime evaluation, and have a mental model that will allow you to move on to writing your own macros if necessary, or to understand macros that have been written by others. The problems of macro hygiene, variable capture, and double evaluation are at the heart of the macro writing process. Knowing all of this will help you write macros, read macros, and, most of all, decide when to write a macro and when not to.</p>
+			<p>Regardless of whether or not you go on to use macros to write your own <strong class="bold">Domain-Specific Languages</strong> (<strong class="bold">DSL</strong>) in Clojure, you'll already benefit from Clojure macros. The flexibility they provide allows Clojure to be extended by library authors in ways that would simply be impossible without macros. Many commonly used Clojure libraries, such as the Ring HTTP server, which you'll learn about in <em class="italic">Chapter 14</em>, <em class="italic">HTTP with Ring</em>, make extensive use of macros to make life simpler for developers.</p>
+			<p>In the next chapter, we are going to explore another one of Clojure's strong points: dealing with concurrency.</p>
+		</div>
+		<div>
+			<div id="_idContainer237" class="Basic-Text-Frame">
+			</div>
+		</div>
+	</body></html>
