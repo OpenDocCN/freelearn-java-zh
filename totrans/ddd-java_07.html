@@ -1,0 +1,416 @@
+<html><head></head><body>
+		<div id="_idContainer114">
+			<h1 id="_idParaDest-78"><em class="italic"><a id="_idTextAnchor077"/>Chapter 5</em>: Implementing Domain Logic</h1>
+			<p class="author-quote">To communicate effectively, the code must be based on the same language used to write the requirements – the same language that the developers speak with each other and with domain experts.</p>
+			<p class="author-quote">– Eric Evans</p>
+			<p>In the <em class="italic">Command Query Responsibility Segregation (CQRS)</em> section of the book, we described how DDD and CQRS complement each other and how the command side (write requests) is the home of business logic. In this chapter, we will implement the command-side API for the <strong class="bold">Letter of Credit</strong> (<strong class="bold">LC</strong>) application using Spring Boot, Axon Framework, JSR-303 bean validations, and persistence options by contrasting between state-stored and event-sourced aggregates. The list of topics to be covered is as follows:</p>
+			<ul>
+				<li>Identifying aggregates</li>
+				<li>Handling commands and emitting events</li>
+				<li>Test-driving the application</li>
+				<li>Persisting aggregates</li>
+				<li>Performing validations</li>
+			</ul>
+			<p>By the end of this chapter, you will have learned how to implement the core of your system (the domain logic) in a robust, well-encapsulated manner. You will also learn how to decouple your domain model from persistence concerns. Finally, you will be able to appreciate how to perform DDD’s tactical design, using services, repositories, aggregates, entities, and value objects.</p>
+			<h1 id="_idParaDest-79"><a id="_idTextAnchor078"/>Technical requirements</h1>
+			<p>To follow the examples in this chapter, you will need access to the following:</p>
+			<ul>
+				<li>JDK 1.8+ (we have used Java 16 to compile sample sources)</li>
+				<li>Maven 3.x</li>
+				<li>Spring Boot 2.4.x</li>
+				<li>JUnit 5.7.x (included with Spring Boot)</li>
+				<li>Axon Framework 4.4.7 (DDD and CQRS framework)</li>
+				<li>Project Lombok (to reduce verbosity)</li>
+				<li>Moneta 1.4.x (money and currency reference implementation – JSR 354)</li>
+			</ul>
+			<h1 id="_idParaDest-80"><a id="_idTextAnchor079"/>Continuing our design journey</h1>
+			<p>In the previous <a id="_idIndexMarker294"/>chapter, we discussed eventstorming as a lightweight method to clarify business flows. As a reminder, this is the output produced from our eventstorming session:</p>
+			<div>
+				<div id="_idContainer080" class="IMG---Figure">
+					<img src="image/B16716_05_02.jpg" alt="Figure 5.1 – Recap of the eventstorming session&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.1 – Recap of the eventstorming session</p>
+			<p>As mentioned previously, the <em class="italic">blue</em> stickies in this diagram represent <em class="italic">commands</em>. We will be using the <strong class="bold">Command Query Responsibility Segregation</strong> (<strong class="bold">CQRS</strong>) pattern as a <a id="_idIndexMarker295"/>high-level architecture approach to implement the domain logic for our LC issuance application. Let’s examine the mechanics of using CQRS and how it can result in an elegant solution. For a recap of what CQRS is and when it is appropriate to apply this pattern, please refer to the <em class="italic">When to use CQRS</em> section in <a href="B16716_02_Final_NM_ePub.xhtml#_idTextAnchor037"><em class="italic">Chapter 2</em></a>, <em class="italic">Where and How Does DDD Fit?</em>.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">CQRS is by no means a silver bullet. Although it is general-purpose enough to be used in a variety of scenarios, it is a paradigm shift as applied to mainstream software problems. Like any other architecture decision, you should apply due diligence when choosing to adopt CQRS to your situation.</p>
+			<p>Let’s look at <a id="_idIndexMarker296"/>how this works in practice by implementing a representative sliver of the command side of the LC application using the Spring and Axon frameworks.</p>
+			<h1 id="_idParaDest-81"><a id="_idTextAnchor080"/>Implementing the command side</h1>
+			<p>In this section, we will <a id="_idIndexMarker297"/>focus on implementing the command side of the application. This is where we expect all the business logic of the application to be implemented. Logically, it looks like the following figure:</p>
+			<div>
+				<div id="_idContainer081" class="IMG---Figure">
+					<img src="image/B16716_05_01.jpg" alt="Figure 5.2 – Traditional versus CQRS architecture&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.2 – Traditional versus CQRS architecture</p>
+			<p>The high-level <a id="_idIndexMarker298"/>sequence on the command side is described here:</p>
+			<ol>
+				<li value="1">A request to mutate state (command) is received.</li>
+				<li>In an event-sourced system, the command model is constructed by replaying existing events that have occurred for that instance. In a state-stored system, we would simply restore state by reading state from the persistence store.</li>
+				<li>If business invariants (validations) are satisfied, one or more domain events are readied with the intention to be published.</li>
+				<li>In an event-sourced system, the domain event is persisted on the command side. In a state-stored system, we would update the state of the instance in the persistence store.</li>
+				<li>The external world is notified by publishing these domain events onto an event bus. The event bus is an infrastructure component to which events are published.</li>
+			</ol>
+			<p>Let’s look at how <a id="_idIndexMarker299"/>we can implement this in the context of our LC issuance application.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">We depict multiple read models because it is possible (but not necessary) to create more than one read model, depending on the kinds of query use cases that need to be supported.</p>
+			<p>For this to <a id="_idIndexMarker300"/>work predictably, the read model(s) need to be kept in sync with the write models (we will examine some of the techniques to do that in detail later).</p>
+			<h2 id="_idParaDest-82"><a id="_idTextAnchor081"/>Tooling choices</h2>
+			<p>Implementing <a id="_idIndexMarker301"/>CQRS does not require the use of any framework. Greg Young, who is considered the father <a id="_idIndexMarker302"/>of the CQRS pattern, advises against rolling our own CQRS framework in the essay found at <a href="https://ordina-jworks.github.io/domain-driven%20design/2016/02/02/A-Decade-Of-DDD-CQRS-And-Event-Sourcing.html">https://ordina-jworks.github.io/domain-driven%20design/2016/02/02/A-Decade-Of-DDD-CQRS-And-Event-Sourcing.html</a>, which is worth taking a look at. Using a good framework can help enhance developer effectiveness and accelerate the delivery of business functionality, while abstracting the low-level plumbing and non-functional requirements without limiting <a id="_idIndexMarker303"/>flexibility. In this book, we will make use of Axon Framework (<a href="http://axonframework.org/">http://axonframework.org/</a>) to implement application functionality, as we have real-world experience in using it in large-scale enterprise development. There <a id="_idIndexMarker304"/>are other frameworks that work <a id="_idIndexMarker305"/>comparably, such as the Lagom framework (<a href="https://www.lagomframework.com/">https://www.lagomframework.com/</a>) and Eventuate (<a href="https://eventuate.io/">https://eventuate.io/</a>), which are worth exploring as well.</p>
+			<h1 id="_idParaDest-83"><a id="_idTextAnchor082"/>Bootstrapping the application</h1>
+			<p>To get started, let’s create a simple Spring Boot application. There are several ways to do this. You <a id="_idIndexMarker306"/>can always use the Spring starter application at <a href="https://start.spring.io">https://start.spring.io</a> to create this application. Here, we will make use of the Spring CLI to bootstrap the application.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">To install <a id="_idIndexMarker307"/>the Spring CLI for your platform, please refer to the detailed instructions at <a href="https://docs.spring.io/spring-boot/docs/current/reference/html/getting-started.html#getting-started.installing">https://docs.spring.io/spring-boot/docs/current/reference/html/getting-started.html#getting-started.installing</a>.</p>
+			<p>To bootstrap the application, use the following command:</p>
+			<div>
+				<div id="_idContainer082" class="IMG---Figure">
+					<img src="image/ch5-1.jpg" alt=""/>
+				</div>
+			</div>
+			<p>This should create a file named <strong class="source-inline">lc-issuance-api.zip</strong> in the current directory. Unzip this file to a location of your choice and add a dependency on Axon Framework in the <strong class="source-inline">dependencies</strong> section of the <strong class="source-inline">pom.xml</strong> file:</p>
+			<div>
+				<div id="_idContainer083" class="IMG---Figure">
+					<img src="image/ch5-2.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">You may need to change the version. We are at version 4.5.3 at the time of writing this book.</li>
+			</ol>
+			<p>Also, add the following dependency on the <strong class="source-inline">axon-test</strong> library to enable unit testing of aggregates:</p>
+			<div>
+				<div id="_idContainer084" class="IMG---Figure">
+					<img src="image/ch5-3.jpg" alt=""/>
+				</div>
+			</div>
+			<p>With the <a id="_idIndexMarker308"/>preceding setup, you should be able to run the application and start implementing the LC issuance functionality.</p>
+			<p>Let’s look at how to implement these commands using Axon Framework.</p>
+			<h2 id="_idParaDest-84"><a id="_idTextAnchor083"/>Identifying commands</h2>
+			<p>From the <a id="_idIndexMarker309"/>eventstorming session in the previous chapter, we have the following commands to start with:</p>
+			<div>
+				<div id="_idContainer085" class="IMG---Figure">
+					<img src="image/B16716_05_03.jpg" alt="Figure 5.3 – Identified commands&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.3 – Identified commands</p>
+			<p>Commands are always directed to an aggregate (the root entity) for processing (handling). This means that we need to resolve each of these commands to be handled by an <a id="_idIndexMarker310"/>aggregate. While the sender of the command does not care which component within the system handles it, we need to decide which aggregate will handle each command. It is also important to note that any given command can only be handled by a single aggregate within the system. Let’s look at how to group these commands and assign them to aggregates. To be able to do that, we need to identify the aggregates in the system first.</p>
+			<h2 id="_idParaDest-85"><a id="_idTextAnchor084"/>Identifying aggregates</h2>
+			<p>Looking at <a id="_idIndexMarker311"/>the output of the eventstorming session of our LC application, one potential grouping can be as follows:</p>
+			<div>
+				<div id="_idContainer086" class="IMG---Figure">
+					<img src="image/B16716_05_04.jpg" alt="Figure 5.4 – First cut attempt at aggregate design&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.4 – First cut attempt at aggregate design</p>
+			<p>Some or all of these entities may be aggregates (For a more detailed explanation on the difference between aggregates and entities , please refer to <a href="B16716_01_Final_NM_ePub.xhtml#_idTextAnchor015"><em class="italic">Chapter 1</em></a>, <em class="italic">The Rationale for Domain-Driven Design</em>). At first <a id="_idIndexMarker312"/>glance, it appears that we have four potential entities to handle these commands:</p>
+			<div>
+				<div id="_idContainer087" class="IMG---Figure">
+					<img src="image/B16716_05_05.jpg" alt="Figure 5.5 – Potential aggregates at first glance&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.5 – Potential aggregates at first glance</p>
+			<p>At first glance, each of these entities may be classified as aggregates in our solution. Here, <strong class="source-inline">LC Application</strong> feels like a reasonably good choice for an aggregate, given that we are building a solution to manage LC applications. However, do the others make sense to be classified as such? <strong class="source-inline">Product</strong> and <strong class="source-inline">Applicant</strong> look like potential entities, but we need to ask ourselves whether we will need to operate on these outside of the purview of <strong class="source-inline">LC Application</strong>. If the answer is <em class="italic">yes</em>, then <strong class="source-inline">Product</strong> and <strong class="source-inline">Applicant</strong> <em class="italic">may</em> be classified as aggregates. But both <strong class="source-inline">Product</strong> and <strong class="source-inline">Applicant</strong> do not seem to require being operated on without an enveloping <strong class="source-inline">LC Application</strong> aggregate within this bounded context. It feels that way because both product and applicant details are required to be provided as part of the LC application process. At least from what we know of the process thus far, this seems to be true. This means that we are left with two potential aggregates – <strong class="source-inline">LC</strong> and <strong class="source-inline">LC</strong> <strong class="source-inline">Application</strong>:</p>
+			<div>
+				<div id="_idContainer088" class="IMG---Figure">
+					<img src="image/B16716_05_06.jpg" alt="Figure 5.6 – Relationship between bounded contexts&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.6 – Relationship between bounded contexts</p>
+			<p>When we <a id="_idIndexMarker313"/>look at the output of our eventstorming session, the <strong class="source-inline">LC Application</strong> aggregate transitions to become an <strong class="source-inline">LC</strong> aggregate much later in the life cycle. Let’s work on the <strong class="source-inline">LC Application</strong> right now and suspend further analysis on the need for an <strong class="source-inline">LC</strong> aggregate to a later time.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">Colloquially, the terms aggregate and aggregate root are sometimes used interchangeably to mean the same thing. Aggregates can be hierarchical, and it is possible for aggregates to contain child aggregates. While both aggregates and aggregate roots handle commands, only one aggregate can exist as the root in a given context, and it encapsulates access to its child aggregates, entities and value objects.</p>
+			<p>It is important to note that entities may be required to be treated as aggregates in a different bounded context and this kind of treatment is entirely context dependent.</p>
+			<p>When we look at the output of our eventstorming session, the LC Application transitions to become an LC much later in the lifecycle in the Issuance context. Our focus right now is to optimize and automate the LC application flow of the overall issuance process. Now that we have settled on working with the LC Application aggregate (root), let’s start writing our first command to see how this manifests itself in code.</p>
+			<h2 id="_idParaDest-86"><a id="_idTextAnchor085"/>Test-driving the system</h2>
+			<p>While <a id="_idIndexMarker314"/>we have a reasonably good conceptual understanding of the system, we are still in the process of refining this understanding. Test-driving the system allows us to exercise our understanding by acting as the first client of the solution that we are producing.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">The practice of test-driving the system is very well illustrated in the best-selling book <em class="italic">Growing Object-Oriented Software, Guided by Tests</em> by authors Nat Price and Steve Freeman. This is worth looking at to gain a deeper understanding of this practice.</p>
+			<p>So, let’s <a id="_idIndexMarker315"/>start with the first test. To the external world, an event-driven system typically works in a manner depicted in the following figure:</p>
+			<div>
+				<div id="_idContainer089" class="IMG---Figure">
+					<img src="image/B16716_05_07.jpg" alt="Figure 5.7 – An event-driven system&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.7 – An event-driven system</p>
+			<p>This figure can be explained as follows:</p>
+			<ol>
+				<li value="1">An optional set of domain events may have occurred in the past.</li>
+				<li>A command is received by the system (initiated manually by a user or automatically by a part of the system), which acts as a stimulus.</li>
+				<li>The command is handled by an aggregate, which then proceeds to validate the received command to enforce invariants (structural and domain validations).</li>
+				<li>The system then reacts in one of two ways:<ol><li>Emit one or more events.</li><li>Throw an exception.</li></ol></li>
+			</ol>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">The code snippets shown in this chapter are excerpts to highlight significant concepts and techniques. For the full working example, please refer to the accompanying source code for this chapter (included in the <strong class="source-inline">ch05</strong> directory).</p>
+			<p>Axon <a id="_idIndexMarker316"/>Framework allows us to express tests in the following form:</p>
+			<div>
+				<div id="_idContainer090" class="IMG---Figure">
+					<img src="image/ch5-4.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1"><strong class="source-inline">FixtureConfiguration</strong> is an Axon Framework utility to aid the testing of aggregate behavior using a BDD-style given-when-then syntax.</li>
+				<li><strong class="source-inline">AggregateTestFixture</strong> is a concrete implementation of <strong class="source-inline">FixtureConfiguration</strong> where you need to register your aggregate class – in our case, <strong class="source-inline">LCApplication</strong> is the candidate to handle commands directed to our solution.</li>
+				<li>Since this is the start of the business process, there are no events that have occurred thus far. This is signified by the fact that we do not pass any arguments to the given method. In other examples we will discuss later, there will likely be events that have already occurred prior to receiving this command.</li>
+				<li>This is <a id="_idIndexMarker317"/>where we instantiate a new instance of the command object. Command objects are usually similar to data transfer objects, carrying a set of information. This command will be routed to our aggregate for handling. We will take a look at how this works in detail shortly.</li>
+				<li>Here, we are declaring that we expect events matching an exact sequence.</li>
+				<li>Here, we are expecting an event of the <strong class="source-inline">LCApplicationCreated</strong> type to be emitted as a result of successfully handling the command.</li>
+				<li>We are finally saying that we do not expect any more events, which means that we expect exactly one event to be emitted.</li>
+			</ol>
+			<h2 id="_idParaDest-87"><a id="_idTextAnchor086"/>Implementing the command</h2>
+			<p><strong class="source-inline">CreateLCApplicationCommand</strong> in the previous simplistic example does not carry any <a id="_idIndexMarker318"/>state. Realistically, the command will likely look something like what is depicted as follows:</p>
+			<div>
+				<div id="_idContainer091" class="IMG---Figure">
+					<img src="image/ch5-5.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">This is the command class. When naming commands, we typically use an imperative style; that is, they usually begin with a verb denoting the action required. Note that this is a data transfer object. In other words, it is simply a bag of data attributes. Also note how it is devoid of any logic (at least at the moment).</li>
+				<li>This is the identifier for the LC application. We are assuming client-generated identifiers in this case. The topic of using server-generated versus client-generated identifiers is out of scope for the subject of this book. You may use either, depending on what is advantageous in your context. Also note that we are using a strong type for the <strong class="source-inline">LCApplicationId</strong> identifier as opposed to a primitive type, such as a numeric or a string value. It is also common in some cases to use UUIDs as an identifier. However, we prefer using strong types to be able to differentiate between identifier types. Note how we are using a <strong class="source-inline">ClientId</strong> type to represent the creator of the application.</li>
+				<li>The <strong class="source-inline">Party</strong> and <strong class="source-inline">AdvisingBank</strong> types are complex types to represent those concepts in our solution. Care should be taken to consistently use names that are relevant in the problem (business) domain as opposed to using names that only make sense in the solution (technology) domain. Note the attempt to make use of the ubiquitous language of the domain experts in both cases. This is a practice that we should always be conscious of when naming things in the system.</li>
+			</ol>
+			<p>It is <a id="_idIndexMarker319"/>worth noting that <strong class="source-inline">merchandiseDescription</strong> is left as a primitive <strong class="source-inline">String</strong> type. This may feel contradictory to the commentary we presented previously. We will address this in the upcoming <em class="italic">Structural validations</em> section.</p>
+			<p>Now, let’s see what the event we will emit as a result of successfully processing the command will look like.</p>
+			<h2 id="_idParaDest-88"><a id="_idTextAnchor087"/>Implementing the event</h2>
+			<p>In an event-driven system, mutating system state by successfully processing a command usually <a id="_idIndexMarker320"/>results in a domain event being emitted to signal the state mutation to the rest of the system. A simplified representation of a real-world <strong class="source-inline">LCApplicationCreatedEvent</strong> event is shown here:</p>
+			<div>
+				<div id="_idContainer092" class="IMG---Figure">
+					<img src="image/ch5-6.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">When naming events, we typically use names in the past tense to denote things that have already occurred and are to be accepted unconditionally as empirical facts that cannot be changed.</li>
+			</ol>
+			<p>You will likely notice that the structure of the event is currently identical to that of the command. While this is true in this case, it may not always be that way. The amount of information <a id="_idIndexMarker321"/>that we choose to disclose in an event is context-dependent. It is important to consult with domain experts when publishing information as part of events. You may choose to withhold certain information in the event payload. For example, consider <strong class="source-inline">ChangePasswordCommand</strong>, which contains the newly changed password. It might be prudent to not include the changed password in the resulting <strong class="source-inline">PasswordChangedEvent</strong>.</p>
+			<p>We have looked at the command and the resulting event in the previous test. Let’s look at how this is implemented under the hood by looking at the aggregate implementation.</p>
+			<h2 id="_idParaDest-89"><a id="_idTextAnchor088"/>Designing the aggregate</h2>
+			<p>The aggregate is the place where commands are handled and events are emitted. The good thing <a id="_idIndexMarker322"/>about the test that we have written is that it is expressed in a manner that hides the implementation details. But let’s look at the implementation to be able to appreciate how we can get our tests to pass and meet the business requirement:</p>
+			<div>
+				<div id="_idContainer093" class="IMG---Figure">
+					<img src="image/ch5-7.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">This is the aggregate identifier for the <strong class="source-inline">LCApplication</strong> aggregate. For an aggregate, the identifier uniquely identifies one instance from another. For this reason, all aggregates are required to declare an identifier and mark it to use the <strong class="source-inline">@AggregateIdentifier</strong> annotation provided by the framework.</li>
+				<li>The method that is handling the command needs to be annotated with the <strong class="source-inline">@CommandHandler</strong> annotation. In this case, the command handler happens to be the constructor of the class, given that this is the first command that can be received <a id="_idIndexMarker323"/>by this aggregate. We will see examples of subsequent commands being handled by other methods later in the chapter.</li>
+				<li>The <strong class="source-inline">@CommandHandler</strong> annotation marks a method as being a command handler. The exact command that this method can handle needs to be passed as a parameter to the method. Note that there can only be one command handler in the entire system for any given command.</li>
+				<li>Here, we are emitting <strong class="source-inline">LCApplicationCreatedEvent</strong> using the <strong class="source-inline">AggregateLifecycle</strong> utility provided by the framework. In this very simple case, we are emitting an event unconditionally on receipt of the command. In a real-world scenario, it is conceivable that a set of validations will be performed before deciding to either emit one or more events, or failing the command with an exception. We will look at more realistic examples later in the chapter.</li>
+				<li>The need for <strong class="source-inline">@EventSourcingHandler</strong> and its role is likely very unclear at this time. We will explain the need for this in detail in an upcoming section of this chapter.</li>
+			</ol>
+			<p>This was a whirlwind introduction to a simple event-driven system. We still need to understand <a id="_idIndexMarker324"/>the role of <strong class="source-inline">@EventSourcingHandler</strong>. To understand that, we will need to appreciate how aggregate persistence works and the implications it has on our overall design.</p>
+			<h1 id="_idParaDest-90"><a id="_idTextAnchor089"/>Persisting aggregates</h1>
+			<p>When working with any system of even moderate complexity, we are required to make interactions <a id="_idIndexMarker325"/>durable; that is, interactions need to outlast system restarts, crashes, and so on. So the need for persistence is a given. While we should always endeavor to abstract persistence concerns from the rest of the system, our persistence technology choices can have a significant impact on the way we architect our overall solution. We have a couple of choices in terms of how we choose to persist aggregate state that are worth mentioning:</p>
+			<ul>
+				<li>State-stored</li>
+				<li>Event-sourced</li>
+			</ul>
+			<p>Let’s examine each of these techniques in more detail in the following sections.</p>
+			<h2 id="_idParaDest-91"><a id="_idTextAnchor090"/>State-stored aggregates</h2>
+			<p>Saving <a id="_idIndexMarker326"/>current values of entities is by far the <a id="_idIndexMarker327"/>most popular way to persist state – thanks to the immense popularity of relational databases and <strong class="bold">Object-Relational Mapping</strong> (<strong class="bold">ORM</strong>) tools <a id="_idIndexMarker328"/>such as Hibernate. And there is good <a id="_idIndexMarker329"/>reason for this ubiquity. Until recently, a majority of enterprise systems used relational databases almost as a default to create business solutions, with ORMs arguably providing a very convenient mechanism to interact with relational databases and their object representations. For example, for our <strong class="source-inline">LCApplication</strong>, it is conceivable that we could use a relational database with a structure that would look something like the following:</p>
+			<div>
+				<div id="_idContainer094" class="IMG---Figure">
+					<img src="image/B16716_05_08.jpg" alt="Figure 5.8 – Typical entity relationship model&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.8 – Typical entity relationship model</p>
+			<p>Irrespective <a id="_idIndexMarker330"/>of whether we choose to <a id="_idIndexMarker331"/>use a relational database or a more modern NoSQL store – for instance, a document store, key-value store, column family store, and so on – the style we use to persist information remains more or less the same, which is to store the current values of the attributes of the said aggregate/entity. When the values of attributes change, we simply overwrite old values with newer ones; that is, we store the current state of aggregates and entities – hence the name <em class="italic">state-stored</em>. This technique has served us very well over the years, but there is at least one more mechanism that we can use to persist information. We will look at this in more detail next.</p>
+			<h2 id="_idParaDest-92"><a id="_idTextAnchor091"/>Event-sourced aggregates</h2>
+			<p>Developers <a id="_idIndexMarker332"/>have also been relying on logs for a variety of diagnostic <a id="_idIndexMarker333"/>purposes for a very long time. Similarly, relational databases have been employing commit logs to store information durably almost since their inception. However, developers’ use of logs as a first-class persistence solution for structured information in mainstream systems remains extremely rare.</p>
+			<p>A log is an extremely simple, append-only sequence of immutable records ordered by time. The diagram here illustrates the structure of a log where records are written sequentially. In essence, a log is an append-only data structure, as depicted here:</p>
+			<div>
+				<div id="_idContainer095" class="IMG---Figure">
+					<img src="image/B16716_05_09.jpg" alt="Figure 5.9 – The log data structure&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.9 – The log data structure</p>
+			<p>Writing to <a id="_idIndexMarker334"/>a log compared to a more complex data structure <a id="_idIndexMarker335"/>such as a table is a relatively simple and fast operation, and can handle extremely high volumes of data while providing predictable performance. Indeed, a modern event-streaming platform such as Apache Kafka makes use of this pattern to scale to support extremely high volumes. We do feel that this can be applied to act as a persistence store when processing commands in mainstream systems because this has benefits beyond the technical advantages listed previously. Consider the example of an online order flow shown here:</p>
+			<div>
+				<div id="_idContainer096" class="IMG---Figure">
+					<img src="image/B16716_05_Table_01.jpg" alt=""/>
+				</div>
+			</div>
+			<p>As you can see, in the event store, we continue to have full visibility of all user actions performed. This allows us to reason about these behaviors more holistically. In the traditional store, we lost the information that the user replaced white with wheat bread. While this does not impact the order itself, we lose the opportunity to gather insights from this user behavior. We recognize that this information can be captured in other ways <a id="_idIndexMarker336"/>using specialized analytical solutions; however, the event log mechanism provides a natural way to do this without requiring any additional <a id="_idIndexMarker337"/>effort. It also acts as an audit log, providing a full history of all events that have occurred thus far. This fits well with the essence of domain-driven design, where we are constantly exploring ways in which to reduce complexity.</p>
+			<p>However, there are implications to persisting data in the form of a simple event log. Before processing any command, we will need to hydrate past events in the exact order of occurrence and reconstruct the aggregate state to allow us to perform validations. For example, when confirming checkout, just having the ordered set of elapsed events will not suffice. We still need to compute the exact items that are in the cart before allowing the order to be placed. This <em class="italic">event replay</em> to restore aggregate state (at least those attributes that are required to validate said command) is necessary before processing that command. For example, we need to know which items are in the cart currently before processing <strong class="source-inline">RemoveItemFromCartCommand</strong>. This is illustrated in the following table:</p>
+			<div>
+				<div id="_idContainer097" class="IMG---Figure">
+					<img src="image/B16716_05_Table_02.jpg" alt=""/>
+				</div>
+			</div>
+			<p>The corresponding <a id="_idIndexMarker338"/>source code for the <a id="_idIndexMarker339"/>whole scenario is illustrated in the following code snippet:</p>
+			<div>
+				<div id="_idContainer098" class="IMG---Figure">
+					<img src="image/ch5-8.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Before processing any command, the aggregate loading process commences by first invoking <a id="_idIndexMarker340"/>the no-args constructor. For this reason, we <a id="_idIndexMarker341"/>need the no-args constructor to be <strong class="bold">empty</strong>; that is, it should <strong class="bold">not</strong> have any code that restores <strong class="source-inline">state</strong>. Restoration of <strong class="source-inline">state</strong> <em class="italic">must</em> happen only in those methods that trigger an event replay. In the case of Axon Framework, this translates to methods embellished with the <strong class="source-inline">@EventSourcingHandler</strong> annotation.</li>
+				<li>It is important to note that it is possible (but not necessary) to emit <strong class="bold">more than one event</strong> after processing a command. This is illustrated in the command handler method for <strong class="source-inline">AddItemCommand</strong> in the previous code where we emit <strong class="source-inline">CartCreatedEvent</strong> and <strong class="source-inline">ItemAddedEvent</strong>. Command handlers do not mutate the state of the aggregate. They only make use of the existing aggregate state to enforce invariants (validations) and emit events if those invariants hold <strong class="source-inline">true</strong>.</li>
+				<li>The loading process continues through the invocation of event-sourcing handler methods in exactly the order of occurrence for that aggregate instance. Event-sourcing handlers are only needed to hydrate aggregate state on the basis of past events. This means that they usually are devoid of any business (conditional) logic. It goes without saying that these methods do not emit any events. Event emission is restricted to happen within command handlers when invariants are successfully enforced.</li>
+			</ol>
+			<p>When working <a id="_idIndexMarker342"/>with event-sourced aggregates, it is very <a id="_idIndexMarker343"/>important to be disciplined about the kind of code that one can write:</p>
+			<div>
+				<div id="_idContainer099" class="IMG---Figure">
+					<img src="image/B16716_05_Table_03.jpg" alt=""/>
+				</div>
+			</div>
+			<p>If there is a large number of historic events to restore state, the aggregate loading process can become a time-consuming operation – directly proportional to the number of elapsed events for that aggregate. There are techniques (such as event snapshotting) we can employ to overcome this.</p>
+			<h1 id="_idParaDest-93"><a id="_idTextAnchor092"/>Persistence technology choices</h1>
+			<p>If you are using a state store to persist your aggregates, using your usual evaluation process for <a id="_idIndexMarker344"/>choosing your persistence technology should suffice. However, if you are looking at event-sourced aggregates, the decision can be a bit more nuanced. In our experience, even a simple relational database can do the trick. Indeed, we once made use of a relational database to act as an event store for a high-volume transactional application with billions of events. This setup worked just fine for us. It is worth noting that we were only using the event store to insert new events and loading events for a given aggregate in sequential order. However, there is a multitude of specialized technologies that have been purpose-built to act as an event store that supports several other value-added features, such as time travel, full event replay, event payload introspection, and so on. If you have such requirements, it might be worth considering <a id="_idIndexMarker345"/>other options, such as NoSQL databases (document stores such as MongoDB or column family stores such as Cassandra) or purpose-built commercial offerings, such as EventStoreDB and Axon Server, to evaluate feasibility in your context.</p>
+			<h2 id="_idParaDest-94"><a id="_idTextAnchor093"/>Which persistence mechanism should we choose?</h2>
+			<p>Now that we have a reasonably good understanding of the two types of aggregate persistence <a id="_idIndexMarker346"/>mechanisms (state-stored and event-sourced), it begs the question <a id="_idIndexMarker347"/>of which one we should choose. We list a few benefits of using event sourcing here:</p>
+			<ul>
+				<li>We get to use the events as a <strong class="bold">natural audit log</strong> in high-compliance scenarios.</li>
+				<li>It provides the ability to perform <strong class="bold">more insightful analytics</strong> on the basis of the fine-grained events data.</li>
+				<li>It arguably produces more flexible designs when we work with a system based on <strong class="bold">immutable events</strong>, because the complexity of the persistence model is capped. Also, there is no need to deal with complex ORM impedance mismatch problems.</li>
+				<li>The domain model is much more <strong class="bold">loosely coupled</strong> with the persistence model, enabling it to evolve mostly independently from the persistence model.</li>
+				<li>It enables going back in time to be able to create <strong class="bold">ad hoc views and reports</strong> without having to deal with upfront complexity.</li>
+			</ul>
+			<p>On the flip side, these are some challenges that you might have to consider when implementing an event-sourced solution:</p>
+			<ul>
+				<li>Event sourcing requires a <strong class="bold">paradigm shift</strong>, which means that development and business teams will have to spend time and effort understanding how it works.</li>
+				<li>The persistence model does not store state directly. This means that <strong class="bold">ad hoc querying</strong> directly on the persistence model can be a lot more <strong class="bold">challenging</strong>. This can be alleviated by materializing new views; however, there is added complexity in doing that.</li>
+				<li>Event sourcing <a id="_idIndexMarker348"/>usually tends to work very well when implemented in conjunction with CQRS, which arguably may add more complexity to the application. It also requires applications to pay closer attention to <strong class="bold">strong versus eventual consistency</strong> concerns.</li>
+			</ul>
+			<p>Our experiences <a id="_idIndexMarker349"/>indicate that event-sourced systems bring a lot of benefits in modern event-driven systems. However, you will need to be cognizant of the considerations presented previously in the context of your own ecosystems when making persistence choices.</p>
+			<h2 id="_idParaDest-95"><a id="_idTextAnchor094"/>Enforcing policies</h2>
+			<p>When processing <a id="_idIndexMarker350"/>commands, we need to enforce policies or rules. Policies come in two broad categories:</p>
+			<ul>
+				<li>Structural rules – those <a id="_idIndexMarker351"/>that enforce that the syntax of the dispatched command is valid</li>
+				<li>Domain rules – those <a id="_idIndexMarker352"/>that enforce that business rules are adhered to</li>
+			</ul>
+			<p>It may also be prudent to perform these validations in different layers of the system. And it is also common for some or all of these policy enforcements to be repeated in more than one layer of the system. However, the important thing to note is that before a command is successfully handled, all these policy enforcements are uniformly applied. Let’s look at some examples of these in the upcoming section.</p>
+			<h3>Structural validations</h3>
+			<p>Currently, to create <a id="_idIndexMarker353"/>an LC application, you are required to dispatch <strong class="source-inline">CreateLCApplicationCommand</strong>. While the command dictates a structure, none of it is enforced at the moment. Let’s correct that.</p>
+			<p>To be able to enable validations declaratively, we will make use of the JSR-303 bean validation libraries. We can add that easily, using the <strong class="source-inline">spring-boot-starter-validation</strong> dependency in our <strong class="source-inline">pom.xml</strong> file, as shown here:</p>
+			<div>
+				<div id="_idContainer100" class="IMG---Figure">
+					<img src="image/ch5-9.jpg" alt=""/>
+				</div>
+			</div>
+			<p>Now, we can <a id="_idIndexMarker354"/>add validations to the command object using the JSR-303 annotations, as depicted here:</p>
+			<div>
+				<div id="_idContainer101" class="IMG---Figure">
+					<img src="image/ch5-10.jpg" alt=""/>
+				</div>
+			</div>
+			<p>Most structural <a id="_idIndexMarker355"/>validations can be accomplished using built-in validator annotations. It is also possible to create custom validators for individual fields or to validate the entire object (for example, to validate interdependent attributes). For more details on how to do this, please refer to the bean validation specification at <a href="https://beanvalidation.org/2.0/">https://beanvalidation.org/2.0/</a> and the reference implementation at <a href="http://hibernate.org/validator/">http://hibernate.org/validator/</a>.</p>
+			<h3>Business rule enforcements</h3>
+			<p>Structural <a id="_idIndexMarker356"/>validations can be accomplished using information that is already available in the command. However, there is another class of validations that requires information that is not present in the incoming command itself. This kind of information can be present in one of two places – within the aggregate that we are operating on or outside of the aggregate itself, but made available within the bounded context.</p>
+			<p>Let’s look at an example of a validation that requires state to be present within the aggregate. Consider the example of submitting an LC. While we can make several edits to the LC when it is in a draft state, no changes can be made after it is submitted. This means that we <a id="_idIndexMarker357"/>can only submit an LC once. This act of submitting the LC is achieved by issuing <strong class="source-inline">SubmitLCApplicationCommand</strong>, as shown in the artifact from the eventstorming session:</p>
+			<div>
+				<div id="_idContainer102" class="IMG---Figure">
+					<img src="image/B16716_05_10.jpg" alt="Figure 5.10 – Validations during the Submit LC Application process&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 5.10 – Validations during the Submit LC Application process</p>
+			<p>Let’s begin with a test to express our intent:</p>
+			<div>
+				<div id="_idContainer103" class="IMG---Figure">
+					<img src="image/ch5-11.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">It is given that <strong class="source-inline">LCApplicationCreatedEvent</strong> has already occurred – in other words, the LC application is already created.</li>
+				<li>This is when we try to submit the application by issuing <strong class="source-inline">SubmitLCApplicationCommand</strong> for the same application.</li>
+				<li>We expect <strong class="source-inline">LCApplicationSubmittedEvent</strong> to be emitted.</li>
+			</ol>
+			<p>The corresponding <a id="_idIndexMarker358"/>implementation will look something like the following:</p>
+			<div>
+				<div id="_idContainer104" class="IMG---Figure">
+					<img src="image/ch5-12.jpg" alt=""/>
+				</div>
+			</div>
+			<p>The preceding implementation allows us to submit an LC application unconditionally – more than once. However, we want to restrict users to be able to submit only once. To be able to do that, we need to remember that the LC application has already been submitted. We can do that in the <strong class="source-inline">@EventSourcingHandler</strong> handler of the corresponding events, as shown next:</p>
+			<div>
+				<div id="_idContainer105" class="IMG---Figure">
+					<img src="image/ch5-13.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">When <strong class="source-inline">LCApplicationSubmittedEvent</strong> is replayed, we set the state of the LC application to <strong class="source-inline">SUBMITTED</strong>.</li>
+			</ol>
+			<p>While we have <a id="_idIndexMarker359"/>remembered that the application has changed to be in the <strong class="source-inline">SUBMITTED</strong> state, we are still not preventing more than one submit attempt. We can fix that by writing a test, as shown here:</p>
+			<div>
+				<div id="_idContainer106" class="IMG---Figure">
+					<img src="image/ch5-14.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1"><strong class="source-inline">LCApplicationCreatedEvent</strong> and <strong class="source-inline">LCApplicationSubmittedEvent</strong> have already happened, which means that <strong class="source-inline">LCApplication</strong> has been submitted once.</li>
+				<li>We now dispatch another <strong class="source-inline">SubmitLCApplicationCommand</strong> command to the system.</li>
+				<li>We expect <strong class="source-inline">AlreadySubmittedException</strong> to be thrown.</li>
+				<li>We also expect no events to be emitted.</li>
+			</ol>
+			<p>The implementation <a id="_idIndexMarker360"/>of the command handler to make this work is shown here:</p>
+			<div>
+				<div id="_idContainer107" class="IMG---Figure">
+					<img src="image/ch5-15.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Note how we are using the state attribute from the <strong class="source-inline">LCApplication</strong> aggregate to perform the validation. If the application is not in the <strong class="source-inline">DRAFT</strong> state, we fail with the <strong class="source-inline">AlreadySubmittedException</strong> domain exception.</li>
+			</ol>
+			<p>Let’s also look at an example where information needed to perform the validation is not part of either the command or the aggregate. Let’s consider the scenario where country regulations prohibit transacting with a set of so-called <em class="italic">sanctioned</em> countries. Changes to this list of countries may be affected by external factors. Hence it does not make sense to pass this list <a id="_idIndexMarker361"/>of sanctioned countries as part of the command payload. Neither does it make sense to maintain it as part of every single aggregate’s state – given that it can change (albeit very infrequently). In such a case, we may want to consider making use of a command handler that is outside the confines of the aggregate class. Thus far, we have only seen examples of <strong class="source-inline">@CommandHandler</strong> methods within the aggregate. But the <strong class="source-inline">@CommandHandler</strong> annotation can appear on any other class external to the aggregate. However, in such a case, we need to load the aggregate ourselves. Axon Framework provides an <strong class="source-inline">org.axonframework.modelling.command.Repository</strong> interface to allow us to do that. It is important to note that this repository is distinct from the Spring Framework interface that is part of the Spring data libraries. An example of how this works is shown here:</p>
+			<div>
+				<div id="_idContainer108" class="IMG---Figure">
+					<img src="image/ch5-16.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">We are <a id="_idIndexMarker362"/>injecting the Axon <strong class="source-inline">Repository</strong> interface to allow us to load aggregates. This was not required previously because the <strong class="source-inline">@CommandHandler</strong> annotation appeared on aggregate methods directly.</li>
+				<li>We are using the <strong class="source-inline">Repository</strong> interface to load aggregates and work with them. The <strong class="source-inline">Repository</strong> interface supports other convenient methods to work with aggregates. Please refer to the Axon Framework documentation for more usage examples.</li>
+			</ol>
+			<p>Coming back to the sanctioned countries example, let’s look at how we need to set up the test slightly differently:</p>
+			<div>
+				<div id="_idContainer109" class="IMG---Figure">
+					<img src="image/ch5-17.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">We are creating a new aggregate fixture as usual.</li>
+				<li>We are <a id="_idIndexMarker363"/>using the fixture to obtain an instance of the Axon <strong class="source-inline">Repository</strong> interface. </li>
+				<li>We instantiate the custom command handler passing in the <strong class="source-inline">Repository</strong> instance. Also, note how we inject the collection of sanctioned countries into the handler using simple dependency injection. In real life, this set of sanctioned countries will likely be obtained from the external configuration.</li>
+				<li>We finally need to register the command handler with the fixture so that it can route commands to this handler as well.</li>
+			</ol>
+			<p>The tests <a id="_idIndexMarker364"/>for this look fairly straightforward:</p>
+			<div>
+				<div id="_idContainer110" class="IMG---Figure">
+					<img src="image/ch5-18.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">For the purposes of the test, we mark the country <strong class="source-inline">SOKOVIA</strong> as a sanctioned country. In a more <a id="_idIndexMarker365"/>realistic scenario, this will likely come from some form of external configuration (for example, a lookup table or form of external configuration). However, this is appropriate for our unit test.</li>
+				<li>We then inject this set of sanctioned countries into the command handler. </li>
+				<li>When the LC application is created for the sanctioned country, we expect no events to be emitted and, furthermore, the <strong class="source-inline">CannotTradeWithSanctionedCountryException</strong> exception to be thrown.</li>
+				<li>Finally, when the beneficiary belongs to a non-sanctioned country, we emit <strong class="source-inline">LCApplicationCreatedEvent</strong> to be emitted.</li>
+			</ol>
+			<p>The implementation <a id="_idIndexMarker366"/>of the command handler is shown here:</p>
+			<div>
+				<div id="_idContainer111" class="IMG---Figure">
+					<img src="image/ch5-19.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">We mark the class as <strong class="source-inline">@Service</strong> to mark it as a component devoid of encapsulated state and enable auto-discovery when using annotation-based configuration or classpath scanning. As such, it can be used to perform any “plumbing” activities.</li>
+				<li>Do note that the validation for the beneficiary’s country being sanctioned could have been performed on line 18 as well. Some would argue that this would be ideal because we could avoid a potentially unnecessary invocation of the Axon <strong class="source-inline">Repository</strong> method if we did that. However, we prefer encapsulating business validations within the confines of the aggregate as much as possible, so that we don’t suffer from the problem of creating an anemic domain model.</li>
+				<li>We use an aggregate repository to act as a factory to create a new instance of the <strong class="source-inline">LCApplication</strong> domain object.</li>
+			</ol>
+			<p>Finally, the aggregate <a id="_idIndexMarker367"/>implementation along with the validation is shown here:</p>
+			<div>
+				<div id="_idContainer112" class="IMG---Figure">
+					<img src="image/ch5-20.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">The validation itself is fairly straightforward. We throw <strong class="source-inline">CannotTradeWithSanctionedCountryException</strong> when the validation fails.</li>
+			</ol>
+			<p>With these <a id="_idIndexMarker368"/>examples, we looked at different ways to implement the policy enforcements encapsulated within the boundaries of the aggregate.</p>
+			<h1 id="_idParaDest-96"><a id="_idTextAnchor095"/>Summary</h1>
+			<p>In this chapter, we used the outputs of the eventstorming session and used it as a primary aid to create a domain model for our bounded context. We looked at how to implement this using the CQRS architecture pattern. We looked at persistence options and the implications of using event-sourced versus state-stored aggregates. Finally, we rounded off by looking at a variety of ways in which to perform business validations. We looked at all this through a set of code examples, using Spring Boot and Axon Framework. With this knowledge, we should be able to implement robust, well-encapsulated, event-driven domain models.</p>
+			<p>In the next chapter, we will look at implementing a UI for these domain capabilities and examine a few options, such as CRUD-based versus task-based UIs.</p>
+			<h1 id="_idParaDest-97"><a id="_idTextAnchor096"/>Further reading</h1>
+			<div>
+				<div id="_idContainer113" class="IMG---Figure">
+					<img src="image/B16716_05_Table_04.jpg" alt=""/>
+				</div>
+			</div>
+		</div>
+	</body></html>

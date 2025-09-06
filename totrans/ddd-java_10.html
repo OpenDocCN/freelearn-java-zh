@@ -1,0 +1,298 @@
+<html><head></head><body>
+		<div id="_idContainer180">
+			<h1 id="_idParaDest-130"><em class="italic"><a id="_idTextAnchor129"/>Chapter 8</em>: Implementing Long-Running Workflows</h1>
+			<p class="author-quote">In the long run, the pessimist may be proven right, but the optimist has a better time on the trip.</p>
+			<p class="author-quote">— Daniel Reardon</p>
+			<p>In the previous chapters, we looked at handling commands and queries within the context of a single aggregate. All the scenarios we have looked at thus far have been limited to a single interaction. However, not all capabilities can be implemented in the form of a simple request-response interaction, requiring coordination across multiple external systems or human-centric operations, or both. In other cases, there may be a need to react to triggers that are non-deterministic (occur conditionally or not at all) and/or are time-bound (based on a deadline). This may require managing business transactions across multiple bounded contexts that may run over a long duration of time while continuing to maintain consistency (<strong class="bold">saga</strong>).</p>
+			<p>There are at least two common patterns to implement the saga pattern:</p>
+			<ul>
+				<li><strong class="bold">Explicit orchestration</strong>: A designated component acts as a centralized coordinator—where the system relies on the coordinator to react to domain events to manage the flow.</li>
+				<li><strong class="bold">Implicit choreography</strong>: No single component is required to act as a centralized coordinator—where the components simply react to domain events in other components to manage the flow.</li>
+			</ul>
+			<p>We’ll cover the following main topics in this chapter:</p>
+			<ul>
+				<li>Implementing sagas</li>
+				<li>Deciding between orchestration and choreography</li>
+				<li>Handling deadlines</li>
+			</ul>
+			<p>By the end of this chapter, you will have learned how to implement sagas using both techniques. You will also have learned how to work with deadlines when no explicit events occur within the system. You will finally be able to appreciate when/whether to choose an explicit orchestrator or simply stick to implicit choreography without resorting to the use of potentially expensive distributed transactions.</p>
+			<h1 id="_idParaDest-131"><a id="_idTextAnchor130"/>Technical requirements</h1>
+			<p>To follow the examples in this chapter, you will need access to the following:</p>
+			<ul>
+				<li>JDK 1.8+ (we have used Java 17 to compile sample sources)</li>
+				<li>Spring Boot 2.4.x</li>
+				<li>Axon Framework 4.5.3</li>
+				<li>JUnit 5.7.x (included with Spring Boot)</li>
+				<li>Project Lombok (to reduce verbosity)</li>
+				<li>Maven 3.x</li>
+			</ul>
+			<p>Please refer to the <strong class="source-inline">Chapter08</strong> directory of the book’s accompanying source code repository for complete working examples on GitHub at <a href="https://github.com/PacktPublishing/Domain-Driven-Design-with-Java-A-Practitioner-s-Guide/tree/master/Chapter08">https://github.com/PacktPublishing/Domain-Driven-Design-with-Java-A-Practitioner-s-Guide/tree/master/Chapter08</a>.</p>
+			<h1 id="_idParaDest-132"><a id="_idTextAnchor131"/>Continuing our design journey</h1>
+			<p>In <a href="B16716_04_Final_NM_ePub.xhtml#_idTextAnchor065"><em class="italic">Chapter 4</em></a>, <em class="italic">Domain Analysis and Modeling</em>, we discussed eventstorming as a lightweight method to clarify business flows. As a reminder, this is the output produced from our eventstorming session:</p>
+			<div>
+				<div id="_idContainer162" class="IMG---Figure">
+					<img src="image/B16716_Figure_8.1.jpg" alt="Figure 8.1 – Recap of the eventstorming session&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 8.1 – Recap of the eventstorming session</p>
+			<p>As depicted in the preceding diagram, some aspects of <strong class="bold">Letter of Credit</strong> (<strong class="bold">LC</strong>) application processing happen outside our current bounded context, before the trade finance manager makes a decision to either approve or decline<a id="_idIndexMarker474"/> the application, as listed here:</p>
+			<ul>
+				<li>Product value is validated.</li>
+				<li>Product legality is validated.</li>
+				<li>Applicant’s creditworthiness is validated.</li>
+			</ul>
+			<p>Currently, the final approval is a manual process. It is pertinent to note that the product value and legality checks happen as part of the work done by the product analysis department, whereas applicant creditworthiness checks happen in the credit analysis department. Both departments make use of their own systems to perform these functions and notify us through the respective events. An LC application is <strong class="bold">not ready</strong> to be either approved or declined until <strong class="bold">each</strong> of these checks is completed. Each of these processes happens mostly independently of the others and may take a non-deterministic amount of time (typically in the order of a few days). After these checks have happened, the trade finance manager manually reviews the application and makes the final decision.</p>
+			<p>Given the growing volumes of LC applications received, the bank is looking to introduce a process optimization to automatically approve applications with an amount below a certain threshold (<em class="italic">USD 10,000</em> at this time). The business has deemed that the three preceding checks are sufficient and that no further human intervention is required when approving such applications.</p>
+			<p>From an overall system perspective, it is pertinent to note that the product analyst system notifies us through <strong class="source-inline">ProductValueValidatedEvent</strong> and <strong class="source-inline">ProductLegalityValidatedEvent</strong>, whereas the credit analyst system does the same through the <strong class="source-inline">ApplicantCreditValidatedEvent</strong> event. Each of these events can, and indeed do, happen independently of the others. For us to be able to auto-approve applications, our solution needs to wait for all of these events to occur. Once these events have occurred, we need to examine the outcome of each of these events to finally make a decision.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">In this context, we are using the term long-running<a id="_idIndexMarker475"/> to denote a complex business process that takes several steps to complete. As these steps occur, the process transitions from one state to another. In other words, we are referring to a state machine. This is not<a id="_idIndexMarker476"/> to be confused with a long-running software process (for example, a complex SQL query or an image-processing routine) that is computationally intensive.</p>
+			<p>As is evident from the preceding diagram, the LC auto-approval functionality is an example of a long-running business process where <em class="italic">something</em> in our system needs to keep track of the fact that these independent events have occurred before proceeding further. Such functionality can be implemented using the saga pattern. Let’s look at how we can do this.</p>
+			<h1 id="_idParaDest-133"><a id="_idTextAnchor132"/>Implementing sagas</h1>
+			<p>Before we delve into how we can implement<a id="_idIndexMarker477"/> this auto-approval functionality, let’s take a look at how this works from a logical perspective, as shown here:</p>
+			<div>
+				<div id="_idContainer163" class="IMG---Figure">
+					<img src="image/B16716_Figure_8.2.jpg" alt="Figure 8.2 – Auto-approval process—logical view&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 8.2 – Auto-approval process—logical view</p>
+			<p>As depicted in the preceding diagram, there<a id="_idIndexMarker478"/> are three bounded contexts in play:</p>
+			<ul>
+				<li><strong class="bold">LC Application</strong> (the bounded context we have been implementing thus far)</li>
+				<li>The <strong class="bold">Applicant</strong> bounded context</li>
+				<li>The <strong class="bold">Product</strong> bounded context</li>
+			</ul>
+			<p>The flow gets triggered when the LC application is submitted. This in turn sets in motion three independent functions that establish the following:</p>
+			<ul>
+				<li>Value of the product being transacted</li>
+				<li>Legality of the product being transacted</li>
+				<li>Creditworthiness of the applicant</li>
+			</ul>
+			<p>LC approval can proceed only after <strong class="bold">all</strong> of these functions have been completed. Furthermore, to <strong class="bold">auto-approve</strong>, all of these checks have to complete <strong class="bold">favorably</strong> and, as mentioned earlier, the LC amount has to be less than the <em class="italic">USD 10,000</em> threshold.</p>
+			<p>As shown in the eventstorming artifact, the <strong class="source-inline">LC Application</strong> aggregate is able to handle <strong class="source-inline">ApproveLCApplicationCommand</strong>, which results in <strong class="source-inline">LCApplicationApprovedEvent</strong>. To auto-approve, this command needs to be invoked automatically when all the conditions mentioned earlier are satisfied. We are building an event-driven system, and we can see that each of these validations produces events when their respective actions are complete. There are at least two ways to implement this functionality:</p>
+			<ul>
+				<li><strong class="bold">Orchestration</strong>: Where a single component<a id="_idIndexMarker479"/> in the system coordinates the state of the flow and triggers subsequent actions as necessary</li>
+				<li><strong class="bold">Choreography</strong>: Where actions in the flow<a id="_idIndexMarker480"/> are triggered without requiring an explicit coordinating component</li>
+			</ul>
+			<p>Let’s examine these methods in more detail.</p>
+			<h2 id="_idParaDest-134"><a id="_idTextAnchor133"/>Orchestration</h2>
+			<p>When implementing sagas using<a id="_idIndexMarker481"/> an orchestrating component, the system<a id="_idIndexMarker482"/> looks similar to the one depicted here:</p>
+			<div>
+				<div id="_idContainer164" class="IMG---Figure">
+					<img src="image/B16716_Figure_8.3.jpg" alt="Figure 8.3 – Saga implementation using an orchestrator&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 8.3 – Saga implementation using an orchestrator</p>
+			<p>The orchestrator starts<a id="_idIndexMarker483"/> tracking the flow when the LC application is submitted. It will then<a id="_idIndexMarker484"/> need to wait for each of the <strong class="source-inline">ProductValueValidatedEvent</strong>, <strong class="source-inline">ProductLegalityValidatedEvent</strong>, and <strong class="source-inline">ApplicantCreditValidatedEvent</strong> events to occur and decide whether it is appropriate to trigger <strong class="source-inline">ApproveLCApplicationCommand</strong>. Finally, the saga life cycle ends unconditionally when the LC application is approved. There are other conditions that may cause the saga to end abruptly. We will examine those scenarios in detail later. It is pertinent to note that there will be a <strong class="bold">distinct</strong> auto-approval saga instance for each LC application that gets submitted. Let’s look at how to implement this functionality using the Axon Framework. As usual, let’s test-drive this functionality that a new auto-approval saga instance is created when an LC application is submitted:</p>
+			<div>
+				<div id="_idContainer165" class="IMG---Figure">
+					<img src="image/ch8-1.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li>We make use of the Axon-provided <strong class="source-inline">FixtureConfiguration</strong> and <strong class="source-inline">SagaTestFixture</strong>, which allow us to test saga functionality.</li>
+				<li>Given no prior activity has occurred (from the perspective of the saga).</li>
+				<li>When <strong class="source-inline">LCApplicationSubmittedEvent</strong> is published.</li>
+				<li>We expect one active saga to exist.</li>
+			</ol>
+			<p>The implementation<a id="_idIndexMarker485"/> to make this test pass looks<a id="_idIndexMarker486"/> as follows:</p>
+			<div>
+				<div id="_idContainer166" class="IMG---Figure">
+					<img src="image/ch8-2.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">When working with Axon and Spring, the orchestrator is annotated with the <strong class="source-inline">@Saga</strong> annotation to mark it as a Spring bean. In order to track each submitted LC application, the <strong class="source-inline">@Saga</strong> annotation is prototype-scoped (as opposed to singleton-scoped), to allow the creation of multiple saga instances. Please refer to the Axon and Spring documentation for more information.</li>
+				<li>The saga listens to <strong class="source-inline">LCApplicationSubmittedEvent</strong> to keep track of the flow (as denoted by the <strong class="source-inline">@SagaEventHandler</strong> annotation). Conceptually, the <strong class="source-inline">@SagaEventHandler</strong> annotation is very similar to the <strong class="source-inline">@EventHandler</strong> annotation that we discussed in the previous chapter. However, the <strong class="source-inline">@SagaEventHandler</strong> annotation is used specifically for event listeners within a saga. The <strong class="source-inline">associationProperty</strong> attribute on the <strong class="source-inline">@SagaEventHandler</strong> annotation causes this event handler method to get invoked only for the saga with a matching value of the <strong class="source-inline">lcApplicationId</strong> attribute in the event payload. Also, <strong class="source-inline">@SagaEventHandler</strong> is a transaction boundary. Every time such a method completes successfully, the Axon Framework commits<a id="_idIndexMarker487"/> a transaction, thereby allowing<a id="_idIndexMarker488"/> it to keep track of the state stored in the saga. We will look at this in more detail shortly.</li>
+				<li>Every saga needs to have at least one <strong class="source-inline">@SagaEventHandler</strong> method that is also annotated with the <strong class="source-inline">@StartSaga</strong> annotation to denote the beginning of the saga.</li>
+			</ol>
+			<p>We have a requirement that an LC cannot be auto-approved if its amount exceeds the threshold (<em class="italic">USD 10,000</em> in our case). The test for this scenario looks like this:</p>
+			<div>
+				<div id="_idContainer167" class="IMG---Figure">
+					<img src="image/ch8-3.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">When the LC amount exceeds the auto-approval threshold amount.</li>
+				<li>We expect no active sagas to exist for that LC.</li>
+			</ol>
+			<p>The implementation<a id="_idIndexMarker489"/> to satisfy this condition looks<a id="_idIndexMarker490"/> like this:</p>
+			<div>
+				<div id="_idContainer168" class="IMG---Figure">
+					<img src="image/ch8-4.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">We check for the condition of the LC amount being greater than the threshold amount.</li>
+				<li>If so, we end the saga using the framework-provided <strong class="source-inline">SagaLifecycle.end()</strong> method. Here, we end the saga programmatically. It is also possible to declaratively end the saga as well using the <strong class="source-inline">@EndSaga</strong> annotation when <strong class="source-inline">LCApplicationApprovedEvent</strong> occurs. Please refer to the full code examples included in this chapter’s repository for more information.</li>
+			</ol>
+			<p>We need to auto-approve<a id="_idIndexMarker491"/> the saga if <strong class="source-inline">ApplicantCreditValidatedEvent</strong>, <strong class="source-inline">ProductLegalityValidatedEvent</strong>, and <strong class="source-inline">ProductValueValidatedEvent</strong> have all occurred<a id="_idIndexMarker492"/> successfully. The test to verify this functionality is shown here: </p>
+			<div>
+				<div id="_idContainer169" class="IMG---Figure">
+					<img src="image/ch8-5.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Given that the LC application has been submitted and <strong class="source-inline">ProductValueValidatedEvent</strong> and <strong class="source-inline">ProductLegalityValidatedEvent</strong> have occurred successfully.</li>
+				<li>When <strong class="source-inline">ApplicantCreditValidatedEvent</strong> is published.</li>
+				<li>We expect one active saga instance and the following.</li>
+				<li>We expect <strong class="source-inline">ApproveLCApplicationCommand</strong> to be dispatched for that LC.</li>
+			</ol>
+			<p>The implementation<a id="_idIndexMarker493"/> for this looks as<a id="_idIndexMarker494"/> follows:</p>
+			<div>
+				<div id="_idContainer170" class="IMG---Figure">
+					<img src="image/ch8-6.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">As mentioned previously, sagas can maintain state. In this case, we are maintaining three Boolean variables, each to denote the occurrence of the respective event.</li>
+				<li>We have declared the Axon <strong class="source-inline">CommandGateway</strong> as a transient member because we need it to dispatch commands, but not be persisted along with other saga states.</li>
+				<li>This event handler intercepts <strong class="source-inline">ApplicantCreditValidatedEvent</strong> for the specific LC application (as denoted by <strong class="source-inline">associationProperty</strong> in the <strong class="source-inline">@SagaEventHandler</strong> annotation).</li>
+				<li>If the decision from <strong class="source-inline">ApplicantCreditValidatedEvent</strong> is rejected, we end the saga immediately.</li>
+				<li>Otherwise, we remember the fact that the applicant’s credit has been validated.</li>
+				<li>We then check to see whether<a id="_idIndexMarker495"/> the product’s value and legality have already been validated.</li>
+				<li>If so, we issue the command<a id="_idIndexMarker496"/> to auto-approve the LC.</li>
+			</ol>
+			<p class="callout-heading">Note</p>
+			<p class="callout">The logic in <strong class="source-inline">ProductValueValidatedEvent</strong> and <strong class="source-inline">ProductLegalityValidatedEvent</strong> is very similar to that in the saga event handler for <strong class="source-inline">ApplicantCreditValidatedEvent</strong>. We have omitted it here for brevity. Please refer to the source code for this chapter for the full example along with the tests.</p>
+			<p>Finally, we can end the saga when we receive <strong class="source-inline">LCApplicationApprovedEvent</strong> for this application:</p>
+			<div>
+				<div id="_idContainer171" class="IMG---Figure">
+					<img src="image/ch8-7.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Given that the LC has been submitted and all the validations have been completed successfully.</li>
+				<li>When <strong class="source-inline">LCApplicationApprovedEvent</strong> is published.</li>
+				<li>We expect zero<a id="_idIndexMarker497"/> active sagas to be<a id="_idIndexMarker498"/> running.</li>
+				<li>We also expect to not dispatch any commands.</li>
+			</ol>
+			<p>Now that we have looked at how to implement sagas using an orchestrator, let’s examine some design decisions that we may need to consider when working with them.</p>
+			<p>Here are the pros<a id="_idIndexMarker499"/> of orchestration:</p>
+			<ul>
+				<li><strong class="bold">Complex workflows</strong>: Having an explicit orchestrator can be very helpful when dealing with flows that involve multiple participants and have a lot of conditionals because the orchestrator can keep track of the overall progress in a fine-grained manner.</li>
+				<li><strong class="bold">Testing</strong>: As we have seen in the preceding implementation, testing flow logic in isolation is relatively straightforward.</li>
+				<li><strong class="bold">Debugging</strong>: Given that we have a single coordinator, debugging the current state of the flow can be relatively easier.</li>
+				<li><strong class="bold">Handling exceptions</strong>: Given that the orchestrator has fine-grained control of the flow, recovering gracefully from exceptions can be easier.</li>
+				<li><strong class="bold">System knowledge</strong>: Components in different bounded contexts do not need to have knowledge of each other’s internals (for example, commands and events) to progress the flow.</li>
+				<li><strong class="bold">Cyclic dependencies</strong>: Having a central coordinator allows avoiding accidental cyclic dependencies between components.</li>
+			</ul>
+			<p>Here are the cons<a id="_idIndexMarker500"/> of orchestration:</p>
+			<ul>
+				<li><strong class="bold">Single point of failure</strong>: From an operational perspective, orchestrators can become single points of failure because they are the only ones that have knowledge of the flow. This means that these components need to exhibit higher-resilience characteristics as compared to other components.</li>
+				<li><strong class="bold">Leaking of domain logic</strong>: In an ideal world, the aggregate will remain the custodian of all domain logic. Given that the orchestrator is also stateful, business logic may inadvertently shift to the orchestrator. Care should be taken to ensure that the orchestrator only has flow control logic while business invariants remain within the confines of the aggregate.</li>
+			</ul>
+			<p>The preceding implementation should give you a good idea of how to implement a saga orchestrator. Now let’s look at how we can do this without the use of an explicit orchestrator.</p>
+			<h2 id="_idParaDest-135"><a id="_idTextAnchor134"/>Choreography</h2>
+			<p>Saga orchestrators keep track<a id="_idIndexMarker501"/> of the current state of the flow, usually making use of some<a id="_idIndexMarker502"/> kind of data store. Another way to implement this functionality is without using any stateful component. Logically, this looks like the setup shown in the diagram here:</p>
+			<div>
+				<div id="_idContainer172" class="IMG---Figure">
+					<img src="image/B16716_Figure_8.4.jpg" alt="Figure 8.4 – Saga implementation using choreography&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 8.4 – Saga implementation using choreography</p>
+			<p>As you can see, there is no single<a id="_idIndexMarker503"/> component that tracks the saga life<a id="_idIndexMarker504"/> cycle. However, to make the auto-approval decision, each of these stateless event handlers needs to have knowledge of the same three events occurring:</p>
+			<ul>
+				<li>Product value is validated.</li>
+				<li>Product legality is validated.</li>
+				<li>Applicant’s creditworthiness is validated.</li>
+			</ul>
+			<p>Given that the event listeners themselves are stateless, there are at least three ways to provide this information to them:</p>
+			<ul>
+				<li>Each of the events carries this information in their respective payloads.</li>
+				<li>The event listeners query the source systems (in this case, the product- and applicant-bounded contexts, respectively).</li>
+				<li>The LC application-bounded context maintains a query model to keep track of these events occurring.</li>
+			</ul>
+			<p>Just like in the orchestrator example, when all events have occurred and the LC amount is below the specified threshold, these event listeners can issue <strong class="source-inline">ApproveLCApplicationCommand</strong>.</p>
+			<p class="callout-heading">Note</p>
+			<p class="callout">We will skip covering code examples for the choreography implementation because this is no different from the material we have covered previously in this and prior chapters.</p>
+			<p>Now that we have looked at how to implement both styles of sagas, let’s examine some design decisions that we may need to consider when working with them.</p>
+			<p>The pros of the choreography implementation<a id="_idIndexMarker505"/> are listed here:</p>
+			<ul>
+				<li><strong class="bold">Simple workflows</strong>: For simple flows, the choreography approach can be relatively straightforward because it does not require the overhead of an additional coordinating component.</li>
+				<li><strong class="bold">No single points of failure</strong>: From an operational<a id="_idIndexMarker506"/> perspective, there is one less high-resilience component to worry about.</li>
+			</ul>
+			<p>These are the cons of the choreography<a id="_idIndexMarker507"/> implementation:</p>
+			<ul>
+				<li><strong class="bold">Workflow tracking</strong>: Especially with complex workflows that involve numerous steps and conditionals, tracking and debugging the current state of the flow may become challenging.</li>
+				<li><strong class="bold">Cyclic dependencies</strong>: It is possible to inadvertently introduce cyclic dependencies among components when workflows become gnarly.</li>
+			</ul>
+			<p>Sagas enable applications to maintain data and transactional consistency when more than one bounded context is required to complete the business functionality without having to resort to using <em class="italic">distributed transactions</em>. However, it does introduce a level of complexity to the programming model, especially when it comes to handling failures. We will look at exception handling in a lot more detail when we discuss working with distributed systems in upcoming chapters. Let’s look at how to progress flows when there are no explicit stimuli by looking at how deadlines work.</p>
+			<h1 id="_idParaDest-136"><a id="_idTextAnchor135"/>Handling deadlines</h1>
+			<p>Thus far, we have looked at events that are caused by human (for example, the applicant submitting an LC application) or system (for example, the auto-approval of an LC application) action. However, in an event-driven system, not all events occur due to an explicit human or system<a id="_idIndexMarker508"/> stimulus. Events may need to be emitted either due to inactivity over a period of time or on a recurring schedule based on prevailing conditions.</p>
+			<p>For example, let’s examine the case where the bank needs <em class="italic">submitted LC applications</em> to be decided on as quickly as possible. When applications are not acted upon by the trade finance managers within 10 calendar days, the system should send them reminders.</p>
+			<p>To deal with such inactivity, we need a means by which to trigger system actions (read: emit events) based on the passage of time—in other words, perform actions when a <em class="italic">deadline</em> expires. In a happy path scenario, we expect either the user or the system to take a certain action. In such cases, we will also need to account for cases where we will need to cancel the<a id="_idIndexMarker509"/> trigger scheduled to occur on deadline expiry. Let’s look at how to test-drive this functionality:</p>
+			<div>
+				<div id="_idContainer173" class="IMG---Figure">
+					<img src="image/ch8-8.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">When the LC application is submitted.</li>
+				<li>We expect a deadline for the reminder to be scheduled.</li>
+			</ol>
+			<p>The implementation<a id="_idIndexMarker510"/> for this is fairly straightforward:</p>
+			<div>
+				<div id="_idContainer174" class="IMG---Figure">
+					<img src="image/ch8-9.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">To allow working with deadlines, the Axon Framework provides a <strong class="source-inline">DeadlineManager</strong> that allows working with deadlines. This is injected into the command handler method.</li>
+				<li>We use <strong class="source-inline">deadlineManager</strong> to schedule a named deadline (<strong class="source-inline">"LC_APPROVAL_REMINDER"</strong> in this case) that will expire in 10 days.</li>
+				<li>When the deadline is met, it will result in <strong class="source-inline">LCApprovalPendingNotification</strong>, which can be handled just like a command. Except, in this case, the behavior<a id="_idIndexMarker511"/> is triggered by the passage of time.</li>
+			</ol>
+			<p>If no action is taken for 10 days, this is what we expect:</p>
+			<div>
+				<div id="_idContainer175" class="IMG---Figure">
+					<img src="image/ch8-10.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Given that the LC application is submitted.</li>
+				<li>When the period of 10 days elapses.</li>
+				<li>The deadline should be met.</li>
+				<li><strong class="source-inline">LCApprovalPendingEvent</strong> should be emitted.</li>
+			</ol>
+			<p>Let’s look at how<a id="_idIndexMarker512"/> to implement this:</p>
+			<div>
+				<div id="_idContainer176" class="IMG---Figure">
+					<img src="image/ch8-11.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Deadlines are handled by annotating handler methods with the <strong class="source-inline">@DeadlineHandler</strong> annotation. Note that the same deadline name used previously is being referenced here.</li>
+				<li>This is the deadline handler method and uses the same payload that was passed along when it was scheduled.</li>
+				<li>We emit <strong class="source-inline">LCApprovalPendingEvent</strong> when the deadline expires.</li>
+			</ol>
+			<p>The deadline handling<a id="_idIndexMarker513"/> logic should only be triggered if no action is taken. However, if the LC is either approved or rejected within a duration of 10 days, none of this behavior should be triggered:</p>
+			<div>
+				<div id="_idContainer177" class="IMG---Figure">
+					<img src="image/ch8-12.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Given that the LC application is submitted.</li>
+				<li>When it is approved within a duration of 10 days (in this case, almost immediately).</li>
+				<li>We expect no scheduled deadlines.</li>
+			</ol>
+			<p>The implementation<a id="_idIndexMarker514"/> for this looks as follows:</p>
+			<div>
+				<div id="_idContainer178" class="IMG---Figure">
+					<img src="image/ch8-13.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">We cancel all the deadlines with the name <strong class="source-inline">LC_APPROVAL_REMINDER</strong> (in this case, we only have<a id="_idIndexMarker515"/> one deadline with that name) within the scope of this aggregate.</li>
+			</ol>
+			<h1 id="_idParaDest-137"><a id="_idTextAnchor136"/>Summary</h1>
+			<p>In this chapter, we examined how to work with long-running workflows using sagas and the different styles we can use to implement them. We also looked at the implications of using explicit orchestration versus implicit choreography. We finally looked at how we can handle deadlines when there are no user-initiated actions.</p>
+			<p>You have learned how sagas can act as a first-class citizen in addition to aggregates when designing a system that makes use of domain-driven design principles.</p>
+			<p>In the next chapter, we will look at how we can interact with external systems while respecting bounded context boundaries between core and peripheral systems.</p>
+			<h1 id="_idParaDest-138"><a id="_idTextAnchor137"/>Further reading</h1>
+			<div>
+				<div id="_idContainer179" class="IMG---Figure">
+					<img src="image/B16716_08_Table_01.jpg" alt=""/>
+				</div>
+			</div>
+		</div>
+	</body></html>

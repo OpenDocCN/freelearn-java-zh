@@ -1,0 +1,232 @@
+<html><head></head><body>
+		<div id="_idContainer161">
+			<h1 id="_idParaDest-113"><em class="italic"><a id="_idTextAnchor112"/>Chapter 7</em>: Implementing Queries</h1>
+			<p class="author-quote">The best view comes after the hardest climb.</p>
+			<p class="author-quote">– Anonymous</p>
+			<p>In the section <em class="italic">Command Query Responsibility Segregation (CQRS)</em> from <a href="B16716_03_Final_NM_ePub.xhtml#_idTextAnchor054"><em class="italic">Chapter 3</em></a>, <em class="italic">Understanding the Domain,</em> we described how DDD and CQRS complement each other and how the query side (read models) can be used to create one or more representations of the underlying data. In this chapter, we will dive deeper into how we can construct read-optimized representations of the data by listening to domain events. We will also look at persistence options for these read models.</p>
+			<p>When working with query models, we construct models by listening to events as they happen. We will examine how to deal with the following situations:</p>
+			<ul>
+				<li>New requirements evolving over a period of time, requiring us to build new query models.</li>
+				<li>We discover a bug in our query model that requires us to recreate the model from scratch.</li>
+			</ul>
+			<p>To do that, the agenda of the chapter includes the following topics:</p>
+			<ul>
+				<li>Continuing our design journey</li>
+				<li>Implementing the query side</li>
+				<li>Historic event replays</li>
+			</ul>
+			<p>By the end of this chapter, you will learn to appreciate how to build query models by listening to domain events. You will also learn how to purpose-build new query models to suit specific read requirements as opposed to being restricted by the data model that was chosen to service commands. You will finally look at how historic event replays work and how you can use them to create new query models to service new requirements.</p>
+			<h1 id="_idParaDest-114"><a id="_idTextAnchor113"/>Technical requirements</h1>
+			<p>To follow the examples in this chapter, you will need access to the following:</p>
+			<ul>
+				<li>JDK 1.8+ (we have used Java 17 to compile sample sources)</li>
+				<li>Spring Boot 2.4.x</li>
+				<li>Axon Framework 4.5.3</li>
+				<li>JUnit 5.7.x (included with Spring Boot)</li>
+				<li>OpenJFX Monocle (for headless UI testing)</li>
+				<li>Project Lombok (to reduce verbosity)</li>
+				<li>Maven 3.x</li>
+			</ul>
+			<p>Please refer to the <strong class="source-inline">Chapter07</strong> directory of the book’s accompanying source code repository at <a href="https://github.com/PacktPublishing/Domain-Driven-Design-with-Java-A-Practitioner-s-Guide/tree/master/Chapter07">https://github.com/PacktPublishing/Domain-Driven-Design-with-Java-A-Practitioner-s-Guide/tree/master/Chapter07</a> for complete working examples.</p>
+			<h1 id="_idParaDest-115"><a id="_idTextAnchor114"/>Continuing our design journey</h1>
+			<p>In <a href="B16716_04_Final_NM_ePub.xhtml#_idTextAnchor065"><em class="italic">Chapter 4</em></a>, <em class="italic">Domain Analysis and Modeling</em>, we discussed eventstorming as a lightweight<a id="_idIndexMarker438"/> method to clarify business flows. As a reminder, this is the output produced from our eventstorming session:</p>
+			<div>
+				<div id="_idContainer148" class="IMG---Figure">
+					<img src="image/B16716_Figure_7.1.jpg" alt="Figure 7.1 – Recap of the eventstorming session&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 7.1 – Recap of the eventstorming session</p>
+			<p>As mentioned previously, we are making use of the CQRS architecture pattern to create the solution. For a detailed explanation on why this is a sound method to employ, you can revisit the <em class="italic">When to use CQRS</em> section in <a href="B16716_03_Final_NM_ePub.xhtml#_idTextAnchor054"><em class="italic">Chapter 3</em></a>, <em class="italic">Understanding the Domain,</em> where we’ve already covered this. In the preceding diagram, the green stickies represent read/query models. These query models are required when validating a command (for example, a list of valid product identifiers when processing the <strong class="source-inline">ValidateProduct</strong> command) or if the information is simply required to be presented to the user (for example, a list of LCs created by an applicant). Let’s look at what it means to apply CQRS in practical terms for the query side.</p>
+			<h1 id="_idParaDest-116"><a id="_idTextAnchor115"/>Implementing the query side</h1>
+			<p>In <a href="B16716_05_Final_NM_ePub.xhtml#_idTextAnchor077"><em class="italic">Chapter 5</em></a>, <em class="italic">Implementing Domain Logic</em>, we examined how to publish events when a command is <a id="_idIndexMarker439"/>successfully processed. Now, let’s look at how we can <a id="_idIndexMarker440"/>construct a query model by listening to these domain events. Logically, this will look something like the following diagram:</p>
+			<div>
+				<div id="_idContainer149" class="IMG---Figure">
+					<img src="image/B16716_Figure_7.2.jpg" alt="Figure 7.2 – The CQRS application – the query side&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 7.2 – The CQRS application – the query side</p>
+			<p>For a detailed explanation of how the command side is implemented, please refer to the <em class="italic">Implementing the command side</em> section in <a href="B16716_05_Final_NM_ePub.xhtml#_idTextAnchor077"><em class="italic">Chapter 5</em></a>,<em class="italic"> Implementing Domain Logic</em>.</p>
+			<p>The<a id="_idIndexMarker441"/> high-level sequence <a id="_idIndexMarker442"/>on the query side is described here:</p>
+			<ol>
+				<li value="1">An event listening component listens to these domain events published on the event bus.</li>
+				<li>It constructs a purpose-built query model to satisfy a specific query use case.</li>
+				<li>This query model is persisted in a datastore optimized for read operations.</li>
+				<li>This query model is then exposed in the form of an API.</li>
+			</ol>
+			<p>Note how there can exist more than one query side component for handling respective scenarios.</p>
+			<p>Let’s implement each of these steps to see how this works for our LC issuance application.</p>
+			<h2 id="_idParaDest-117"><a id="_idTextAnchor116"/>Tooling choices</h2>
+			<p>In a CQRS application, there<a id="_idIndexMarker443"/> is a separation between the command and query sides. At this time, this separation is logical in our application because both the command and query sides are running as components within the same application process. To illustrate the concepts, we will use conveniences provided by Axon Framework to implement the query side in this chapter. In <a href="B16716_10_Final_NM_ePub.xhtml#_idTextAnchor150"><em class="italic">Chapter 10</em></a>, <em class="italic">Beginning the Decomposition Journey</em>, we will look at how it may not be necessary to use a specialized framework (such as Axon) to implement the query side.</p>
+			<p>When implementing the query side, we have two concerns to address, as depicted in the following diagram:</p>
+			<div>
+				<div id="_idContainer150" class="IMG---Figure">
+					<img src="image/B16716_Figure_7.3.jpg" alt="Figure 7.3 – The query side dissected&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 7.3 – The query side dissected</p>
+			<p>These concerns <a id="_idIndexMarker444"/>are as follows:</p>
+			<ul>
+				<li>Consuming domain events and persisting one or more query models</li>
+				<li>Exposing the query model as an API</li>
+			</ul>
+			<p>Before we start implementing these concerns, let’s identify the queries we need to implement for our LC issuance application.</p>
+			<h2 id="_idParaDest-118"><a id="_idTextAnchor117"/>Identifying queries</h2>
+			<p>From<a id="_idIndexMarker445"/> the eventstorming session, we have the following queries to start with:</p>
+			<div>
+				<div id="_idContainer151" class="IMG---Figure">
+					<img src="image/B16716_Figure_7.4.jpg" alt="Figure 7.4 – Identified queries&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 7.4 – Identified queries</p>
+			<p>The queries <a id="_idIndexMarker446"/>marked in green (in the output from the eventstorming session from <em class="italic">Figure 7.1</em>) all require us to expose a collection of LCs in various states. To represent this, we can create an <strong class="source-inline">LCView</strong> class, an extremely simple object devoid of any logic, as shown here:</p>
+			<div>
+				<div id="_idContainer152" class="IMG---Figure">
+					<img src="image/ch7-1.jpg" alt=""/>
+				</div>
+			</div>
+			<p>These query models are an absolute necessity to implement basic functionality dictated by business requirements. But it is possible and very likely that we will need additional query models as the system requirements evolve. We will enhance our application to support these queries as and when the need arises.</p>
+			<h2 id="_idParaDest-119"><a id="_idTextAnchor118"/>Creating the query model</h2>
+			<p>As <a id="_idIndexMarker447"/>seen in <a href="B16716_05_Final_NM_ePub.xhtml#_idTextAnchor077"><em class="italic">Chapter 5</em></a>, <em class="italic">Implementing Domain Logic</em>, when starting a new LC application, the importer sends <strong class="source-inline">StartNewLCApplicationCommand</strong>, which results in <strong class="source-inline">LCApplicationStartedEvent</strong> being emitted, as shown here:</p>
+			<div>
+				<div id="_idContainer153" class="IMG---Figure">
+					<img src="image/ch7-2.jpg" alt=""/>
+				</div>
+			</div>
+			<p>Let’s write an event-processing component that will listen to this event and construct a query model. When working with Axon Framework, we have a convenient way to do this by annotating the event-listening method with the <strong class="source-inline">@EventHandler</strong> annotation.</p>
+			<p>To make any method an event listener, we annotate it with the <strong class="source-inline">@EventHandler</strong> annotation:</p>
+			<div>
+				<div id="_idContainer154" class="IMG---Figure">
+					<img src="image/ch7-3.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">To make <a id="_idIndexMarker448"/>any method an event listener, we annotate it with the <strong class="source-inline">@EventHandler</strong> annotation.</li>
+				<li>The handler method needs to specify the event that we intend to listen to. There are other arguments that are supported by event handlers. Please refer to the Axon Framework documentation for more information.</li>
+				<li>We finally save the query model in an appropriate query store. When persisting this data, we should consider storing it in a form that is optimized for data access. In other words, we want to reduce as much complexity and cognitive load when querying this data.</li>
+			</ol>
+			<p>The <strong class="source-inline">@EventHandler</strong> annotation should not be confused with the <strong class="source-inline">@EventSourcingHandler</strong> annotation that we looked at in <a href="B16716_05_Final_NM_ePub.xhtml#_idTextAnchor077"><em class="italic">Chapter 5</em></a>, <em class="italic">Implementing Domain Logic</em>. The <strong class="source-inline">@EventSourcingHandler</strong> annotation is used to replay<a id="_idIndexMarker449"/> events and restore aggregate state when loading event-sourced aggregates on the command side, whereas the <strong class="source-inline">@EventHandler</strong> annotation is used to listen to events outside the context of the aggregate. In other words, the <strong class="source-inline">@EventSourcingHandler</strong> annotation is used exclusively within aggregates, whereas the <strong class="source-inline">@EventHandler</strong> annotation can be used anywhere there is a need to consume domain events. In this case, we are using it to construct a query model.</p>
+			<h2 id="_idParaDest-120"><a id="_idTextAnchor119"/>Query-side persistence choices</h2>
+			<p>Segregating <a id="_idIndexMarker450"/>the query side this way enables us to choose the persistence technology most appropriate for the problem being solved on the query side. For example, if extreme performance and simple filtering criteria are important, it may be prudent to choose an in-memory store such as Redis or Memcached. If complex search/analytics requirements and large datasets are to be supported, then we may want to consider something like Elasticsearch. Or we may even simply choose to stick with just a relational database. The point we would like to emphasize is that employing CQRS affords a level of flexibility that was previously not available to us.</p>
+			<h2 id="_idParaDest-121"><a id="_idTextAnchor120"/>Exposing a query API</h2>
+			<p>Applicants <a id="_idIndexMarker451"/>like to view the LCs they created, specifically those in the draft state. Let’s look at how we can implement this functionality. Let’s start by defining a simple object to capture the query criteria:</p>
+			<div>
+				<div id="_idContainer155" class="IMG---Figure">
+					<img src="image/ch7-4.jpg" alt=""/>
+				</div>
+			</div>
+			<p>Let’s implement <a id="_idIndexMarker452"/>the query using Spring’s repository pattern to retrieve the results for these criteria:</p>
+			<div>
+				<div id="_idContainer156" class="IMG---Figure">
+					<img src="image/ch7-5.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">This is the dynamic Spring data finder method we will use to query the database.</li>
+				<li>The <strong class="source-inline">@QueryHandler</strong> annotation provided by Axon Framework routes query requests to the respective handler.</li>
+				<li>Finally, we invoke the finder method to return results.</li>
+			</ol>
+			<p>In the <a id="_idIndexMarker453"/>preceding example, we have implemented the <strong class="source-inline">QueryHandler</strong> method within the repository itself for brevity. <strong class="source-inline">QueryHandler</strong> can be placed elsewhere as well.</p>
+			<p>To connect this to the UI, we add a new method in <strong class="source-inline">BackendService</strong> (originally introduced in <a href="B16716_06_Final_NM_ePub.xhtml#_idTextAnchor097"><em class="italic">Chapter 6</em></a>, <em class="italic">Implementing the User Interface  - Task-Based</em>) to invoke the query, as shown here:</p>
+			<div>
+				<div id="_idContainer157" class="IMG---Figure">
+					<img src="image/ch7-6.jpg" alt=""/>
+				</div>
+			</div>
+			<ol>
+				<li value="1">Axon Framework provides the <strong class="source-inline">QueryGateway</strong> convenience that allows us to invoke the query. For more details on how to use <strong class="source-inline">QueryGateway</strong>, please refer to the Axon Framework documentation.</li>
+				<li>We execute<a id="_idIndexMarker454"/> the query using the <strong class="source-inline">MyDraftLCsQuery</strong> object to return results.</li>
+			</ol>
+			<p>What we looked at previously is an example of a very simple query implementation where we have a single <strong class="source-inline">@QueryHandler</strong> annotation to service the query results. This implementation returns results as a one-time fetch. Let’s look at more complex query scenarios.</p>
+			<h2 id="_idParaDest-122"><a id="_idTextAnchor121"/>Advanced query scenarios</h2>
+			<p>Our<a id="_idIndexMarker455"/> focus currently is on active LC applications. Maintaining issued LCs happens in a different bounded context of the system. Consider a scenario where we need to provide a consolidated view of currently active LC applications and issued LCs. In such a scenario, it is necessary to obtain this information by querying two distinct sources (ideally in parallel) – commonly referred to as the <em class="italic">scatter-gather</em> pattern. Please refer to the section on scatter-gather queries in the Axon Framework documentation for more details.</p>
+			<p>In other cases, we may want to remain up to date on dynamically changing data. For example, consider a real-time stock-ticker application tracking price changes. One way to implement this is by polling for price changes. A more efficient way to do this is to push price changes as and when they occur – commonly referred to as the <em class="italic">publish-subscribe</em> pattern. Please refer to the section on subscription queries in the Axon Framework documentation for more details.</p>
+			<h1 id="_idParaDest-123"><a id="_idTextAnchor122"/>Historic event replays</h1>
+			<p>The<a id="_idIndexMarker456"/> example we have looked at thus far allows us to listen to events as they occur. Consider a scenario where we need to build a new query from historic events to satisfy an unanticipated new requirement. This new requirement may necessitate the need to create a new query model or, in a more extreme case, a completely new bounded context. Another scenario might be when we may need to correct a bug in the way we had built an existing query model and now need to recreate it from scratch. Given that we have a record of all events that have transpired in the event store, we can use replay events to enable us to construct both new and/or correct existing query models with relative ease.</p>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">We have used<a id="_idIndexMarker457"/> the term <em class="italic">event replay</em> in the context of reconstituting the state of event-sourced aggregate instances (discussed in the <em class="italic">Event-sourced aggregates</em> section in <a href="B16716_05_Final_NM_ePub.xhtml#_idTextAnchor077"><em class="italic">Chapter 5</em></a>, <em class="italic">Implementing Domain Logic</em>). The event replay mentioned here, although similar in concept, is still very different. In the case of a domain object event replay, we work with a single aggregate root instance and only load events for that one instance. In this case, though, we will likely work with events that span more than one aggregate.</p>
+			<p>Let’s look at the different types of replays and how we can use each of them.</p>
+			<h2 id="_idParaDest-124"><a id="_idTextAnchor123"/>Types of replays</h2>
+			<p>When<a id="_idIndexMarker458"/> replaying events, there are at least two types of replays, depending on the requirements we need to meet. Let’s look at each type in turn:</p>
+			<ul>
+				<li><strong class="bold">Full event replay</strong>: This is<a id="_idIndexMarker459"/> where we replay all the events in the event store. This can be used in a scenario where we need to support a completely new bounded context that is dependent on this subdomain. This can also be used in cases where we need to support a completely new query model or reconstruct an existing, erroneously built query model. Depending on the number of events in the event store, this can be a fairly long and complex process.</li>
+				<li><strong class="bold">Partial/ad hoc event replay</strong>: This is where we need to replay all the events on a<a id="_idIndexMarker460"/> subset of aggregate instances or a subset of events on all aggregate instances, or a combination of both. When working with partial event replays, we will need to specify filtering criteria to select subsets of aggregate instances and events. This means that the event store needs to have the flexibility to support these use cases. Using specialized event store solutions (such as Axon Server and EventStoreDB, to name a couple) can be extremely beneficial.</li>
+			</ul>
+			<h2 id="_idParaDest-125"><a id="_idTextAnchor124"/>Event replay considerations</h2>
+			<p>The <a id="_idIndexMarker461"/>ability to replay events and create new query models can be invaluable. However, like everything else, there are considerations that we need to keep in mind when working with replays. Let’s examine some of these in more detail.</p>
+			<h3>Event store design</h3>
+			<p>As <a id="_idIndexMarker462"/>mentioned in <a href="B16716_05_Final_NM_ePub.xhtml#_idTextAnchor077"><em class="italic">Chapter 5</em></a>, <em class="italic">Implementing Domain Logic</em>, when working with event-sourced aggregates, we persist immutable events in the persistence store. The primary use cases that we need to support are as follows:</p>
+			<ul>
+				<li>Provide consistent and predictable <strong class="bold">write</strong> performance when acting as an append-only store.</li>
+				<li>Provide consistent and predictable <strong class="bold">read</strong> performance when querying for events using the aggregate identifier.</li>
+			</ul>
+			<p>However, replays (especially partial/ad hoc) require the event store to support much richer querying capabilities. Consider a scenario where we found an issue where the amount is incorrectly reported for LCs that were approved during a certain time period and only for a certain currency. To fix this issue, we need to do the following:</p>
+			<ol>
+				<li value="1">Identify affected LCs from the event store.</li>
+				<li>Fix the issue in the application.</li>
+				<li>Reset the query store for these affected aggregates.</li>
+				<li>Do a replay of a subset of events for the affected aggregates and reconstruct the query model.</li>
+			</ol>
+			<p>Identifying affected aggregates from the event store can be tricky if we don’t support querying capabilities that allow us to introspect the event payload. Even if this kind of ad hoc querying were to be supported, these queries can adversely impact the command-handling performance of the event store. One of the primary reasons to employ CQRS was to make use of query-side stores for such complex read scenarios.</p>
+			<p>Event replays seem to introduce a chicken and egg problem where the query store has an issue that<a id="_idIndexMarker463"/> can only be corrected by querying the event store. A few options to mitigate this issue are discussed here:</p>
+			<ul>
+				<li><strong class="bold">General purpose store</strong>: Choose an event store that offers predictable performance for both scenarios (command handling and replay querying).</li>
+				<li><strong class="bold">Built-in datastore replication</strong>: Make use of read replicas for event replay querying.</li>
+				<li><strong class="bold">Distinct datastores</strong>: Make use of two distinct datastores to solve each problem on its own (for example, use a relational database/key-value store for command handling and a search-optimized document store for event replay querying).</li>
+			</ul>
+			<p class="callout-heading">Important Note</p>
+			<p class="callout">Do note that the distinct datastores approach for replays is used to satisfy an operational problem as opposed to query-side business use cases discussed earlier in this chapter. Arguably, it is more complex because the technology team on the command side has to be equipped to maintain more than one database technology.</p>
+			<h2 id="_idParaDest-126"><a id="_idTextAnchor125"/>Event design</h2>
+			<p>Event replays are<a id="_idIndexMarker464"/> required to reconstitute the state from an event stream. In this article on what it means to be event-driven (<a href="https://martinfowler.com/articles/201701-event-driven.html">https://martinfowler.com/articles/201701-event-driven.html</a>), Martin Fowler talks about three different styles of events. If we employ the event-carried state-transfer approach (in Martin’s article) to reconstitute state, it might require us to only replay the latest event for a given aggregate, as opposed to replaying all the events for that aggregate in order of occurrence. While this may seem convenient, it also has its downsides:</p>
+			<ul>
+				<li>All events may now require carrying a lot of additional information that may not be relevant to that event. Assembling all this information when publishing the event can add to the cognitive complexity on the command side.</li>
+				<li>The amount of data that needs to be stored and flow through the wire can increase drastically.</li>
+				<li>On the query side, it can increase cognitive complexity when understanding the structure of the event and processing it.</li>
+			</ul>
+			<p>In a<a id="_idIndexMarker465"/> lot of ways, this leads back to the CRUD-based versus task-based approach for APIs discussed in <a href="B16716_05_Final_NM_ePub.xhtml#_idTextAnchor077"><em class="italic">Chapter 5</em></a>, <em class="italic">Implementing Domain Logic</em>. Our general preference is to design events with as lean a payload as possible. However, your experiences may be different, depending on your specific problem or situation.</p>
+			<h3>Application availability</h3>
+			<p>In an<a id="_idIndexMarker466"/> event-driven system, it is common to accumulate an extremely large number of events over a period of time, even in a relatively simple application. Replaying a large number of events can be <a id="_idIndexMarker467"/>time-consuming. Let’s look at the mechanics of how replays typically work:</p>
+			<ol>
+				<li value="1">We suspend listening to new events in preparation for a replay.</li>
+				<li>Clear the query store for impacted aggregates.</li>
+				<li>Start an event replay for impacted aggregates.</li>
+				<li>Resume listening to new events after the replay is complete.</li>
+			</ol>
+			<p>Based on the preceding list, while the replay is running (<em class="italic">step 3</em>), we may not be able to provide reliable answers to queries that are impacted by the replay. This obviously has an impact on application availability. When using event replays, care needs to be taken to ensure <a id="_idIndexMarker468"/>that <strong class="bold">Service Level Objectives</strong> (<strong class="bold">SLOs</strong>) continue to be met.</p>
+			<h2 id="_idParaDest-127"><a id="_idTextAnchor126"/>Event handlers with side effects</h2>
+			<p>When<a id="_idIndexMarker469"/> replaying events, we re-trigger event handlers either to fix logic that was previously erroneous or to support new functionality. Invoking most (if not all) event handlers usually results in some sort of side effect (for example, updating a query store). This means that some event handlers may not be running for the first time. To prevent unwanted side effects, it is important to undo the effects of having invoked these event handlers previously or code event handlers in an idempotent manner (for example, by using an <strong class="source-inline">upsert</strong> command instead of a simple <strong class="source-inline">insert</strong> command or an <strong class="source-inline">update</strong> command). The effect of some event handlers can be hard (if not impossible) to undo (for example, invoking a command, sending <a id="_idIndexMarker470"/>an email, or SMS). In such cases, it might be required to mark such event handlers as being ineligible to run during the replay. When using Axon Framework, this is fairly simple to do:</p>
+			<div>
+				<div id="_idContainer158" class="IMG---Figure">
+					<img src="image/ch7-7.jpg" alt=""/>
+				</div>
+			</div>
+			<p><strong class="source-inline">@DisallowReplay</strong> (or its counterpart <strong class="source-inline">@AllowReplay</strong>) can be used to explicitly mark event handlers ineligible to run during the replay.</p>
+			<h3>Events as an API</h3>
+			<p>In an <a id="_idIndexMarker471"/>event-sourced system where events are persisted instead of domain state, it is natural for the structure of events to evolve over a period of time. Consider an example of <strong class="source-inline">BeneficiaryInformationChangedEvent</strong>, which has evolved over a period of time, as shown here:</p>
+			<div>
+				<div id="_idContainer159" class="IMG---Figure">
+					<img src="image/B16716_Figure_7.5.jpg" alt="Figure 7.5 – Event evolution&#13;&#10;"/>
+				</div>
+			</div>
+			<p class="IMG---Caption" lang="en-US" xml:lang="en-US">Figure 7.5 – Event evolution</p>
+			<p>Given<a id="_idIndexMarker472"/> that the event store is immutable, it is conceivable that we may have one or more combinations of these event versions for a given LC. This can present a number of decisions we will need to make when performing an event replay:</p>
+			<ul>
+				<li>The producer can simply provide the historic event as it exists in the event store and allow consumers to deal with older versions of the event.</li>
+				<li>The producer can upgrade older versions of events to the latest version before exposing them to the consumer.</li>
+				<li>Allow the consumer to specify an explicit version of the event that they are able to work with and upgrade it to that version before exposing it to the consumer.</li>
+				<li>Migrate the events in the event store to the latest version as evolutions occur. This may not be feasible, given the immutable promise of events in the event store.</li>
+			</ul>
+			<p>Which approach you choose really depends on your specific context and the maturity of the producer/consumer ecosystem. Axon Framework makes provisions for a process they call event upcasting that allows events to be upgraded just in time before they are consumed. Please refer to the Axon Framework documentation for more details.</p>
+			<p>In an event-driven system, events are your API. This means that you will need to apply the same rigor <a id="_idIndexMarker473"/>that you apply to APIs when making life cycle management decisions (for example, versioning, deprecation, and backward compatibility).</p>
+			<h1 id="_idParaDest-128"><a id="_idTextAnchor127"/>Summary</h1>
+			<p>In this chapter, we examined how to implement the query side of a CQRS-based system. We looked at how domain events can be consumed in real time to construct materialized views that can be used to service query APIs. We looked at the different query types that can be used to efficiently access the underlying query models. We rounded off by looking at persistence options for the query side.</p>
+			<p>Finally, we looked at historic event replays and how they can be used to correct errors or introduce new functionality in an event-driven system.</p>
+			<p>This chapter should give you a good idea of how to build and evolve the query side of a CQRS-based system to meet changing business requirements while retaining all the business logic on the command side.</p>
+			<p>In this chapter, we looked at how to consume events in a stateless manner (where no two event handlers have knowledge of each other’s existence). In the next chapter, we will continue to look at how to consume events, but this time in a stateful manner, in the form of long-running user transactions (also known as sagas).</p>
+			<h1 id="_idParaDest-129"><a id="_idTextAnchor128"/>Further reading</h1>
+			<div>
+				<div id="_idContainer160" class="IMG---Figure">
+					<img src="image/B16716_07_Table_01.jpg" alt=""/>
+				</div>
+			</div>
+		</div>
+	</body></html>
