@@ -1,4 +1,4 @@
-一只兔子跃然纸上
+# 第一章：一只兔子跃然纸上
 
 **消息传递**或**消息队列**是应用程序或组件之间的一种通信方式。得益于消息队列，这些应用程序可以在处理各自任务时保持完全独立。消息通常是小型请求、回复、状态更新，甚至是仅仅信息。消息队列提供了一个临时的地方让这些消息停留，允许应用程序根据需要发送和接收它们。
 
@@ -22,7 +22,7 @@ RabbitMQ 是一个开源的消息代理，作为独立应用程序的中介或�
 
 让我们开始吧！
 
-# 第二章：技术要求
+# 技术要求
 
 本章的代码文件可以在 GitHub 上找到：[`github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter01`](https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter01)。
 

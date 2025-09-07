@@ -1,4 +1,4 @@
-将 RabbitMQ 投入生产
+# 第六章：将 RabbitMQ 投入生产
 
 到目前为止，**完整汽车**（**CC**）在生产中运行单个 RabbitMQ 实例。现在 CC 还需要确保服务具有高可用性。创建节点集群确保即使系统出现故障，信息仍然可访问。本章将介绍如何设置 RabbitMQ 集群，包括代理集群、经典镜像队列和法定多数队列的介绍。CC 还在寻找一个新的优雅的日志聚合解决方案，其中所有日志都通过联邦插件发布到集中的 RabbitMQ 节点，因此本章也将涵盖这一主题。
 
@@ -10,7 +10,7 @@
 
 +   使用联邦代理和日志聚合
 
-# 第七章：技术要求
+# 技术要求
 
 本章的代码文件可以在 GitHub 上找到，地址为[`github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter06`](https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter06)。
 

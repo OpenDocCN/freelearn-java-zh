@@ -1,4 +1,4 @@
-创建出租车应用程序
+# 第二章：创建出租车应用程序
 
 在日常对话中，人们互相问候，交换闲聊，然后最终结束对话并继续前行。在 RabbitMQ 的轻量级通道中，低级 TCP 连接以同样的方式工作。将要通过 RabbitMQ 交换消息的应用程序需要与消息代理建立永久连接。当建立此连接时，需要创建一个通道，以便执行面向消息的交互，例如发布和消费消息。
 
@@ -24,7 +24,7 @@
 
 让我们开始吧！
 
-# 第三章：技术要求
+# 技术要求
 
 本章的代码文件可以在 GitHub 上找到：[`github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter02`](https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter02)。
 

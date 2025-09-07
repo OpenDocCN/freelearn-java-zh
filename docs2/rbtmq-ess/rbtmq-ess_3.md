@@ -1,4 +1,4 @@
-向多个出租车司机发送消息
+# 第三章：向多个出租车司机发送消息
 
 第二章，*创建出租车应用程序*，包含了如何连接到并从 RabbitMQ 接收消息的信息。本章演示了设置预取值，该值指定同时发送给消费者的消息数量。它还涵盖了消费者可以手动确认消息或接收无需确认的消息，前者允许零消息损失的设计。
 
@@ -14,7 +14,7 @@
 
 +   向所有队列发布
 
-# 第四章：技术要求
+# 技术要求
 
 本章的代码文件可以在 GitHub 上找到，网址为[`github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter03`](https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter03)。
 
