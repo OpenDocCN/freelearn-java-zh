@@ -1,4 +1,4 @@
-# 第六章：*第四章*: Graal 即时编译器
+# 第六章: Graal 即时编译器
 
 在*第三章*“GraalVM 架构”中，我们探讨了 GraalVM 架构及其构成的各种组件。我们详细介绍了带有 Truffle 的 GraalVM 多语言架构，并简要提到了 Graal 的**即时**（**JIT**）编译器。我们探讨了 Graal JIT 如何通过实现 Java 虚拟机编译器接口插入 Java 虚拟机。在本章中，我们将通过运行示例代码并使用理想图可视化器工具可视化 Graal JIT 执行的 Graal 图和优化来探索 Graal JIT 编译器的工作原理。
 

@@ -1,4 +1,4 @@
-# 第十章：*第八章*: GraalVM 多语言支持 – 在 Truffle、Python 和 R 上运行的 Java
+# 第十章: GraalVM 多语言支持 – 在 Truffle、Python 和 R 上运行的 Java
 
 在上一章中，我们介绍了 JavaScript 和 Node.js 解释器以及语言间的互操作性。在本章中，我们将介绍其他语言实现，例如以下内容：
 

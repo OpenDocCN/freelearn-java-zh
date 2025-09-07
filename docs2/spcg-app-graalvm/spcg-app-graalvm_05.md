@@ -1,4 +1,4 @@
-# 第五章：*第三章*：GraalVM 架构
+# 第五章：GraalVM 架构
 
 在 *第一章* *Java 虚拟机的发展* 中，我们详细探讨了 JVM 架构。在 *第二章* *JIT、HotSpot 和 GraalJIT* 中，我们更详细地介绍了 JVM JIT 编译器的工作原理。我们还探讨了 JVM 如何发展成为最优的 HotSpot VM，拥有 C1 和 C2 JIT 编译器。
 
