@@ -1,6 +1,6 @@
-# 6
 
-# Jakarta Faces
+
+# 第六章：Jakarta Faces
 
 在本章中，我们将介绍自 Java EE 6 以来`web.xml`已变为可选，这意味着在许多情况下，我们可以不写一行 XML 代码就编写完整的 Web 应用程序。
 

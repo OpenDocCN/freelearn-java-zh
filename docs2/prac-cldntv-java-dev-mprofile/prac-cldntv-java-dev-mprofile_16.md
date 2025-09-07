@@ -1,4 +1,4 @@
-# *第十二章*: MicroProfile LRA 及其 MicroProfile 的未来
+# 第十二章: MicroProfile LRA 及其 MicroProfile 的未来
 
 您已经到达了这本书的最后一章。恭喜您走到了这一步！在本章的最后，我们将简要讨论新发布的 MicroProfile **长运行操作**（**LRA**），然后看看 MicroProfile 的未来。
 

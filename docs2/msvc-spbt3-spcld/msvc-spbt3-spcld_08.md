@@ -1,6 +1,6 @@
-# 8
 
-# Spring Cloud 简介
+
+# 第八章：Spring Cloud 简介
 
 到目前为止，我们已经看到了如何使用 Spring Boot 来构建具有良好文档的 API 的微服务，以及 Spring WebFlux 和 `springdoc-openapi`；使用 Spring Data for MongoDB 和 JPA 在 MongoDB 和 SQL 数据库中持久化数据；构建响应式微服务，要么作为非阻塞 API 使用 Project Reactor，要么作为使用 RabbitMQ 或 Kafka 的 Spring Cloud Stream 的事件驱动异步服务，同时结合 Docker；以及管理和测试由微服务、数据库和消息系统组成的系统景观。
 

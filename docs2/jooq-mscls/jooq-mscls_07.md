@@ -1,4 +1,4 @@
-# *第五章*：处理不同类型的 SELECT、INSERT、UPDATE、DELETE 和 MERGE
+# 第五章：处理不同类型的 SELECT、INSERT、UPDATE、DELETE 和 MERGE
 
 jOOQ 初学者常见的场景来自于有一个应该通过 jOOQ DSL API 表达的标准有效的 SQL。虽然 jOOQ DSL API 非常直观且易于学习，但缺乏实践仍然可能导致我们无法找到或直观地找到应该链式调用的适当 DSL 方法来表达特定的 SQL。
 

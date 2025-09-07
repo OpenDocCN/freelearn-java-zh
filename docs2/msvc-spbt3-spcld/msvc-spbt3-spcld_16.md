@@ -1,6 +1,6 @@
-# 16
 
-# 将我们的微服务部署到 Kubernetes
+
+# 第十六章：将我们的微服务部署到 Kubernetes
 
 在本章中，我们将部署本书中的微服务到 Kubernetes。为了在不同运行环境中打包和配置微服务以进行部署，我们将使用 Kubernetes 的包管理器 **Helm**。在这样做之前，我们需要回顾一下服务发现是如何使用的。由于 Kubernetes 内置了对服务发现的支持，因此似乎没有必要部署 Netflix Eureka 来实现这一目的。最后，我们还将尝试一些有助于在 Kubernetes 中部署微服务的 Spring Boot 功能。
 

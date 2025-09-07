@@ -1,4 +1,4 @@
-# *第十一章***：MicroProfile GraphQL**
+# 第十一章**：MicroProfile GraphQL**
 
 **GraphQL** 是一种分布式查询语言，它解决了 **REpresentational State Transfer** （**REST**） 的一些缺点。特别是，GraphQL 解决了 **过度获取**（接收比客户端预期更多的数据）和 **不足获取**（要求客户端发出多个请求以获取所需的数据）的概念。GraphQL 应用程序利用一个模式文件，向客户端展示其可用的查询和突变，以及它可以访问和操作的对象。
 

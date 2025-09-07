@@ -1,6 +1,6 @@
-# 1
 
-# Jakarta EE 简介
+
+# 第一章：Jakarta EE 简介
 
 Jakarta EE 由一组用于开发服务器端企业 Java 应用程序的 **应用程序编程接口 (API**) 规范组成。本书的大部分章节将涵盖单个 Jakarta EE 规范，例如用于集成应用程序不同部分的 **上下文和依赖注入 (CDI**)，或用于开发 RESTful Web 服务的 Jakarta RESTful Web 服务。我们还涵盖了用于处理 JSON 格式数据的 Jakarta EE API，以及用于开发基于 Web 的用户界面的 Jakarta Faces。我们还深入探讨了如何与关系数据库交互，实现 Web 应用程序中客户端和服务器之间的双向通信，安全性和消息传递。
 

@@ -1,6 +1,6 @@
-# 12
 
-# 将日志和跟踪添加到服务中
+
+# 第十一章：将日志和跟踪添加到服务中
 
 在本章中，你将学习关于日志和跟踪工具的内容。我们将使用 Spring Micrometer、Brave、**Elasticsearch、Logstash 和 Kibana**（**ELK**）堆栈以及 Zipkin。ELK 和 Zipkin 将用于实现 API 调用的请求/响应的分布式日志和跟踪。**Spring Micrometer** 与 **Actuator** 将用于将跟踪信息注入 API 调用中。你将学习如何发布和分析不同请求的日志以及与响应相关的日志。
 

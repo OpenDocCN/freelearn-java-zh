@@ -1,6 +1,6 @@
-# 7
 
-# 额外的 Jakarta Faces 功能
+
+# 第七章：额外的 Jakarta Faces 功能
 
 在本章中，我们将介绍 Jakarta EE 的标准组件框架 Jakarta Faces 的附加功能。这些附加功能使我们能够使我们的 Web 应用程序用户友好，同时为应用程序开发者提供方便的功能。
 

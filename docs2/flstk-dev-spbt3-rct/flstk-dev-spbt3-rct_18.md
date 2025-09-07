@@ -1,6 +1,6 @@
-# 15
 
-# 测试 React 应用
+
+# 第十五章：测试 React 应用
 
 本章解释了测试 React 应用的基础知识。它将为我们提供一个使用 Jest 的概述，Jest 是一个 JavaScript 测试框架。我们将探讨如何创建和运行新的测试套件和测试。为了测试我们的 React Vite 项目，我们还将学习如何结合使用 React Testing Library 和 Vitest。
 

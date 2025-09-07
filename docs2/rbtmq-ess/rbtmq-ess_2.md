@@ -24,7 +24,7 @@
 
 让我们开始吧！
 
-# 技术要求
+# 第三章：技术要求
 
 本章的代码文件可以在 GitHub 上找到：[`github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter02`](https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter02)。
 

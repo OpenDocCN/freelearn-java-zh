@@ -1,4 +1,4 @@
-# *第七章*：使用 Open Liberty、Docker 和 Kubernetes 的 MicroProfile 生态系统
+# 第七章：使用 Open Liberty、Docker 和 Kubernetes 的 MicroProfile 生态系统
 
 到目前为止，本书的前几章中，我们专注于使用 MicroProfile API 编写云原生应用程序。在本章中，我们将探讨如何运行云原生应用程序。MicroProfile 与其他一些云原生应用程序框架的不同之处在于，MicroProfile 提供了 API 的多个实现。这减少了最终陷入特定实现或发现您所利用的 API 背后的开源社区不如您想象的那么活跃，维护者消失的可能性。此外，不同的实现往往采取不同的设计决策，这可能更适合您的需求。在撰写本文时，MicroProfile API 的最新版本有四个实现：**Open Liberty**、**Payara**、**WebSphere Liberty**和**WildFly**。此外，**Helidon**、**JBoss EAP**、**KumuluzEE**和**Quarkus**实现了之前的版本。
 

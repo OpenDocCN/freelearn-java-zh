@@ -1,4 +1,4 @@
-# *第一章*：启动 jOOQ 和 Spring Boot
+# 第一章：启动 jOOQ 和 Spring Boot
 
 本章是使用 jOOQ（开源和免费试用商业版）在 Spring Boot 应用程序中开始工作的实用指南。为了方便，让我们假设我们有一个 Spring Boot 占位符应用程序，并计划通过 jOOQ 实现持久层。
 

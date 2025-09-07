@@ -1,6 +1,6 @@
-# 17
 
-# 实施 Kubernetes 功能以简化系统景观
+
+# 第十七章：实施 Kubernetes 功能以简化系统景观
 
 当前的微服务景观包含几个支持服务，这些服务实现了在大规模微服务景观中所需的重要设计模式，例如，边缘服务器、配置服务器、授权服务器以及分布式跟踪服务。为了回顾，请参阅 *第一章*，*微服务简介*。在前一章中，我们将基于 Netflix Eureka 的服务发现模式实现替换为 Kubernetes 内置的发现服务。在本章中，我们将通过减少需要部署的支持服务数量来进一步简化微服务景观。相反，相应的设计模式将由 Kubernetes 的内置功能处理。Spring Cloud Config Server 将被 Kubernetes ConfigMaps 和 Secrets 替换。Spring Cloud Gateway 将被 Kubernetes Ingress 对象替换，它可以像 Spring Cloud Gateway 一样充当边缘服务器。
 

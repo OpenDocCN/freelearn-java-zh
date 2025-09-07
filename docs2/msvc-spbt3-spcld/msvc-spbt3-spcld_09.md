@@ -1,6 +1,6 @@
-# 9
 
-# 使用 Netflix Eureka 添加服务发现
+
+# 第九章：使用 Netflix Eureka 添加服务发现
 
 在本章中，我们将学习如何基于 Spring Boot 使用 Netflix Eureka 作为微服务的发现服务。为了使我们的微服务能够与 Netflix Eureka 通信，我们将使用 Spring Cloud 模块中的 Netflix Eureka 客户端。在我们深入细节之前，我们将详细阐述为什么需要一个发现服务以及为什么 DNS 服务器不足以满足需求。
 

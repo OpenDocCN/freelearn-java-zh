@@ -1,6 +1,6 @@
-# 3
 
-# Jakarta RESTful Web 服务
+
+# 第三章：Jakarta RESTful Web 服务
 
 **表示性状态转移** (**REST**) 是一种架构风格，在这种风格中，Web 服务被视为资源，并且可以通过 **统一资源标识符** (**URIs**) 来识别。
 

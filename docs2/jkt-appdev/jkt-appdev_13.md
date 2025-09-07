@@ -1,6 +1,6 @@
-# 13
 
-# Jakarta Messaging
+
+# 第十三章：Jakarta Messaging
 
 **Jakarta Messaging**为 Jakarta EE 应用程序之间发送消息提供了一种机制。Jakarta Messaging 应用程序不直接通信；相反，消息生产者将消息发送到目的地，而消息消费者从目的地接收消息。
 

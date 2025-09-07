@@ -1,4 +1,4 @@
-# *第二章*：JIT、HotSpot 和 GraalJIT
+# 第三章：*第二章*：JIT、HotSpot 和 GraalJIT
 
 在上一章中，我们学习了 C1 和 C2 编译器以及 C2 编译器在运行时执行的代码优化和去优化类型。
 

@@ -1,6 +1,6 @@
-# 13
 
-# 开始使用 GraphQL
+
+# 第十二章：开始使用 GraphQL
 
 在本章中，你将了解 GraphQL 的基础知识，包括其 **模式定义语言**（**SDL**）、查询、突变和订阅。GraphQL API 在基于手持设备的应用程序中很受欢迎，如移动应用，因为它在获取数据方面既快又高效，在某些情况下优于 REST。因此，了解 GraphQL 非常重要。你将在本章的 *比较 GraphQL 与 REST* 部分了解更多关于其与 REST 的比较。完成本章后，你将了解 GraphQL 的基础知识，包括其语义、模式设计以及使用 Spring 和 Spring Boot 开发基于 GraphQL 的 API 所需的一切。
 

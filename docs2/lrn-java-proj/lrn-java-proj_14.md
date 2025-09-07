@@ -1,6 +1,6 @@
-# 14
 
-# Lambda 表达式
+
+# 第十四章：Lambda 表达式
 
 在本章中，我们将介绍 lambda 表达式，这是我最喜欢的特性之一。Java 8 引入的 lambda 表达式（*lambdas*）将函数式编程带到了 Java。首先，我们将定义*功能接口*及其与 lambda 的关系。我们将演示自定义和基于 API 的 lambda 表达式。我们还将解释关于 lambda 表达式内部使用的局部变量的“final 或实际上是 final”的概念。
 

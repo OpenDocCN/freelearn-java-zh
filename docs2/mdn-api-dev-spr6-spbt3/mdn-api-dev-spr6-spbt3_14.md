@@ -1,6 +1,6 @@
-# 14
 
-# GraphQL API 开发和测试
+
+# 第十三章：GraphQL API 开发和测试
 
 在上一章中，我们学习了 GraphQL 的基本概念。您将利用这些知识在本章中开发和测试基于 GraphQL 的 API。您将在本章中为示例应用程序实现基于 GraphQL 的 API。GraphQL 服务器的实现将基于**设计优先**的方法，这与您在*第三章*中定义的 OpenAPI 规范的方式相同，在*第十一章*中设计了模式，*gRPC API 开发和测试*。
 

@@ -1,6 +1,6 @@
-# 10
 
-# 使用 React 消费 REST API
+
+# 第十章：使用 React 消费 REST API
 
 本章解释了使用 React 进行网络操作。这是一个在大多数 React 应用中都需要的重要技能。我们将学习承诺，它可以使异步代码更简洁、更易读。对于网络操作，我们将使用`fetch`和 Axios 库。作为一个例子，我们将使用 OpenWeather 和 GitHub REST API 来展示如何使用 React 消费 RESTful Web 服务。我们还将看到 React Query 库的实际应用。
 

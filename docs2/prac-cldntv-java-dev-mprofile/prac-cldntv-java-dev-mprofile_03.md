@@ -1,4 +1,4 @@
-# *第二章*：MicroProfile 如何融入云原生应用开发？
+# 第二章：MicroProfile 如何融入云原生应用开发？
 
 本章为您提供了 MicroProfile 的概述，并从满足云原生应用需求的角度描述了 MicroProfile 的规范。在本章中，我们首先回顾 MicroProfile 的历史，探讨其创建的原因和目的，然后我们将探讨 MicroProfile 的内容。这将使您对每个 MicroProfile 规范有一个高层次的理解，以便您了解 MicroProfile 如何融入云原生应用开发，以及为什么您应该采用 MicroProfile 技术。最后，我们将关注 MicroProfile 代码生成器，即 **MicroProfile Starter**，重点介绍如何创建云原生应用。这很有用，因为它将帮助您从头开始使用 MicroProfile。
 

@@ -1,6 +1,6 @@
-# 14
 
-# 设置 Dockerfile 和 Kubernetes 对象以进行云部署
+
+# 第十四章：设置 Dockerfile 和 Kubernetes 对象以进行云部署
 
 我们在之前的章节中探讨了 Quarkus 提供的一些令人惊叹的功能，以帮助我们创建云原生应用程序。更进一步，我们还学习了如何将 Quarkus 集成到六边形系统中。
 

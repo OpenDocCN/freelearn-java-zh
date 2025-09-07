@@ -1,4 +1,4 @@
-# *第六章*：处理不同类型的 JOIN
+# 第六章：处理不同类型的 JOIN
 
 SQL 的 `JOIN` 子句代表了最常用的 SQL 功能之一。从众所周知的 `INNER` 和 `OUTER JOIN` 子句，到虚构的半和反 JOIN，再到花哨的 `LATERAL` JOIN，本章提供了一套全面的示例，旨在帮助您通过 jOOQ DSL API 练习各种 `JOIN` 子句。
 

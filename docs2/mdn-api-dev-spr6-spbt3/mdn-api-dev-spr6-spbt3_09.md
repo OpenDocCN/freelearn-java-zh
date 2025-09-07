@@ -1,6 +1,6 @@
-# 9
 
-# Web 服务的部署
+
+# 第八章：Web 服务的部署
 
 在这一章中，你将了解容器化、Docker 和 Kubernetes 的基础知识。然后，你将使用这些概念使用 Docker 容器化一个示例电子商务应用程序。然后，这个容器将被部署到 Kubernetes 集群中。你将使用 Minikube 进行 Kubernetes，这使得学习和基于 Kubernetes 的开发变得更加容易。
 

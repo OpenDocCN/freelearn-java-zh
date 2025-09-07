@@ -1,6 +1,6 @@
-# 22
 
-# 使用 WSL 2 和 Ubuntu 的 Microsoft Windows 安装说明
+
+# 第二十二章：使用 WSL 2 和 Ubuntu 的 Microsoft Windows 安装说明
 
 在本章中，我们将学习如何设置在 Microsoft Windows 上运行本书中描述的命令所需的工具。我们还将学习如何获取本书源代码的访问权限。
 

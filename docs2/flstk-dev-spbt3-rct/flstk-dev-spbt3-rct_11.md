@@ -1,6 +1,6 @@
-# 9
 
-# TypeScript 简介
+
+# 第九章：TypeScript 简介
 
 本章介绍了 TypeScript。我们将涵盖使用 TypeScript 与 React 一起使用所需的基本技能，并使用 TypeScript 创建我们的第一个 React 应用程序。
 

@@ -1,6 +1,6 @@
-# 4
 
-# JSON 处理和 JSON 绑定
+
+# 第四章：JSON 处理和 JSON 绑定
 
 **JavaScript 对象表示法**（**JSON**）是一种人类可读的数据交换格式。正如其名称所暗示的，JSON 源自 JavaScript。Jakarta EE 提供了对两种不同的 JSON 操作 API 的支持，即**Jakarta JSON Processing**，这是一个低级 API，允许细粒度控制，以及**Jakarta JSON Binding**，这是一个高级 API，允许我们轻松地从 JSON 数据填充 Java 对象，以及快速从 Java 对象生成 JSON 格式的数据。在本章中，我们将介绍 JSON 处理和 JSON 绑定。
 

@@ -14,7 +14,7 @@
 
 +   创建数据分析服务
 
-# 技术要求
+# 第六章：技术要求
 
 本章的代码文件可以在 GitHub 上找到，地址为[`github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter05`](https://github.com/PacktPublishing/RabbitMQ-Essentials-Second-Edition/tree/master/Chapter05)。
 

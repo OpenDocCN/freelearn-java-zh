@@ -1,6 +1,6 @@
-# 8
 
-# Spring Reactive 和 Spring Cloud Stream
+
+# 第八章：Spring Reactive 和 Spring Cloud Stream
 
 在高并发场景中，可能需要不同的应用程序方法，例如需要低延迟和响应性的资源密集型操作，如 **输入/输出** (**I/O**) 限定的任务。在本章中，我们将了解两个解决此类场景的 Spring Boot 项目。
 

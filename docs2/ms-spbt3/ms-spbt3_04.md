@@ -1,6 +1,6 @@
-# 4
 
-# Spring Data：SQL、NoSQL、缓存抽象和批处理
+
+# 第四章：Spring Data：SQL、NoSQL、缓存抽象和批处理
 
 欢迎来到*第四章*。在这里，我们将更深入地了解 Spring Data 方法。在本章中，我们想要了解 Spring Data 方法如何为我们工作。Spring Data 是 Spring Boot 生态系统中的关键部分。这将帮助您清楚地了解如何在 Spring Boot 3.0 中处理不同类型的数据库。
 

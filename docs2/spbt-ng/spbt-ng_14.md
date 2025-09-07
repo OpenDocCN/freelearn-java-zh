@@ -1,6 +1,6 @@
-# 14
 
-# 在 Angular 中添加认证
+
+# 第十四章：在 Angular 中添加认证
 
 在上一章中，我们使用 NgRx 的构建块完成了我们的 Angular 应用程序的 CRUD 功能。我们还学习了在应用程序中编写 actions、reducers 和 effects 的逐步过程，这些将被用于修改状态值。我们还学习了在应用程序中使用和不使用 effects 的区别。Effects 对于我们与允许数据库更改同步到 NgRx 存储的外部 API 进行通信至关重要。
 

@@ -1,6 +1,6 @@
-# 2
 
-# 使用 Spring 暴露 RESTful API
+
+# 第二章：使用 Spring 暴露 RESTful API
 
 为了实现 REST API，在本书的大部分章节中，我们将使用 **Spring Boot**。由于它是一个知名且流行的框架，你很可能熟悉它或之前使用过它。
 

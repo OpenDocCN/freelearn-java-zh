@@ -1,6 +1,6 @@
-# 14
 
-# 使用 Jakarta 进行服务器端编码
+
+# 第十四章：使用 Jakarta 进行服务器端编码
 
 虽然 Java 与网络的最初连接是通过小程序开发实现的，但该语言出现后的几年内，服务器端 Java，最初称为 **Java 2 Enterprise Edition** 或 **J2EE**，后来称为 **Java Enterprise Edition** 或 **JEE**，才被引入。与可以在您的桌面上运行的独立应用程序不同，JEE 应用程序在另一组称为应用服务器的 Java 程序中运行。当 Oracle 决定主要关注核心语言 Java SE 时，规范和库被转交给 Eclipse 基金会。这些规范和库被重命名为 **Jakarta EE**。
 

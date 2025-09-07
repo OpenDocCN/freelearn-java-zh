@@ -1,4 +1,4 @@
-# *第九章*：GraalVM 多语言 – LLVM、Ruby 和 WASM
+# 第十一章：*第九章*：GraalVM 多语言 – LLVM、Ruby 和 WASM
 
 在上一章中，我们介绍了 Java、Python 和 R 的 Truffle 解释器以及语言间的互操作性。在本章中，我们将介绍其他语言的实现，例如以下内容：
 

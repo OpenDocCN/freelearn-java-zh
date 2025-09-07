@@ -1,4 +1,4 @@
-# *第四章*：开发云原生应用程序
+# 第四章：开发云原生应用程序
 
 MicroProfile 4.1 基于某些 **Jakarta EE**（以前称为 **Java Enterprise Edition**）**应用程序编程接口**（**API**）——具体来说，是 **Jakarta RESTful Web Services**（**JAX-RS**）、**Jakarta Contexts and Dependency Injection**（**CDI**）、**JavaScript Object Notation Processing**（**JSON-P**）和 **JSON Binding**（**JSON-B**）。仅使用这些技术，就可以开发一个完全能够胜任的云原生应用程序。MicroProfile 社区增加了一个用于调用 RESTful 服务的类型安全机制，称为 **MicroProfile Rest Client**。这些技术对于构建可以在云中互操作的基于 Java 的微服务至关重要。学习使用这些技术将使您能够构建健壮且安全的 Java 微服务。
 

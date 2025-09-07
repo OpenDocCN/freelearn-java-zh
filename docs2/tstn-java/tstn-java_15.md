@@ -1,6 +1,6 @@
-# 15
 
-# Jakarta Faces 应用
+
+# 第十五章：Jakarta Faces 应用
 
 Jakarta Faces，现在简称 Faces，是网络应用中两种客户端渲染技术之一。另一种是**Jakarta Server Pages**（**JSP**）。在本章中，我们将检查一个 Faces 网络应用，就像我们的 Swing 和 JavaFX 示例一样，允许你执行三个常见的财务计算。
 

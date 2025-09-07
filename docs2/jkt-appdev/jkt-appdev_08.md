@@ -1,6 +1,6 @@
-# 8
 
-# 使用 Jakarta Persistence 进行对象关系映射
+
+# 第八章：使用 Jakarta Persistence 进行对象关系映射
 
 Jakarta EE 应用程序通常需要在关系型数据库中持久化数据。在本章中，我们将介绍如何通过**Jakarta Persistence**连接到数据库并执行**创建、读取、更新和删除**（**CRUD**）**操作**。
 

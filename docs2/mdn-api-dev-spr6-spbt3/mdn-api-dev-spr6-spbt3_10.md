@@ -1,6 +1,6 @@
-# 10
 
-# 开始使用 gRPC
+
+# 第九章：开始使用 gRPC
 
 gRPC 是一个用于网络中通用远程过程调用（RPC）的开源框架。RPC 允许远程过程（托管在不同的机器上）像调用本地过程一样调用，而无需编写远程交互的详细信息。RPC 在*gRPC*缩写中具有恒定的意义。看起来很合理，gRPC 中的*g*代表*Google*，因为它最初是在那里开发的。但是，*g*的含义随着每个版本的发布而改变。对于其第一个版本 1.0，gRPC 中的*g*代表 gRPC 本身。也就是说，在版本 1.0 中，它代表**gRPC** **远程过程调用**。在本章中，你将使用 gRPC 版本 1.54，其中*g*代表**优雅**。因此，你可以将 gRPC 称为**优雅的远程过程调用**（针对版本 1.54）。你可以在[`github.com/grpc/grpc/blob/master/doc/g_stands_for.md`](https://github.com/grpc/grpc/blob/master/doc/g_stands_for.md)找到不同版本中*g*的所有含义。
 

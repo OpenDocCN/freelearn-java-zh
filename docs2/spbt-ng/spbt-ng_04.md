@@ -1,6 +1,6 @@
-# 4
 
-# 设置数据库和 Spring Data JPA
+
+# 第四章：设置数据库和 Spring Data JPA
 
 在上一章中，您学习了 Spring Boot 的基本知识，以开发我们的后端应用程序，例如依赖注入、bean 和注解。此外，我们现在知道如何使用 Spring Initializr 创建 Spring Boot 项目。
 

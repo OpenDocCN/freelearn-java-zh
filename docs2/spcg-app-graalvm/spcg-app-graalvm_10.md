@@ -1,4 +1,4 @@
-# *第七章*：GraalVM 多语言 – JavaScript 和 Node.js
+# 第九章：*第七章*：GraalVM 多语言 – JavaScript 和 Node.js
 
 在上一章中，我们探讨了 Truffle 如何提供一层来集成其他语言程序以便在 GraalVM 上运行。在本章中，我们将重点关注 JavaScript 和 Node.js 解释器，在下一章中，我们将介绍其他运行时，例如 Java/Truffle、Python、R 和 WebAssembly。我们将探讨 Truffle 的多语言互操作性功能，并探索 JavaScript 解释器。我们将通过编写代码来亲身体验这些功能。
 

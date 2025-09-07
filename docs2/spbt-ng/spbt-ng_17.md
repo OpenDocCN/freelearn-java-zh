@@ -1,6 +1,6 @@
-# 17
 
-# 部署 Spring Boot 和 Angular 应用程序
+
+# 第十七章：部署 Spring Boot 和 Angular 应用程序
 
 在上一章中，我们学习了 `frontend-maven-plugin` 的作用以及我们用它来做什么。然后，我们学习了在 Spring Boot 应用程序内运行 Angular 应用程序所需的配置。之后，我们学习了如何将两个应用程序打包成一个文件。最后，我们学习了如何使用 Angular 运行 Spring Boot 应用程序。
 

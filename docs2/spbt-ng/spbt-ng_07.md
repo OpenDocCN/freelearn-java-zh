@@ -1,6 +1,6 @@
-# 7
 
-# 添加 Spring Boot 安全性与 JWT
+
+# 第七章：添加 Spring Boot 安全性与 JWT
 
 在上一章中，我们主要学习了如何在 Spring Boot 项目中为创建的 API 生成自动化文档。我们学习了如何添加和使用 `springdoc-openapi` 的特性和属性，配置项目上的插件，以及访问生成的 JSON 和 YAML 文档。我们还学习了如何实现 Swagger UI，使我们的文档交互式，并允许我们在浏览器上直接测试端点。
 
