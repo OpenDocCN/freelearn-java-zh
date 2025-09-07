@@ -1,0 +1,375 @@
+<html><head></head><body><div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">A Look at Monad Transformers and Free Monad</h1>
+                </header>
+            
+            <article>
+                
+<p class="p1">In <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a>, <em>Exploring Built-In Effects</em>, we looked at standard effects and promised to reveal the truth about the concepts underlying them; we also discussed the topic of combining them. Since then, we have discussed algebraic structures, such as monoids and groups, functors, applicatives, and monads, delivering on our first promise. But the composition topic has remained uncovered all this time.</p>
+<p class="p1">In <a href="d31b3592-80b3-4b50-8c32-b41dd9862ecd.xhtml">Chapter 8</a>, <em>Dealing with Effects</em>, we implemented a general way to compose applicatives—which is very useful on its own, but can<span><span>'</span></span>t help us with combining the standard effects of a monadic nature.</p>
+<p class="p1">In this chapter, we will finally take on and keep our second promise by discussing some ways to bring different monadic effects together. We will look at the complications related to that and some of the solutions used in the Scala community to deal with these obstacles, including:</p>
+<ul>
+<li class="p1">Monad transformers</li>
+<li class="p1">Monad transformer stacks</li>
+<li class="p1">Free monads</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Technical requirements</h1>
+                </header>
+            
+            <article>
+                
+<p>Before we begin, make sure you have the following installed:</p>
+<ul>
+<li>JDK 1.8+</li>
+<li class="mce-root">SBT 1.2+</li>
+</ul>
+<p class="mce-root">The source code for this chapter is available at <a href="https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter10">https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter10</a>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Combining monads</h1>
+                </header>
+            
+            <article>
+                
+<p>In <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml"/><a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a><span>, </span><em>Exploring Built-In Effects</em><span>,</span> we talked about standard effects such as <kbd>Option</kbd>, <kbd>Try</kbd>, <kbd>Either</kbd>, and <kbd>Future</kbd>. In <a href="e66f4a4d-2e99-49cd-a090-ee8c8d661660.xhtml">Chapter 9</a>, <em>Familiarizing Yourself with Basic Monads</em>, we moved on and implemented monads for all of them. In our examples, we demonstrated how Scala provides nice syntax for the code formulated in monadic terms by having for-comprehension, which is a syntactic sugar for the combination of <kbd>map</kbd>, <kbd>flatMap</kbd>, and possibly <kbd>filter</kbd> methods. In all our examples, we used for-comprehension to define a sequence of steps which constitute some process where the result of the previous computation is consumed by the next step. </p>
+<p>For an instance, this is the way we defined<span> the process of </span>fishing in terms of <kbd>Option</kbd> <span>in <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a>, <em>Exploring Built-In Effects</em>:</span></p>
+<pre><span>val </span>buyBait: <span>String </span>=&gt; Option[<span>Bait</span>]<br/><span>val </span>makeBait: <span>String </span>=&gt; Option[<span>Bait</span>]<br/><span>val </span>castLine: <span>Bait </span>=&gt; Option[<span>Line</span>]<br/><span>val </span>hookFish: <span>Line </span>=&gt; Option[<span>Fish</span>]<br/><br/><span>def </span><span>goFishing</span>(bestBaitForFish: Option[<span>String</span>]): Option[<span>Fish</span>] =<br/>  <span>for </span>{<br/>    baitName &lt;- bestBaitForFish<br/>    bait &lt;- buyBait(baitName).orElse(makeBait(baitName))<br/>    line &lt;- castLine(bait)<br/>    fish &lt;- hookFish(line)<br/>  } <span>yield </span>fish</pre>
+<p>With our new obtained knowledge about monads, we could make this implementation effect-agnostic:</p>
+<pre><span>def </span><span>goFishing</span>[<span>M</span>[_]: Monad](bestBaitForFish: <span>M</span>[<span>String</span>]): <span>M</span>[<span>Fish</span>] = {<br/><br/>  <span>val </span>buyBait: <span>String </span>=&gt; <span>M</span>[<span>Bait</span>] = <span>???<br/></span><span>  </span><span>val </span>castLine: <span>Bait </span>=&gt; <span>M</span>[<span>Line</span>] = <span>???<br/></span><span>  </span><span>val </span>hookFish: <span>Line </span>=&gt; <span>M</span>[<span>Fish</span>] = <span>???<br/></span><span><br/></span><span>  </span><span>import </span>Monad.lowPriorityImplicits._<br/><br/>  <span>for </span>{<br/>    baitName &lt;- bestBaitForFish<br/>    bait &lt;- buyBait(baitName)<br/>    line &lt;- castLine(bait)<br/>    fish &lt;- hookFish(line)<br/>  } <span>yield </span>fish<br/>}<br/>Ch10.goFishing(Option("Crankbait"))</pre>
+<p>One thing we can't do with this approach is to use the <kbd>orElse</kbd> method specific to <kbd>Option</kbd> to define the unhappy path for bait-acquiring.</p>
+<p>Another simplification we're making here is pretending that all our actions can be described by the same effect. In reality, this will almost definitely not be the case. To be more specific, obtaining the bait and waiting to hook the fish will probably take much longer than casting the line. Thus, we probably would like to represent these actions with <kbd>Future</kbd> instead of <kbd>Option</kbd>:</p>
+<pre><span>val </span>buyBait: <span>String </span>=&gt; Future[<span>Bait</span>]<br/>val hookFish: Line =&gt; Future[Fish]</pre>
+<p>Or, in generic terms, we would have the type of effect <kbd>N</kbd> instead of <kbd>M</kbd>:</p>
+<pre><span>def </span><span>goFishing</span>[<span>M</span>[_]: Monad<span>, </span><span>N</span>[_]: Monad](bestBaitForFish: <span>M</span>[<span>String</span>]): <span>N</span>[Fish] = {<br/><br/>  <span>val </span>buyBait: <span>String </span>=&gt; <span>N</span>[<span>Bait</span>] = <span>???<br/></span><span>  </span><span>val </span>castLine: <span>Bait </span>=&gt; <span>M</span>[<span>Line</span>] = <span>???<br/></span><span>  </span><span>val </span>hookFish: <span>Line </span>=&gt; <span>N</span>[<span>Fish</span>] = <span>???</span><br/>  <br/>  // ... the rest goes as before<br/>}<br/>import scala.concurrent.ExecutionContext.Implicits.global<br/>Ch10.goFishing[Option, Future](Option("Crankbait"))</pre>
+<p>But, unfortunately, this won't compile anymore. Let's consider a simpler example to understand why:</p>
+<pre>import scala.concurrent.ExecutionContext.Implicits.global<br/>import scala.concurrent.Future<br/><br/>scala&gt; for {<br/>     | o &lt;- Option("str")<br/>     | c &lt;- Future.successful(o)<br/>     | } yield c<br/>           c &lt;- Future.successful(o)<br/>             ^<br/>On line 3: error: type mismatch;<br/>        found : scala.concurrent.Future[String]<br/>        required: Option[?]</pre>
+<p>The compiler ceases to accept <kbd>Future</kbd> instead of the <kbd>Option</kbd>. Let's desugar our for-comprehension to see what is going on:</p>
+<pre><span>Option</span>(<span>"str"</span>).flatMap { o: String =&gt;<br/>  <span>val </span>f: Future[String] = Future(o).map { c: String =&gt; c }<br/>  f<br/>}</pre>
+<p>Now the problem lies on the surface—the <kbd>Option.flatMap</kbd> expects some function returning an <kbd>Option</kbd> as an effect (this is using the definition of <kbd>Option.flatMap[B](f: A =&gt; Option[B]): Option[B]</kbd> in particular, and <kbd>Monad.flatMap</kbd> in general). But the value we return is wrapped in <kbd>Future</kbd>, as a result of applying the <kbd>map</kbd> function of the <kbd>Future</kbd>.</p>
+<p>Generalising this reasoning, we can conclude that it is only possible to use effects of the same type in the single for-comprehension. </p>
+<p>Because of this, it looks like we have two possibilities to combine desired effects:</p>
+<ul>
+<li>Put them in separate for-comprehensions</li>
+<li>Lift different effects to some kind of common denominator type</li>
+</ul>
+<p>We can compare both approaches using our fishing example as the playground. The variation of separate for-comprehensions would look like the following:</p>
+<pre><span>for </span>{<br/>  baitName &lt;- bestBaitForFish<br/>} <span>yield for </span>{<br/>  bait &lt;- buyBait(baitName)<br/>} <span>yield for </span>{<br/>  line &lt;- castLine(bait)<br/>} <span>yield for </span>{<br/>  fish &lt;- hookFish(line)<br/>} <span>yield </span>fish</pre>
+<p>This looks slightly worse than the original version but is still quite nice, apart from the fact that the type of the result has changed from <kbd>N[Fish]</kbd> to the <kbd>M[N[M[N[Fish]]]]</kbd>. In the specific cases of <kbd>Future</kbd> and <kbd>Option</kbd>, it would be <kbd>Option[Future[Option[Future[Fish]]]]</kbd> and there is no easy way to extract the result other than going through all of the layers one by one. This is not a very nice thing to do and we'll leave it as an exercise for the scrupulous reader.</p>
+<p>Another option would be to abandon the generosity of our implementation and make it nonpolymorphic as follows:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFish: Option[<span>String</span>]): Future[<span>Fish</span>] =<br/>  bestBaitForFish <span>match </span>{<br/>    <span>case </span>None =&gt; Future.<span>failed</span>(<span>new </span>NoSuchElementException)<br/>    <span>case </span><span>Some</span>(name) =&gt; <span>buyBait</span>(name).flatMap { bait: <span>Bait </span>=&gt;<br/>      <span>castLine</span>(bait) <span>match </span>{<br/>        <span>case </span>None =&gt; Future.<span>failed</span>(<span>new </span>IllegalStateException)<br/>        <span>case </span><span>Some</span>(line) =&gt; <span>hookFish</span>(line)<br/>      }<br/>    }<br/>  }</pre>
+<p>Besides losing general applicability, this implementation has the obvious disadvantage of being much less readable.</p>
+<p>Let's hope that the second approach, the common denominator for the effect type, will bear more fruit than the first one.</p>
+<p>First, we need to decide how we want to compose the two effects we currently have. There are two choices: <kbd>Future[Option[?]]</kbd> and <span><kbd>Option[Future[?]]</kbd>. Semantically, having an optional result at some point later feels better than optionally having an operation which will complete in the future, hence we will continue with the first alternative.</span></p>
+<p>With this fixed new type, the functions we have became invalid—they all now have the wrong type of result. Conversion to the proper type just involves juggling the types and we can do this on the spot:</p>
+<pre><span>val </span><span>buyBaitFO</span>: <span>String </span>=&gt; Future[Option[<span>Bait</span>]] = (name: <span>String</span>) =&gt; <span>buyBait</span>(name).map(Option.<span>apply</span>)<br/><span>val </span><span>castLineFO</span>: <span>Bait </span>=&gt; Future[Option[<span>Line</span>]] = <span>castLine</span>.andThen(Future.<span>successful</span>)<br/><span>val </span><span>hookFishFO</span>: <span>Line </span>=&gt; Future[Option[<span>Fish</span>]] = (line: <span>Line</span>) =&gt; <span>hookFish</span>(line).map(Option.<span>apply</span>)</pre>
+<p>All we need to do is to wrap <kbd>Option</kbd> into the <kbd>Future</kbd> or <kbd>Future</kbd> into the <kbd>Option</kbd>, depending on the return type of the original function.</p>
+<p>To keep everything consistent, we'll also change the type of the argument and return type of the <kbd>goFishing</kbd> function in the same way:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFish: Future[Option[<span>String</span>]]): Future[Option[<span>Fish</span>]] = ???</pre>
+<p>As we strive to formulate the logic itself as a for-comprehension, it is reasonable to try to draw it up it in terms of the <kbd>flatMap</kbd>:</p>
+<pre>bestBaitForFish.flatMap { /* takes Option[?] and returns Future[Option[?]] */ }</pre>
+<p>As an argument to <kbd>flatMap</kbd>, we have to provide some function which takes an <kbd>Option[String]</kbd> and returns <kbd>Future[Option[Fish]]</kbd>. But our functions expect "real" input, not optional. We can't <kbd>flatMap</kbd> over the <kbd>Option</kbd> as discussed before and we can't just use <kbd>Option.map</kbd> because it will wrap our result type in an additional layer of optionality. What we can use is a pattern match to extract the value:</p>
+<pre><span>case </span>None =&gt; Future.<span>successful</span>(Option.<span>empty</span>[<span>Fish</span>])<br/><span>case </span><span>Some</span>(name) =&gt; <span>buyBaitFO</span>(name) /* now what ? */</pre>
+<p>In the case of <kbd>None</kbd>, we just shortcut the process and return the result. In that case, we indeed have a <kbd>name</kbd>; we can call a corresponding function, passing this <kbd>name</kbd> as an argument. The question is, how do we proceed further? If we look carefully at the return type of <kbd>buyBaitFO(name)</kbd>, we will see that this is the same as we had for the initial argument—<kbd>Future[Option[?]]</kbd>. Hence, we can try to reuse the approach with flatmapping and pattern matching again, which<span> after all its iterations </span>gives us the following implementation:</p>
+<pre><span>def </span><span>goFishingA</span>(bestBaitForFish: Future[Option[<span>String</span>]]): Future[Option[<span>Fish</span>]] =<br/>  bestBaitForFish.flatMap {<br/>    <span>case </span>None =&gt; Future.<span>successful</span>(Option.<span>empty</span>[<span>Fish</span>])<br/>    <span>case </span><span>Some</span>(name) =&gt; <span>buyBaitFO</span>(name).flatMap {<br/>      <span>case </span>None =&gt; Future.<span>successful</span>(Option.<span>empty</span>[<span>Fish</span>])<br/>      <span>case </span><span>Some</span>(bait) =&gt; <span>castLineFO</span>(bait).flatMap {<br/>        <span>case </span>None =&gt; Future.<span>successful</span>(Option.<span>empty</span>[<span>Fish</span>])<br/>        <span>case </span><span>Some</span>(line) =&gt; <span>hookFishFO</span>(line)<br/>      }<br/>    }<br/>  }</pre>
+<p>There is a lot of duplication in this snippet, but it already looks somehow structured. It is possible to improve its readability by extracting the repetitive code fragments. First, we can make the case of <em>no result</em> polymorphic as shown below:</p>
+<pre><span>def </span><span>noResult</span>[<span>T</span>]: Future[Option[<span>T</span>]] = Future.<span>successful</span>(Option.<span>empty</span>[<span>T</span>])</pre>
+<p>Second, we might capture our reasoning about <kbd>flatMap</kbd> and pattern match as a standalone polymorphic function:</p>
+<pre><span>def </span><span>continue</span>[<span>A</span><span>, </span><span>B</span>](arg: Future[Option[<span>A</span>]])(f: <span>A </span>=&gt; Future[Option[<span>B</span>]]): Future[Option[<span>B</span>]] =<br/>  arg.flatMap {<br/>    <span>case </span>None =&gt; <span>noResult</span>[<span>B</span>]<br/>    <span>case </span><span>Some</span>(a) =&gt; f(a)<br/>  }</pre>
+<p>With these changes, our last attempt starts to look more concise:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFish: Future[Option[<span>String</span>]]): Future[Option[<span>Fish</span>]] =<br/>  <span>continue</span>(bestBaitForFish) { name =&gt;<br/>    <span>continue</span>(<span>buyBaitFO</span>(name)) { bait =&gt;<br/>      <span>continue</span>(<span>castLineFO</span>(bait)) { line =&gt;<br/>        <span>hookFishFO</span>(line)<br/>      }<br/>    }<br/>  }</pre>
+<p>This is arguably something that is already quite good, and we could stop at this moment, but there is one aspect we might improve further on. The <kbd>continue</kbd> function calls are nested. This makes it nontrivial to formulate the business logic flow. It might be beneficial if we could have a kind of fluent interface instead and we would be able to chain the <kbd>continue</kbd> calls.</p>
+<p>It is easily achieved by capturing the first argument of <kbd>continue</kbd> as a value of some class. This will change our implementation to the following form:</p>
+<pre><span>final case class FutureOption[A](value: Future[Option[A]]) {<br/></span><span>  def continue[B](f: A =&gt; FutureOption[B]): FutureOption[B] = new FutureOption(value.flatMap {<br/></span><span>    case None =&gt; noResult[B]<br/></span><span>    case Some(a) =&gt; f(a).value<br/></span><span>  })<br/></span><span>}</span></pre>
+<p>There are two ways to improve this further. First, the signature of <kbd>continue</kbd> reveals that it is a Kleisli arrow, which we introduced in the previous chapter. Second, in this form, we will need to wrap the <kbd>value</kbd> in <kbd>FutureOption</kbd> manually each time we need to call the <kbd>continue</kbd> method. This will make the code unnecessarily verbose and we can enhance our implementation by making it an <kbd>implicit</kbd> class:</p>
+<pre><span>implicit class FutureOption[A](value: Future[Option[A]]) {<br/></span><span>  def compose[B](f: A =&gt; FutureOption[B]): FutureOption[B] = new FutureOption(value.flatMap {<br/></span><span>    case None =&gt; noResult[B]<br/></span><span>    case Some(a) =&gt; f(a).value<br/></span><span>  })<br/></span><span>}</span></pre>
+<p>Let's take a look at what our main flow looks like with these changes incorporated:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFish: Future[Option[<span>String</span>]]): Future[Option[<span>Fish</span>]] = {<br/>  <span>val </span>result = bestBaitForFish.compose { name =&gt;<br/>    <span>buyBaitFO</span>(name).compose { bait =&gt;<br/>      <span>castLineFO</span>(bait).compose { line =&gt;<br/>        <span>hookFishFO</span>(line)<br/>      }<br/>    }<br/>  }<br/>  result.value<br/>}</pre>
+<p>Wonderful! Can you spot further possibility for improvement? If we scrutinise the type signature of the <kbd>FutureOption</kbd>, we'll see that everything we're doing with the wrapped <kbd>value</kbd> is calling a <kbd>flatMap</kbd> method which is defined on <kbd>Future</kbd>. But we already know the proper abstraction for that—this is a monad. Utilizing this knowledge will allow us to make our class polymorphic and possibly reuse it for other types of effects, if needed:</p>
+<pre><span>implicit class FOption</span>[<span>F</span>[_]: Monad<span>, </span><span>A</span>](<span>val </span>value: <span>F</span>[Option[<span>A</span>]]) {<br/>  <span>def </span><span>compose</span>[<span>B</span>](f: <span>A </span>=&gt; FOption[<span>F</span><span>, </span><span>B</span>]): FOption[<span>F</span><span>, </span><span>B</span>] = {<br/>    <span>val </span>result = value.flatMap {<br/>      <span>case </span>None =&gt; <span>noResultF</span>[<span>F</span><span>, </span><span>B</span>]<br/>      <span>case </span><span>Some</span>(a) =&gt; f(a).value<br/>    }<br/>    <span>new FOption</span>(result)<br/>  }<br/>  def isEmpty: F[Boolean] = Monad[F].map(value)(_.isEmpty)<br/>}</pre>
+<p>To demonstrate that the polymorphic nature of the new implementation won't harm our flexibility to define helper functions as needed, we've also added a method to check that the composition of monads we have is empty.</p>
+<p><span>Unfortunately, if we'll try to make this implementation polymorphic in the type of the second effect, we'll see that it is impossible—we need to decompose it as explained previously, and for this we need to know the specifics of the effect's implementation.</span></p>
+<p>At this point, an astute reader will remember that all monads we developed in the previous chapter were implemented in terms of <kbd>compose</kbd> function, which had the same signature. Could we try to do the same trick again and implement a monad for the <kbd>FutureOption</kbd> type? Readers familiar with the previous chapter will know that this is almost a mechanical task of delegating to the implementation we just came up with:</p>
+<pre><span>implicit def </span><span>fOptionMonad</span>[<span>F</span>[_] : Monad] = <span>new </span>Monad[FOption[<span>F</span><span>, </span>?]] {<br/>  <span>override def </span><span>unit</span>[<span>A</span>](a: =&gt; <span>A</span>): FOption[<span>F</span><span>, </span><span>A</span>] = <span>Monad</span>[<span>F</span>].unit(<span>Monad</span>[Option].unit(a))<br/>  <span>override def </span><span>flatMap</span>[<span>A</span><span>, </span><span>B</span>](a: FOption[<span>F</span><span>, </span><span>A</span>])(f: <span>A </span>=&gt; FOption[<span>F</span><span>, </span><span>B</span>]): FOption[<span>F</span><span>, </span><span>B</span>] =<br/>    a.compose(f)<br/>}</pre>
+<p>Now, we also need to change the return type of the original functions to be a <kbd>FOption[Future, ?]</kbd> to match the type signature of our new monad. We don't need to touch the implementation—the compiler will wrap <kbd>implicit FOption</kbd> around the result automatically:</p>
+<pre><span>val </span><span>buyBaitFO</span>: <span>String </span>=&gt; FOption[Future<span>, </span><span>Bait</span>] = // as before<br/><span>val </span><span>castLineFO</span>: <span>Bait </span>=&gt; FOption[Future<span>, </span><span>Line</span>] = // as before<br/><span>val </span><span>hookFishFO</span>: <span>Line </span>=&gt; FOption[Future<span>, </span><span>Fish</span>] = // as before</pre>
+<p>Now we can formulate our logic once again, this time in terms of for-comprehension:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFish: FOption[Future<span>, </span><span>String</span>]): FOption[Future<span>, </span><span>Fish</span>] = <span>for </span>{<br/>  name &lt;- bestBaitForFish<br/>  bait &lt;- <span>buyBaitFO</span>(name)<br/>  line &lt;- <span>castLineFO</span>(bait)<br/>  fish &lt;- <span>hookFishFO</span>(line)<br/>} <span>yield </span>fish</pre>
+<p>Finally, this is nice and clean! The final touch would be to do something with the adhoc name of <kbd>FOption</kbd>. What the type does is <em>transform</em> an <kbd>Option</kbd> into something monadic of higher order, by wrapping an <kbd>Option</kbd> into a monadic effect of our choice. We could rename it into <kbd>OptionTransformer</kbd> or <kbd>OptionT</kbd> for short.</p>
+<p>Congratulations! We just implemented a monad transformer.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Monad transformers</h1>
+                </header>
+            
+            <article>
+                
+<p>Let's hold on for a second and recap what we just did.</p>
+<p>We made a small sacrifice and increased the complexity of the return type of our original functions to some "common denominator" type. This sacrifice is rather small because in our example, as well as in real life, this is usually done by just lifting the original functions into their proper context.</p>
+<p>The signatures we came up with look a little awkward, but this is <span>partly because we started to develop them as concrete implementations. In fact, the user-facing API of our fishing component should be similar to the following snippet straight from the beginning, if implemented in a more abstract way:</span></p>
+<pre><span>abstract class </span>FishingApi[<span>F</span>[_]: Monad] {<br/><br/>  <span>val </span>buyBait: <span>String </span>=&gt; <span>F</span>[<span>Bait</span>]<br/>  <span>val </span>castLine: <span>Bait </span>=&gt; <span>F</span>[<span>Line</span>]<br/>  <span>val </span>hookFish: <span>Line </span>=&gt; <span>F</span>[<span>Fish</span>]<br/><br/>  <span>def </span><span>goFishing</span>(bestBaitForFish: <span>F</span>[<span>String</span>]): <span>F</span>[<span>Fish</span>] = <span>for </span>{<br/>    name &lt;- bestBaitForFish<br/>    bait &lt;- buyBait(name)<br/>    line &lt;- castLine(bait)<br/>    fish &lt;- hookFish(line)<br/>  } <span>yield </span>fish<br/>}</pre>
+<p>This approach abstracts over the type of effect, giving more flexibility to us as library authors and more structure to the user of our API.</p>
+<p>This API can be used with any effect with a monad. This is an example of how it can be implemented utilizing functions we currently have—returning mixed <kbd>Future</kbd> and <kbd>Optional</kbd> results:</p>
+<pre><span>import </span>Transformers.<span>OptionTMonad<br/></span><span>import </span>ch09.Monad.<span>futureMonad<br/></span><span>import </span>scala.concurrent.ExecutionContext.Implicits.<span>global<br/></span><span><br/>// we need to fix the types first to be able to implement concrete fucntions<br/>object Ch10 {<br/>  type Bait = String<br/>  type Line = String<br/>  type Fish = String<br/>}<br/><br/></span><span>object </span>Ch10FutureFishing <span>extends </span>FishingApi[OptionT[Future<span>, </span>?]] <span>with </span>App {<br/><br/>  <span>val </span><span>buyBaitImpl</span>: <span>String </span>=&gt; Future[<span>Bait</span>] = Future.successful<span><br/></span><span>  </span><span>val </span><span>castLineImpl</span>: <span>Bait </span>=&gt; Option[<span>Line</span>] = Option.apply<span><br/></span><span>  </span><span>val </span><span>hookFishImpl</span>: <span>Line </span>=&gt; Future[<span>Fish</span>] = Future.successful<span><br/></span><span><br/></span><span>  </span><span>override val </span><span>buyBait</span>: <span>String </span>=&gt; OptionT[Future<span>, </span><span>Bait</span>] = <br/>    (name: <span>String</span>) =&gt; <span>buyBaitImpl</span>(name).map(Option.<span>apply</span>)<br/>  <span>override val </span><span>castLine</span>: <span>Bait </span>=&gt; OptionT[Future<span>, </span><span>Line</span>] = <br/><span>    castLineImpl</span>.andThen(Future.<span>successful</span>(_))<br/>  <span>override val </span><span>hookFish</span>: <span>Line </span>=&gt; OptionT[Future<span>, </span><span>Fish</span>] = <br/>    (line: <span>Line</span>) =&gt; <span>hookFishImpl</span>(line).map(Option.<span>apply</span>)<br/><br/>  goFishing(Transformers.<span>optionTunit</span>[Future<span>, </span><span>String</span>](<span>"Crankbait"</span>))<br/>}</pre>
+<p> Exactly as before, we implemented facades for our original functions, doing nothing more than routine lifting of them into the appropriate effect. And the <kbd>goFishing</kbd> method can be used as is—the compiler takes only a monad for the <kbd>OptoinT[Future]</kbd> available to make it happen.</p>
+<p>For instance, at some point the implementor of the underlying functions can decide that they should return <kbd>Try</kbd> instead of the future now. This is OK because requirements change and we can incorporate this change in our logic quite easily:</p>
+<pre><span>import scala.util._<br/>object </span>Ch10OptionTTryFishing <span>extends </span>FishingApi[OptionT[Try<span>, </span>?]] <span>with </span>App {<br/><br/>  <span>val </span><span>buyBaitImpl</span>: <span>String </span>=&gt; Try[<span>Bait</span>] = Success.apply<span><br/></span><span>  </span><span>val </span><span>castLineImpl</span>: <span>Bait </span>=&gt; Option[<span>Line</span>] = Option.apply<span><br/></span><span>  </span><span>val </span><span>hookFishImpl</span>: <span>Line </span>=&gt; Try[<span>Fish</span>] = Success.apply<span><br/></span><span><br/></span><span>  </span><span>override val </span><span>buyBait</span>: <span>String </span>=&gt; OptionT[Try<span>, </span><span>Bait</span>] = <br/>    (name: <span>String</span>) =&gt; <span>buyBaitImpl</span>(name).map(Option.<span>apply</span>)<br/>  <span>override val </span><span>castLine</span>: <span>Bait </span>=&gt; OptionT[Try<span>, </span><span>Line</span>] = <br/><span>    castLineImpl</span>.andThen(Try.<span>apply</span>(_))<br/>  <span>override val </span><span>hookFish</span>: <span>Line </span>=&gt; OptionT[Try<span>, </span><span>Fish</span>] = <br/>    (line: <span>Line</span>) =&gt; <span>hookFishImpl</span>(line).map(Option.<span>apply</span>)<br/><br/>  goFishingM(Transformers.<span>optionTunit</span>[Try<span>, </span><span>String</span>](<span>"Crankbait"</span>))<br/><br/>}</pre>
+<p>Assuming that the change in the library is given, the only things we need to alter on our side are:</p>
+<ul>
+<li>The lifting approach for the <kbd>castLine</kbd> function; it changes from <kbd>Future.success</kbd> to <kbd>Try.apply</kbd></li>
+<li>The type parameter we're passing over for the wrapper for the initial argument of the <kbd>goFishing</kbd> function</li>
+</ul>
+<p>And we're done. We don't need to touch our fishing "business" logic at all!</p>
+<p>The monad transformer in a sense "flattens" both monads, such that it is possible to cut through all layers at once when calling the <kbd>map</kbd> and <kbd>flatMap</kbd> methods—and thus also in for-comprehension.</p>
+<p>Currently, it is not possible to change the type of the "inner" effect though— we only have an <kbd>OptionT</kbd> monad transformer available. But this is just a matter of implementing another transformer once, entirely like we did with monads. To be more specific, let's see the effect of altering the return type of the basic functions to <kbd>Either</kbd> instead of <kbd>Option</kbd>. Supposing it is expected that the new version uses <kbd>String</kbd> as a description of the unhappy case; we would have the following code:</p>
+<pre><span>object </span>Ch10EitherTFutureFishing <span>extends </span>FishingApi[EitherT[Future<span>, </span><span>String</span><span>, </span>?]] <span>with </span>App {<br/><br/>  <span>val </span><span>buyBaitImpl</span>: <span>String </span>=&gt; Future[<span>Bait</span>] = Future.successful<span><br/></span><span>  </span><span>val </span><span>castLineImpl</span>: <span>Bait </span>=&gt; <span>Either</span>[<span>String</span><span>, </span><span>Line</span>] = Right.apply<span><br/></span><span>  </span><span>val </span><span>hookFishImpl</span>: <span>Line </span>=&gt; Future[<span>Fish</span>] = Future.successful<span><br/></span><span><br/></span><span>  </span><span>override val </span><span>buyBait</span>: <span>String </span>=&gt; EitherT[Future<span>, </span><span>String</span><span>, </span><span>Bait</span>] =<br/>    (name: <span>String</span>) =&gt; <span>buyBaitImpl</span>(name).map(l =&gt; <span>Right</span>(l): <span>Either</span>[<span>String</span><span>, </span><span>Bait</span>])<br/>  <span>override val </span><span>castLine</span>: <span>Bait </span>=&gt; EitherT[Future<span>, </span><span>String</span><span>, </span><span>Line</span>] =<br/>    <span>castLineImpl</span>.andThen(Future.<span>successful</span>(_))<br/>  <span>override val </span><span>hookFish</span>: <span>Line </span>=&gt; EitherT[Future<span>, </span><span>String</span><span>, </span><span>Fish</span>] =<br/>    (line: <span>Line</span>) =&gt; <span>hookFishImpl</span>(line).map(l =&gt; <span>Right</span>(l): <span>Either</span>[<span>String</span><span>, </span><span>Fish</span>])<br/><br/>  goFishing(Transformers.<span>eitherTunit</span>[Future<span>, </span><span>String</span><span>, </span><span>String</span>](<span>"Crankbait"</span>)).value<br/><br/>}</pre>
+<p>The return type of <kbd>castLineImpl</kbd> is now <kbd>Either[String, Line]</kbd> as new requirements dictate. The lifting we are doing is slightly convoluted, just because we need to convey the types of both the left and right side of <kbd>Either</kbd> to the compiler. The rest of the implementation is the same as before.</p>
+<p>And it relies on the fact that we have an instance of <kbd>EitherT</kbd> and a corresponding monad available. We already know how to implement monad transformers and can come up with the code in no time. First, the <kbd>EitherT</kbd> class, which resembles an <kbd>OptionT</kbd> almost identically, with respect to the need to carry the type of the left side of <kbd>Either</kbd> around as follows:</p>
+<pre><span>implicit class </span>EitherT[<span>F</span>[_]: Monad<span>, </span><span>L</span><span>, </span><span>A</span>](<span>val </span>value: <span>F</span>[<span>Either</span>[<span>L</span><span>, </span><span>A</span>]]) {<br/>  <span>def </span><span>compose</span>[<span>B</span>](f: <span>A </span>=&gt; EitherT[<span>F</span><span>, </span><span>L</span><span>, </span><span>B</span>]): EitherT[<span>F</span><span>, </span><span>L</span><span>, </span><span>B</span>] = {<br/>    <span>val </span>result: <span>F</span>[<span>Either</span>[<span>L</span><span>, </span><span>B</span>]] = value.flatMap {<br/>      <span>case </span><span>Left</span>(l) =&gt; <span>Monad</span>[<span>F</span>].unit(<span>Left</span>[<span>L</span><span>, </span><span>B</span>](l))<br/>      <span>case </span><span>Right</span>(a) =&gt; f(a).value<br/>    }<br/>    <span>new </span>EitherT(result)<br/>  }<br/>  <span>def </span><span>isRight</span>: <span>F</span>[<span>Boolean</span>] = <span>Monad</span>[<span>F</span>].map(value)(_.isRight)<br/>}</pre>
+<p>Instead of pattern matching on <kbd>None</kbd> and <kbd>Some</kbd>, we pattern-match on the <kbd>Left</kbd> and <kbd>Right</kbd> sides of <kbd>Either</kbd>. We also replace the helper <span>method</span> <kbd>isEmpty</kbd> with the more suitable <kbd>isRight</kbd>.</p>
+<p>The lifting function and the implementation of the monad are also considerably similar—just boilerplate, if you will:</p>
+<pre><span>def </span><span>eitherTunit</span>[<span>F</span>[_]: Monad<span>, </span><span>L</span><span>, </span><span>A</span>](a: =&gt; <span>A</span>) = <span>new </span>EitherT[<span>F</span><span>, </span><span>L</span><span>, </span><span>A</span>](<span>Monad</span>[<span>F</span>].unit(<span>Right</span>(a)))<br/><br/><span>implicit def </span><span>EitherTMonad</span>[<span>F</span>[_] : Monad<span>, </span><span>L</span>]: Monad[EitherT[<span>F</span><span>, </span><span>L</span><span>, </span>?]] = <br/><span>  new </span>Monad[EitherT[<span>F</span><span>, </span><span>L</span><span>, </span>?]] {<br/>    <span>override def </span><span>unit</span>[<span>A</span>](a: =&gt; <span>A</span>): EitherT[<span>F</span><span>, </span><span>L</span><span>, </span><span>A</span>] =<br/>      <span>Monad</span>[<span>F</span>].unit(ch09.Monad.<span>eitherMonad</span>[<span>L</span>].unit(a))<br/>    <span>override def </span><span>flatMap</span>[<span>A</span><span>, </span><span>B</span>](a: EitherT[<span>F</span><span>, </span><span>L</span><span>, </span><span>A</span>])(f: <span>A </span>=&gt; EitherT[<span>F</span><span>, </span><span>L</span><span>, </span><span>B</span>]): EitherT[<span>F</span><span>, </span><span>L</span><span>, </span><span>B</span>] =<br/>      a.compose(f)<br/>}</pre>
+<p>Incredible! We now have two monad transformers in our toolbox and the previously broken definition of <kbd>Ch10EitherTFutureFishing</kbd> has started to compile and run!</p>
+<p>Eager to implement <kbd>TryT</kbd> to cement this newly gained knowledge? We're happy to leave this as an exercise for you.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Monad transformers stacks</h1>
+                </header>
+            
+            <article>
+                
+<p>In the meantime, we'll entertain ourselves with the following ideas: </p>
+<ul>
+<li>Monad transformers require an instance of a monad for the outer layer</li>
+<li>A monad transformer itself has a monad</li>
+<li>Will something bad happen if we use a monad transformer as an instance of a monad for another monad transformer?</li>
+</ul>
+<p>Let's try it out. We've already implemented two monad transformers so let's bring them together. To start, we'll define the type of stack. It will be <kbd>EitherT</kbd> wrapped in <kbd>OptionT</kbd>. This will give us an unwrapped type of the following code:</p>
+<pre>Future[<span>Either</span>[<span>String</span><span>, </span>Option[<span>Fish</span>]]]</pre>
+<p>This can be interpreted as an operation which takes time and might return an error in the case of nontechnical failure and needs to have an explanation (technical failures are denoted by failed <kbd>Futures</kbd>). An <kbd>Option</kbd> represents an operation which can return no result in a <span>natural </span>way that requires no further explanation.</p>
+<p>With type aliases, we can represent the type of the inner transformer, fixing <kbd>String</kbd> as the type of the left side, as follows:</p>
+<pre><span>type </span><span>Inner</span>[<span>A</span>] = EitherT[Future<span>, </span><span>String</span><span>, </span><span>A</span>]</pre>
+<p>The outer transformer in the stack is even simpler. In contrast to the inner type, where we fixed the type of effect to be <kbd>Future</kbd>, it takes a type constructor for an effect as the type parameter, as follows:</p>
+<pre><span>type </span><span>Outer</span>[<span>F</span>[_]<span>, </span><span>A</span>] = OptionT[<span>F</span><span>, </span><span>A</span>]</pre>
+<p>We can now use these aliases to define the whole stack as follows: </p>
+<pre><span>type </span><span>Stack</span>[<span>A</span>] = <span>Outer</span>[<span>Inner</span><span>, </span><span>A</span>]</pre>
+<p>To make the situation realistic, we'll just take the last version of our original fishing functions—the one with <kbd>castLineImpl</kbd> returns <kbd>Either[String, Line]</kbd>. We need to decorate all original functions so that the result type matches the type of the stack we now have. This is where it starts to become unwieldy. The compiler is not allowed to apply two implicit conversions in a row, so therefore we have to apply one of them by hand. For the two functions returning <kbd>Future[?]</kbd>, we also need to envelop the bottom layer into the <kbd>Option</kbd>:</p>
+<pre><span>override val </span><span>buyBait</span>: <span>String </span>=&gt; <span>Stack</span>[<span>Bait</span>] =<br/>  (name: <span>String</span>) =&gt; <span>new </span>EitherT(<span>buyBaitImpl</span>(name).map(l =&gt; <span>Right</span>(<span>Option</span>(l)): <span>Either</span>[<span>String</span><span>, </span>Option[<span>Bait</span>]]))<br/><br/><span>override val </span><span>hookFish</span>: <span>Line </span>=&gt; <span>Stack</span>[<span>Fish</span>] =<br/>  (line: <span>Line</span>) =&gt; <span>new </span>EitherT(<span>hookFishImpl</span>(line).map(l =&gt; <span>Right</span>(<span>Option</span>(l)): <span>Either</span>[<span>String</span><span>, </span>Option[<span>Fish</span>]]))</pre>
+<p>Now the compiler will be able to apply implicit conversion to the <kbd>OptionT</kbd>.</p>
+<p>Likewise, the function returning <kbd>Either[String, Line]</kbd> needs to be converted to <kbd>EitherT</kbd> on the outer side as follows:</p>
+<pre><span>override val </span><span>castLine</span>: <span>Bait </span>=&gt; <span>Stack</span>[<span>Line</span>] =<br/>  (bait: <span>Bait</span>) =&gt; <span>new </span>EitherT(Future.<span>successful</span>(<span>castLineImpl</span>(bait).map(Option.<span>apply</span>)))</pre>
+<p>Internally, we have to <kbd>map</kbd> the contents of <kbd>Either</kbd> into an <kbd>Option</kbd> and apply <kbd>Future</kbd> to the whole result.</p>
+<p>The compiler can help us to create an input of the proper type by applying implicit conversions as required—we won't see a lot of changes on this side, as follows:</p>
+<pre><span>val </span><span>input </span>= <span>optionTunit</span>[<span>Inner</span><span>, </span><span>String</span>](<span>"Crankbait"</span>)</pre>
+<p>A small tweak is needed at the moment as we're calling our business logic with this transformer stack—now we have two layers of transformation, so we need to call <kbd>value</kbd> two times to extract the result, as follows:</p>
+<pre><span>val </span><span>outerResult</span>: <span>Inner</span>[Option[<span>Fish</span>]] = goFishing(<span>input</span>).value<br/><span>val </span><span>innerResult</span>: Future[<span>Either</span>[<span>String</span><span>, </span>Option[<span>Fish</span>]]] = <span>outerResult</span>.value</pre>
+<p>It can become tedious quite quickly to turn to the <kbd>value</kbd> method repeatedly on each of the monad transformers that constitute the stack. Why do we need to? Because returning the result with the type of specific transformer can pollute the client's code quite quickly. Hence, there are usually a couple of suggestions related to the monad transformers and monad transformer stacks worth considering, as follows:</p>
+<ul>
+<li>Stacking monads and especially monad transformers adds performance and garbage collection overhead. It is essential to carefully consider the necessity of adding every additional layer of effects to the existing type.</li>
+<li>It is also arguable that more layers in the stack add mental overhead and clutter the code. The approach is the same as with the first suggestion—don't do this unless absolutely needed.</li>
+<li>Clients usually do not operate in terms of monad transformers, therefore they (transformers) should be considered to be an implementation detail. The API should be defined in generic terms. If it needs to be specific, prefer effect types over transformer types. In our example, it is better to return the result of the type <kbd>Future[Option[?]]</kbd> compared to <kbd>OptionT[Future, ?]</kbd>.</li>
+</ul>
+<p>Given all these considerations, are monad transformers really useful in real life? Surely they are! Nevertheless, as always there are alternatives, for example the free monad.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Free monads</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter and the previous chapters, we represented sequenced computations with monads. The <kbd>flatMap</kbd> method of the monad describes how the computation steps should be joined and the function given to it as an argument—the computation step itself. The free monad elevates the concept of sequenced computations to the next level. </p>
+<p>First, we start to represent the computation steps as instances of some <strong>ADT</strong> (<strong>algebraic data type</strong>) of our choice. Second, we represent the monadic concept with instances of another ADT. </p>
+<p>To substantiate this approach, we can turn to the fishing example once again. Earlier, we had three actions we encoded as functions. These actions will be represented as value classes now. We also need to give specific meaning to the type aliases we've used before to be able to run examples later.</p>
+<p>Here is the definition of the fishing model and corresponding ADT as follows:</p>
+<pre><span>case class </span>Bait(name: <span>String</span>) <span>extends </span>AnyVal<br/><span>case class </span>Line(length: <span>Int</span>) <span>extends </span>AnyVal<br/><span>case class </span>Fish(name: <span>String</span>) <span>extends </span>AnyVal<br/><br/><span>sealed trait </span>Action[<span>A</span>]<br/><span>final case class </span>BuyBait[<span>A</span>](name: <span>String</span><span>, </span>f: Bait =&gt; <span>A</span>) <span>extends </span>Action[<span>A</span>]<br/><span>final case class </span>CastLine[<span>A</span>](bait: Bait<span>, </span>f: Line =&gt; <span>A</span>) <span>extends </span>Action[<span>A</span>]<br/><span>final case class </span>HookFish[<span>A</span>](line: Line<span>, </span>f: Fish =&gt; <span>A</span>) <span>extends </span>Action[<span>A</span>]</pre>
+<p>In the model, we represent some properties of the bait, line, and a fish so that we can make use of them later. </p>
+<p>The <kbd>Action</kbd> type has a few aspects worth discussing. First of all, the instances of <kbd>Action</kbd> reflect that the functions we had before take a single parameter by declaring this parameter as a field of the class. Second, all actions are typed by the <em>type of the next action</em> and this next action is captured as another field of the class, in the form of a function which expects the result of the wrapping action to be an argument. This second field is how we encode the sequencing of actions.</p>
+<p>Now we need to represent the monadic methods as classes.</p>
+<p><kbd>Done</kbd> assembles an instance of <kbd>Free</kbd> from a value the same way as <kbd>Monad.unit</kbd> does:</p>
+<pre><span>final case class </span>Done[<span>F</span>[_]: Functor<span>, </span><span>A</span>](a: <span>A</span>) <span>extends </span>Free[<span>F</span><span>, </span><span>A</span>]</pre>
+<p>The <kbd>F[_]</kbd> refers to the type of actions to wrap and <kbd>A</kbd> is the type of the result. <kbd>F</kbd> needs to have a <kbd>Functor</kbd>; we will see why in a moment.</p>
+<p>The <kbd>Join</kbd> constructs a representation of <kbd>flatMap</kbd>—it should do so by applying the <kbd>F</kbd> to the previous instance of <kbd>Free</kbd>. This gives us the following type of <kbd>action</kbd> parameter as follows:</p>
+<pre><span>final case class </span>Suspend[<span>F</span>[_]: Functor<span>, </span><span>A</span>](action: <span>F</span>[Free[<span>F</span><span>, </span><span>A</span>]]) <span>extends </span>Free[<span>F</span><span>, </span><span>A</span>]</pre>
+<p class="mce-root">Now, as we said, this is a monad, so we need to provide an implementation of <kbd>flatMap</kbd>. We'll do this on the <kbd>Free</kbd> so that it is possible to use both instances of <kbd>Done</kbd> and <kbd>Join</kbd> in for-comprehensions as follows:</p>
+<pre><span>class </span>Free[<span>F</span>[_]: Functor<span>, </span><span>A</span>] {<br/>  <span>def </span><span>flatMap</span>[<span>B</span>](f: <span>A </span>=&gt; Free[<span>F</span><span>, </span><span>B</span>]): Free[<span>F</span><span>, </span><span>B</span>] = <span>this match </span>{<br/>    <span>case </span><span>Done</span>(a) =&gt; f(a)<br/>    <span>case Join</span>(a) =&gt; Join(<span>implicitly</span>[Functor[<span>F</span>]].map(a)(_.flatMap(f)))<br/>  }<br/>}</pre>
+<p>The <kbd>flatMap</kbd> naturally takes the Kleisli arrow as an argument. Similar to the definitions of <kbd>flatMap</kbd> on other monads, for example, an <kbd>Option</kbd>, we distinguish between shortcutting and exiting and continuing the computation chain. In the former case, we can just apply the given function; in the latter case we have to build up the sequence. This is where we're using the <kbd>Functor[F]</kbd> to get inside the <kbd>F</kbd> and apply the <kbd>flatMap</kbd> on the wrapped <kbd>Free[F, A]</kbd>, basically doing the sequencing in a <span>good, </span>old monadic way.</p>
+<p>The fact that the functor is here to give us the possibility to succeed in computations dictates how the functor for our actions should be implemented —the given function should be called on the result of the next action. Our actions might have quite a different structure, hence the easiest way to describe this approach is pattern matching, as follows:</p>
+<pre><span>implicit val </span><span>actionFunctor</span>: Functor[Action] = <span>new </span>Functor[Action] {<br/>  <span>override def </span><span>map</span>[<span>A</span><span>, </span><span>B</span>](in: Action[<span>A</span>])(f: <span>A </span>=&gt; <span>B</span>): Action[<span>B</span>] = in <span>match </span>{<br/>    <span>case </span><span>BuyBait</span>(name<span>, </span>a) =&gt; <span>BuyBait</span>(name<span>, </span>x =&gt; f(a(x)))<br/>    <span>case </span><span>CastLine</span>(bait<span>, </span>a) =&gt; <span>CastLine</span>(bait<span>, </span>x =&gt; f(a(x)))<br/>    <span>case </span><span>HookFish</span>(line<span>, </span>a) =&gt; <span>HookFish</span>(line<span>, </span>x =&gt; f(a(x)))<br/>  }<br/>}</pre>
+<p>Values of our ADT are structured similarly and this is the reason why the tranformations look alike for all actions.</p>
+<p>The last preparation step we need is to have a user-friendly way to create instances of the free monad for each of the actions. Let's create helper methods for that in the following manner:</p>
+<pre><span>def </span><span>buyBait</span>(name: <span>String</span>): Free[Action<span>, </span>Bait] = Join(<span>BuyBait</span>(name<span>, </span>bait =&gt; <span>Done</span>(bait)))<br/><span>def </span><span>castLine</span>(bait: Bait): Free[Action<span>, </span>Line] = Join(<span>CastLine</span>(bait<span>, </span>line =&gt; <span>Done</span>(line)))<br/><span>def </span><span>hookFish</span>(line: Line): Free[Action<span>, </span>Fish] = Join(<span>HookFish</span>(line<span>, </span>fish =&gt; <span>Done</span>(fish)))</pre>
+<p>Each of these methods creates a free monad instance which describes a computation consisting of a single action; the <kbd>Done(...)</kbd> encodes the fact that we are, well, done, and have some result.</p>
+<p>Now we can use these helper functions to build a computation chain like we did before. But this time the computation won't be something callable—it is just a sequence of instances of the free monad captured as a single instance of <kbd>Free</kbd>, as follows:</p>
+<pre><span>def </span><span>catchFish</span>(baitName: <span>String</span>): Free[Action<span>, </span>Fish] = <span>for </span>{<br/>  bait &lt;- <span>buyBait</span>(baitName)<br/>  line &lt;- <span>castLine</span>(bait)<br/>  fish &lt;- <span>hookFish</span>(line)<br/>} <span>yield </span>fish</pre>
+<p>This single instance we have incorporates all of the steps in the form of <kbd>Free</kbd> containing actions. Represented as pseudo-code, the result of calling this method would look like a nested structure, as given below:</p>
+<pre>Join(BuyBait("Crankbait", Join(CastLine(bait, Join(HookFish(line, Done(fish)))))))</pre>
+<p class="mce-root">At this moment, we have created the computation sequence, but this sequence is useless because it's just a data structure. We need a way to make it useful—we have to create an interpreter for it. And this is where the free monad really starts to shine—it is up to us how we will render this data. We can create as many interpreters as we wish, for example, one for testing purposes and another for production use. For instance, for testing, it might be useful just to collect all of the actions which should happen in some journal—in an event-sourced way (we'll look at event sourcing in detail later in this book). As we're just testing, our journal does not need to be persistent—hence, we can just use some kind of collection; for example, a <kbd>List</kbd> would do, as follows:</p>
+<pre><span>@tailrec<br/></span><span>def </span><span>goFishingAcc</span>[<span>A</span>](actions: Free[Action<span>, </span><span>A</span>]<span>, </span>log: <span>List</span>[<span>AnyVal</span>]): <span>List</span>[<span>AnyVal</span>] = actions <span>match </span>{<br/>  <span>case Join</span>(<span>BuyBait</span>(name<span>, </span>f)) =&gt;<br/>    <span>val </span>bait = <span>Bait</span>(name)<br/>    <span>goFishingAcc</span>(f(bait)<span>, </span>bait :: log)<br/>  <span>case Join</span>(<span>CastLine</span>(bait<span>, </span>f)) =&gt;<br/>    <span>val </span>line = <span>Line</span>(bait.name.length)<br/>    <span>goFishingAcc</span>(f(line)<span>, </span>line :: log)<br/>  <span>case Join</span>(<span>HookFish</span>(line<span>, </span>f)) =&gt;<br/>    <span>val </span>fish = <span>Fish</span>(<span>s"CatFish from (</span><span>$</span>line<span>)"</span>)<br/>    <span>goFishingAcc</span>(f(fish)<span>, </span>fish :: log)<br/>  <span>case </span><span>Done</span>(_) =&gt; log.reverse<br/>}</pre>
+<p>The preceding snippet is indeed an interpreter for the program which is built in terms of the actions wrapped in <kbd>Free</kbd>. The logic is repetitive—we're producing the result of the action and calling this action recursively, passing the log with the added entry as a parameter. In the case of <kbd>Done</kbd>, we're ignoring the result; our goal is the log, and we return it in reversed form <span>by calling </span><kbd>.reverse</kbd> to compensate for building it up in the opposite direction.</p>
+<p>The result of the execution looks like the following:</p>
+<pre><span>scala&gt; import ch10.FreeMonad._<br/>import ch10.FreeMonad._<br/>scala&gt; println</span>(goFishingAcc(catchFish("Crankbait"), Nil))<br/>List(Bait(Crankbait), Line(9), Fish(CatFish from (Line(9))))</pre>
+<p>For production, we can do something else, such as collecting the executed actions. We will model this side-effecting by writing to the console, as follows:</p>
+<pre><span>def </span><span>log</span>[<span>A</span>](a: <span>A</span>): <span>Unit </span>= <span>println</span>(a)<br/><br/><span>@scala.annotation.tailrec<br/></span><span>def </span><span>goFishingLogging</span>[<span>A</span>](actions: Free[Action<span>, </span><span>A</span>]<span>, </span>unit: <span>Unit</span>): <span>A </span>= actions <span>match </span>{<br/>  <span>case Join</span>(<span>BuyBait</span>(name<span>, </span>f)) =&gt;<br/>    <span>goFishingLogging</span>(f(<span>Bait</span>(name))<span>, </span><span>log</span>(<span>s"Buying bait </span><span>$</span>name<span>"</span>))<br/>  <span>case Join</span>(<span>CastLine</span>(bait<span>, </span>f)) =&gt;<br/>    <span>goFishingLogging</span>(f(<span>Line</span>(bait.name.length))<span>, </span><span>log</span>(<span>s"Casting line with </span><span>$</span>{bait.name}<span>"</span>))<br/>  <span>case Join</span>(<span>HookFish</span>(line<span>, </span>f)) =&gt;<br/>    <span>goFishingLogging</span>(f(<span>Fish</span>(<span>"CatFish"</span>))<span>, </span><span>log</span>(<span>s"Hooking fish from </span><span>$</span>{line.length}<span> feet"</span>))<br/>  <span>case </span><span>Done</span>(fish) =&gt; fish<br/>}</pre>
+<p>The structure of this interpreter is naturally the same as before. The result type of the computation is <kbd>Unit</kbd>—everything we do is side-effecting, so there is no need to pass anything around. Instead of accumulating actions into the log we are just writing a report directly to the console. The case of <kbd>Done</kbd> is also little different—we're returning the <kbd>fish</kbd>, the result of the performed combined action.</p>
+<p>The result of the execution changes as expected, as follows:</p>
+<pre><span>scala&gt; </span><span>println</span>(<span>goFishingLogging</span>(<span>catchFish</span>(<span>"Crankbait"</span>)<span>, </span>()))<br/>Buying bait Crankbait<br/>Casting line with Crankbait<br/>Hooking fish from 9 feet<br/>Fish(CatFish)</pre>
+<p>We managed to implement a very basic version of the free monad along with a small fishing language and two different interpreters. It is quite a bit of code so it's time to answer an obvious question: for what purpose do we invest this additional effort?</p>
+<p>The free monad has obvious advantages; we touched upon these, and they are as as follows:</p>
+<ul>
+<li>Gluing the computations together as classes happens in a heap and saves stack memory.</li>
+<li>It is possible to pass the computation over to different parts of the code and the side-effects will be deferred until it is explicitly run.</li>
+<li>Having multiple interpreters allows for different behaviour in different circumstances.</li>
+<li>This chapter's scope has not allowed us to show how different "languages" (ADTs) can be composed into one algebraic structure, which then can be used to define the logic using both languages at the same time. This possibility offers an alternative to the monad transformers and monad transformer stacks, for example, a language that combines business terms and persistence terms.</li>
+</ul>
+<p>The disadvantages lie in the same plane as they do for monads. These include additional initial implementation effort, runtime overhead for the garbage collector, and processing additional instructions and mental overhead for developers new to the concept.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p class="p1">Monads are arguably the most ubiquitous abstraction in functional programming. Unfortunately they cannot be composed in general—in contrast to functions and applicatives.</p>
+<p class="p1">Monad transformers provide a way to work around this limitation by specifying a set of overarching structures to represent combinations of monads, each combination being specific to a single internal effect type. Monad transformers compose monads in a way that it is possible to cross both effects with a single call of the <kbd>flatMap</kbd> or <kbd>map</kbd>.</p>
+<p class="p1">Monad transformer stacks lift the concept of monad transformers one level higher, utilizing the fact that each monad transformer is also a monad. By stacking monad transformers, it is possible to work with virtually any number of effects combined together in a single pile the same way we would do with a single monad.</p>
+<p class="p1">Monad transformers are not without disadvantages. The list includes increased garbage collection footprint and processor utilization because of the need to unpack and repack<span class="Apple-converted-space"> </span> effects in the stack. The same reasoning applies to the mental model developers needed to build and maintain in their head while working with the code.</p>
+<p class="p1">The free monad provides a reasonable alternative by clearly separating structure and interpretation of the computations. It does so by representing business logic as a sequence of steps encoded as data by some ADT and executing these steps with suitable interpreter(s).</p>
+<p class="p1">This chapter concludes the second part of the book. In this part and the first part, we refrained from using third-party libraries and focused on giving readers a deep understanding of the language features and underlying theoretical concepts.</p>
+<p class="p1">Needless to say, the code examples in this part were decidedly simplistic and only suitable for learning purposes. </p>
+<p class="p1">Specifically to the functional programming aspects, there are two exceptionally good libraries, worth mentioning one more time and available for Scala: Cats (<a href="https://typelevel.org/cats/">https://typelevel.org/cats/</a>) and Scalaz (<a href="https://github.com/scalaz/scalaz">https://github.com/scalaz/scalaz</a>). If we managed to ignite your interest in programming Scala using the functional style shown in this part of the book, we highly recommend taking a look at both of them. Besides offering production-ready implementation for the concepts we studied, they also contain lots of abstractions we weren't able to discuss.</p>
+<p class="p1">In the third part of the book we will relax our self-imposed constraint about third-party dependencies and dedicate it to the topic of reactive programming in Scala using different Akka libraries.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Questions</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>Why does the type of monad transformer reflect the type of the stack "upside-down" with its name referring to the type of innermost monad?</li>
+<li>Why is it possible to reuse existing monads for the top layer of the stack?</li>
+<li>Why is it impossible to reuse existing monads for the bottom layer of the stack?</li>
+<li>Implement a <kbd>TryT</kbd> monad transformer.</li>
+<li>Use the <kbd>TryT</kbd> monad transformer instead of <kbd>EitherT</kbd> with the example functions from the chapter.</li>
+<li>Implement another take on the monad transformer stack, this time with the layers placed upside-down: <kbd>EitherT[OptionT[Future, A], String, A]</kbd>.</li>
+<li>Add an action to release the caught fish in the free monad example we developed in the chapter.</li>
+</ol>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Further reading</h1>
+                </header>
+            
+            <article>
+                
+<p>Anatolii Kmetiuk, <em>Mastering Functional Programming</em>: Learn how functional programming can help you in deploying web servers and working with databases in a declarative and pure way</p>
+<p><span>Atul S. Khot, <em>Scala Functional Programming Patterns</em>: </span><span>Grok and perform effective functional programming in Scala</span></p>
+<p><span>Ivan Nikolov, </span><em>Scala Design Patterns</em><span> </span>- Second Edition: Learn how to write efficient, clean, and reusable code with Scala</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  </body></html>

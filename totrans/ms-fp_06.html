@@ -1,0 +1,272 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Effect Types in Practice</h1>
+                </header>
+            
+            <article>
+                
+<p>In the previous chapters, we saw that the general pattern for abstracting away side effects is to use effect types. This pattern allows you to reduce the mental load on your mind. The pattern states that we first define an effect type and then represent every occurrence of a particular side effect with this type. In this chapter, we will see more examples of real-world effect types and when to use them.</p>
+<p>More precisely, we will be covering the following topics:</p>
+<ul>
+<li><kbd>Future</kbd></li>
+<li><kbd>Either</kbd></li>
+<li><kbd>Reader</kbd></li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Future</h1>
+                </header>
+            
+            <article>
+                
+<p><span>The first effect type we will be looking at is</span> Future<span>. This effect is</span> frequently<span> encountered in a wide range of projects, even in non-functional languages. If you have substantial experience in Java regarding writing concurrent and asynchronous applications, you probably already know about this type of effect.</span></p>
+<p>First, let's take a look at the phenomenon that the effect type abstracts and the motivation behind why such an effect type may be needed.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Motivation and the imperative example</h1>
+                </header>
+            
+            <article>
+                
+<p>Consider the following example. Say you are developing a calendar application to compose a user's daily schedule. This application allows the user to write their plans for the Future into the database. For example, if they have a meeting with somebody, they can create a separate entry in the database, specifying when <span>and where</span> it will take place.</p>
+<p class="mce-root"/>
+<p>They may also want to add a weather forecast integration into the app. They would like to <span>warn </span>their users whenever they have outdoor activities in unfavorable weather conditions. For example, an outdoor picnic party is undesirable in rainy weather. One way to help the user avoid such situations is to make the application contact a weather forecast server and see whether the weather on the given day is satisfying or not.</p>
+<p>For any given event, this process can be done with the following algorithm:</p>
+<ol>
+<li>Retrieve an event from the database based on its ID</li>
+<li>Retrieve the date and the place of the event</li>
+<li>Contact a weather forecast server and provide it with the date and place we are interested in, and retrieve the weather forecast</li>
+<li>If the weather is bad, we can send a notification to the user</li>
+</ol>
+<p>The preceding algorithm can be implemented as follows:</p>
+<pre>def weatherImperative(eventId: Int): Unit = {<br/>  val evt = getEvent(eventId)  // Will block<br/>  val weather = getWeather(evt.time, evt.location)  // Will block<br/>  if (weather == "bad") notifyUser() // Will block<br/>}</pre>
+<p>The methods are defined as follows:</p>
+<pre>case class Event(time: Long, location: String)<br/>def getEvent(id: Int): Event = {<br/>  Thread.sleep(1000)  // Simulate delay<br/>  Event(System.currentTimeMillis, "New York")<br/>}<br/>def getWeather(time: Long, location: String): String = {<br/>  Thread.sleep(1000) // Simulate delay<br/>  "bad"<br/>}<br/>def notifyUser(): Unit = Thread.sleep(1000) // Simulate delay</pre>
+<p>There is one effect that can cause trouble in the preceding example. It takes time to connect to the database, and it takes even more time to contact the weather server.</p>
+<p>If we perform all of these operations sequentially from the application's main thread, as in the preceding example, we are risking blocking this thread. Blocking the main application thread means that the application will become unresponsive. One standard way to avoid this experience is to run all of these time-consuming computations in separate threads. However, it is quite common for asynchronous applications to specify every computation in a non-blocking manner. It is not common to have blocking methods; rather, every method is supposed to return an asynchronous primitive representing the computation immediately.</p>
+<p>The simplest implementation of this idea in Java is to run every computation in a separate thread:</p>
+<pre>// Business logic methods<br/>def notifyThread(weather: String): Thread = thread {<br/>  if (weather == "bad") notifyUser()<br/>}<br/>def weatherThread(evt: Event): Thread = thread {<br/>  val weather = getWeather(evt.time, evt.location)<br/>  runThread(notifyThread(weather))<br/>}<br/>val eventThread: Thread = thread {<br/>  val evt = getEvent(eventId)<br/>  runThread(weatherThread(evt))<br/>}</pre>
+<p>The three business logic methods get their own threads. The <kbd>thread</kbd> and <kbd>runThread</kbd> <span>methods </span>are defined as follows:</p>
+<pre>// Utility methods<br/>def thread(op: =&gt; Unit): Thread =<br/>new Thread(new Runnable { def run(): Unit = { op }})<br/>def runThread(t: Thread): Unit = t.start()</pre>
+<p>You can run this application as follows:</p>
+<pre>// Run the app<br/>runThread(eventThread)  // Prints "The user is notified"</pre>
+<p>Here, every subsequent computation is invoked at the end of every previous computation because the subsequent computation depends on the result of the computation that precedes it.</p>
+<p>The code is hard to read, and the execution flow is difficult to follow. Therefore, it is smart to abstract away the sequential composition of these computations.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Abstraction and the functional example</h1>
+                </header>
+            
+            <article>
+                
+<p>Let's look at a functional way of writing this example. In the functional world, one abstraction to deal with asynchronous computations is Future. Future has the following signature—<kbd>Future[A]</kbd>. This type represents a computation that runs in a separate thread and computes some result, which in our case is <kbd>A</kbd>.</p>
+<p>A common technique when dealing with Futures is to use callbacks to specify continuations of the computations. A continuation of a computation is an instruction on what to do after the computation has completed. A continuation has access to the result of the computation it continues. This is possible since it runs after the computation terminates.</p>
+<p>In most implications of the <kbd>Future</kbd> data type, the callback pattern is present in one form or another. For example, in the Scala implementation of <kbd>Future</kbd>, you can specify the continuation of a function as a callback using the <kbd>onSuccess</kbd> method:</p>
+<pre>def weatherFuture(eventId: Int): Unit = {<br/>  implicit val context =   ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(5))<br/>  Future { getEvent(eventId) }<br/>  .onSuccess { case evt =&gt;<br/>  Future { getWeather(evt.time, evt.location) }<br/>  .onSuccess { case weather =&gt; Future { if (weather == "bad") notifyUser } }<br/>}</pre>
+<p>In the preceding example, we can start the new Futures after the previous Futures terminate using the results they computed.</p>
+<p>Also, note the <kbd>implicit val</kbd> that we defined before running the Future. It brings into scope an implicit execution context for the Future. Future is an asynchronous computation that runs in a separate thread. Which thread does it run on, precisely? How do we control how many threads there are and whether or not the threads are reused? We need a specification of a threading strategy when running Futures.</p>
+<p>In the Scala implementation of the Future type, we are using Scala's mechanism of implicits to bring the threading context in scope. However, in other languages, you should expect that similar controls of the Futures' threading strategy will exist.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Composing Futures</h1>
+                </header>
+            
+            <article>
+                
+<p>A situation where we need to run one computation after another in an asynchronous manner is a frequent pattern. One way to solve this task is via callbacks, as we have seen previously. Every asynchronous computation is a separate entity and is started from a callback that's registered on another computation it depends upon.</p>
+<p>Another way of conceptualizing such a pattern is to treat Futures as composable entities. The concept in question is the ability to compose two Futures into one. The semantics of the combined <kbd>Future</kbd> is a sequential execution of the second <kbd>Future</kbd> after the first one.</p>
+<p>So, given a Future for contacting the database and a <kbd>Future</kbd> for contacting the weather forecast server, we can create a <kbd>Future</kbd> that combines both sequentially, with the second one being able to use the result of the first one.</p>
+<p>The sequential composition is facilitated using the <kbd>flatMap</kbd> method, which we are already familiar with from the previous chapter. So, our example can be implemented as follows:</p>
+<pre>def weatherFutureFlatmap(eventId: Int): Future[Unit] = {<br/>  implicit val context =   ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(5))<br/>  for {<br/>    evt  &lt;- Future { getEvent(eventId) }<br/>    weather &lt;- Future { getWeather(evt.time, evt.location) }<br/>     _  &lt;- Future { if (weather == "bad") notifyUser() }<br/>  } yield ()<br/>}</pre>
+<p>The <kbd>for</kbd> comprehension is shorthand for sequentially calling <kbd>flatMap</kbd>. This technique is called the <strong>Monadic flow</strong>, and is present in some functional languages, including Scala and Haskell. The preceding Scala code is syntactic sugar for the following:</p>
+<pre>def weatherFutureFlatmapDesugared(eventId: Int): Future[Unit] = {<br/>  implicit val context =   ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(5))<br/>  Future { getEvent(eventId) }<br/>  .flatMap { evt =&gt; Future { getWeather(evt.time, evt.location) } }<br/>  .flatMap { weather =&gt; Future { if (weather == "bad") notifyUser() } }<br/>}</pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">flatMap generalized</h1>
+                </header>
+            
+            <article>
+                
+<p>In the previous chapter, we have already seen <kbd>flatMap</kbd> in the context of the <kbd>Try</kbd> type. It was conceptualized as a continuation of a computational that may result in an error. We can extrapolate this conceptualization to the case of Futures. The same way as <kbd>flatMap</kbd> was a conceptualization of a continuation of an error-prone computation in the case of <kbd>Try</kbd>,  it is a continuation of an asynchronous computation in the case of Future.</p>
+<p>The role of the <kbd>flatMap</kbd> function is more or less the same in the case of any effect type you deal with. It is a continuation of a computation that produces a side effect with another computation that produces the same side effect, but requires the result of the first computation to proceed.</p>
+<p>Similarly to the way we used it in the case of <kbd>Try</kbd> in the previous chapter, we can also define a signature of <kbd>flatMap</kbd> for Futures as follows—<kbd>(A =&gt; Future[B]) =&gt; (Future[A] =&gt; Future[B])</kbd>. Another way to look at this <kbd>flatMap</kbd> function is that it is a lift. The <kbd>flatMap</kbd> lifts a function that produces the Future side effect and depends on some value, such as <kbd>(A =&gt; Future[B])</kbd>, to a function that does the same thing the original function did, but depends on the <kbd>Future[A]</kbd> (<kbd>Future[A] =&gt; Future[B]</kbd>) <span>value</span>. That is, the dependency is no longer available in a raw format, but is computed by another computation that produces the Future side effect.</p>
+<p>It should be mentioned that Futures are not specific to functional programming. You can encounter them in lots of other languages, such as Java, JavaScript, Python, and many others. Asynchronous computations are so ubiquitous that it is natural that programmers devised a primitive to abstract their complexity away. However, in functional programming languages, such as Scala or Haskell, Future gets a functional twist to it, as we have seen previously.</p>
+<p>Let's continue our exploration of side effects and what you can do with them by using an example with <kbd>Either</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Either</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Either</kbd> is an effect that is similar to the <kbd>Try</kbd> effect that we encountered in the previous chapters.</p>
+<p>If you remember, <kbd>Try</kbd> is a structure that can contain either of two values—an exception, or the result of the computation. Let's briefly recall our division by zero example from the previous chapters:</p>
+<pre>def functionalDivision(n1: Double, n2: Double): Try[Double] =<br/>  if (n2 == 0) Failure(new RuntimeException("Division by zero!"))<br/>  else Success(n1 / n2)</pre>
+<p>Here, in the case of success, we create a <kbd>Success</kbd> data structure. In case of failure, we need to create an exception with a specific error message.</p>
+<p>Is it essential to create an exception here? The useful payload is the error message, after all. Exceptions are needed in cases where they are thrown with the <kbd>throw</kbd> statement. However, as we discussed in previous chapters, functional programming avoids such a side effect, rectifying it into an effect type instead. If we are not throwing an exception, then what is the point of explicitly creating and wrapping it in the <kbd>Failure</kbd> data structure? A more efficient way of doing things would be to return a raw error message such as a <kbd>String</kbd>, not an exception with this error message. However, when you look at the signature of the <kbd>Failure</kbd> data structure, you will see that it can only contain the subclasses of <kbd>Throwable</kbd>.</p>
+<p>To be able to return a string instead of an exception in an erroneous case, we can use another data type: <kbd>Either</kbd>.</p>
+<p><kbd>Either</kbd> represents an alternative between two values. If <kbd>Try</kbd> is an alternative between an exception and a result, then <kbd>Either</kbd> is an alternative between two arbitrary types. It has two subclasses. So, a value with type <kbd>Either[A, B]</kbd> can be either <kbd>Right[B]</kbd> or <kbd>Left[A]</kbd>. Traditionally, the right case is reserved for the results of successful computations, and the left case is reserved for errors.</p>
+<p>Let's take a look at how our division by zero example can be improved with this new data structure:</p>
+<pre>def division(n1: Double, n2: Double): Either[String, Double] =<br/> if (n2 == 0) Left("Division by zero!")<br/> else Right(n1 / n2)<br/> println(division(1, 0))  // Left("Division by Zero")<br/> println(division(2, 2))  // Right(1.0)</pre>
+<p>We no longer need to wrap the error message in an exception. We can return our error message directly. The result type of the function is now <kbd>Either[String, Double]</kbd>, where <kbd>String</kbd> is the way we represent an error, and <kbd>Double</kbd> is the result type.</p>
+<p>It should be noted that the notion of an alternative can be taken further. <kbd>Either</kbd> is not the only data type that is used to abstract away alternatives. As you may have noticed, <kbd>Either</kbd> can be either of two values, but not both at the same time, or none.</p>
+<p>Whenever you have a use case where you have two values at the same time, or when you have an empty alternative, you may want to use other effect types that are tailored specifically to this use case. Libraries for functional programming for languages such as Scala or Haskell provide such types. In Scala, for example, the library called <kbd>cats</kbd> provides the data type <kbd>Ior</kbd>, which may contain two values at the same time.</p>
+<p>One use case where we may want to have two values at the same time is for presenting warnings. If errors can be understood as fatal occurrences that terminate a computation without producing a result, warnings are notifications that tell you that something went wrong in the computation, but that it was able to terminate successfully. In such a scenario, you may want to have a data structure that can contain both the computed value and the generated warnings at the same time.</p>
+<p>Errors and asynchronous computations are not the only domain tackled by effect types. Now, let's take a look at how the problem of dependency injection is solved in a purely functional way. Let's take a look at the <kbd>Reader</kbd> type.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Reader</h1>
+                </header>
+            
+            <article>
+                
+<p>Dependency injection is a mechanism that defines how parts of your program should access other parts of the same program or external resources.</p>
+<p>Let's consider a scenario where dependency injection becomes relevant. For example, consider you are writing an application with a database for a bank. The application will include methods for reading and writing the objects of your business domain into the database. For example, you may have a method to create a new user and a method to create a new account for them. These methods depend on the connection to the database. One way to inject this dependency is to pass the database connection object into the methods as arguments:</p>
+<pre>def createUser(u: User, c: Connection): Int = ???<br/>def createAccount(a: Account, c: Connection): Int = ???</pre>
+<p>The preceding types are defined as follows:</p>
+<pre>class Connection<br/>case class User(id: Option[Int], name: String)<br/>case class Account(id: Option[Int], ownerId: Int, balance: Double)</pre>
+<p>However, this clutters the signatures of the methods. Also, other methods that call the database, such as dependent methods, get cluttered because they need the database connection object to satisfy the dependency of the methods they call. For example, imagine a business logic method that creates a new user and an account for them at the same time:</p>
+<pre>def registerNewUser(name: String, c: Connection): Int = {<br/>  val uid   = createUser(User(None, name), c)<br/>  val accId = createAccount(Account(None, uid, 0), c)<br/>  accId<br/>}</pre>
+<p>It is composed of two database calls, and since each of these calls depends on a database connection, this method must also depend on a database connection. Hence, you must provide a database connection as an argument to the business logic method. Providing the dependency as an argument is not very convenient as it brings the connection object into your focus. On the business logic layer, you want to focus on the business logic and not on the details of how the database connection works.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Functional solution</h1>
+                </header>
+            
+            <article>
+                
+<p>One solution that functional programming provides for the problem of dependency injection is that it can treat dependency requirement as a function defined with the dependency as an argument and then abstract this function away. If we want to do this, then first we have to define our database access methods as follows:</p>
+<pre>def createUserFunc   (u: User ): Connection =&gt; Int = ???<br/>def createAccountFunc(a: Account): Connection =&gt; Int = ???</pre>
+<p>The approach states that whenever we have a computation that depends on some external resource, we model this dependency as a function that accepts this resource as an argument. So, when we have a method that is supposed to create a user, it does not perform the computation itself. Rather, it returns a function that performs the computation, provided you supply it with the database connection.</p>
+<p>Here's how to express the business logic method in this setting:</p>
+<pre>def registerNewUserFunc(name: String): Connection =&gt; Int = { c:  Connection =&gt;<br/>  val uid   = createUserFunc(User(None, name))(c)<br/>  val accId = createAccountFunc(Account(None, uid, 0))(c)<br/>  accId<br/>}</pre>
+<p>This approach is not very different from the approach of having an extra argument in the functions. However, this is the first step of the abstraction process, and this step is to bring focus onto the effect we are abstracting.</p>
+<p>The second step is to abstract away these functions. One way to do this is to treat the functions as effects. This effect is used so that the computation represented by this function cannot be performed unless you provide it with its dependency—the argument of the function. Consider our already familiar example that has been rewritten with the help of the <kbd>Reader</kbd> effect type:</p>
+<pre>def createUserReader   (u: User ): Reader[Connection, Int] = Reader { _ =&gt; 0 }  // Dummy implementation, always returns 0<br/>def createAccountReader(a: Account): Reader[Connection, Int] = Reader { _ =&gt; 1 }  // Dummy implementation, always returns 1<br/>def registerNewUserReader(name: String): Reader[Connection, Int] =<br/>createUserReader(User(None, name)).flatMap { uid =&gt;<br/>createAccountReader(Account(None, uid, 0)) }</pre>
+<p><kbd>Reader</kbd> can be defined as follows:</p>
+<pre>case class Reader[A, B](f: A =&gt; B) {<br/>  def apply(a: A): B = f(a)<br/>  def flatMap[C](f2: B =&gt; Reader[A, C]): Reader[A, C] =<br/>   Reader { a =&gt; f2(f(a))(a) }<br/>}</pre>
+<p>We can see that the pattern of <kbd>flatMap</kbd> and the effect types are repeating again. Previously, we saw the side effects of asynchronous computation and errors. All of them were represented by separate data structures—<kbd>Future</kbd> and <kbd>Either</kbd> (and <kbd>Try</kbd>). Now, we can see an effect of dependency. That is, the effect is that the computation is unable to be executed unless a specific resource demand is satisfied. This effect, too, is modeled by its own effect type: <kbd>Reader</kbd>.</p>
+<p>As we stated previously, we provided the <kbd>flatMap</kbd> method for the <kbd>Reader</kbd> class. The meaning of this method is the same as in the cases of <kbd>Future</kbd> and <kbd>Try</kbd>. That is, to perform a continuation on a side effecting computation. This method can be used in the setting of a business logic method that relies on the <kbd>createUser</kbd> and <kbd>createAccount</kbd> methods.</p>
+<p>Notice that <kbd>Readers</kbd> are essentially functions. This means that you cannot run them until you provide the dependencies they require. To do so, you can call a method that is usually defined in the API of the <kbd>Reader</kbd> data structure. In our case, according to the definition of the preceding <kbd>Reader</kbd> class, this can be done as follows:</p>
+<pre>val reader: Reader[Connection, Int] = registerNewUserReader("John")<br/>val accId = reader(new Connection)<br/>println(s"Success, account id: $accId") // Success, account id: 1</pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we were armed with the theoretical foundations of effects, what they are, and why they are needed. We took a look at some examples of effects types which are frequently encountered in practice. We have seen how the <kbd>Future</kbd> type abstracts away asynchronous computations. We also looked at the <kbd>Either</kbd> type, which is similar to <kbd>Try</kbd>, but allows alternative representations for errors. Finally, we covered the <kbd>Reader</kbd> effect type, which abstracts away the effect of dependency. We also saw that <kbd>flatMap</kbd> is a typical pattern among effect types, which abstracts away the sequential composition of side effecting computations, and the effects of which are rectified into effect types.</p>
+<p>In the next chapter, we'll have a look at how to generalize patterns of working with effect types.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Questions</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>What does the <kbd>Future</kbd> effect type <kbd>abstract</kbd>?</li>
+<li>Why do we need the <kbd>Either</kbd> effect type if we already have the <kbd>Try</kbd> effect type?</li>
+<li>How does functional programming represent dependency injection?</li>
+<li>What role does the <kbd>flatMap</kbd> function play in all of the effect types we have encountered?</li>
+</ol>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

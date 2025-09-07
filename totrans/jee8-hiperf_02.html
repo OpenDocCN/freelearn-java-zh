@@ -1,0 +1,1863 @@
+<html><head></head><body>
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Looking Under the Cover – What is This EE Thing?</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p class="mce-root">Java EE can appear as a magic tool for deployment. However, it is actually just Java
+               code. This chapter intends to look under the cover of the server and ensure that you
+               understand what implications you should expect from the performance of your application.
+               Since covering the entire Java EE space is quite impossible, this chapter will deal
+               with the most common patterns and main specifications.<br/>
+               In this chapter, we will go through some commonly used specifications, and check out
+               what their role is and what you should expect in terms of the impact on your runtime.
+               In the end, you should be able to do the following:
+            </p>
+            
+            <ul>
+               
+               <li>Know the services that you can expect from your container and the high-level <span>associated </span>overhead
+               </li>
+               
+               <li>Evaluate whether a code pattern can impact the performance</li>
+               
+               <li>Judge whether your runtime (Java EE) overhead is normal</li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Context and Dependency Injection – what did you do to my beans?</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p><strong>Context and Dependency Injection</strong> (<strong>CDI</strong>) is the central specification of Java EE. Its role is to <em>manage</em> the beans you define. It is directly linked to the pattern called <strong>Inversion of Control</strong> (<strong>IoC</strong>), which provides a way to obtain loose coupling between your classes. The goal is
+               to be flexible on the way so that the current instances are linked together. It also
+               controls the life cycle and the instantiation of instances.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">IoC – a pretty simple example</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Before exploring the CDI, let's use a very simple example (I would say, a <em>handmade example</em>) to illustrate what a bean container is.
+            </p>
+            
+            <p>We will use an application that has <kbd>TimeService</kbd>, which simply provides a <kbd>now()</kbd> method returning the current <kbd>LocalDateTime</kbd>.
+            </p>
+            
+            <p>Here is what it can look like in terms of code:</p>
+            <pre><span>public interface </span>TimeService {<br/>    LocalDateTime now();<br/>}</pre>
+            <p>A trivial implementation will rely on the native <kbd>now()</kbd> implementation:
+            </p>
+            <pre><span>public class </span>TimeServiceImpl <span>implements </span>TimeService {<br/>    <span>@Override<br/></span><span>    </span><span>public </span>LocalDateTime now() {<br/>        <span>return </span>LocalDateTime.<span>now</span>();<br/>    }<br/>}</pre>
+            <p>But you may also need to be able to switch to a mock (for tests or another customer,
+               for instance):
+            </p>
+            <pre><span>public class </span>MockTimeService <span>implements </span>TimeService {<br/>    <span>@Override<br/></span><span>    </span><span>public </span>LocalDateTime now() {<br/>        <span>return </span>LocalDateTime.<span>of</span>(<span>2017</span>, Month.<span>SEPTEMBER</span>, <span>4</span>, <span>19</span>, <span>0</span>);<br/>    }<br/>}</pre>
+            <p>In terms of code, you will likely implement the switch with a plain old factory:</p>
+            <pre><span>public static class </span>TimeServiceFactory {<br/>    <span>public </span>TimeService create() {<br/>        <span>if </span>(useDefault()) {<br/>            <span>return new </span>TimeServiceImpl();<br/>        }<br/>        <span>return new </span>MockTimeService();<br/>    }<br/>}</pre>
+            <p>Then, you need to use the factory everywhere in the callers, which is quite impacting,
+               especially when you need to add a parameter to the <kbd>create()</kbd> method. To solve this issue, you can put all your application instances in a single
+               place, which we will call <kbd>Container</kbd>:
+            </p>
+            <pre><span>public class </span>Container {<br/>    <span>private final </span>Map&lt;Class&lt;?&gt;, Class&lt;?&gt;&gt; <span>instances </span>= <span>new </span>HashMap&lt;&gt;();<br/><br/>    <span>public </span>&lt;<span>A</span>, <span>I </span><span>extends </span><span>A</span>&gt; Container register(<span>final </span>Class&lt;<span>A</span>&gt; api,<br/>    <span>final </span>Class&lt;<span>I</span>&gt; implementation) {<br/>        <span>instances</span>.put(api, implementation);<br/>        <span>return this</span>;<br/>    }<br/><br/>    <span>public </span>&lt;<span>T</span>&gt; <span>T </span>get(<span>final </span>Class&lt;<span>T</span>&gt; api) {<br/>        <span>try </span>{<br/>            <span>return </span>api.cast(<br/>                    <span>ofNullable</span>(<span>instances</span>.get(api))<br/>                            .orElseThrow(() -&gt; <span>new<br/>                            </span>IllegalArgumentException(<span>"No bean for api<br/>                            &lt;" </span>+ <span>api</span>.getName() + <span>"&gt;"</span>))<br/>                            .getConstructor()<br/>                            .newInstance());<br/>        } <span>catch </span>(<span>final </span>Exception e) {<br/>            <span>throw new </span>IllegalArgumentException(e);<br/>        }<br/>    }<br/>}</pre>
+            <p>This is a very minimal and trivial implementation. But once it is done, you can just
+               register all your application beans in your bootstrap class, and all the code will
+               rely on <kbd>Container</kbd> to retrieve the instance. In other words, the lookup of the classes is centralized.
+               This also means that the updates are simpler:
+            </p>
+            <pre><span>public class </span>Main {<br/>    <span>public static void </span>main(<span>final </span>String[] args) {<br/>        <span>final </span>Container container = <span>new </span>Container()<br/>                .register(TimeService.<span>class</span>, TimeServiceImpl.<span>class</span>)<br/>                /*other registers if needed*/;<br/><br/>        <span>final </span>TimeService timeService =<br/>        container.get(TimeService.<span>class</span>);<br/>        System.<span>out</span>.println(timeService.now());<br/>    }<br/>}</pre>
+            <p>As the last thing before starting to deal with the CDI itself, <span>you can add services on top of the container, </span>since the instances are created by <kbd>Container</kbd>. For instance, if you want to log any call to the method of a registered API, you
+               can change the <kbd>get(Class&lt;?&gt;)</kbd> method in the following way:
+            </p>
+            <pre><span>public </span>&lt;<span>T</span>&gt; <span>T </span>get(<span>final </span>Class&lt;<span>T</span>&gt; api) {<br/>    <span>try </span>{<br/>        <span>final </span>Object serviceInstance = <span>ofNullable</span>(<span>instances</span>.get(api))<br/>                .orElseThrow(() -&gt; <span>new </span>IllegalArgumentException(<span>"No<br/>                bean registered for api &lt;" </span>+ <span>api</span>.getName() + <span>"&gt;"</span>))<br/>                .getConstructor()<br/>                .newInstance();<br/><br/>        <span>return </span>api.cast(Proxy.<span>newProxyInstance</span>(api.getClassLoader(),<br/>        <span>new </span>Class&lt;?&gt;[]{api}, <span>new </span>LoggingHandler(serviceInstance,<br/>        api)));<br/>    } <span>catch </span>(<span>final </span>Exception e) {<br/>        <span>throw new </span>IllegalArgumentException(e);<br/>    }<br/>}</pre>
+            <p>The entire logic will be implemented in <kbd>LoggingHandler</kbd>, which will fully decorate the registered instance logic with logging invocations.
+               In other words, each method invocation on the proxy instance will be forwarded to
+               the handler:
+            </p>
+            <pre><span>public class </span>LoggingHandler <span>implements </span>InvocationHandler {<br/>    <span>private final </span>Object <span>delegate</span>;<br/>    <span>private final </span>Logger <span>logger</span>;<br/><br/>    <span>public </span>LoggingHandler(<span>final </span>Object delegate, <span>final </span>Class&lt;?&gt; api) {<br/>        <span>this</span>.<span>delegate </span>= delegate;<br/>        <span>this</span>.<span>logger </span>= Logger.<span>getLogger</span>(api.getName());<br/>    }<br/><br/>    <span>@Override<br/></span><span>    </span><span>public </span>Object invoke(<span>final </span>Object proxy, <span>final </span>Method method, <span>final<br/>    </span>Object[] args) <span>throws </span>Throwable {<br/>        <span>logger</span>.info(() -&gt; <span>"Calling " </span>+ <span>method</span>.getName());<br/>        <span>try </span>{<br/>            <span>return </span>method.invoke(<span>delegate</span>, args);<br/>        } <span>catch </span>(<span>final </span>InvocationTargetException ite) {<br/>            <span>throw </span>ite.getTargetException();<br/>        } <span>finally </span>{<br/>            <span>logger</span>.info(() -&gt; <span>"Called " </span>+ <span>method</span>.getName());<br/>        }<br/>    }<br/>}</pre>
+            <p>Now, if you call <kbd>TimeService.now()</kbd>, you will be able to observe the corresponding output. With the default logging setup,
+               it looks something like this:
+            </p>
+            <pre><strong>sept. 03, 2017 4:29:27 PM com.github.rmannibucau.container.LoggingHandler invoke</strong><br/><strong>INFOS: Calling now</strong><br/><strong>sept. 03, 2017 4:29:27 PM com.github.rmannibucau.container.LoggingHandler invoke</strong><br/><strong>INFOS: Called now</strong></pre>
+            <p>By itself, it is not that useful, but if you add some metrics (timing), parameter
+               logging, and so on, it can become really neat. Also, keep in mind that you can chain
+               the handlers you add on top of the proxy.
+            </p>
+            
+            <p>What does this mean, regarding the performance? Well, it means that a simple call
+               to a method we fully control (user method) can do really different things from the
+               user code; it will be slow due to the <kbd>Container</kbd> class and not due to the user code. If you doubt it, take a case where the user method
+               implementation is empty and the handler pauses for some minutes. Of course, the EE
+               implementation doesn't do it, but it adds some complexity on top of the end user code.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">The main features of CDI</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>CDI is quite <span>a </span>complete specification with a lot of features compared with our small container. However,
+               the CDI works in a <span>manner </span>similar to the container, except that it scans the <span><kbd>classloader</kbd> </span>application to find beans at startup instead of requiring a manual registration.
+            </p>
+            
+            <p>To understand how the CDI can impact the performance of your application, we will
+               detail a few major features of the CDI, explaining the work the server has to do to
+               provide them.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Injections</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>If you take a look at our quote manager application, you may have noticed that <kbd>QuoteService</kbd> was injected in <kbd>QuoteResource</kbd> or <kbd>DirectQuoteSocket</kbd>. We are exactly in the IoC area of the CDI container. Here, the algorithm globally
+               looks <span>as follows </span>(in pseudo-code):
+            </p>
+            <pre>Object createInstance() {<br/>    Object[] constructorArguments = createConstructorArguments(); &lt;1&gt;<br/>    Object instance = createNewInstance(constructorArguments); &lt;2&gt;<br/>    for each injected field of (instance) { &lt;3&gt;<br/>        field.inject(instance);<br/>    }<br/>    return prepare(instance); &lt;4&gt;<br/>}</pre>
+            <p>To fulfill its role, the CDI will need to instantiate an instance and initialize it.
+               To do so, it proceeds with the following steps which leads to provide you a ready
+               to use instance:
+            </p>
+            
+            <ol>
+               
+               <li>The CDI allows injections from the constructor parameters, through field injections,
+                  or through setter injections. Therefore, before instantiating an instance, the CDI
+                  needs to resolve the required parameters and get one instance for each of them.
+               </li>
+               
+               <li>Now, the container can provide constructor parameters; it just creates a current instance
+                  from the bean constructor.
+               </li>
+               
+               <li>Now that the container has an instance, it populates its field/setter injections.</li>
+               
+               <li>If needed, the instance is wrapped in a proxy, adding the required services/handlers
+                  (interceptors/decorators in CDI semantic).
+               </li>
+               
+            </ol>
+            
+            <p>In terms of the performance, this kind of logic has some consequences for us and the
+               way we can rely on the CDI in high-performance environments and applications.  A simple
+               bean instantiation now requires operations which look simple but can be expensive
+               to execute all the time due to the actual work they have to do, like allocating memory
+               or using meta programmation, or because of the complexity they hide:
+            </p>
+            
+            <ul>
+               
+               <li>Most of the steps imply some reflection (that is, Java reflection) and, therefore,
+                  the container must cache all it can to avoid wasting time in retrieving the reflection
+                  data again and again.
+               </li>
+               
+               <li><em>Step 1</em> and <em>step 3</em> can imply calling back <kbd>createInstance()</kbd> for other instances, which means that if the complexity to create an instance without
+                  any injection is 1, the complexity to create an instance with N injections will be
+                  <em>1+N</em>. I<span>t will be <em>1+NxM</em> </span>if the N injections have M injections.
+               </li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Scopes</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>A very neat feature of the CDI is to handle the scope life cycle for you. Concretely,
+               you decorate your beans with <kbd>@ApplicationScoped</kbd> and <kbd>@RequestScoped</kbd>, and the life of the bean is either bound to the application (it is a singleton)
+               or the request duration (which means you can have as many different instances as you
+               have concurrent requests).
+            </p>
+            
+            <p>The scope implementation is called <em>context</em>, and the context is mainly responsible for looking up in the right contextual instance
+               or creating it. An application scoped instance will be looked up in a single map shared
+               by the entire application. However, a request scoped instance will also be looked
+               up in <kbd>ThreadLocal</kbd> associated with the request life cycle through <kbd>ServletRequestListener</kbd>.
+            </p>
+            
+            <p>The implications on the performance are quite immediate:</p>
+            
+            <ul>
+               
+               <li>The context setup can be pricey (depending on the scope) and can add some overhead
+                  that you may not require. In fact, if you have no <kbd>@RequestScoped</kbd> bean, you don't need the <kbd>ServletRequestListener</kbd> instance (even if not very expensive).
+               </li>
+               
+               <li>Recreating your bean every time the context needs it will trigger the process we saw
+                  in the previous part and the life cycle hooks of the bean (<kbd>@PostConstruct</kbd> and <kbd>@PreDestroy</kbd>).
+               </li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Interceptors/decorators</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Interceptors are the CDI way of adding custom handlers on top of a bean. For instance,
+               our logging handler will be this interceptor in CDI:
+            </p>
+            <pre>@Log<br/><span>@Interceptor<br/></span><span>@Priority</span>(<span>Interceptor</span>.Priority.<span>APPLICATION</span>)<br/><span>public class </span>LoggingInterceptor <span>implements </span>Serializable {<br/>    <span>@AroundInvoke<br/></span><span>    </span><span>public </span>Object invoke(<span>final </span>InvocationContext context) <span>throws </span>Exception {<br/>        <span>final </span>Logger logger = Logger.<span>getLogger</span>(context.getTarget().getClass().getName());<br/>        logger.info(() -&gt; <span>"Calling " </span>+ <span>context</span>.getMethod().getName());<br/>        <span>try </span>{<br/>            <span>return </span>context.proceed();<br/>        } <span>finally </span>{<br/>            logger.info(() -&gt; <span>"Called " </span>+ <span>context</span>.getMethod().getName());<br/>        }<br/>    }<br/>}</pre>
+            <p>Decorators do the same job but they are applied automatically based on the interface(s)
+               they implement and get the current implementation injected. They don't require a binding
+               (such as <kbd>@Log</kbd> to put on a method to activate <kbd>LoggingInterceptor</kbd>), but they are more specific to a set of types.
+            </p>
+            
+            <p>In terms of the performance, an interceptor/decorator will obviously add some logic
+               and, therefore, some execution time. But it also adds a more vicious overhead: the
+               context creation. This part depends on the implementation of the CDI your server uses
+               (Weld, OpenWebBeans, CanDI, and so on). However, if you don't have any interceptor,
+               the container doesn't need to create a context and, therefore, to populate it. Most
+               of the context creation is cheap but the <kbd>getParameter()</kbd> method, which represents the parameters of the method, can be expensive, since it
+               requires converting a stack call into an array.
+            </p>
+            
+            <p>CDI implementations have multiple choices here and we will not go through all of them.
+               What is important to keep in mind here is the following equation:
+            </p>
+            <pre>business_code_execution_time + interceptors_code_execution_time &lt; method_execution_time</pre>
+            <p>If you only have interceptors that don't do much, you can often assume that the container
+               makes it as right as possible. If you compare this with a framework where you do it
+               all manually, you will probably see this overhead.
+            </p>
+            
+            <p>By itself, the associated overhead is still acceptable, not big enough to not use
+               interceptors in your code regarding the maintenance/complexity versus the performance
+               trade-off. However, when you start adding a lot of interceptors, you need to ensure
+               that they are well implemented too. What does this mean? To understand, we need to
+               step back and see how interceptors are used.
+            </p>
+            
+            <p>To link an interceptor and an implementation, you need to use what we call an interceptor
+               binding, which is the marker annotation of your interceptor (decorated with <kbd>@InterceptorBinding</kbd>). No big issues until here, but this binding often holds some configuration, making
+               the interceptor behavior configurable.
+            </p>
+            
+            <p>If we use back our logging interceptor, the logger name is configurable:</p>
+            <pre><span>@InterceptorBinding<br/></span><span>@Retention</span>(<span>RUNTIME</span>)<br/><span>@Target</span>({<span>TYPE</span>, <span>METHOD</span>})<br/><span>public </span>@<span>interface </span><span>Log </span>{<br/>    <span>/**<br/></span><span>     * </span><span>@return </span><span>the logger name to use to trace the method invocations.<br/></span><span>     */<br/></span><span>    </span><span>@Nonbinding<br/></span><span>    </span>String value();<br/>}</pre>
+            <p>Now, <kbd>LoggingInterceptor</kbd> needs to get back the value, which will be passed to the logger factory to get the
+               logger instance that our interceptor will use to decorate the actual bean invocation.
+               This means that we can just modify our previous implementation, as shown in the following
+               snippet, to respect the logger configuration:
+            </p>
+            <pre><span>@Log</span>(<span>""</span>)<br/><span>@Interceptor<br/></span><span>@Priority</span>(<span>Interceptor</span>.Priority.<span>APPLICATION</span>)<br/><span>public class </span>LoggingInterceptor <span>implements </span>Serializable {<br/>    <span>@AroundInvoke<br/></span><span>    </span><span>public </span>Object invoke(<span>final </span>InvocationContext context) <span>throws </span>Exception {<br/>        <span>final </span>String loggerName = getLoggerName();<br/>        <span>final </span>Logger logger = Logger.<span>getLogger</span>(loggerName);<br/>        logger.info(() -&gt; <span>"Calling " </span>+ <span>context</span>.getMethod().getName());<br/>        <span>try </span>{<br/>            <span>return </span>context.proceed();<br/>        } <span>finally </span>{<br/>            logger.info(() -&gt; <span>"Called " </span>+ <span>context</span>.getMethod().getName());<br/>        }<br/>    }<br/>}</pre>
+            <p>All the tricky part is in <kbd>getLoggerName()</kbd>. A bad and fragile - because it relies on plain reflection and not CDI metamodel
+               - but common implementation is as follows:
+            </p>
+            <pre><span>private </span>String getLoggerName(InvocationContext context) {<br/>    <span>return </span><span>ofNullable</span>(context.getMethod().getAnnotation(<span>Log</span>.<span>class</span>))<br/>            .orElseGet(() -&gt; <span>context</span>.getTarget().getClass().getAnnotation(<span>Log</span>.<span>class</span>))<br/>            .value();<br/>}</pre>
+            <p>Why is it fragile? Because there is no guarantee that the class handling works, as
+               you can get a proxy instance and ignore the stereotype usage. It is bad because it
+               utilizes reflection at every invocation and the JVM is not really optimized for such
+               usage. The implementer should call <kbd>getAnnotation</kbd> only once.
+            </p>
+            
+            <p>Regarding the performances, a better implementation will be to ensure that we don't
+               use reflection every time there is an invocation call, but only once, since the Java
+               model (the <kbd>Class</kbd> metadata) doesn't change at runtime in general. To do it, we can use <kbd>ConcurrentMap</kbd> which will hold the already computed names in memory and avoid to do it again and
+               again when the same method is called:
+            </p>
+            <pre><span>private final </span>ConcurrentMap&lt;Method, String&gt; <span>loggerNamePerMethod </span>= <span>new </span>ConcurrentHashMap&lt;&gt;();<br/><br/><span>private </span>String getLoggerName(InvocationContext context) {<br/>    <span>return </span><span>loggerNamePerMethod</span>.computeIfAbsent(context.getMethod(), m -&gt; <span>ofNullable</span>(m.getAnnotation(<span>Log</span>.<span>class</span>))<br/>            .orElseGet(() -&gt; <span>context</span>.getTarget().getClass().getAnnotation(<span>Log</span>.<span>class</span>))<br/>            .value());<br/>}</pre>
+            <p>It simply caches the logger name <span>per method </span>and computes it once. This way, no reflection after the first call is involved; instead,
+               we rely on the cache. <kbd>ConcurrentHashMap</kbd> is a good candidate for it and its overhead is negligible compared to a <em>synchronized</em> structure.
+            </p>
+            
+            <p>To be fast, do we just need to ensure that the interceptors are caching metadata?
+               Actually, it is not enough. Remember that the interceptors are beans with an enforced
+               scope: <kbd>@Dependent</kbd>. This scope means <em>create every time you need</em>. In the context of an interceptor, it means <em>create an instance of the interceptor every time you create an intercepted bean</em>.
+            </p>
+            
+            <p>If you think of a <kbd>@RequestScoped</kbd> bean, then its interceptors will be created for every request and the cache, which
+               totally defeats the purpose.
+            </p>
+            
+            <p>To solve it, do not cache in the interceptor but in an <kbd>@ApplicationScoped</kbd> bean, which is injected into the interceptor:
+            </p>
+            <pre><span>@ApplicationScoped<br/></span><span>class </span>Cache {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>BeanManager <span>beanManager</span>;<br/><br/>    <span>private final </span>ConcurrentMap&lt;Method, String&gt; <span>loggerNamePerMethod </span>= <span>new </span>ConcurrentHashMap&lt;&gt;();<br/><br/>    String getLoggerName(<span>final </span>InvocationContext context) {<br/>        <span>return </span><span>loggerNamePerMethod</span>.computeIfAbsent(context.getMethod(), mtd -&gt; {<br/>            <span>// as before<br/></span><span>        </span>});<br/>    }<br/>}<br/><br/><span>@Log</span>(<span>""</span>)<br/><span>@Interceptor<br/></span><span>@Priority</span>(<span>Interceptor</span>.Priority.<span>APPLICATION</span>)<br/><span>public class </span>LoggingInterceptor <span>implements </span>Serializable {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>Cache <span>cache</span>;<br/><br/>    <span>@AroundInvoke<br/></span><span>    </span><span>public </span>Object invoke(<span>final </span>InvocationContext context) <span>throws </span>Exception {<br/>        <span>final </span>String loggerName = <span>cache</span>.getLoggerName(context);<br/>        <span>final </span>Logger logger = Logger.<span>getLogger</span>(loggerName);<br/>        logger.info(() -&gt; <span>"Calling " </span>+ <span>context</span>.getMethod().getName());<br/>        <span>try </span>{<br/>            <span>return </span>context.proceed();<br/>        } <span>finally </span>{<br/>            logger.info(() -&gt; <span>"Called " </span>+ <span>context</span>.getMethod().getName());<br/>        }<br/>    }<br/>}</pre>
+            <p>This simple trick ensures that our cache is <kbd>@ApplicationScoped</kbd> itself and, therefore, computed only once per application. If you want to make sure
+               you don't compute it at runtime at all, you can even enforce it to be initialized
+               through a CDI extension in an observer of the <kbd>AfterDeploymentValidation</kbd> event (but this is less impacting on the performance).
+            </p>
+            
+            <p>To conclude this part, note that the specifications now rely on interceptors to provide
+               their features and integrate together (Security API, JTA, JSF, JAX-RS, and so on).
+               The EJB specification was providing the JTA integration <span>until Java EE 7 </span>(replaced by <kbd>@Transactional</kbd>) and the security API <span>until Java EE 8 </span>(replaced by Security API). It was an ad-hoc implementation of these integrations
+               (such as our <kbd>Container</kbd> at the beginning of this chapter), but it is strictly equivalent to the interceptor
+               functional use. And in terms of the performance, both implementations (EJB and CDI
+               based) are often very close.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Events</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>CDI events globally provide an event BUS inside the application. They can be synchronous
+               or asynchronous. To let you have an idea, here is what the code can look like:
+            </p>
+            <pre><span>@ApplicationScoped<br/></span><span>public class </span>LifecycleManager {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>Event&lt;Starting&gt; <span>startingEvent</span>;<br/><br/>    <span>public void </span>starting() {<br/>        <span>final </span>Starting event = <span>new </span>Starting();<br/><br/>        <span>startingEvent</span>.fire(event);<br/>        <span>startingEvent</span>.fireAsync(event);<br/>    }<br/>}</pre>
+            <p>As both types of invocations are exclusive, w<span>hat we can note here is that these snippets call </span><kbd>fire()</kbd><span> and </span><kbd>fireAsync()</kbd><em>.</em> To be able to target all the observers, you need to invoke both. This means that
+               the associated logic will be twice.
+            </p>
+            
+            <p>Without entering into the details that do not impact our performance, both cases share
+               the same resolution mechanism:
+            </p>
+            
+            <ol>
+               
+               <li>Resolve the observers based on the event type.</li>
+               
+               <li>Remove the observers not matching the fire type (asynchronous or synchronous).</li>
+               
+               <li>Sort the observers by priority.</li>
+               
+               <li>Handle the invocations.</li>
+               
+            </ol>
+            
+            <p>The difference between synchronous and asynchronous cases is <em>point 4</em>. In the synchronous case, it just means, <em>invoke the observers</em>, whereas in the asynchronous case, it means, <em>call asynchronously and return</em> <kbd>CompletionStage</kbd> <em>representing all the invocation results</em>.
+            </p>
+            
+            <p>The parts impacting the performance are the resolution of the observers and the invocation,
+               which can require some bean resolution.
+            </p>
+            
+            <p>We already saw bean resolution, so let's dig into the observer resolution here. Indeed,
+               the implementation is specific to the vendor you are using. But, as it is impossible
+               to use static analysis to implement this part, the resolution is done at runtime with
+               a cache per event type. Note that the caching depends a lot on the implementation.
+               Most will only cache raw type events.
+            </p>
+            
+            <p>This concretely means that the invocation without generics, as shown in the following
+               code, <span>will be way faster than the invocation that implements generics and enforces the CDI
+                  container to do some more resolution</span>:
+            </p>
+            <pre>event.fire(new MyEvent());</pre>
+            <p>In terms of the code, and to let you compare it with the previous example, the code
+               with generics would be exactly the same except the event would be parameterized:
+            </p>
+            <pre>event.fire(new MyEvent&lt;String&gt;());</pre>
+            <p>Then, once you have the potential set of observers, you need to reduce the set based
+               on the qualifiers that the caller configures for the event. This also implies some
+               reflection, more or less cached, depending on the implementation.
+            </p>
+            
+            <p>Finally, some runtime checks are enforced by the set of tests that the vendors have
+               to pass so that we can claim to be compliant with the specifications.
+            </p>
+            
+            <p>All these steps are more or less optimized by vendors depending on the cases they
+               may have received complaints about. But in all of them, you can end up on code paths
+               where everything is done at runtime for the firing of each event, which can be a pain
+               in terms of the performance.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Dynamic lookups</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Another great feature of the CDI is to be able to control a lazy instantiation or
+               resolution of a bean. This is done with the <kbd>Provider&lt;?&gt;</kbd> and <kbd>Instance&lt;?&gt;</kbd> APIs. <em>Instance</em> is a <em>Provider</em> allowing you to resolve a bean at runtime. <em>Provider</em> is an instance wrapper allowing you to decide when to instantiate the underlying
+               instance.
+            </p>
+            
+            <p>Take a look at the following code snippet:</p>
+            <pre><span>@ApplicationScoped<br/></span><span>public class </span>DynamicInstance {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>Provider&lt;MyService&gt; <span>myServiceProvider</span>;<br/><br/>    <span>@Inject<br/></span><span>    </span><span>private </span>Instance&lt;MyService&gt; <span>myServices</span>;<br/><br/>    <span>public </span>MyService currentService() {<br/>        <span>return </span><span>myServiceProvider</span>.get(); &lt;1&gt;<br/>    }<br/><br/>    <span>public </span>MyService newService(<span>final </span>Annotation qualifier) {<br/>        <span>return </span><span>myServices</span>.select(qualifier).get(); &lt;2&gt;<br/>    }<br/>}</pre>
+            <p>Let's look at the underlying mechanism of the preceding code snippet:</p>
+            
+            <ul>
+               
+               <li>Calling <kbd>Provider.get()</kbd> will trigger the creation of an underlying instance (<kbd>MyService</kbd> here). It delays the instantiation of the injection or makes the instantiation conditional.
+                  Note that it depends on the scope of the bean and that a normal scoped bean won't
+                  benefit much from this use.
+               </li>
+               
+               <li>Calling <kbd>Instance.select(...)</kbd> will make the bean definition <span>more specific</span> based on the injection point. In this case, we start from a bean type (<kbd>MyService</kbd><em>)</em> with the implicit <kbd>@Default</kbd> qualifier and replace the implicit qualifier with the one passed as the parameter.
+                  Then, we resolve the bean and get its instance. This is useful for <span>switching</span> the implementation <span>dynamically</span><span> </span><span>and conditionally</span>.
+               </li>
+               
+            </ul>
+            
+            <p>Since an <em>Instance</em> is a <em>Provider</em>, the implementations share the same code for both. This means their performances
+               will be the same.
+            </p>
+            
+            <p>Now the question is, what is the cost of <span>using a programmatic lookup</span> versus a plain injection? Is it more expensive or not? In terms of implementation,
+               the code is quite comparable, it has to resolve the bean to instantiate and then instantiate
+               it so that we are very close to an injection. We will ignore the small differences
+               that do not impact the performance much. One issue here is its use: if you get a <em>Provider</em> injected and resolve it for each use, you will then increase a lot of the time spent
+               on <em>resolving and instantiating</em> versus <em>just using an already resolved and created instance</em>.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">JAX-RS – the servlet router</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Even if JAX-RS is not fully bound to HTTP and is usable over JMS, WebSockets, and
+               so on, we will just consider the HTTP case here and, more particularly, the case it
+               runs on top of the servlet specification (which is the most common one).
+            </p>
+            
+            <p>The goal of JAX-RS is to provide a command pattern based on the API to implement the
+               HTTP communications. In other words, it abstracts the I/O with Java modeling. You
+               can see it as a HTTP Java object binding solution. This is what <kbd>QuoteResource</kbd> uses.
+            </p>
+            
+            <p>The role of JAX-RS is to provide all the necessary tooling to make servlet abstraction
+               directly usable for most cases. For this purpose, it provides the following:
+            </p>
+            
+            <ul>
+               
+               <li>A routing layer letting developers directly map the request based on its path</li>
+               
+               <li>A serialization layer allowing the conversion of Java objects into HTTP models and
+                  streams
+               </li>
+               
+               <li>An exception handling layer enabling the mapping of an exception to an HTTP response</li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">The router</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>JAX-RS is command-oriented. It means that a request must be bound to a Java method.
+               To do so, the matching takes multiple parameters of the request <span>into account</span>:
+            </p>
+            
+            <ul>
+               
+               <li>The patch</li>
+               
+               <li>The Accept header</li>
+               
+               <li>The Content-Type header</li>
+               
+            </ul>
+            
+            <p>Here is the simplified algorithm for routing:</p>
+            
+            <ol>
+               
+               <li>Find the class matching the request based on the path (this is a regex-like logic).</li>
+               
+               <li>From the class found in <em>step 1</em>, find the method matching the request based on the path. (This is close to <em>step 1</em> but applied to methods with subresource handling.)
+               </li>
+               
+               <li>From the methods found in <em>step 2</em>, find the one that will handle the request based on mime types (Accept/Content-Type
+                  headers). This level parses the media types to handle the quality of service options
+                  (q, qs, and so on) of the header.
+               </li>
+               
+            </ol>
+            
+            <p>This is not a complicated algorithm, but it is quite dynamic and depends on the incoming
+               requests. So most of the time, it is done at runtime by the providers and can add
+               a small overhead, which you can notice during benchmarks.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Marshalling</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>(Un)Marshalling is what will (read/)write a Java object to a communication format.
+               It is commonly the part converting an object to a XML or JSON payload but can really
+               be any format, including binary formats.
+            </p>
+            
+            <p>This conversion is normally synchronous in the implementation and can be costly depending
+               on the model you use and the serializer that is activated. Compared with the servlet
+               API, where you yourself serialize the payload you want to read/return, here, the task
+               is done by the framework and is, therefore, a bit hidden.
+            </p>
+            
+            <p>A crucial point at this stage is to make sure that the manipulated object has almost
+               no logic and is fast to initialize/read. If you don't respect this point, you may
+               end up holding the HTTP stream for too long which would badly impact your scalability
+               and on a more general practice, you would risk to have some lazy loading of data with
+               JPA which can fail or imply an unexpected connection usage depending the JPA provider
+               and configuration. Another bad case would be to start writing and, then, compute some
+               costly value before continuing to write and therefore force the marshalling process
+               to pause and delay the write after having started it. This not only has a direct impact
+               on the request thread pool but also on the HTTP I/O.
+            </p>
+            
+            <p>In the same spirit as the algorithm used to match a method to invoke (see the previous
+               part), the JAX-RS runtime must resolve the provider to use (<kbd>MessageBodyReader</kbd> or <kbd>MessageBodyWriter</kbd> depending on whether you read or write) in order to make the link with the Java model.
+               Here again, this resolution depends on the incoming request (or the response being
+               built) and media type headers and is not as flat as expected even if it is cacheable
+               and generally fast.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Filter and interceptors</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>JAX-RS 2.0 added <kbd>ContainerRequestFilter</kbd> and<em> </em><kbd>ContainerResponseFilter</kbd> to modify the request context. It is executed around the method invocation but has
+               already passed the method resolution. On a high level, it can be seen as a CDI interceptor
+               but only at the HTTP layer. These filters do not impact significantly the performance
+               until they do a lot of logic, and there are a few cases where it is a good place to
+               put some logic. One very common example is to validate a security token or log in
+               a user based on the HTTP headers. Don't be surprised to see this kind of component
+               while investigating what your application is doing.
+            </p>
+            
+            <p>In the same spirit, <kbd>ReaderInterceptor</kbd> and <kbd>WriterInterceptor</kbd> intercept <kbd>MessageBodyReader</kbd><span> or </span><kbd>MessageBodyWriter</kbd><em>.</em> They are intended to wrap the input/output streams to add some support such as GZIP
+               compression. However, since we are close to the current I/O, we need to take care
+               to not add too much logic here if the payloads are huge or if the algorithm is complex.
+               In fact, since the stream operations are called very often, a badly implemented wrapper
+               can affect the performance.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">@Suspended or asynchronous operation</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>JAX-RS 2.1 got a brand new reactive API to integrate with Java 8 CompletionStage but
+               the server also has a nice integration to be reactive: <kbd>@Suspended</kbd>. For instance, the <kbd>findAll</kbd><em> </em>method of <kbd>QuoteResource</kbd><em> </em>could look like the following:
+            </p>
+            <pre><span>@Path</span>(<span>"quote"</span>)<br/><span>@RequestScoped<br/></span><span>public class </span>QuoteResource {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>QuoteService <span>quoteService</span>;<br/><br/>    <span>@Resource<br/></span><span>    </span><span>private </span>ManagedExecutorService <span>managedExecutorService</span>;<br/><br/>    <span>@GET<br/></span><span>    </span><span>public void </span>findAll(<span>@Suspended </span><span>final </span>AsyncResponse response, &lt;1&gt;<br/>                        <span>@QueryParam</span>(<span>"from"</span>) <span>@DefaultValue</span>(<span>"0"</span>) <span>final int </span>from,<br/>                        <span>@QueryParam</span>(<span>"to"</span>) <span>@DefaultValue</span>(<span>"10"</span>) <span>final int </span>to) {<br/>        <span>managedExecutorService</span>.execute(() -&gt; { &lt;2&gt;<br/>            <span>try </span>{<br/>              <span>final long </span>total = <span>quoteService</span>.countAll();<br/>              <span>final </span>List&lt;JsonQuote&gt; items = <span>quoteService</span>.findAll(<span>from</span>, <span>to</span>)<br/>                        .map(quote -&gt; {<br/>                            <span>final </span>JsonQuote json = <span>new </span>JsonQuote();<br/>                            json.setId(quote.getId());<br/>                            json.setName(quote.getName());<br/>                            json.setValue(quote.getValue());<br/>                           json.setCustomerCount(<span>ofNullable</span>(quote.getCustomers())<br/>                            .map(Collection::size).orElse(<span>0</span>));<br/>                            <span>return </span>json;<br/>                        })<br/>                        .collect(<span>toList</span>());<br/><br/>                <span>final </span>JsonQuotePage page = <span>new </span>JsonQuotePage();<br/>                page.setItems(items);<br/>                page.setTotal(total);<br/>                <span>response</span>.resume(page); &lt;3&gt;<br/>            } <span>catch </span>(<span>final </span>RuntimeException re) {<br/>                <span>response</span>.resume(re); &lt;3&gt;<br/>            }<br/>        });</pre>
+            <pre>    }<br/><br/>    <span>// ...</span><span><br/></span>}</pre>
+            <p>In the synchronous flavor of a JAX-RS method, the returned instance is the response
+               payload. However, when going asynchronous, the returned instance is no more used as
+               the payload in JAX-RS 2.0; the only option is to use the <kbd>AsyncResponse</kbd> JAX-RS API to let the container be notified of the state of processing of the request.
+               Since JAX-RS 2.1 (Java EE 8), you can also return a Java 8 CompletionStage instance,
+               which gives you the same hooks, and the server can integrate with it to be notified
+               of the success or failure of the invocation. In any case, both kinds of APIs imply
+               the same kind of logic:
+            </p>
+            
+            <ol>
+               
+               <li>The <kbd>@Suspended</kbd> annotation marks a parameter of the <kbd>AsyncResponse</kbd> type to be injected. This is the callback holder you use to notify JAX-RS that you
+                  have finished the execution and have made JAX-RS resume the HTTP request. If you use
+                  the <kbd>CompletionStage</kbd> API flavor, you don't need this parameter and can directly use your <kbd>CompletionStage</kbd> instance almost the same way.
+               </li>
+               
+               <li>This  asynchronous API makes sense when the computation of the response is asynchronous.
+                  So, we need to submit the task in a thread pool. In EE 8 the best way to do it correctly
+                  is to rely on the EE concurrency utility API and, therefore, <kbd>ManagedExecutorService</kbd>.
+               </li>
+               
+               <li>Once the computation is finished, <kbd>resume()</kbd> is used to send back the response (normal payload or <kbd>throwable</kbd>), which will use <kbd>ExceptionMappers</kbd> to be translated in payload.
+               </li>
+               
+            </ol>
+            
+            <p>With this pattern, you need to take into account the fact that there is another thread
+               pool apart from the HTTP one. It will impact at different levels, which we will deal
+               with later, but an important point is that increasing the number of threads doesn't
+               mean improving the performance in all cases, and for fast execution, you can even
+               decrease your performance.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">JPA – the database link</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The <strong>Java Persistence API</strong> (<strong>JPA</strong>) is the link to the database (MySQL for our quote application we created in chapter
+               1). Its goal is to enable an application to map the database model to Java objects.
+               The gain is that we can use the database as any object.
+            </p>
+            
+            <p>For instance, consider the following table, which matches our quote representation
+               in the database:
+            </p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="108" src="assets/6326f8c9-058d-4daa-9bed-16f9bc5d2a25.png" width="190"/></div>
+            
+            <p>The preceding table can be converted into the following object in Java, thanks to
+               JPA annotations:
+            </p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="154" src="assets/7a04b4ed-93e3-4530-8c26-d5d8d01c843a.png" width="181"/></div>
+            
+            <p>While the tables are <em>flat</em>, <span>mapping them in JPA</span> is pretty straightforward, but the more the model complexity will increase, the more
+               you will realize the two opposed worlds: building a great Java model can lead to an
+               awful database model or the opposite. Why? Because both don't share exactly the same
+               philosophy and can lead to some anti-patterns.
+            </p>
+            
+            <p>For instance, in our model, we linked our <em>Quote</em> to <em>Customer</em> mapping. Since a customer can have multiple quotes (and the opposite as well), we
+               used a <kbd>@ManyToMany</kbd> relationship. If you check the database generated by JPA, you will be surprised to
+               see one table that is not modelized:
+            </p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="98" src="assets/a15a59f1-1b14-4e20-9ea1-376376ec403a.png" width="145"/></div>
+            
+            <p>The <strong>QUOTE_CUSTOMER</strong> table model is pretty simple if you open it:
+            </p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="67" src="assets/8f11dc14-5cdd-45fd-a643-0810c69e08a7.png" width="182"/></div>
+            
+            <p>As you can see, it just makes a link between the <strong>QUOTE</strong> and <strong>CUSTOMER</strong> tables. This is what we would manually do on the database side, except that we would
+               modelize this table (it wouldn't be implicit) and potentially add some attributes
+               owned by the relationship (something we can't do with our current Java model).
+            </p>
+            
+            <div class="packt_tip">Of course, you can always modelize this join table and link it to <em>Quote</em> and <em>Customer </em>with <kbd>@ManyToOne</kbd> relationships if you need more flexibility or want to be closer to the database model.
+            </div>
+            
+            <p>This example is interesting at two levels:</p>
+            
+            <ul>
+               
+               <li>What will the JPA provider do to fetch the quotes of a customer, since there is this
+                  join table in the middle?
+               </li>
+               
+               <li>The model is symmetric: a customer can get the quotes he can access, and we can access
+                  the allowed customers from a quote. In Java, it will just be translated by <kbd>quote.getCustomers()</kbd> and <kbd>customer.getQuotes()</kbd>. Are both doing the same thing? Are they similar in terms of performance? In Java,
+                  they really look the same, right?
+               </li>
+               
+            </ul>
+            
+            <p>To dig into the role of the provider, we must start by checking how by using some
+               object-related code and query language the provider can actually make it work on the
+               database-side, which uses a different paradigm. To do so, we will first investigate
+               how our Java code is converted to native SQL and, then, check how the modeling can
+               impact the performance.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">From JPA to the database</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>JPA let's you represent your database in plain Java. Said otherwise it let's you represent
+               the relational model as an object model. It is very common for the development and
+               maintenance but at some point, and in particular when you will validate your performances,
+               you will need to check what the mapper (JPA implementation) is doing and how it does
+               translate your object code/model to the relational one (SQL).
+            </p>
+            
+            <p>When you check the JPA caller code, you often have something like the following:</p>
+            <pre>final Quote quote = entityManager.find(Quote.class, id);<br/>....<br/>entityManager.persist(quote);</pre>
+            <p>For more complex queries, it is like the following:</p>
+            <pre><span>final Number count = entityManager</span>.createQuery(<span>"select count(q) from Quote q"</span>, Number.<span>class</span>);</pre>
+            <p>I will not deal with named queries versus this kind of query in this part, but what
+               is important here is that the model is object/Java-based. Even the JPQL query is related
+               to an object and not plain SQL.
+            </p>
+            
+            <p>This leads to the main role of the JPA provider: translating <span>all the code</span> from the object/Java model to the relational/SQL model.
+            </p>
+            
+            <p>To understand this, we will configure the JPA provider of our server to log what it
+               does. Since we are using GlassFish, we need to configure EclipseLink, which is the
+               JPA provider. To do so, we just add the following properties <span>in the persistence unit</span>:
+            </p>
+            <pre><span>&lt;</span><span>property </span><span>name=</span><span>"eclipselink.logging.level" </span><span>value=</span><span>"FINEST"</span><span>/&gt;</span><br/><span>&lt;</span><span>property </span><span>name=</span><span>"eclipselink.logging.logger" </span><span>value=</span><span>"JavaLogger"</span><span>/&gt;</span></pre>
+            <p>This configuration will activate Eclipselink to log at <kbd>FINEST</kbd> level of the logger a lot of information. To see these information, we need to ensure
+               the <kbd>FINEST</kbd> log level is written somewhere and not skipped as it is done by default. To do that,
+               you need to configure the EclipseLink logger level to <kbd>FINEST</kbd> as well. This way Eclipselink would log with a level the logger would output. You
+               can do it in GlassFish add this line to your <kbd>logging.properties</kbd>:
+            </p>
+            <pre><span>org.eclipse.persistence.level </span>= <span>FINEST</span></pre>
+            <p>Note that if we use the maven plugin that we set up in <a href="f8931396-0636-41a9-8bf7-2b67bb424b76.xhtml">Chapter 1</a>, <span><em>Money – The Quote Manager Application</em> </span>to run GlassFish, it will fallback on JVM <kbd>logging.properties</kbd> and you will need to either modify it from <kbd>$JAVA_HOME/jre/lib/logging.properties</kbd> or set another one when launching the server. Here is the potential content to activate
+               logging in the console:
+            </p>
+            <pre><span># output configuration - console here<br/></span><span>java.util.logging.ConsoleHandler.level </span>= <span>FINEST<br/></span><span>java.util.logging.ConsoleHandler.formatter </span>= <span>java.util.logging.SimpleFormatter<br/></span><span><br/></span><span># global configuration (default)<br/></span><span>.level </span>= <span>INFO<br/></span><span>.handlers </span>= <span>java.util.logging.ConsoleHandler<br/></span><span><br/># eclipselink specific logging level<br/></span><span>org.eclipse.persistence.level </span>= <span>FINEST<br/></span></pre>
+            <p>Finally, to use this file when launching the server, simply set the system property, <kbd>java.util.logging.config.file</kbd> (assuming you put the file in <kbd>src/main/glassfish/conf/logging.properties</kbd>), as follows:
+            </p>
+            <pre>MAVEN_OPTS="-Djava.util.logging.config.file=src/main/glassfish/conf/logging.properties" mvn package embedded-glassfish:run</pre>
+            <p>The logger name uses this pattern:</p>
+            <pre>org.eclipse.persistence.session./file:&lt;path to the webapp&gt;/WEB-INF/classes/_&lt;entity simple name in lowercase&gt;.[sql|query]</pre>
+            <p>Now, if you start the server, you have a few more lines:</p>
+            <pre>...<br/>Sep 09, 2017 5:21:51 PM org.eclipse.persistence.session./file:/home/rmannibucau/dev/quote-manager/target/quote-manager-1.0-SNAPSHOT/WEB-INF/classes/_quote.sql<br/>FINE: SELECT ID, NAME, VALUE FROM QUOTE WHERE (NAME = ?)<br/>  bind =&gt; [1 parameter bound]<br/>...<br/>Sep 09, 2017 5:41:53 PM org.eclipse.persistence.session./file:/home/rmannibucau/dev/quote-manager/target/quote-manager-1.0-SNAPSHOT/WEB-INF/classes/_quote.sql<br/>FINE: INSERT INTO QUOTE (ID, NAME, VALUE) VALUES (?, ?, ?)<br/>  bind =&gt; [3 parameters bound]<br/>....<br/>Sep 09, 2017 5:44:26 PM org.eclipse.persistence.session./file:/home/rmannibucau/dev/quote-manager/target/quote-manager-1.0-SNAPSHOT/WEB-INF/classes/_quote.sql<br/>FINE: SELECT t1.ID, t1.NAME FROM QUOTE_CUSTOMER t0, CUSTOMER t1 WHERE ((t0.quotes_ID = ?) AND (t1.ID = t0.customers_ID))<br/>  bind =&gt; [1 parameter bound]</pre>
+            <p>These lines are generated by our JPA provider (EclipseLink here) every time a query
+               is issued to the database. The queries use bound parameters. This is interesting at
+               two levels. The first one is about the security and intends to prevent SQL injections
+               - note that for security reasons as well, the values are not logged by default <kbd><span>eclipselink.logging.parameters</span></kbd> can be set to true in your persistence unit properties if you want to see them instead
+               of the number of bound parameters only. The second interesting consequence is directly
+               linked to the performance and the fact that the provider can use prepared statements
+               instead of creating a statement every time it creates a query. Combined with a datasource
+               pool which can most of the time cache these prepared statements, it makes pretty cheap
+               to execute statement compared to an implementation which would create them each time
+               it is needed.
+            </p>
+            
+            <div class="packt_tip">Depending on your JPA provider, you need to change <span>the properties to activate the query logging</span>. Hibernate and OpenJPA use other properties and logger names, for instance. Alternatively,
+               some containers or JDBC drivers will let you configure it at another level. For instance,
+               in Apache TomEE you can set <kbd>LogSQL=true</kbd> in your <kbd>DataSource</kbd> resource directly.
+            </div>
+            
+            <p>What is interesting to see is the effect of what we write in Java on the SQL side.</p>
+            
+            <p>The <kbd>INSERT</kbd> case is straightforward and directly converts the JPA model to the corresponding
+               SQL statement to insert all the values into the corresponding database:
+            </p>
+            <pre>INSERT INTO QUOTE (ID, NAME, VALUE) VALUES (?, ?, ?)</pre>
+            <p><kbd>SELECT</kbd> is a direct binding too, which selects all the columns with a clause on the idenfitier
+               of the entity:
+            </p>
+            <pre>SELECT ID, NAME, VALUE FROM QUOTE WHERE (ID = ?)</pre>
+            <p>Here, the role of the JPA provider is quite obvious; it makes the link to SQL, which
+               means the following:
+            </p>
+            
+            <ul>
+               
+               <li>Convert the JPA API and JPQL to the current SQL. Note that in all the JPA providers,
+                  there is a notion of database SQL language so that they can handle the database specifics
+                  (such as the column types or the pagination). EclipseLink calls it <em>platform</em>, Hibernate, <em>dialect </em>and OpenJPA, <em>dictionary</em>.
+               </li>
+               
+               <li>Handle Java to database mapping: database column names are converted to field names,
+                  table names to class names, and so on.
+               </li>
+               
+            </ul>
+            
+            <p>However, if you look closer to the logs when you query <span>a quote </span>through the JAX-RS endpoint, you may be surprised:
+            </p>
+            <pre>SELECT t1.ID, t1.NAME FROM QUOTE_CUSTOMER t0, CUSTOMER t1 WHERE ((t0.quotes_ID = ?) AND (t1.ID = t0.customers_ID))</pre>
+            <p>Where does it come from? If you investigate a bit, you will quickly identify this
+               line in the JAX-RS layer:
+            </p>
+            <pre>json.setCustomerCount(<span>ofNullable</span>(quote.getCustomers()).map(Collection::size).orElse(<span>0</span>));</pre>
+            <p>What does it do? It just sets the number of customers linked to <em>Quote</em>. Which part triggers this additional query? A simple call on the relationship collection
+               triggers it. In our case, it is <kbd>size()</kbd>:
+            </p>
+            <pre>quote.getCustomers().size();</pre>
+            <p>Since the relationship between <em>Quote</em> and <em>Customer</em> is lazy, this simple line will trigger <span>an additional query </span>with EclipseLink. What is interesting is that if you check the JAX-RS resource, it
+               is not <kbd>@Transactional</kbd> and this query may fail depending on the JPA provider, as lazy handling must be done
+               in a transaction.
+            </p>
+            
+            <div class="packt_infobox">The provider is clever enough to not trigger any query and just call <kbd>getCustomers()</kbd><em>.</em> But it will do when calling any method of the returned collection such as <kbd>size()</kbd> here. Depending on the provider, null may or may not be possible, which is why the
+               original code assumes it can be null.
+            </div>
+            
+            <p>We will discuss about modelling in another chapter but the obvious solution to make
+               the relationship eager is not a real solution, since you will slowly load all your
+               object graphs everywhere, doing which can lead to performance issues and even memory
+               issues. So try to resist this temptation.
+            </p>
+            
+            <p class="mce-root">While you are playing with the JPA and SQL, I recommend that you disable EclipseLink's
+               default shared cache, which easily hides queries (later on, we will discuss why to
+               disable it even in production). This can be done with the following property added
+               to your persistence unit:
+            </p>
+            <pre><span>&lt;</span><span>property </span><span>name=</span><span>"eclipselink.cache.shared.default" </span><span>value=</span><span>"false"</span><span>/&gt;</span></pre>
+            
+            
+            </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Model and implications</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>This section does not intend to go through all the cases; other books centered on
+               JPA do it very well. In order to avoid doing things that can have a negative impact
+               on the performances, this part will <span>show you that the abstraction JPA does need some attention.</span></p>
+            
+            <p>To illustrate this statement, we will reuse the <strong>Customer</strong><em>/</em><strong>Quote</strong> relationship. As it is <em>@ManyToMany,</em> it relies on a join table. Here is a representation of the model:
+            </p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="88" src="assets/5b51832e-7f3f-457e-80f0-6ea74effb9b2.png" width="637"/></div>
+            
+            <p>The use case is when you want to access the other side of the relationship: <em>Quotes</em> from a <em>Customer</em> (<kbd>getQuotes()</kbd>) or the opposite (<kbd>getCustomers().size()</kbd>)<em>.</em></p>
+            
+            <p>Here, the provider will find all the entities that have the current entity identifier
+               in the join table.
+            </p>
+            
+            <p>This sounds perfectly fine but how can it affect the performance? If you check the
+               structure of the join table in MySQL, you will immediately see a minor difference:
+            </p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="77" src="assets/15b333a4-70b2-420b-86b3-b3a8c8aded64.png" width="160"/></div>
+            
+            <p>The <kbd>quotes_ID</kbd> column has an index, whereas the <kbd>customers_ID</kbd> column does not. Do not be fooled by the picture and the fact that both the columns
+               have a yellow key. The primary key is the composed key of both the columns, so the
+               index is not useless and allows us to select fast rows from <kbd>quotes_ID</kbd>. Why does <kbd>quotes_ID</kbd> have an index and <kbd>customers_ID</kbd><em> </em>hasn't? Because the <em>Quote</em> entity is the owner of the relationship. However, it will always be faster to select
+               columns by the <em>Quote</em> identifier rather than by the <em>Customer</em> identifier.
+            </p>
+            
+            <p>Now the interesting part is to compare both the calls:</p>
+            <pre>quote.getCustomers()<br/>customer.getQuotes() </pre>
+            <p>The first call will load the customers from an already loaded quote whereas the second
+               call will load the quotes related to an already loaded customer.
+            </p>
+            
+            <p>Now let's see what the corresponding generated SQL will be. The first invocation will
+               be converted to the following statement:
+            </p>
+            <pre>SELECT t1.ID, t1.NAME FROM QUOTE_CUSTOMER t0, CUSTOMER t1 WHERE ((t0.quotes_ID = ?) AND (t1.ID = t0.customers_ID))</pre>
+            <p>The second invocation (<kbd>customer.getQuotes()</kbd>) will be converted to the following:<br/></p>
+            <pre>SELECT t1.ID, t1.NAME, t1.VALUE FROM QUOTE_CUSTOMER t0, QUOTE t1 WHERE ((t0.customers_ID = ?) AND (t1.ID = t0.quotes_ID)) </pre>
+            <p>A join is done with the known sides of the relationship, which means the entity containing
+               the relationship (set of entities). Yet, we saw that only one of the two columns of
+               the join table has an index. This means that one side will be slower than the other
+               side. If you use bi-directional relationships, you should ensure that you make the
+               owner of the relationship either of the following:
+            </p>
+            
+            <ul>
+               
+               <li><span>The one that is way more used than the other one (if there is a huge difference)</span></li>
+               
+               <li>The one that will bring back a smaller set of entities than the other one</li>
+               
+            </ul>
+            
+            <p>This is just an example of how a very fast model can impact the performance. This
+               is a general statement that is valid for any modeling. Anyway, since JPA makes modeling
+               very easy and not as much database-related, it is easier to make it wrong.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">The Java Transaction API</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The <strong>Java Transaction API</strong> (<strong>JTA</strong>) is the element responsible for providing the API responsible for ensuring the consistency
+               of your data in the widest sense. In our quote manager, it is only applied to the
+               database data but it can be applied to JMS messages, potentially files if you use
+               connectors, and so on.
+            </p>
+            
+            <p>Without going through the details and protocol, the idea is to ensure, across multiple
+               systems, that either all commits or all rollbacks but not something in between are
+               done ensuring the consistency of the system (which is one common issue mixing NoSQL
+               systems).
+            </p>
+            
+            <p>To do that, JTA uses what we call a <em>two phases commit protocol</em>:
+            </p>
+            
+            <ul>
+               
+               <li>Ask all systems to prepare the commit which means the system must verify and ensure
+                  it will be able to commit in next phase
+               </li>
+               
+               <li>Ask all systems to actually do the commit</li>
+               
+            </ul>
+            
+            <p>A lot of transaction manager or servers are optimized for the case of a single resource
+               to limit all the associated overhead.
+            </p>
+            
+            <p>In our quote manager application we only have a database, so we should benefit from
+               these optimizations in most servers. Nonetheless, we still use JTA backbone and don't
+               fallback on JPA transaction management (<em>RESOURCE_LOCAL</em>) which is faster.
+            </p>
+            
+            <p>What is important to know with JTA is that a transaction is bound to a thread. Each
+               resource has its representation and identifier, a complete lifecycle (see <em>XAResource</em>). There is a transaction bound registry to store the data (a bit like a <em>@TransactionScoped</em> bean) and the listeners to integrate with the transaction lifecycle.
+            </p>
+            
+            <p>All of that is not true in terms of memory and CPU cycles but can be justified if
+               you need it, either because you have multiple systems or because you use your server
+               JTA monitoring (you rarely have monitoring with <em>RESOURCE_LOCAL i</em>n administration UI).
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Server resources</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>At several layers, the server provides your application with some resources. In our
+               quote manager we have our datasource injected into the persistence unit through its
+               JNDI name:
+            </p>
+            <pre><span>&lt;</span><span>jta-data-source</span><span>&gt;</span>java:app/jdbc/quote_manager<span>&lt;/</span><span>jta-data-source</span><span>&gt;</span></pre>
+            <p>This datasource can also be injected anywhere else in the code:</p>
+            <pre>@Resource(lookup = "java:app/jdbc/quote_manager")<br/>private DataSource datasource;</pre>
+            <p>But the server manages way more resources. Resources are important because they are
+               provided and handled by the server but used from the application. In other words it
+               is a way to control how the application behaves from the outside of it. It enables
+               you to develop without having to care about the configuration and to tune it later
+               or to adapt it depending on the environment you deploy your application to. The next
+               table lists a subset of the most useful JavaEE resource types which can impact your
+               performances and you can need to watch out if your application uses some of them.
+            </p>
+            
+            <table style="width: 790px;height: 1496px">
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td><strong>Resource Type</strong></td>
+                     
+                     <td><strong>Description</strong></td>
+                     
+                     <td><strong>Example</strong></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><kbd>ManagedExecutorService</kbd></td>
+                     
+                     <td>An EE <em>ExecutorService</em> which is used to ensure you inherit the EE context in custom asynchronous tasks.
+                        Very useful to link to JAX-RS <em>@Suspended</em> or third party libraries for instance.
+                     </td>
+                     
+                     <td>
+                        <pre>@Resource<br/>private ManagedExecutorService mes;</pre></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><kbd>ManagedScheduledExecutorService</kbd></td>
+                     
+                     <td>Close to the <kbd>ManagedExecutorService</kbd>, it reuses the <kbd>ScheduledExecutorService</kbd> API adding the EE integration.
+                     </td>
+                     
+                     <td>
+                        <pre>@Resource<br/>private ManagedScheduledExecutorService mses;</pre></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><kbd>DataSource</kbd></td>
+                     
+                     <td>As seen before it allows to connect to a database providing a <kbd>DataSource</kbd> instance.
+                     </td>
+                     
+                     <td>
+                        <pre>@Resource<br/>private DataSource ds;</pre></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><kbd>XADataSource</kbd></td>
+                     
+                     <td>Same as <kbd>DataSource</kbd> but supporting two phases commit.
+                     </td>
+                     
+                     <td>
+                        <pre>@Resource<br/>private XADataSource ds;</pre></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><kbd>Queue</kbd></td>
+                     
+                     <td>JMS <em>Queue</em>, it defines a destination of type queue. In term of configuration, its name can be
+                        interesting to distinguish the logical name (application) and real name (deployment).
+                     </td>
+                     
+                     <td>
+                        <pre>@Resource<br/>private Queue queue;</pre></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><kbd>Topic</kbd></td>
+                     
+                     <td>Same as <kbd>Queue</kbd> but for a destination of type <kbd>topic</kbd>.
+                     </td>
+                     
+                     <td>
+                        <pre>@Resource<br/>private Topic topic;</pre></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><kbd>ConnectionFactory</kbd></td>
+                     
+                     <td>Defines the way to integrate with JMS and get <em>Connections</em> (or <em>JMSContext</em> since Java EE 7).
+                     </td>
+                     
+                     <td>
+                        <pre>@Resource<br/>private ConnectionFactory cf;</pre></td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p>There are other types of resources, but those are the main ones linked to the outside
+               of the application and with performance related configuration, like pooling configuration.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">DataSource configuration</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>To illustrate the configuration let's use the one we rely on in the quote manager:
+               the datasource. As shown in <a href="f8931396-0636-41a9-8bf7-2b67bb424b76.xhtml">Chapter 1</a>, <em>Money – The Quote Manager Application</em> you can define the datasource this way:
+            </p>
+            <pre><span>&lt;?</span><span>xml version=</span><span>"1.0" </span><span>encoding=</span><span>"UTF-8"</span><span>?&gt;<br/></span><span>&lt;!DOCTYPE</span><span> </span><span>resources</span><span> </span><span>PUBLIC</span><span> </span><span>"-//GlassFish.org//DTD GlassFish Application Server 3.1 Resource Definitions//EN"</span><span><br/></span><span>    </span><span>"http://glassfish.org/dtds/glassfish-resources_1_5.dtd"</span><span>&gt;<br/></span><span>&lt;</span><span>resources</span><span>&gt;<br/><br/></span>  &lt;1&gt;<br/>  <span>&lt;</span><span>jdbc-connection-pool </span><span>allow-non-component-callers=</span><span>"false"<br/></span><span>                        </span><span>associate-with-thread=</span><span>"false"<br/></span><span>                        </span><span>connection-creation-retry-attempts=</span><span>"0"<br/></span><span>                        </span><span>connection-creation-retry-interval-in-seconds=</span><span>"10"<br/></span><span>                        </span><span>connection-leak-reclaim=</span><span>"false"<br/></span><span>                        </span><span>connection-leak-timeout-in-seconds=</span><span>"0"<br/></span><span>                        </span><span>connection-validation-method=</span><span>"auto-commit"<br/></span><span>                        </span><span>datasource-classname=</span><span>"com.mysql.jdbc.jdbc2.optional.MysqlDataSource"<br/></span><span>                        </span><span>fail-all-connections=</span><span>"false"<br/></span><span>                        </span><span>idle-timeout-in-seconds=</span><span>"300"<br/></span><span>                        </span><span>is-connection-validation-required=</span><span>"false"<br/></span><span>                        </span><span>is-isolation-level-guaranteed=</span><span>"true"<br/></span><span>                        </span><span>lazy-connection-association=</span><span>"false"<br/></span><span>                        </span><span>lazy-connection-enlistment=</span><span>"false"<br/></span><span>                        </span><span>match-connections=</span><span>"false"<br/></span><span>                        </span><span>max-connection-usage-count=</span><span>"0"<br/></span><span>                        </span><span>max-pool-size=</span><span>"10"<br/></span><span>                        </span><span>max-wait-time-in-millis=</span><span>"120000"<br/></span><span>                        </span><span>name=</span><span>"MySQLConnectinoPool"<br/></span><span>                        </span><span>non-transactional-connections=</span><span>"false"<br/></span><span>                        </span><span>pool-resize-quantity=</span><span>"2"<br/></span><span>                        </span><span>res-type=</span><span>"javax.sql.DataSource"<br/></span><span>                        </span><span>statement-timeout-in-seconds=</span><span>"-1"<br/></span><span>                        </span><span>steady-pool-size=</span><span>"8"<br/></span><span>                        </span><span>validate-atmost-once-period-in-seconds=</span><span>"0"<br/></span><span>                        </span><span>validation-table-name=</span><span>"DUAL" </span><span>wrap-jdbc-objects=</span><span>"false"</span><span>&gt;</span><br/>    <span>&lt;</span><span>property </span><span>name=</span><span>"URL" </span><span>value=</span><span>"jdbc:mysql://localhost:3306/quote_manager"</span><span>/&gt;</span><br/>    <span>&lt;</span><span>property </span><span>name=</span><span>"User" </span><span>value=</span><span>"root"</span><span>/&gt;</span><br/>    <span>&lt;</span><span>property </span><span>name=</span><span>"Password" </span><span>value=</span><span>"password"</span><span>/&gt;</span><br/>  <span>&lt;/</span><span>jdbc-connection-pool</span><span>&gt;<br/><br/></span>  &lt;2&gt;<br/>  <span>&lt;</span><span>jdbc-resource </span><span>jndi-name=</span><span>"java:app/jdbc/quote_manager" </span><span>pool-name=</span><span>"MySQLConnectinoPool" </span><span>enabled=</span><span>"true"</span><span>/&gt;</span><br/><span>&lt;/</span><span>resources</span><span>&gt;</span></pre>
+            <p>This XML configuration defines the datasource our JPA provider will use thanks to
+               two declarations allowing the container to create the datasource instance and allowing
+               the JPA provider to find this datasource:
+            </p>
+            
+            <ul>
+               
+               <li>The pool definition which defines how the database connections will be created, cached
+                  and validated
+               </li>
+               
+               <li>The link between the pool and the application through its JNDI name to let the application
+                  use it - this is how JPA will look up the instance
+               </li>
+               
+            </ul>
+            
+            <p><span>The properties are the datasource instance (based on the configured class) configuration
+                  but the </span><kbd>jdbc-connection-pool</kbd><span> attributes are mostly the pool configuration.</span></p>
+            
+            <p>It is very important to note that the configuration depends on the server. As an example,
+               in Wildly, you would use this kind of declaration:
+            </p>
+            <pre class="programlisting"><span class="perl_Keyword">&lt;datasources&gt;</span>
+  <span class="perl_Keyword">&lt;xa-datasource</span><span class="perl_Others"> jndi-name=</span><span class="perl_String">"java:jboss/quote_manager"</span><span class="perl_Others"> pool-name=</span><span class="perl_String">"QuoteManagerPool"</span><span class="perl_Keyword">&gt;</span>
+    <span class="perl_Keyword">&lt;driver&gt;</span>mysql<span class="perl_Keyword">&lt;/driver&gt;</span>
+    <span class="perl_Keyword">&lt;xa-datasource-property</span><span class="perl_Others"> name=</span><span class="perl_String">"ServerName"</span><span class="perl_Keyword">&gt;</span>localhost<span class="perl_Keyword">&lt;/xa-datasource-property&gt;</span>
+    <span class="perl_Keyword">&lt;xa-datasource-property</span><span class="perl_Others"> name=</span><span class="perl_String">"DatabaseName"</span><span class="perl_Keyword">&gt;</span>quote_manager<span class="perl_Keyword">&lt;/xa-datasource-property&gt;<br/></span>    &lt;pool&gt;<br/>      &lt;min-pool-size&gt;10&lt;/min-pool-size&gt;<br/>      &lt;max-pool-size&gt;50&lt;/max-pool-size&gt;<br/>    &lt;/pool&gt;
+    <span class="perl_Keyword">&lt;security&gt;</span>
+      <span class="perl_Keyword">&lt;user-name&gt;</span>root<span class="perl_Keyword">&lt;/user-name&gt;</span>
+      <span class="perl_Keyword">&lt;password&gt;</span>secret<span class="perl_Keyword">&lt;/password&gt;</span>
+    <span class="perl_Keyword">&lt;/security&gt;</span>
+    <span class="perl_Keyword">&lt;validation&gt;</span>
+      <span class="perl_Keyword">&lt;valid-connection-checker</span><span class="perl_Others"> class-<br/>      name=</span><span class="perl_String">"org.jboss.jca.adapters.jdbc.extensions.mysql<br/>      .MySQLValidConnectionChecker"</span><span class="perl_Keyword">&gt;&lt;/valid-connection-checker&gt;</span>
+      <span class="perl_Keyword">&lt;exception-sorter</span><span class="perl_Others"> class-<br/>      name=</span><span class="perl_String">"org.jboss.jca.adapters.jdbc.extensions.mysql.MySQLExceptionSorter"</span><span class="perl_Keyword">&gt;&lt;/exception-sorter&gt;</span>
+    <span class="perl_Keyword">&lt;/validation&gt;</span>
+  <span class="perl_Keyword">&lt;/xa-datasource&gt;</span>
+  <span class="perl_Keyword">&lt;drivers&gt;</span>
+    <span class="perl_Keyword">&lt;driver</span><span class="perl_Others"> name=</span><span class="perl_String">"mysql"</span><span class="perl_Others"> module=</span><span class="perl_String">"com.mysql"</span><span class="perl_Keyword">&gt;</span>
+      <span class="perl_Keyword">&lt;xa-datasource-class&gt;</span>com.mysql.jdbc.jdbc2.optional.MysqlXADataSource<span class="perl_Keyword">&lt;/xa-datasource-class&gt;</span>
+    <span class="perl_Keyword">&lt;/driver&gt;</span>
+  <span class="perl_Keyword">&lt;/drivers&gt;</span>
+<span class="perl_Keyword">&lt;/datasources&gt;</span></pre>
+            <p>Here again we find a property part and a pool part. Still, it is no more in attributes
+               but with plain tags.
+            </p>
+            
+            <p>In Apache TomEE <span>the same resource declaration</span> looks like:
+            </p>
+            <pre>&lt;Resource id="quote_manager" type="DataSource"&gt;<br/>  JdbcDriver = com.mysql.jdbc.Driver<br/>  JdbcUrl = jdbc:mysql://localhost:3306/quote_manager?tcpKeepAlive=true<br/>  UserName = root<br/>  Password = secret<br/>  ValidationQuery = SELECT 1<br/>  ValidationInterval = 30000<br/>  NumTestsPerEvictionRun = 5<br/>  TimeBetweenEvictionRuns = 30 seconds<br/>  TestWhileIdle = true<br/>  MaxActive = 50<br/>&lt;/Resource&gt;</pre>
+            <p>Here the configuration is not fully XML but it is mixed with properties (as <kbd>java.util.Properties</kbd>) that contains the pool configuration and connection information which will be passed
+               either to tomcat-jdbc or commons-dbcp2 pooling library.
+            </p>
+            
+            <p>What is interesting to note is the overall idea. Most of the servers share the same
+               kind of configuration and here are the crucial configuration entries you need to care
+               about:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td><strong>Configuration type</strong></td>
+                     
+                     <td><strong>Description</strong></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Max pool size</td>
+                     
+                     <td>How many connections can be created by the pool. This is a key configuration which
+                        must be set consistently with the scalability you need across your deployments and
+                        the database max connection configuration.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Max wait</td>
+                     
+                     <td>The time a caller can wait before getting a timeout from the pool. For performances
+                        it is not bad to deactivate it (0) to ensure you identify a too small pool. If you
+                        set 10 seconds for instance, the benchmark can be slow because all callers are waiting
+                        for a connection.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Idle timeout</td>
+                     
+                     <td>How many times a connection is kept if idle.</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Validation</td>
+                     
+                     <td>How connections are validated, this is very important to ensure connections are valid
+                        when kept in the pool and not corrupted. For instance MySQL will close each connection
+                        after 8h by default and therefore if your pool doesn't renew the connection you will
+                        get errors. The validation type is important because it can generally be done by a
+                        background thread from time to time or actively when borrowing or releasing a connection.
+                        All have impacts on consistency and/or performances so it is a trade off choice and
+                        if you can rely on your database it is generally better to have a background evictor
+                        than an active one.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Min (or steady) pool size</td>
+                     
+                     <td>The size the pool should enforce as a minimum. The goal is to ensure that when the
+                        application is idle and get a new request it doesn't have to create a connection at
+                        that moment and can just reuse an existing one because creating a connection is an
+                        expensive operation.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Initial (or steady) pool size</td>
+                     
+                     <td>
+                        
+                        <p class="mce-root">The number of connections to create when creating the resource (at startup generally).
+                           In GlassFish this is merged with the minimum pool size (<em>steady-pool-size</em>).
+                        </p>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p>Last note about resources is that most servers allow multiple ways to configure them:</p>
+            
+            <ol>
+               
+               <li>Plain configuration files (often XML based).</li>
+               
+               <li>A command line interface.</li>
+               
+               <li>A REST API.</li>
+               
+               <li>A UI. For instance, here is a screenshot of Glassfish JDBC pool configuration where
+                  you will find all the parameters we talked about:
+               </li>
+               
+            </ol>
+            
+            <div class="CDPAlignCenter CDPAlign"><img src="assets/50962771-bbca-430e-bb43-60238d85dfd6.png"/></div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Java EE and performances</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>As a reminder, this book is not about Java EE role, so we can't go through all the
+               specifications and detail them all but it is important to understand what Java EE
+               is and what its role is to be able to start working on Java EE performances serenely.
+            </p>
+            
+            <p>Very often, a small annotation or line of code can hide a lot of logic. The entity
+               manager is a good example: most of the methods are hiding some SQL generation and
+               execution which is not a trivial operation.
+            </p>
+            
+            <p>With the standardization of CDI in applications, a simple call to a method with a
+               simple complexity can imply to:
+            </p>
+            
+            <ul>
+               
+               <li>Validate the call (BeanValidation) which can be impacting if the object graph is huge</li>
+               
+               <li>Validate the logged in user and its permissions (Security API) which can sometimes
+                  contact external systems depending on the configuration and implementations
+               </li>
+               
+               <li>An integration of multiple external systems (JTA), and so on</li>
+               
+            </ul>
+            
+            <p>All these features can be done with CDI interceptors and are additional logic <span>virtually</span> added to a method.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Ensure you know the server</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>When you will start to investigate your application performances, before or during
+               profiling, it is therefore important to understand what the server does to know what
+               you should expect in terms of performances. At runtime, the server is part of your
+               application. This means that if the server has a bug (it is still a software like
+               anyone, so it can have bugs or issues even if widely tested), or a performance bottleneck,
+               you will directly be impacted.
+            </p>
+            
+            <p>Some servers can be embedded with your application, and some can't. Yet, in any case,
+               you will need to ensure you validate your application as well (as your server) to
+               fully understand your runtime and be able to have an impact on it if needed.
+            </p>
+            
+            <p>Here the choice of your server will be very impacting. You may need to ask yourself
+               what to do in case the server has a bug or a performance bottleneck. In the following,
+               you will find some criteria you can investigate before the benchmark or when starting
+               the development:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td><strong>Criteria</strong></td>
+                     
+                     <td><strong>Comment</strong></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Is the server Open Source?</td>
+                     
+                     <td>If the server is Open Source, you will be able to check issues you identify against
+                        the source code and validate them. You will also be able to recompile it with patches
+                        and potentially don't wait for the server team to fix the issue but fix it yourself,
+                        which can be very interesting during benchmarks if it has some associated cost (like
+                        locating servers or dedicated locals).
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Is the server supported?</td>
+                     
+                     <td>Having a company you pay for fixing performance issues (or bugs) can be important
+                        too. However, mind that some servers will answer quite slowly if you don't pay enough,
+                        and this doesn't help a lot during benchmarks. If you go with this solution, make
+                        sure to have appropriated SLA or go rather for the Open Source solution.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Is the application portable?</td>
+                     
+                     <td>If the application is portable, you would be able to compare servers and use the fastest
+                        one. This is not a trivial work to do even if since Java EE 6 it is easier and you
+                        will need to ensure it is the case during development. But this can be worthy if one
+                        version of a server has a performance issue.
+                     </td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p>Until recently, Java EE philosophy was to host applications. This is where was coming
+               the <em>application server</em> name. The intent, which is still valid today, was to ensure the server is managed
+               by another team than the application (typically, operation team and development team).
+            </p>
+            
+            <p>Yet, with Docker and embeddable containers (Apache TomEE, Wildfly Swarm, Payara micro,
+               and so on), the operation responsability started being reconsidered and developers
+               have more and more control over the server. This means that you will then ask yourself
+               the same question (how can I easily patch my server?), but also that you will need
+               an expert developer either from your development team or from a computer support company.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Ensure you know your application</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>In case it was not explicit enough before, it is crucial to know what the server does
+               for your application. It is already key in development, but when you start working
+               on performances, it is a must. This means that you need to know the application good
+               enough to know which part of the server it will use and which implication it will
+               have on your performances.
+            </p>
+            
+            <p>In other words, you will need to fully understand the use case of your application
+               but also what technology was used to implement it. A simple example is if your application
+               used <em>RESOURCE_LOCAL</em> mode for JPA but you see a lot of JTA use, then you will need to identify why. If
+               you don't have this kind of insight, you will just think the application uses JTA
+               and that it is ok. Yet, this kind of fact can mean <em>something is not well configured</em>, which can not only impact the application's behavior, but also its raw performances
+               and even its scalability.
+            </p>
+            
+            <p>It is also very important to know what part of the specifications is used. To illustrate
+               it we'll use JPA again here. JPA is integrated with Bean Validation. This means that
+               each time you will persist/merge an entity, the entity will be validated to ensure
+               it passes the model constraints. This is a great feature but if you validate your
+               model on the outbounds of your application (JAX-RS for instance) then you rarely (never
+               in theory, if the application is done correctly) need to revalidate it internally
+               (JPA). This means that the Bean Validation layer is useless here and can be disabled.
+               This particular example is done by updating the <kbd>persistence.xml</kbd> and adding the <kbd>validation-mode</kbd> tag <span>in the right persistence unit</span>:<span><br/></span></p>
+            <pre><span>&lt;</span><span>validation-mode</span><span>&gt;</span>NONE<span>&lt;/</span><span>validation-mode</span><span>&gt;</span></pre>
+            
+            
+            </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Ensure you know your resources</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>It is crucial to properly tune the resources (databases, thread pools, and so on).
+               Since Java EE 6, some resources can be defined in the application. For instance, a
+               <kbd>DataSource</kbd> can be defined with:
+            </p>
+            <pre><span>@DataSourceDefinition</span>(<br/>        name = <span>"java:app/jdbc/quote_manager"</span>,<br/>        className = <span>"com.mysql.jdbc.Driver"</span>,<br/>        url = <span>"jdbc:mysql://localhost:3306/quote_manager"</span>,<br/>        user = <span>"root"</span>,<br/>        password = <span>"password"<br/></span>)<br/><span>public class </span>DataSourceConfiguration {<br/>}</pre>
+            <p>This is often a bad idea since you can't <span>externally </span>configure it (it is hardcoded). Thus, you often end up configuring the resources in
+               server specific files or UI.
+            </p>
+            
+            <p>This is a good practise to avoid in the application. But outside the application,
+               Java EE doesn't define any way or standard to configure the server. Everything is
+               vendor specific. However, you will need to tune it! For that reason, it is crucial
+               to ensure you know:
+            </p>
+            
+            <ul>
+               
+               <li>What kind of resources your application needs</li>
+               
+               <li>How to create them and configure them in your server</li>
+               
+            </ul>
+            
+            <p>This is a great start for the application side but resources are generally linked
+               to an <em>external</em> side like a database. Here again, it will be very important to know the resource
+               itself, how it is configured and potentially how to tune it if needed. A very simple
+               example is the number of connections you can use on a database. If you can only use
+               20 connections, no need to configure 100 in the application, this would generate a
+               lot of errors and slow down the application, or just make it fail depending on how
+               the pool is configured.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Summary</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>In this chapter, you understood that the Java EE server's role is to make the development
+               of the application easier and faster, providing out-of-the-box services and implementations.
+               We browsed through some common examples, detailed their implications in terms of the
+               code, and, therefore, the performance. We saw that the JPA handles statement creation
+               automatically, securely, and correctly and that your code can imply some unoptimized
+               queries if not designed close enough of the data. This is a good example showing that
+               Java EE is here to enable you to build the best application as easily as possible
+               even though you need to take care of some points (often related to design) in order
+               to ensure you meet your performance requirements.
+            </p>
+            
+            <p>At this point, we have an application (<a href="f8931396-0636-41a9-8bf7-2b67bb424b76.xhtml">Chapter 1</a>, <em>Money – The Quote Manager Application</em>), we know what it does, and how the Java EE server helps it (this chapter). So, before
+               working on the performance, we need to be able to measure it. This is what our next
+               chapter will be about.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   </body></html>

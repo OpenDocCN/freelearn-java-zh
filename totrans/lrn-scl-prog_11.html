@@ -1,0 +1,814 @@
+<html><head></head><body><div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">An Introduction to the Akka and Actor Models</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we'll learn about the actor model and how it is implemented in Akka. We'll make ourselves familiar with Akka by building a simple yet complete actor system. We will then learn how to create an actor system and actors, pass messages between them, make use of location transparency and remoting, properly structure the system for effective supervision, and look at how <strong>finite-state machine</strong> (<strong>FSM</strong>) actors work. Finally, we'll show you how to test actor-based applications.<span class="Apple-converted-space"> </span></p>
+<p>The following topics will be covered in this chapter:</p>
+<ul>
+<li>The actor model</li>
+<li>The basics of Akka</li>
+<li>Akka FSM</li>
+<li>Akka remoting</li>
+<li>Testing</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Technical requirements</h1>
+                </header>
+            
+            <article>
+                
+<p>Before we begin, make sure you have the following installed:</p>
+<ul>
+<li>Java 1.8+</li>
+<li>SBT 1.2+</li>
+</ul>
+<p>Please refer to the installation instructions in <a href="bc164888-625c-460a-9b0b-e6c45c9eb074.xhtml">Appendix A</a>, <em>Preparing the Environment and Running Code Samples</em>, if you need to perform a first-time setup of Java or SBT.</p>
+<p>The source code is available <span>on our GitHub repository at:</span> <a href="https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter11">https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter11</a>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Introduction to the actor model</h1>
+                </header>
+            
+            <article>
+                
+<p>From the first days of computing applications of all kinds, they have faced growing demands for processing increasing volumes of data within diminishing processing times. Up until recently, these challenges were addressed by scaling applications vertically, by adding more memory and higher speed processors. This approach was possible because of growing processor speed, which is described by Moore's law as the following:</p>
+<div class="mce-root packt_quote">"Moore's law is the observation that the number of transistors in a dense integrated circuit doubles about every two years. ... Moore's prediction proved accurate for several decades, and has been used in the semiconductor industry to guide long-term planning and to set targets for research and development. .... Moore's law is an observation and projection of a historical trend and not a physical or natural law."</div>
+<p>But the pace of advancement in hardware started to slow down, as stated by Intel in 2015. This trend made it obvious that the only way to scale applications from now on was via horizontal scalability—by increasing the number of processing cores and machines which are to process data in parallel by using multiple application threads. Two obvious challenges in this situation are as follows<span class="Apple-converted-space">:</span></p>
+<ul>
+<li>To prevent concurrent modification and, as a result, corruption of data</li>
+<li>To provide access to the data for processes running on different cores or machines</li>
+</ul>
+<p>The first challenge is traditionally solved by using shared memory and different locking approaches. Unfortunately, this approach effectively makes the parts of the application that are synchronizing with each other <span>pseudo</span><span>-</span>sequential, which in turn limits possible speedup in accordance with Amdahl's law:</p>
+<div class="mce-root packt_quote">"Amdahl's law is a formula that gives theoretical<span> </span>speedup<span> </span>in<span> terms of </span>latency<span> in </span>the execution of a task at the fixed<span> </span>workload<span> </span>that can be expected of a system whose resources have been improved.  ... Amdahl's law is often used in<span> </span>parallel computing<span> </span>to predict the theoretical speedup when using multiple processors."<br/>
+<span> </span></div>
+<div class="mce-root packt_infobox"><br/>
+The most important corollary is that <span>the speedup is limited by the serial part of the program.</span> </div>
+<p>Fortunately, there are other solutions that make it possible for different parts of the program to work together toward the same goal in parallel. One of these approaches is the actor model. Fortunately, the actor model also addresses the second challenge with a concept known as <strong>location transparency</strong>.</p>
+<p>The concept of actors was first introduced in 1973 by <em>Carl Hewitt</em>, <em>Peter Bishop</em>, and <em>Richard Steiger</em>.</p>
+<div class="packt_infobox"><span class="Apple-converted-space">Carl Hewitt<span>, Peter Bishop, and Richard Steiger:</span> <span>A Universal Modular Actor Formalism for Artificial Intelligence. In: Proceeding IJCAI'73 Proceedings of the 3rd International Joint Conference on Artificial Intelligence. 1973, S. 235–245</span> (<a href="https://dl.acm.org/citation.cfm?id=1624804">https://dl.acm.org/citation.cfm?id=1624804</a>).</span></div>
+<p>The idea is that everything is represented as an actor, which is a basic computational entity. Actors communicate with each other using messages. In response to a message, an actor can undertake any of the following actions:</p>
+<ul>
+<li>Send a finite number of messages to other actor(s)</li>
+<li>Create a finite number of other actors</li>
+<li>Change its behavior for the next message to be processed</li>
+</ul>
+<p>This definition is quite abstract, but already allows you to recognize a couple of constraints that the implementation must satisfy:</p>
+<ul>
+<li>Actors communicate using messages and are not allowed to expose or inspect the internal states of each other.</li>
+<li>A shared mutable state has no place in the actor model.</li>
+<li>Side-effects are not mentioned in this definition, but they are obviously the end goal of any system. Therefore, an actor's response to the message might be any combination of<span class="Apple-converted-space"> the following:</span>
+<ol>
+<li>Changing internal state</li>
+<li>Modifying behavior</li>
+<li>Producing side-effects</li>
+</ol>
+</li>
+<li>Actors need to be able to address each other. Consequently, a naming system is expected to exist. Having an appropriate naming system is a prerequisite for location transparency, meaning that every actor can be addressed by some canonical name regarding its actual location.</li>
+</ul>
+<p>The preceding definition also leaves the following questions unanswered, among others:</p>
+<ul>
+<li>What would be an effect of the limitations of the underlying hardware, operating system, and runtime environment?</li>
+<li>Where do actors coexist and how is the first actor created?</li>
+<li>How are messages delivered from one actor to another?</li>
+<li>Are actors mortal, and if yes, how do they die?</li>
+</ul>
+<p>The most prominent languages that use the actor model are Erlang, Io, D, Pony, and Scala.</p>
+<p>We will take a closer look at the Scala implementation—Akka—by building an enterprise bakery application. Our bakery will be crowded by different actors, each with their own responsibilities, producing cookies as a result of their teamwork.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Akka basics</h1>
+                </header>
+            
+            <article>
+                
+<p>We will start by adding an Akka dependency into the <kbd><span>build.sbt</span></kbd> file of an empty Scala SBT project:</p>
+<pre>libraryDependencies +=<span class="Apple-converted-space">  </span>"com.typesafe.akka" %% "akka-actor" % akkaVersion</pre>
+<div>The <kbd><span>akkaVersion</span></kbd> could be looked upon the Akka website. At the time of writing this book, it was 2.5.13, so we would prepend <kbd>val akkaVersion = "2.5.13"</kbd> <span>to the preceding snippet.</span></div>
+<div class="packt_tip"> The SBT can create a minimal Akka project for you via a giter8 template: <kbd>s<span>bt new https://github.com/akka/akka-quickstart-scala.g8</span></kbd><span>.</span></div>
+<p>Now, we can instantiate an <kbd><span>ActorSystem</span></kbd>, which is the place where Akka's actors live:</p>
+<pre>import akka.actor._<br/>val bakery = ActorSystem("Bakery")</pre>
+<p>Avoid defining multiple actor systems in the same JVM or even on the same machine. An actor system is not very lightweight and is usually configured to closely reflect the hardware configuration it is running on. Thus, multiple actor systems will not only consume more resources than needed but, in the worst case, they will compete for these resources<span>.</span></p>
+<div class="packt_tip">It is also possible to create a default actor system without providing a name, but it would be best if you don't do this. Naming the actor system and actors will make your life easier while you reason about it and debug existing code.</div>
+<div><span>As a next step, let's define an actor. </span></div>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Defining actors</h1>
+                </header>
+            
+            <article>
+                
+<p>An actor in Akka must extend traits of the same name and implement the <kbd>receive</kbd> method:</p>
+<pre>class Cook extends Actor {<span class="Apple-converted-space">  <br/></span>  override def receive = {<span class="Apple-converted-space">      <br/></span>    case _ =&gt;<span class="Apple-converted-space"> </span><span class="Apple-converted-space">  <br/></span>  }<br/>}</pre>
+<p>The type of the <kbd><span>receive</span></kbd> action is defined as <span><kbd>type Receive = PartialFunction[Any, Unit]</kbd>, </span>which closely resembles the abstract definition of an actor model. In Akka, actors can receive any message, and any of the actor's activities are manifested as a change in its state or as a side-effect.</p>
+<p>Our defined actor accepts any message and does nothing. This is probably the simplest and laziest actor possible.</p>
+<p>In order to make it useful, let's define its behavior and vocabulary.</p>
+<p>As we're building an enterprise bakery, our actors will have a single responsibility, which is also a good idea in any kind of system, not just one that's actor-based. Our cook actor will take a ready-made dough and make raw cookies out of it. First, we must define the messages:</p>
+<pre>object Cook {<br/>  final case class Dough(weight: Int)<br/>  final case class RawCookies(number: Int)<br/>}</pre>
+<p>And then the behavior of the actor:</p>
+<pre>class Cook extends Actor {<br/>  override def receive = {<br/>    case Dough(weight) =&gt; <br/>      val numberOfCookies = makeCookies(weight)<br/>      sender() ! RawCookies(numberOfCookies)<br/>  }<br/><br/>  private val cookieWeight = 30<br/>  private def makeCookies(weight: Int):Int = weight / cookieWeight<br/>}</pre>
+<p>There are a couple of things going on in this definition:</p>
+<ol>
+<li>Our actor understands only one message type, <kbd><span>Dough</span></kbd></li>
+<li>It <em>makes</em> raw cookies out of dough by calculating their number</li>
+<li>We're using <kbd>s<span>ender()</span></kbd> to obtain a reference to the actor from which the received message is originating and send the response to this reference</li>
+</ol>
+<p>Also, some more subtle details are worth mentioning:</p>
+<ul>
+<li>If, by coincidence, our <kbd><span>Cook</span></kbd> will get any other message except <span><kbd>Dough</kbd>,</span> this message won't be handled by the actor and will be lost. Akka has a special mechanism for such messages called <em>dead message queue</em>. </li>
+<li>We defined case classes for each message type to make understanding the code less complicated.</li>
+<li>The actor's logic is decoupled from the protocol and can be extracted into the companion object. This is done to make testing easier.</li>
+</ul>
+<p>Now that we have a definition of the actor, it is time to instantiate it and send some messages to it. In Akka, we have to use a special <kbd><span>Prop</span></kbd> constructor:</p>
+<pre>val cookProps: ActorRef = Props[Cook]</pre>
+<p>We don't need to pass any constructor parameters to the actor in this case and therefore we can benefit from using the <kbd><span>Props</span></kbd> form, which takes a sole type of an actor as its parameter.</p>
+<div class="packt_infobox">Don't construct actors directly using a class constructor. It is possible to do so and then obtain the <span><em>ActorRef</em></span> from the actor, but this will result in an error at runtime.</div>
+<p>Now, we can bring everything together and send out our first message:</p>
+<pre>object Bakery extends App {<br/>  val bakery = ActorSystem("Bakery")<br/>  val cook: ActorRef = bakery.actorOf(Props[Cook], "Cook")<br/>  cook ! Dough(1000)<br/>}</pre>
+<p>Here, we have created a named actor using an actor system and sent one <span>message </span>to it.</p>
+<p>Let's define a couple of other actors to make our bakery lively. We will separate the responsibilities, as follows:</p>
+<ul>
+<li>A boy will visit the groceries store and get the necessary ingredients.</li>
+<li>He will hand them over to the bakery manager so that they can check the amount and quality.</li>
+<li>The ingredients are then given to the chef, who prepares a dough out of them.</li>
+<li>The chef uses one or more mixers depending on the volume of the dough.</li>
+<li>The ready dough is given to the cook, who prepares the raw cookies.</li>
+<li>The raw cookies are baked by the baker.</li>
+<li>The baker uses the oven for baking. It might take a couple of rounds to bake all of the cookies because of the oven's limited size.</li>
+<li>The cookies are returned to the manager as soon as they are ready.</li>
+</ul>
+<p>Then, we need to figure out the relationships between actors, like so:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="Images/5611e12b-1d43-48ae-86fa-bcbe72d7e94d.png" width="1068" height="301"/></div>
+<p>And then we need to build and show the message flow among them:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="Images/6d1d019c-d38b-4eba-b523-2a61324d2cdd.png" width="617" height="447"/></div>
+<p>We'll build our actor hierarchy from the bottom up, starting from the oven:</p>
+<pre>object Oven {<br/>  final case object Extract<br/>  final case class Cookies(count: Int)<br/>  def props(size: Int) = Props(classOf[Oven], size)<br/>}<br/><br/>class Oven(size: Int) extends Actor {<br/>  private var cookiesInside = 0<br/>  override def receive = LoggingReceive {<br/>    case RawCookies(count) =&gt; insert(count).foreach(sender().!)<br/>    case Extract =&gt; sender() ! Cookies(extract())<br/>  }<br/><br/>  def insert(count: Int): Option[RawCookies] =<br/>    if (cookiesInside &gt; 0) {<br/>      Some(RawCookies(count))<br/>    } else {<br/>      val tooMany = math.max(0, count - size)<br/>      cookiesInside = math.min(size, count)<br/>      Some(tooMany).filter(_ &gt; 0).map(RawCookies)<br/>    }<br/><br/>  def extract(): Int = {<br/>    val cookies = cookiesInside<br/>    cookiesInside = 0<br/>    cookies<br/>  }<br/>}</pre>
+<p>We introduced a number of new features here.</p>
+<p>First, we defined two new message types that will be used to command an oven to return cookies and make a container for the ready cookies. In the actor itself, we're using a constructor parameter to specify how many cookies will fit inside it. We're also using Akka's <kbd><span>LoggingReceive</span></kbd>, which writes incoming messages into the log. In the <kbd>r<span>eceive</span></kbd><span> method itself, we stick to the principle of separating Akka semantics from the business logic.</span></p>
+<p>The <span><kbd>insert</kbd> m</span>ethod checks whether the oven is empty and places as many raw cookies as possible into it, optionally returning these which don't fit inside back, so that we can forward them to the sender.</p>
+<p>In the <kbd><span>extract</span></kbd> method, we modify the number of cookies inside the oven and return them to the sender.</p>
+<p>Having <kbd><span>var</span></kbd> inside of an actor is absolutely safe and illustrates one of the core features of Akka features—messages are processed by actors one-by-one in the order they are received. Even in a highly concurrent environment, Akka shields actor code from any concurrency-related matters.</p>
+<div class="packt_tip">Always use deeply immutable messages. Using mutable structures will allow two different actors to access the same data from different threads, which can lead to concurrent modifications and corrupt data.</div>
+<p>To instantiate an oven, we'll use another flavor of the <kbd><span>Prop</span></kbd> constructor, which allows us to define constructor parameters:</p>
+<pre>val prop = Props(classOf[Oven], size)</pre>
+<p>By convention, it is placed into the companion object of an actor. The <kbd>size</kbd> of the oven is defined here as well.</p>
+<p>As shown in the following code, we'll describe the user of the oven, that is, the <kbd><span>Baker</span></kbd> actor:</p>
+<pre>object Baker {<br/>  import scala.concurrent.duration._<br/>  private val defaultBakingTime = 2.seconds<br/>  def props(oven: ActorRef) = Props(new Baker(oven))<br/>}<br/>class Baker(oven: ActorRef,<br/>            bakingTime: FiniteDuration = Baker.defaultBakingTime)<br/>    extends Actor {<br/>  private var queue = 0<br/>  private var timer: Option[Cancellable] = None<br/>  override def receive: Receive = {<br/>    case RawCookies(count) =&gt;<br/>      queue += count<br/>      if (sender() != oven &amp;&amp; timer.isEmpty) timer = sendToOven()<br/>    case c: Cookies =&gt;<br/>      context.actorSelection("../Manager") ! c<br/>      assert(timer.isEmpty)<br/>      if (queue &gt; 0) timer = sendToOven() else timer = None<br/>  }<br/>  private def sendToOven() = {<br/>    oven ! RawCookies(queue)<br/>    queue = 0<br/>    import context.dispatcher<br/>    Option(context.system.scheduler.scheduleOnce(bakingTime, oven, Extract))<br/>  }<br/>  override def postStop(): Unit = {<br/>    timer.foreach(_.cancel())<br/>    super.postStop()<br/>  }<br/>}</pre>
+<p>Let's take a closer look at what is going on here. First, we need to use yet another kind of <kbd><span>Props</span></kbd> constructor because Akka does not support constructors with default parameters.</p>
+<div class="packt_tip"><kbd><span>Props</span></kbd>, along with the instance, is a very powerful construct that allows you to create anonymous actors which in turn can close over the internal state of another actor. Try to avoid using it, if possible.</div>
+<p>The <kbd><span>Baker</span></kbd> actor receives an <span><kbd>ActorRef</kbd> of the <kbd>Oven</kbd> </span>as a parameter. This reference is used by the baker to send cookies to the <kbd>Oven</kbd> and extract them.</p>
+<p>After receiving the baked cookies from the <kbd>Oven</kbd>, the <kbd>Baker</kbd> looks up the <kbd>Manager</kbd> actor and sends the <kbd>Cookies</kbd> to it. After that, it puts another batch of raw cookies into the <kbd>Oven</kbd>, if needed. We will discuss the intrinsics of <kbd>context.actorSelection</kbd> later in this chapter.</p>
+<p><span>The</span> <kbd><span>Baker</span></kbd><span> maintains an internal queue of raw cookies and periodically puts them into the oven. This is an old oven, and to use it, we need set up a kitchen timer in order to extract the baked cookies at the proper time. Finally, we include a <kbd>postStop</kbd> life cycle hook for the timer in order to cancel it if our actor stops. We have done this because, if the actor is no longer there, there will be no one around to listen out for the timer signal.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">The life cycle of an actor</h1>
+                </header>
+            
+            <article>
+                
+<p>Actors in Akka define a number of methods which are called at different moments during their lifetime, specifically:<span class="Apple-converted-space"> </span></p>
+<ul>
+<li><kbd>preStart</kbd>: Called after the actor is started or during restart</li>
+<li><kbd>preRestart</kbd>: Called on the actor which is about to be destroyed because of the restart<span class="Apple-converted-space"> </span></li>
+<li><kbd>postRestart</kbd>: Called on the actor who was just created after the restart</li>
+<li><kbd>postStop</kbd>: Called after the actor is stopped</li>
+</ul>
+<p>The order of execution, given two instances of the same actor—one that has failed and another one that has been created as a replacement—is shown as follows:<span class="Apple-converted-space"> </span></p>
+<ul>
+<li>Actor A, stopping: <kbd>constructor</kbd> | <kbd>preStart</kbd> | <kbd>preRestart</kbd> | <kbd>postStop</kbd></li>
+<li>Actor B, starting: <kbd>constructor</kbd> | <kbd>postRestart</kbd> | <kbd>preStart</kbd> | <kbd>postStop</kbd></li>
+</ul>
+<p> </p>
+<p>Now, we can implement a <kbd><span>Chef</span></kbd> actor.</p>
+<p>This actor will combine ingredients to produce dough. It will use its magical powers to create a <kbd>Mixer</kbd> and will use this <kbd><span>Mixer</span></kbd> to do the actual blending work. One <kbd><span>Mixer</span></kbd> has limited capacity, and so the <kbd>Chef</kbd> will need to create multiple mixers for bigger shopping lists and use them in parallel in order to speed up the preparation process.</p>
+<p>We'll start by defining a mixer:</p>
+<pre>object Mixer {<br/>  final case class Groceries(eggs: Int, flour: Int, sugar: Int, chocolate: Int)<br/>  def props: Props = Props[Mixer].withDispatcher("mixers-dispatcher")<br/>}<br/><br/>class Mixer extends Actor {<br/>  override def receive: Receive = {<br/>    case Groceries(eggs, flour, sugar, chocolate) =&gt;<br/>      Thread.sleep(3000)<br/>      sender() ! Dough(eggs * 50 + flour + sugar + chocolate)<br/>  }<br/>}</pre>
+<p>The <kbd>Mixer</kbd> only understands a single type of message, <kbd><span>Groceries</span></kbd>. After getting this type of message, it produces a certain amount of <kbd>Dough</kbd> by mixing all of the ingredients together and returns it to the sender. <kbd><span>Thread.sleep</span></kbd> represents blocking—waiting for the hardware to complete its operation.</p>
+<div class="packt_tip">Try to avoid blocking. Blocking in the actor consumes a thread, and if many actors have blocked, other actors will be starved for threads and won't be able to process messages.</div>
+<p>Unfortunately, in our case, blocking is unavoidable during the mixing operation because of hardware limitations. Akka offers a solution to this problem in the form of dispatchers.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Dispatchers</h1>
+                </header>
+            
+            <article>
+                
+<p>Dispatchers are the machinery that makes actors work. They are responsible for assigning CPU to the actors, managing actor's mailboxes, and passing over messages from the mailbox to an actor. There are four commonly used types of dispatchers:<span class="Apple-converted-space"> </span></p>
+<ul>
+<li><strong>Default dispatcher: </strong>This dispatcher creates one mailbox per actor and may be shared by any number of actors. It uses <kbd>java.util.concurrent.ExecutorService</kbd> <span>for this process. It</span><span><span> is designed to be used in combination with actors having a nonblocking code. The dispatcher selects an idle thread and assigns it to an actor of its choice. The actor then processes a certain number of messages before releasing the thread.</span></span></li>
+</ul>
+<ul>
+<li><strong>Balanced dispatcher: </strong>This dispatcher creates a single mailbox that can be shared by multiple actors of the same kind. Messages from the mailbox are distributed among actors sharing the dispatcher.</li>
+</ul>
+<ul>
+<li><strong>Pinned dispatcher: </strong>This dispatcher uses a thread pool with a single thread. This thread is assigned to a single actor. Thus, each actor has its own thread and mailbox, and can perform blocking or long-running activities without starving other actors.</li>
+</ul>
+<ul>
+<li><strong>CallingThread dispatcher: </strong>This dispatcher assigns one thread per actor. This is mainly used for testing.</li>
+</ul>
+<p> </p>
+<p>In our case, the <kbd>Mixer</kbd> has a blocking call in its implementation. Because of this, we are better off with the pinned dispatcher. First, we'll add a dispatcher configuration to <kbd><span>application.conf</span></kbd>:</p>
+<pre>mixers-dispatcher {<br/>  executor = "thread-pool-executor"<br/>  type = PinnedDispatcher<br/>}</pre>
+<div>The name of the dispatcher is defined at the root level of the configuration and isn't nested into the <kbd>akka</kbd> namespace.</div>
+<div class="packt_tip">Akka uses Typesafe Config as a configuration library. It is a very powerful and useful configuration facility that's absolutely worth checking out. You can find it at <a href="https://github.com/lightbend/config">https://github.com/lightbend/config</a>.</div>
+<p>And then we can use the configured dispatcher at the moment we create an actor:</p>
+<pre><span>def props: Props = Props[Mixer].withDispatcher("mixer-dispatcher")</span></pre>
+<p>This way, each of the mixers will have its own thread, and blocking will not affect its siblings and other actors in the system.<span class="Apple-converted-space"> </span></p>
+<p><span>After waiting, the mixer returns the produced dough to the </span><kbd>s<span>ender()</span></kbd><span> and sends itself a </span><kbd><span>PoisonPill</span></kbd><span> so that it can terminate.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Terminating actors</h1>
+                </header>
+            
+            <article>
+                
+<p>There are a couple of ways to stop an actor in Akka. The most direct approach involves calling the <kbd><span>stop</span></kbd> method of the context, like so:</p>
+<pre>context stop child<br/>context.stop(self)</pre>
+<p>The actor terminates asynchronously after it finishes processing its current message, but not after other messages in the inbox. This contrasts to sending an actor a <kbd><span>PoisonPill</span></kbd> or <kbd><span>Kill</span></kbd> message, which is enqueued into the mailbox and processed in an orderly fashion.</p>
+<p>The <span><kbd>Kill</kbd> </span>message will cause an actor to throw an <kbd><span>ActorKilledException</span></kbd>, which in turn will involve its supervision chain (more on that topic later in this chapter) to decide how this actor's <em>failure</em> should be handled.</p>
+<p>Stopping an actor using a <kbd>context</kbd> or <kbd><span>PoisonPill</span></kbd> in contrast to <kbd>Kill</kbd> is done gracefully. The actor will stop all of its children, execute life cycle hooks, and inform its supervisor appropriately.</p>
+<div class="packt_tip">The actor's termination is propagated top-down, but the actual stopping occurs bottom-up. One slow actor that takes a long (or infinite) time to stop can prevent the whole chain of actors from being terminated.</div>
+<div>
+<p>Now that we have our blocking<span> </span><kbd>Mixer</kbd>, it is time to define a<span> </span><kbd>Chef</kbd>:</p>
+</div>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">The ask pattern</h1>
+                </header>
+            
+            <article>
+                
+<p>With the <kbd>Chef</kbd>, we will introduce another popular pattern in Akka—the ask pattern:</p>
+<pre>class Chef extends Actor with ActorLogging with Stash {<br/>  import scala.concurrent.duration._<br/>  private implicit val timeout = Timeout(5 seconds)<br/><br/>  override def receive = {<br/>    case Groceries(eggs, flour, sugar, chocolate) =&gt;<br/>      for (i &lt;- 1 to eggs) {<br/>        val mixer = context.watch(context.actorOf(Mixer.props, s"Mixer_$i"))<br/>        val message = Groceries(1, flour / eggs, sugar / eggs, chocolate / eggs)<br/>        import akka.pattern.ask<br/>        val job = (mixer ? message).mapTo[Dough]<br/>        import context.dispatcher<br/>        import akka.pattern.pipe<br/>        job.pipeTo(sender())<br/>      }<br/>      log.info("Sent jobs to {} mixers", eggs)<br/>      context.become(waitingForResults, discardOld = false)<br/>  }<br/>  def waitingForResults: Receive = {<br/>    case g: Groceries =&gt; stash()<br/>    case Terminated(child) =&gt;<br/>      if (context.children.isEmpty) {<br/>        unstashAll()<br/>        context.unbecome()<br/>        log.info("Ready to accept new mixing jobs")<br/>      }<br/>  }<br/>}</pre>
+<p>There are lots of things happening here, so let's go over the code line by line and describe what's going on.</p>
+<pre><span>сlass Chef extends Actor with ActorLogging with Stash</span></pre>
+<p>Our <kbd>Chef</kbd> actor is not only an <kbd>Actor</kbd>—but it also extends <kbd><span>ActorLogging</span></kbd> and <kbd><span>Stash</span></kbd>. The <kbd>ActorLogging</kbd> trait gives an actor a predefined <kbd>logger</kbd>.<span class="Apple-converted-space">  </span>It is also possible to define the <kbd>Logger</kbd> directly, for example, as shown in the following code: </p>
+<pre><span>val log = akka.event.Logging(this)</span></pre>
+<p>Akka uses a special message-based logging facility internally to minimize blocking inside of an actor.<span class="Apple-converted-space"> </span></p>
+<p>Akka logging supports SLF4J as a backend. The official documentation (<a href="https://doc.akka.io/docs/akka/2.5/logging.html">https://doc.akka.io/docs/akka/2.5/logging.html</a>) has a detailed explanation on how to extend the configuration to enable SLF4J logging into an Akka application:</p>
+<pre>  import scala.concurrent.duration._<br/>  private implicit val timeout = Timeout(5 seconds)</pre>
+<p>Here, we have defined a timeout of 5 seconds, which will be necessary the moment we start working with mixers:</p>
+<pre>override def receive = {<br/>  case Groceries(eggs, flour, sugar, chocolate) =&gt;</pre>
+<p>In the <kbd>receive</kbd> method, our actor only accepts <kbd><span>Groceries</span></kbd> messages and uses pattern matching to extract field values:</p>
+<pre>for (i &lt;- 1 to eggs) {<br/>  val message = Groceries(1, flour / eggs, sugar / eggs, chocolate / eggs)<br/><br/></pre>
+<p>Our mixers are small, so we need to split the groceries at hand into portions of one egg so that the portion fits into the mixer:</p>
+<pre>val mixer = context.watch(context.actorOf(Mixer.props, s"Mixer_$i"))</pre>
+<p>Here, we created a <kbd>Mixer</kbd> actor using the <kbd><span>props</span></kbd> defined earlier (which in turn assigns the proper dispatcher to it) and named it appropriately.</p>
+<p>In the following two lines of code, we can see implicit <kbd>ask</kbd> magic at work:</p>
+<pre>import akka.pattern.ask<br/>val job: Future[Dough] = mixer ? message</pre>
+<p>Having to <kbd><span>ask</span></kbd> in scope allows us implicitly to convert an <kbd><span>ActorRef</span></kbd> into <kbd><span>AskableActorRef</span></kbd>, which is then used as a target for the message. The <span><kbd>actor ? message</kbd> </span>syntax represents the ask pattern. Akka sends a message to the target actor and creates an expectation of the response as a <kbd><span>Future[Any]</span></kbd>. This <kbd>Future</kbd> can be worked with like any other <kbd>Future</kbd>. For convenience, Akka provides a <kbd><span>mapTo[T]</span></kbd> method, which allows you to convert it into the <kbd>Future[<span>T]</span></kbd>.</p>
+<p>The final piece of code in the <kbd>for</kbd> comprehension uses another implicit conversion provided by Akka, this time acting on the <kbd><span>Future</span></kbd>:</p>
+<pre>import akka.pattern.pipe<br/>import context.dispatcher<br/>job.pipeTo(sender())</pre>
+<p>Here, we're bringing in scope a <kbd><span>pipe</span></kbd> which transforms the normal <kbd><span>Future</span></kbd> into the <kbd><span>PipeableFuture</span></kbd>. The latter can be piped into one or multiple actors, as shown in the third line of the preceding code, by using an implicit execution context that was imported in the second line.</p>
+<p>The third line of code pipes the result of the <kbd>Future</kbd> execution to the sender in the case of it being a success.</p>
+<div class="packt_tip">We could use <kbd><span>job.recoverWith</span></kbd> to resend the job to the mixer if the first attempt fails. This is a simple way to implement "at least once" semantics using the ask pattern.</div>
+<p>Having created all of the mixers and sent them work packages, the <kbd>Chef</kbd> actor writes a log entry and starts to wait for the results:</p>
+<pre>log.info("Sent jobs to {} mixers", eggs)<br/>context.become(waitingForResults, discardOld = false)</pre>
+<p>There is a special syntax in Akka logging. The first argument is a <kbd><span>String</span></kbd> that incorporates <kbd><span>{}</span></kbd> placeholders to denote other arguments. The substitution is done in a separate thread, but only if the respective log level is enabled. This is done to minimize the logging work done by the actor's thread.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Changing an actor's behavior using context</h1>
+                </header>
+            
+            <article>
+                
+<p>In the last line of code, the actor changes its behavior by using the <kbd><span>context.become</span></kbd> construct.</p>
+<p><kbd><span>become</span></kbd> and <kbd><span>unbecome</span></kbd> is an Akka way of changing the behavior of the actor in response to a message. <kbd><span>become</span></kbd> takes a <kbd><span>Receive</span></kbd> argument (which is a type alias for <span><kbd>PartialFunction[Any, Unit]</kbd>,</span> which is also just a normal sign of the <kbd><span>receive</span></kbd> method) which becomes a new actor's behavior starting from the next message (this change in behavior is not preserved across actor restarts). The <kbd><span>discardOld</span></kbd> parameter controls whether this new behavior should replace an old one or whether it should just push it down to the stack of behaviors that actors maintain internally. We'll see how this stack works in a minute.</p>
+<p>Let's go over the <kbd><span>waitingForResults</span></kbd> method, which became a new behavior of the actor a moment ago. The first line puts any <kbd><span>Groceries</span></kbd> messages on hold because we are already waiting for jobs to be finished. This is done by using the <kbd><span>stash()</span></kbd> method of the <kbd><span>Stash</span></kbd> trait, which puts the current message into an internal stash of the actor:<span class="Apple-converted-space"> </span></p>
+<pre>case g: Groceries =&gt; stash()</pre>
+<p>The <kbd>Chef</kbd> actor watches over the <kbd>Mixer</kbd> actors it has created. In this case, if a child actor dies, the watching actor will receive a <kbd><span>Terminated</span></kbd> message with an actor reference of the victim:</p>
+<pre>case Terminated(child) =&gt;</pre>
+<p>The actor checks whether all of the children are terminated by using <kbd><span>context.children</span></kbd>, and if this is the case, it prepends all of the stashed messages to the message box by using <kbd><span>unstashAll()</span></kbd> and returns to its previous behavior by using <kbd><span>context.unbecome()</span></kbd><span>.</span></p>
+<div class="packt_tip">Unbalanced <kbd><span>context.become()</span></kbd> and <kbd><span>context.unbecome()</span></kbd> operations might introduce the source of a memory leak in long-running applications.</div>
+<div><span>Now that our </span><kbd>Chef</kbd><span> is ready, let's move on and implement a </span><kbd>Manager</kbd><span>. </span></div>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Advanced topics</h1>
+                </header>
+            
+            <article>
+                
+<p>Up until now, we have implemented our bakery by relying on basic Akka concepts. It is time to deepen our knowledge and start to use higher level concepts.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Akka FSM</h1>
+                </header>
+            
+            <article>
+                
+<p>The <kbd>Manager</kbd> pushes the cookie-making process forward by coordinating all other inhabitants of the bakery. It does so by taking the messages representing job results from one actor and passing them further along to an appropriate successor. It is important that this process is consequent, that is, it should be impossible to make raw cookies at the moment since we only have a shopping list and no dough. We'll represent this behavior as a state machine.<span class="Apple-converted-space"> </span></p>
+<div class="packt_infobox">An FSM is an abstraction defined by a set of states the machine can be in. For each state, it also defines which message types can be accepted in this state and the possible reaction of the machine, including its new state.</div>
+<p>Let's dive into the code and see how this approach is implemented with Akka FSM.</p>
+<p>The actor is defined by extending the <kbd><span>FSM</span></kbd> trait:</p>
+<pre>class Manager(chef: ActorRef, cook: ActorRef, baker: ActorRef) extends FSM[State, Data]</pre>
+<p>The type parameter, <kbd>State</kbd>, represents the type of states the actor can be in, and the <kbd>Data</kbd> represents the possible associated internal state.</p>
+<div class="packt_infobox">There is an obvious confusion between the term <em>State</em>, referring to the state of the FSM our actor represents, and a <em>State</em> referring to the data which is associated with each of the steps in the process. To avoid ambiguity, we'll<span> further </span>refer to the state of the actor as <em>Data</em> and the state of the FSM as <em>State</em>.</div>
+<p>States of the actor reflect the processes that occur in the bakery: the goods moving from the shop boy over to the chef and cook, which then move over to the baker and back to the manager (note that because of the sequential art of work-passing done by the manager, there will be only one worker actor active in our bakery at the moment, even if they could work in parallel with a more sophisticated manager).</p>
+<p>The following messages represent the state of the managed bakery:</p>
+<pre>trait State<br/>case object Idle extends State<br/>case object Shopping extends State<br/>case object Mixing extends State<br/>case object Forming extends State<br/>case object Baking extends State</pre>
+<p>The messages we defined previously also need to be extended to represent<span class="Apple-converted-space"> the </span>possible types of data:</p>
+<pre>sealed trait Data<br/>case object Uninitialized extends Data<br/>final case class ShoppingList(...) extends Data<br/>final case class Groceries(...) extends Data<br/>final case class Dough(weight: Int) extends Data<br/>final case class RawCookies(count: Int) extends Data</pre>
+<p>The FSM itself is defined by describing three primary aspects of the state machine:</p>
+<ul>
+<li>States</li>
+<li>State transitions</li>
+<li>An initial state</li>
+</ul>
+<p>Let's take a look at the actor's code to see how this is done. The states are defined within the <kbd><span>when</span></kbd> block, which accepts a state name and a state function:</p>
+<pre>when(Idle) {<br/>  case Event(s: ShoppingList, Uninitialized) ⇒<br/>    goto(Shopping) forMax (5 seconds) using s<br/>  case _ =&gt;<br/>    stay replying "Get back to work!"<br/>}</pre>
+<p>When there are multiple <kbd><span>when</span></kbd> blocks for the same states, the state functions that constitute them are concatenated.</p>
+<p>The state function is a <kbd><span>PartialFunction[Event, State]</span></kbd>, and describes a new state for each event type received in a particular state. Akka FSM provides a nice domain specific language (DLS) for this. For example, in the preceding code, the actor reacts to the <kbd><span>ShoppingList</span></kbd> event by transitioning to the <kbd><span>Shopping</span></kbd> state with a timeout of 5 seconds. The shopping list is used as new state data.</p>
+<p>In the case of any other message, the actor stays in the same state and replies to the sender with a friendly remark.</p>
+<p>In the <kbd><span>Shopping</span></kbd> state, the <kbd>Manager</kbd> reacts differently depending upon whether the groceries conform to the shopping list or not:</p>
+<pre>when(Shopping) {<br/>  case Event(g: Groceries, s: ShoppingList)<br/>      if g.productIterator sameElements s.productIterator ⇒<br/>    goto(Mixing) using g<br/>  case Event(_: Groceries, _: ShoppingList) ⇒<br/>    goto(Idle) using Uninitialized<br/>}</pre>
+<p>In the first case, it uses <kbd><span>Groceries</span></kbd> as a new state and goes to the next state. In the second case, it goes back to the <kbd>Idle</kbd> state and sets its state to <kbd>Uninitialized</kbd>.</p>
+<p>Other states are described in a similar fashion:</p>
+<pre>when(Mixing) {<br/>    case Event(p: Dough, _) ⇒<br/>      goto(Forming) using p<br/>  }<br/><br/>  when(Forming) {<br/>    case Event(c: RawCookies, _) ⇒<br/>      goto(Baking) using c<br/>  }<br/><br/>  when(Baking, stateTimeout = idleTimeout * 20) {<br/>    case Event(c: Cookies, _) ⇒<br/>      log.info("Cookies are ready: {}", c)<br/>      stay() replying "Thank you!"<br/>    case Event(StateTimeout, _) =&gt;<br/>      goto(Idle) using Uninitialized<br/>  }</pre>
+<p>We're just moving on to the next state and updating the state data in the process. The most obvious observation at the moment would be that <kbd>This actor does nothing but enjoying himself</kbd>, and we're going to fix this by using <span>the <kbd>onTransition</kbd></span> block, which describes the behavior of the actor at the moment state transition occurs:</p>
+<pre>onTransition {<br/>  case Idle -&gt; Shopping ⇒<br/>    val boy = sendBoy<br/>    boy ! stateData<br/>  case Shopping -&gt; Idle =&gt;<br/>    self ! stateData<br/>  case Shopping -&gt; Mixing ⇒<br/>    chef ! nextStateData<br/>  case Mixing -&gt; Forming =&gt;<br/>    cook ! nextStateData<br/>  case Forming -&gt; Baking =&gt;<br/>    baker ! nextStateData<br/>}</pre>
+<p>The <kbd>Manager</kbd> already knows its subordinates, so it only needs to look up a <kbd>Boy</kbd>. Then, for each of the state transitions, it obtains the necessary state by using either <kbd><span>stateData</span></kbd> or <kbd><span>nextStateData</span></kbd>, which references the actor's state data before and after the respective state transition. This data is sent to the appropriate subordinate.</p>
+<p>Now, all that's missing is an optional <kbd><span>whenUnhandled</span></kbd> block, which is executed in all states. The timer setting and a mandatory <kbd><span>initiate()</span></kbd> call sets up the defined timer and performs a state transition to the initial state.</p>
+<div class="packt_tip">Akka FSM forces you to mix business logic with actor-related code, which makes it hard to test and support it. It also locks you into the provided implementation and makes it impossible to bring in another state machine realization. Always consider another possibility before fixing upon Akka FSM.</div>
+<p><span>At the same time, by separating the definition of states separately from behavior, </span><span>Akka FSM</span><span> allows for clean structuring of the business logic.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Akka remoting</h1>
+                </header>
+            
+            <article>
+                
+<p>Now, we can implement the final piece of the puzzle—the shop boy and the <kbd><span>sendBoy</span></kbd> function that we left uncovered until now. The <kbd>Boy</kbd> does not belong to the <kbd>Bakery</kbd>. The <kbd>Manager</kbd> will need to send the <kbd>Boy</kbd> to the grocery <kbd>Store</kbd>, which is represented by another actor system.</p>
+<p>In order to do so, we'll rely on Akka's location transparency and remote capabilities. First, the manager will deploy a boy actor to the remote system. The deployed actor will get a reference to the <kbd>Seller</kbd> actor in the store so that it can get groceries as and when required.</p>
+<p>There are two ways to use remoting in Akka—either by using actor lookup or actor creation. Both are used in the same way that we did locally until now, that is, by calling <kbd><span>actorSelection</span></kbd> and <kbd><span>actorOf</span></kbd>, respectively.</p>
+<p>Here, we will demonstrate both ways that the manager will look up a seller from whom the boy should get groceries (imagine this seller is working with the bakery on a prepaid basis) and then require the boy to interact with this specific actor.</p>
+<p>Before we dive into the code, we need to augment the setup of our application. Remoting is a separate dependency in Akka which we will put into the <kbd><span>build.sbt</span></kbd>:</p>
+<pre>libraryDependencies += "com.typesafe.akka" %% "akka-remote" % akkaVersion</pre>
+<p>Then, we need to replace the <span>local</span> actor provider with the <span>remote</span> one and configure the network settings in <kbd><span>application.conf</span></kbd>:</p>
+<pre>akka {<br/>  actor.provider = remote<br/>  remote {<br/>    enabled-transports = ["akka.remote.netty.tcp"]<br/>    netty.tcp {<br/>      hostname = "127.0.0.1"<br/>      port = 2552<br/>    }<br/> }<br/>}</pre>
+<p>The same configuration, but with a necessarily different <span>port, is </span>provided for the second actor system that's representing the grocery store. This is done by reusing the <kbd><span>application.conf</span></kbd> via inclusion and redefining the TCP port:</p>
+<pre>include "application"<br/>akka.remote.netty.tcp.port = 2553</pre>
+<p>Then, we need to define the grocery store:</p>
+<pre>import akka.actor._<br/>import com.example.Manager.ShoppingList<br/>import com.example.Mixer.Groceries<br/>import com.typesafe.config.ConfigFactory<br/><br/>object Store extends App {<br/>  val store = ActorSystem("Store", ConfigFactory.load("grocery.conf"))<br/><br/>  val seller = store.actorOf(Props(new Actor {<br/>    override def receive: Receive = {<br/>      case s: ShoppingList =&gt;<br/>        ShoppingList.unapply(s).map(Groceries.tupled).foreach(sender() ! _)<br/>    }<br/>  }), "Seller")<br/>}</pre>
+<p>We can't use the default configuration as it is already taken by the bakery system, so we need to load a custom <kbd><span>grocery.conf</span></kbd> by using <span><kbd>ConfigFactory.load</kbd></span>. Next, we need to create an anonymous (but named!) actor whose sole responsibility is to return groceries, as described by the <span><kbd>ShoppingList</kbd>, to the sender</span>.</p>
+<p>Finally, we're ready to implement the <kbd>sendBoy</kbd> function in the <kbd>Manager</kbd>:</p>
+<pre>private def sendBoy: ActorRef = {<br/>  val store = "akka.tcp://Store@127.0.0.1:2553"<br/>  val seller = context.actorSelection(s"$store/user/Seller")<br/>  context.actorOf(Boy.props(seller))<br/>}</pre>
+<p>First, we must define the address of the grocery store. Then, we need to look up a seller by using its address on the remote system. Akka's documentation specifies the following pattern for remote actor lookup:</p>
+<pre>akka.&lt;protocol&gt;://&lt;actor system name&gt;@&lt;hostname&gt;:&lt;port&gt;/&lt;actor path&gt;</pre>
+<p>We'll take a look at this template and especially the actor path in a moment.</p>
+<p>Then, we need to create a boy by using our usual <span><kbd>actorOf</kbd> method.</span> To tell Akka to deploy this actor remotely, we need to put the following configuration into <kbd><span>application.conf</span></kbd>:</p>
+<pre>akka.actor.deployment {<br/>  /Manager/Boy {<br/>     remote = "akka.tcp://Store@127.0.0.1:2553"<br/>  }<br/>}</pre>
+<p>This instructs Akka not to instantiate a local actor but to contact the remote daemon running in the actor system with the name <kbd>Store</kbd> with a network address of <kbd>127.0.0.1:2553</kbd> and to tell this daemon to create a remote actor.</p>
+<p>We could achieve the same result without extending configuration by providing deployment configuration directly in the code:</p>
+<pre>val storeAddress = AddressFromURIString(s"$store")<br/>val boyProps = Boy.props(seller).withDeploy(Deploy(scope = RemoteScope(storeAddress)))<br/>context.actorOf(boyProps)</pre>
+<p>This snippet creates a store address from the string we defined earlier and explicitly tells Akka to use it while creating the actor.</p>
+<p>The implementation of <kbd><span>Boy</span></kbd> is trivial now:</p>
+<pre>object Boy {<br/>  def props(seller: ActorSelection): Props = Props(classOf[Boy], seller)<br/>}<br/><br/>class Boy(seller: ActorSelection) extends Actor {<br/>  override def receive = {<br/>    case s: ShoppingList =&gt;<br/>      seller forward s<br/>      self ! PoisonPill<br/>  }<br/>}</pre>
+<p>The <kbd>Boy</kbd> constructor's takes a parameter of type <span><kbd>ActorSelection</kbd></span>, which is the result of the remote lookup that was done by the <kbd>Manager</kbd> previously. By receiving a <kbd><span>ShoppingList</span></kbd>, our implementation uses <kbd><span>forward</span></kbd> to, well, forward the message directly to the seller. Because of this forwarding, the seller will receive a message with the original actor (<span>who is a manager</span>) as a sender.<span class="Apple-converted-space"> </span></p>
+<p>Finally, we will take into the account that the boy was created by the manager just for the purpose of going shopping once, and we need to clean up the resources. This can be done by the manager actor, but we prefer self-cleanup <span>here</span>. The <kbd>Boy</kbd> sends himself a <span><kbd>PoisonPill</kbd> immediately after forwarding the original message</span> and terminates.</p>
+<p>Now that we're done defining all of the inhabitants of our bakery, we can wire them together and bake some cookies:</p>
+<pre>object Bakery extends App {<br/>  val bakery = ActorSystem("Bakery")<br/>  val cook: ActorRef = bakery.actorOf(Props[Cook], "Cook")<br/>  val chef: ActorRef = bakery.actorOf(Props[Chef], "Chef")<br/>  val oven: ActorRef = bakery.actorOf(Oven.props(12), "Oven")<br/>  val baker: ActorRef = bakery.actorOf(Baker.props(oven), "Baker")<br/>  val manager: ActorRef = bakery.actorOf(Manager.props(chef, cook, baker), "Manager")<br/>}</pre>
+<p>Before we run our app and enjoy some cookies, let's take a break from coding and look at the actor path we saw in the remote actor lookup pattern.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">The actor path</h1>
+                </header>
+            
+            <article>
+                
+<p>In accordance with the actor model, Akka actors are hierarchical.</p>
+<p>The actor path is built by taking the names of each actor in the hierarchy up to the root actor and concatenating them right-to-left using slashes. In the beginning of the path, there is an address part identifying the protocol and location of the actor system. This address part is called the <strong>anchor</strong> and its representation is different for local and remote systems.</p>
+<p>In our example, the whole path for the <kbd>Boy</kbd> which is described by the local path <kbd><span>/Manager/Boy</span></kbd> in the deployment configuration will be <kbd><span>akka://user/Bakery/Manager/Boy</span></kbd> (purely local path) for the <kbd>Boy</kbd> actor and an akka.tcp://Store@127.0.0.1:2553/user/Seller (remote path) for the <kbd>Seller</kbd> actor in the remote <kbd>Store</kbd> actor system, as shown from the <kbd>Bakery</kbd> side.</p>
+<p>As you can see, remoting introduces the necessary differences in the way the actor path is built and used.<span class="Apple-converted-space"> </span></p>
+<p>The main purpose of the <span>actor path</span> is to address an actor we are about to send messages to. On a technical level, we have an abstraction for sending messages to an actor, which is <kbd><span>ActorRef</span></kbd>. <span>For each actor, </span>its <kbd><span>ActorRef</span></kbd> provides access to its local reference through the <kbd><span>self</span></kbd> field and to the sender of the current message via the <kbd><span>context.sender()</span></kbd>. Each <kbd><span>ActorRef</span></kbd> references exactly one actor. <kbd>ActorRef</kbd> also incorporates a dispatcher and a mailbox for the actor. The dispatcher is responsible for queueing messages in the actor's mailbox and dequeueing them at a certain time before passing them to the actors' <kbd>receive</kbd> method.</p>
+<p>We've already seen both ways to create an <kbd><span>ActorRef</span></kbd>:</p>
+<ol>
+<li>By creating an actor using <kbd><span>context.actorOf</span></kbd></li>
+<li>By looking up one or multiple actors using <kbd><span>context.actorSelection</span></kbd></li>
+</ol>
+<p>There are different ways to provide an actor path for the lookup in the second case:</p>
+<ul>
+<li><strong>Absolute path</strong>: <kbd>context.actorSelection("/user/Manager/Boy")</kbd> returns a single actor with a path specified or empty selection</li>
+<li><strong>Relative path</strong>: <kbd>context.actorSelection("../sibling")</kbd> goes up to the parent in the hierarchy and then down to the "sibling" in the case that it exists.</li>
+<li><strong>Wildcards</strong>:<span class="Apple-converted-space"> </span><kbd>context.actorSelection("../*")</kbd> goes up in the hierarchy and selects all of the <span>children </span>of the actor's parent, including the current actor</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Actor supervision</h1>
+                </header>
+            
+            <article>
+                
+<p>Now, let's explain another strangeness in the actor path that you are probably wondering about—the leading <kbd><span>/user</span></kbd> part in the actors paths we've seen before. The existence of this part is Akka's answer to the question we stated at the beginning of this chapter—<em>How is the very first actor created?</em></p>
+<p>In Akka, the very first actor is created by the library itself. It represents a root actor and is called the root guardian accordingly (we'll explain the <em>guardian</em> part in a moment).</p>
+<p>In fact, Akka creates three guardian actors for each actor system, as shown in the following diagram.</p>
+<p>The <kbd>/</kbd> root guardian is a parent for two other guardians and thus an ancestor of any other actor in the system.</p>
+<p>The <kbd><span>/user</span></kbd> guardian is a root actor for all user-created actors in the system. Thus, every actor created by any user of the Akka library has two parents in the hierarchy and therefore has <kbd><span>/user/</span></kbd> as a prefix in its path.</p>
+<p>The <kbd><span>/system</span></kbd> is a root actor for internal actors that have been created by the system.</p>
+<p>Let's extend our actor diagram with the guardian actors we just learned about:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="Images/ad82fdc8-a14d-4c0a-9940-6f5cfc664e96.png" width="1254" height="472"/></div>
+<p>We instantiate all of our actors except mixers by using <kbd>system.context</kbd>. Because of this, they are created as children of the user guardian. The root guardian is on the top of the hierarchy and has a user guardian and a system guardian as its children.</p>
+<p>The guardians are a part of another important feature of Akka—supervision. To understand what supervision is and why it is important, let's finally run our application.</p>
+<p>The following is the sanitized output in the console:</p>
+<pre><strong>...</strong><br/><strong>[INFO] Remoting now listens on addresses: [akka.tcp://Bakery@127.0.0.1:2552]</strong><br/><strong>[INFO] [akka.tcp://Bakery@127.0.0.1:2552/user/Chef] Sent jobs to 24 mixers</strong><br/><strong>[INFO] [akka.tcp://Bakery@127.0.0.1:2552/user/Chef] Ready to accept new mixing jobs</strong><br/><strong>[INFO] [akka.tcp://Bakery@127.0.0.1:2552/user/Manager] Cookies are ready: Cookies(12)</strong><br/><strong>[ERROR] [akka.actor.LocalActorRefProvider(akka://Bakery)] guardian failed, shutting down system</strong><br/><strong>java.lang.AssertionError: assertion failed</strong><br/><strong> at scala.Predef$.assert(Predef.scala:204)</strong><br/><strong> ...</strong><br/><strong>...</strong><br/><strong>[akka.tcp://Bakery@127.0.0.1:2552/system/remoting-terminator] Remoting shut down.</strong></pre>
+<p>What happened? The actor system has started and communication between actors begun, but then an <kbd><span>AssertionError</span></kbd> was thrown and the whole system terminated!<span class="Apple-converted-space"> </span></p>
+<p>The reason for this exception is a trivial programming error in the <kbd><span>Baker</span></kbd> actor we described previously:</p>
+<pre>override def receive: Receive = {<br/>  ...<br/>  case c: Cookies =&gt;<br/>    context.actorSelection("../Manager") ! c<br/>    assert(timer.isEmpty)<br/>    if (queue &gt; 0) timer = sendToOven() else timer = None<br/>}</pre>
+<p>The <span>assertion that the timer is empty</span> is wrong, and so it throws an exception at runtime. The exception is not caught and leads to termination of the program. Obviously, in this case, the rules of the actor model (as described at the beginning of this chapter) <span>are not respected. </span>One actor affects all other actors and the system as <span>a whole</span> without sending any messages.</p>
+<p>In fact, this is not some deficiency of Akka. The reason our application behaves as it does is that we ignored the very important aspect of actor-based systems—supervision.</p>
+<p>Supervision in Akka means that any actor creating a child is responsible for its management in case problems occur.</p>
+<p>An actor detecting erroneous conditions is expected to suspend all of its descendants and itself and report a failure to its parent. This failure reporting has a form of exception throwing.</p>
+<div class="packt_tip">By convention, expected erroneous conditions, for example, an absence of a record in the database, are modelled on the protocol level via messages and errors of a technical nature, such as unavailable database connections modelled with exceptions. To better differentiate between erroneous conditions, developers are encouraged to define a rich set of exception classes, similar to that of normal message classes.</div>
+<p>Exceptions thrown by the child actor are delivered to the parent, who then needs to handle the situation in one of four possible ways:</p>
+<ul>
+<li>Resume the child and let it process messages in the message box,<span class="Apple-converted-space"> starting from the next one. The message that caused the actor to fail is lost.</span></li>
+<li>Restart the child. This will clean up its internal state and recursively stop all of its descendants.</li>
+<li>Stop the child completely. This is also recursively propagated to the descendants.</li>
+<li>Propagate the failure to its own parent. By doing this, the supervisor is failing itself with the same cause as the subordinate.</li>
+</ul>
+<p>Before delving into the technical aspects of defining a supervision strategy, let's revisit our actor's structure. Currently, all of our actors (with the exception of dynamic mixers) are created as direct children of the user guardian. This leads to the necessity to define the supervision strategy in one place for the whole actor hierarchy. This is a clear violation of the principle of separation of concerns, and is known in Akka as a <em>Flat Actor Hierarchy</em> anti-pattern. What we should aim for instead is creating a structure where failure handling happens close to the place the error occurred by the actor that is most capable of handling such errors.</p>
+<p>With this goal in mind, let's restructure our application so that the <kbd>Baker</kbd> actor is responsible for the supervision of the <kbd>Oven</kbd> and the <kbd>Manager</kbd> is responsible for all of the actors in the system. This structure is represented in the following diagram:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="Images/49c75977-26b5-403f-94af-1149487839e0.png" style="width:37.33em;height:21.83em;" width="810" height="474"/></div>
+<p>Now, we have a sane hierarchical structure where each supervisor has the best knowledge about possible failures of its children and how to deal with them.</p>
+<p>On a technical level, the supervision strategy is defined by overriding the <kbd>supervisorStrategy</kbd> field of the corresponding actor. To demonstrate how this is done, let's extend our <kbd>Mixer</kbd> actor with the capability to report different hardware failures. First, we must define a rich set of exceptions in the companion object:</p>
+<pre><span>class </span>MotorOverheatException <span>extends </span>Exception<br/><span>class </span>SlowRotationSpeedException <span>extends </span>Exception<br/><span>class </span>StrongVibrationException <span>extends </span>Exception</pre>
+<p>And then we need to throw them randomly during message processing:</p>
+<pre><span>class </span>Mixer <span>extends </span>Actor <span>with </span>ActorLogging {<br/>  <span>override def </span>receive: <span>Receive </span>= {<br/>    <span>case </span><span>Groceries</span>(eggs, flour, sugar, chocolate) =&gt;<br/>      <span>val </span>rnd = Random.nextInt(<span>10</span>)<br/>      <span>if </span>(rnd == <span>0</span>) {<br/>        log.info(<span>"Motor Overheat"</span>)<br/>        <span>throw new </span>MotorOverheatException<br/>      }<br/>      <span>if </span>(rnd &lt; <span>3</span>) {<br/>        log.info(<span>"Slow Speed"</span>)<br/>        <span>throw new </span>SlowRotationSpeedException<br/>      }<br/>      ...<br/>  }<br/>}</pre>
+<p>Now, we'll override a supervision strategy in the <kbd>Chef</kbd> actor:</p>
+<pre><span>override val </span><span>supervisorStrategy</span>: OneForOneStrategy =<br/>  <span>OneForOneStrategy</span>(maxNrOfRetries = <span>10</span>, withinTimeRange = <span>1 </span>minute) {<br/>    <span>case </span>_: MotorOverheatException ⇒<br/>      <span>self </span>! <span>Dough</span>(<span>0</span>)<br/>      Stop<br/>    <span>case </span>_: SlowRotationSpeedException ⇒<br/>      sender() ! <span>message<br/></span><span>      </span>Restart<br/>    <span>case </span>_: StrongVibrationException =&gt;<br/>      sender() ! <span>message<br/></span><span>      </span>Resume<br/>    <span>case </span>_: <span>Exception </span>⇒ Escalate<br/>  }</pre>
+<p>The <kbd>OneForOneStrategy</kbd> instructs the <kbd>Chef</kbd> to deal with any children's failures on an individual basis.</p>
+<p>For <kbd>MotorOverheatException</kbd>, we decide to stop the failing <kbd>Mixer</kbd>. The <kbd>Chef</kbd> sends an empty <kbd>Dough</kbd> message <span>to itself </span>which is counted as the response from the broken child.</p>
+<p>The <kbd>SlowRotationSpeedException</kbd> means that something went wrong during the placement of groceries into the <kbd>Mixer</kbd>. The original message was lost by the <kbd>Mixer</kbd> at the moment it threw an <kbd>Exception</kbd>, so we're resending this message and restarting the <kbd>Mixer</kbd>.</p>
+<p>We can tolerate <kbd>StrongVibrationException</kbd>, so we just compensate for the lost message by resending it and resuming the child.</p>
+<p>In the case of any other exception, the <kbd>Chef</kbd> has no knowledge of how to handle it and just propagates failure to the <kbd>Manager</kbd>. The <kbd>Manager</kbd> does not have any <kbd>supervisorStrategy</kbd> defined and the exception is ultimately propagated to the user guardian.</p>
+<p>The user guardian handles exceptions as specified by the default strategy. The default strategy is the same for all actors in the userspace if not overridden, and is defined as follows:</p>
+<ul>
+<li><kbd>ActorInitializationException</kbd>: Stops the failing child actor</li>
+<li><kbd>ActorKilledException</kbd>: Stops the failing child actor</li>
+<li><kbd>DeathPactException</kbd>: Stops the failing child actor</li>
+<li><kbd>Exception</kbd>: Restarts the failing child actor</li>
+<li><kbd>Throwable</kbd>: Escalates to the parent actor</li>
+</ul>
+<p>The root guardian is configured with <span><kbd>SupervisorStrategy.stoppingStrategy</kbd>, which differentiates between the <kbd>Exception</kbd> and other throwables. The former leads to the termination of the failing actor (which effectively means all of the actors in the <kbd>/user</kbd> or <kbd>/system</kbd> space), while the latter is propagated further and leads to the termination of the actor system. This is what happened when our earlier implementation threw an <kbd>AssertionError</kbd>.</span></p>
+<p>The supervision strategy for the user guardian can be overridden by using its configuration property. Let's demonstrate how to use it to handle the occasional <kbd>LazinessException</kbd>, which could be thrown by any actor in the system. First, we augment <kbd>application.conf</kbd>:</p>
+<pre>akka {<br/> actor {<br/>  guardian-supervisor-strategy = ch11.GuardianSupervisorStrategyConfigurator<br/> }<br/>}</pre>
+<p>And then we implement the configured strategy, as follows:</p>
+<pre><span>class </span>GuardianSupervisorStrategyConfigurator<br/>    <span>extends </span>SupervisorStrategyConfigurator {<br/>  <span>override def </span>create(): SupervisorStrategy = <span>AllForOneStrategy</span>() {<br/>    <span>case </span>_: LazyWorkerException ⇒<br/>      <span>println</span>(<span>"Lazy workers. Let's try again with another crew!"</span>)<br/>      Restart<br/>  }<br/>}</pre>
+<p>Laziness is contagious, so we use <kbd>AllForOneStrategy</kbd> to replace the whole team by restarting all of the children of the user guardian. </p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Testing actors</h1>
+                </header>
+            
+            <article>
+                
+<p>Actor-based systems are different from systems that are built using a traditional approach. Naturally, testing actors is different from regular testing. Actors send and receive messages in an asynchronous manner and are usually examined via message flow analysis. A typical setup will include three parts:</p>
+<ol>
+<li>The source of the messages</li>
+<li>The actor under test</li>
+<li>The receiver of the actor's responses</li>
+</ol>
+<p>Luckily, Akka includes a testing module that abstracts a lot of setup logic and provides useful helpers for common testing activities. The name of the module is Akka <kbd>TestKit</kbd> and it is contained in a separate module that needs to be added to the project's test scope:</p>
+<pre><span class="pln">libraryDependencies </span><span class="pun">+=</span><span class="pln"> </span><span class="str">"com.typesafe.akka"</span><span class="pln"> </span><span class="pun">%%</span><span class="pln"> </span><span class="str">"akka-testkit"</span><span class="pln"> </span><span class="pun">%</span><span class="pln"> </span><span class="str">akkaVersion</span><span class="pln"> </span><span class="pun">%</span><span class="pln"> </span><span class="typ">Test</span></pre>
+<p>Having this dependency allows us to extend a <kbd>TestKit</kbd> class. The <kbd>TestKit</kbd> implements a special testing environment that mimics the internals of a normal actor system but provides access to some of the details that are hidden in a production implementation.</p>
+<p>Here is an example of the <kbd>ScalaTest</kbd> specification that extends <kbd>TestKit</kbd>:</p>
+<pre><span>class </span>BakerySpec(_system: ActorSystem) <span>extends </span>TestKit(_system)<br/>    <span>with </span>Matchers <span>with </span>WordSpecLike <span>with </span>BeforeAndAfterAll <br/>    with ImplicitSender {<br/><br/>  <span>def this</span>() = <span>this</span>(<span>ActorSystem</span>(<span>"BakerySpec"</span>))<br/><br/>  <span>override def </span>afterAll: Unit = shutdown(<span>system</span>)</pre>
+<p>Here, we extend a <kbd>TestKit</kbd> with usual the <kbd>ScalaTest</kbd> matchers and <kbd>WordSpec</kbd>, but also mix a <kbd>BeforeAndAfterAll</kbd> and an <kbd>ImplicitSender</kbd> in. Then, we implement the default constructor by instantiating a <kbd>BakerySpec</kbd> actor system. Lastly, we override an <kbd>afterAll</kbd> method to make sure that our test actor system is properly terminated after the test.</p>
+<p>In SBT, tests are usually run in parallel. In this case, it is important to name an actor system properly and <span>in this case, remoting is also used to </span>override the default port to avoid conflicts between simultaneously executing tests. Also, we should not forget to shut down the actor system <span>gracefully </span>to ensure that our resources are cleaned up properly.</p>
+<p>The <kbd>TestKit</kbd> implements and brings into scope a <kbd>testActor</kbd> field, which we can use to send messages from the test code. Usually, we'd like these messages to be sent from a well-known actor<span>. The <kbd>ImplicitSender</kbd> trait implements a reference to the <kbd>testActor</kbd> that is attached to the message at the moment it is sent.</span></p>
+<p>The <kbd>TestKit</kbd> also maintains an internal queue of the messages sent to the <kbd>testActor</kbd> and defines a host of useful methods to inspect this queue.</p>
+<p><span>This is how some of these predefined methods can be used to test our <kbd>Boy</kbd> actor:</span></p>
+<pre><span>"The boy should" </span>should {<br/>  <span>val </span>boyProps = Boy.<span>props</span>(<span>system</span>.actorSelection(<span>testActor</span>.path))<br/>  <span>val </span>boy = <span>system</span>.actorOf(boyProps)<br/><br/>  <span>"forward given ShoppingList to the seller" </span>in {<br/>    <span>val </span>list = <span>ShoppingList</span>(<span>0</span>, <span>0</span>, <span>0</span>, <span>0</span>)<br/>    boy ! list<br/>    within(<span>3 </span>millis, <span>20 </span>millis) {<br/>      expectMsg(list)<br/>      lastSender shouldBe testActor<br/>    }<br/>  }<br/>  <span>"ignore other message types" </span>in {<br/>    boy ! <span>'GoHome<br/></span><span>    </span>expectNoMessage(<span>500 </span>millis)<br/>  }<br/>}</pre>
+<p>Recapping the logic of the <kbd>Boy</kbd> actor, all it is doing is forwarding <kbd>ShoppingList</kbd> to another actor provided as a constructor parameter. In order to test this behaviour, we first create an <kbd>ActorSelection</kbd> as required by the boy's constructor, use our default <kbd>testActor</kbd> as a target, and create a boy actor as a child of the test actor system that the <kbd>TestKit</kbd> provides us with.</p>
+<p>In the first test, we send a <kbd>ShoppingList</kbd> to the <kbd>Boy</kbd> and expect it to forward the list to the <kbd>testActor</kbd> within a predefined time interval between 3 and 30 milliseconds. We verify that the message is indeed a <kbd>ShoppingList</kbd> and that the sender is a <kbd>testActor</kbd>.</p>
+<p>In the second test, we verify that the <kbd>Boy</kbd> ignores other messages. To check this, we send it a message with a <span><kbd>Symbol</kbd> </span>type and expect our <kbd>testActor</kbd> to receive nothing within 500 milliseconds. As normal forwarding is expected to take no more than 20 milliseconds by our first test, we can be sure that the message has been ignored by the <kbd>Boy</kbd>.</p>
+<p><kbd>testActor</kbd>, <kbd>lastSender</kbd>, <kbd>within</kbd>, <kbd>expectMsg</kbd>, and <kbd>expectNoMsg</kbd> are implemented by the <kbd>TestKit</kbd> and save us from writing boilerplate code.</p>
+<p>There are lots of other helpful methods in the <kbd>TestKit</kbd> that we will take a look at shortly. Most of them exist in two forms: one takes a timeout as a parameter and another uses a default timeout. The timeout defines how long <kbd>TestKit</kbd> will wait for the condition to happen. The default timeout can be overridden by using the <kbd>within</kbd> wrapper, as shown previously, by changing the configuration or by using a <kbd>timescale</kbd> parameter that will affect all durations within the scope.</p>
+<p>We are already familiar with the <kbd>expectMsg</kbd> and <kbd>expectNoMessage</kbd> assertions. Let's take a look at some of the other available helpers:</p>
+<ul>
+<li><kbd>def expectMsgClass[C](c: Class[C])</kbd>: <kbd>C</kbd> expects and returns a single message of type C.</li>
+<li><kbd>def expectMsgType[T](implicit t: ClassTag[T])</kbd>: <kbd>T</kbd> does the same as the previous helper, but uses implicit to construct the type parameter.</li>
+<li><kbd>def expectMsgAnyOf[T](obj: T*): T</kbd> This expects one message and verifies that it is equal to one of the constructor parameters.</li>
+<li><kbd>def expectMsgAnyClassOf[C](obj: Class[_ &lt;: C]*)</kbd>: <kbd>C</kbd> does the same as before, but verifies the type of the message instead of the actual message.</li>
+<li><kbd>def expectMsgAllOf[T](obj: T*)</kbd>: <kbd>Seq[T]</kbd> expects the number of messages and verifies that all of them are equal to the constructor parameters.</li>
+<li><kbd>def expectMsgAllClassOf[T](obj: Class[_ &lt;: T]*)</kbd>: <kbd>Seq[T]</kbd> does the same as before, but verifies types of messages.</li>
+<li><kbd>def expectMsgAllConformingOf[T](obj: Class[_ &lt;: T]*)</kbd>: <kbd>Seq[T]</kbd> does the same as <kbd>expectMsgAllClassOf</kbd>, but checks conformity (instanceOf) instead of class equality.</li>
+<li><kbd>def expectNoMessage()</kbd>: <kbd>Unit</kbd> verifies that no message is received during the specified or default timeout.</li>
+<li><kbd>def receiveN(n: Int)</kbd>: <kbd>Seq[AnyRef]</kbd> receives N messages and returns them to the caller for further verification.</li>
+<li><kbd>def expectMsgPF[T](max: Duration = Duration.Undefined, hint: String = "")(f: PartialFunction[Any, T])</kbd>: <kbd>T</kbd> expects a single message and verifies that a given partial function is defined.</li>
+<li><kbd>def expectTerminated(target: ActorRef, max: Duration = Duration.Undefined)</kbd>: <kbd>Terminated</kbd> expects a single <kbd>Terminated</kbd> message from a specified <kbd>target</kbd>.</li>
+<li><kbd>def fishForMessage(max: Duration = Duration.Undefined, hint: String = "")(f: PartialFunction[Any, Boolean])</kbd>: <kbd>Any</kbd> expects multiple messages for which given partial function is defined. It returns the first message for which <kbd>f</kbd> returns true.</li>
+</ul>
+<p>Our <kbd>Baker</kbd> actor is designed in such a way that it sends messages to its parent, which means that we will be unable to receive responses from the <kbd>Baker</kbd> if we create it using the test actor system. Let's take a look at how <kbd>TestKit</kbd> can help us in this situation:</p>
+<pre><span>"The baker should" </span>should {<br/>  <span>val </span>parent = <span>TestProbe</span>()<br/>  <span>val </span>baker = parent.childActorOf(<span>Props</span>(<span>classOf</span>[Baker], <span>0 </span>millis))<br/>  <span>"bake cookies in batches" </span>in {<br/>    <span>val </span>count = Random.nextInt(<span>100</span>)<br/>    baker ! <span>RawCookies</span>(Oven.<span>size </span>* count)<br/>    parent.expectMsgAllOf(<span>List</span>.fill(count)(<span>Cookies</span>(Oven.<span>size</span>)):_*)<br/>  }<br/>}</pre>
+<p>Here, we're constructing a test actor using <kbd>TestProbe()</kbd>. The <kbd>TestProbe</kbd> is another nice feature provided by the <kbd>TestKit</kbd> that allows you to send, receive, and reply to messages, and is useful in testing scenarios when multiple test actors are required. In our case, we're using its ability to create child actors to create a <kbd>Baker</kbd> actor as a child.</p>
+<p>Then, we need to generate a number of <kbd>RawCookies</kbd> so that it requires a number of turns to bake them. We expect this number of messages to be sent to the <kbd>parent</kbd> in the next line.</p>
+<p>Up until now, we have tested actors in isolation. Our grocery <kbd>Store</kbd> is built in a way that it instantiates an anonymous actor. This makes the approach of testing an actor in isolation impossible. Let's demonstrate how we can verify that the <kbd>Seller</kbd> actor returns the expected <kbd>Groceries</kbd> if given a <kbd>ShoppingList</kbd>:</p>
+<pre><span>class </span>StoreSpec(store: Store) <span>extends </span>TestKit(store.<span>store</span>)<br/>    <span>with </span>Matchers <span>with </span>WordSpecLike <span>with </span>BeforeAndAfterAll {<br/><br/>  <span>def this</span>() = <span>this</span>(<span>new </span>Store {})<br/><br/>  <span>override def </span>afterAll: Unit = shutdown(<span>system</span>)<br/><br/>  <span>"A seller in store" </span>should {<br/>    <span>"do nothing for all unexpected message types" </span>in {<br/>      store.<span>seller </span>! <span>'UnexpectedMessage<br/></span><span>      </span>expectNoMessage()<br/>    }<br/>    <span>"return groceries if given a shopping list" </span>in {<br/>      store.<span>seller</span>.tell(<span>ShoppingList</span>(<span>1</span>, <span>1</span>, <span>1</span>, <span>1</span>), <span>testActor</span>)<br/>      expectMsg(<span>Groceries</span>(<span>1</span>,<span>1</span>,<span>1</span>,<span>1</span>))<br/>    }<br/>  }<br/>}</pre>
+<p>We will construct our test class like we did previously, but with one subtle difference. The <kbd>Seller</kbd> actor is defined anonymously and therefore is only constructed as a part of the whole actor system. Because of this, we instantiate the <kbd>Store</kbd> in the default constructor and use the underlying actor system that's accessible via the <kbd>store</kbd> field as a constructor parameter for the <kbd>TestKit</kbd> instance.</p>
+<p>In the test itself, we're sending test inputs directly to the <kbd>seller</kbd> <kbd>ActorRef</kbd> using the <kbd>store</kbd> that we constructed previously. We have not extended <kbd>ImplicitSender</kbd> and need to provide a <kbd>testActor</kbd> as a sender reference explicitly.</p>
+<p>Now that we have our application implemented and tested, let's run it!</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Running the application</h1>
+                </header>
+            
+            <article>
+                
+<p>Please refer to <span> </span><a href="bc164888-625c-460a-9b0b-e6c45c9eb074.xhtml">Appendix A</a>, <em><span>Preparing the Environment and Running Code Samples</span></em>, if you don't have Java and SBT installed yet.</p>
+<p>We will run our application in the terminal by using two separate terminal sessions for <kbd>Shop</kbd> and <kbd>Bakery</kbd>. It is possible to run both by issuing one of the two following commands in the corresponding shell:</p>
+<ul>
+<li><kbd>sbt "runMain ch11.Store"</kbd></li>
+<li><kbd>sbt "runMain ch11.Bakery"</kbd></li>
+</ul>
+<p>In our code, we do not handle the <kbd>StateTimeout</kbd> for the <kbd>Shopping/ShoppingList</kbd> state. Therefore, it is mandatory to start the store session first and after it loads and starts to accept connections stating that the bakery session can be started. </p>
+<p>It is also possible to use an approach documented in <a href="bc164888-625c-460a-9b0b-e6c45c9eb074.xhtml">Appendix A</a><span>, </span><em><span>Preparing the Environment and Running Code Samples</span></em><span>, </span>to run the code from within the SBT session and choose the appropriate main class after that. This approach is represented in the following screenshot:</p>
+<p class="CDPAlignCenter CDPAlign"><img src="Images/4a897de3-2ade-41c7-b645-e0245266b108.png" width="2403" height="1311"/></p>
+<p>Here, we can see how two SBT sessions are initiated in the <kbd>ch11</kbd> folder. On the right-hand side of the screen, the main class for the store was already selected and run by SBT. The logs show that the <kbd>Store</kbd> is listening for connections, so it is safe to start the main <kbd>Bakery</kbd> session.</p>
+<p>This happens after we enter <kbd>1</kbd> in the left Terminal window:</p>
+<p class="CDPAlignCenter CDPAlign"><img src="Images/c436493b-db61-420f-be10-295ff655470e.png" width="1950" height="1065"/></p>
+<p>The store side reflects that the connection was established and the bakery side starts to output log statements about current activities. It keeps running and logging what is happening until stopped by pressing <em>Ctrl</em> + <em>C</em>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>Let's recap what we've learned in this chapter.</p>
+<p>Current scaling demands are hard to meet using traditional approaches. The actor model with its shared nothing paradigm offers a solution to this problem. Akka is a library for building actor-based applications on the JVM.<span class="Apple-converted-space"> </span></p>
+<p>Actors communicate by sending and receiving messages and change their internal state and produce side-effects in response. Each actor has an address in the form of an <kbd>ActorRef</kbd>, which also encapsulates ab actor's mailbox and a dispatcher. Actors are organized into hierarchies where parent actors are responsible for the supervision of their children.<span class="Apple-converted-space"> </span></p>
+<p>Actors have a well-defined life cycle and implement a number of methods, which are called at appropriate moments during their lifetimes.</p>
+<p>Akka provides additional modules that extend provided functionality even further.</p>
+<p>We also looked at Akka FSM, which gives us the possibility to represent an actor as an FSM by encoding its possible states and state transitions.</p>
+<p>Akka remoting implements the <span>location transparency principle in practice </span>and allows you to access remote Akka systems easily.</p>
+<p>Testing actors is different from testing regular code. Akka <kbd>TestKit</kbd> is a library that's provided by the Akka team, which simplifies and streamlines the testing process. It does so by placing a tested actor in a controlled—but close to the real—environment.</p>
+<p>In the next chapter, we will rebuild our bakery using different actor-based approach and different Akka library—Akka Typed.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Questions</h1>
+                </header>
+            
+            <article>
+                
+<ul>
+<li class="mce-root">Name two ways in which an actor can change itself in response to the received message.</li>
+<li class="mce-root">What is the purpose of <kbd>ActorRef</kbd>?<span class="Apple-converted-space"> </span></li>
+<li class="mce-root">Lookup is in the official documentation description of the system guardian. What is the main purpose of it?</li>
+<li class="mce-root">What are the advantages and disadvantages of using Akka FSM?</li>
+<li class="mce-root">In how many ways can an actor in another actor system be accessed? Describe them.</li>
+<li class="mce-root">Why does testing actors require a special toolkit?</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Further reading</h1>
+                </header>
+            
+            <article>
+                
+<ul>
+<li><span>Christian Baxter, <em>Mastering Akka</em>: </span><span>Master the art of creating scalable, concurrent, and reactive applications using Akka.</span></li>
+<li><span>Héctor Veiga Ortiz and Piyush Mishra, </span><em>Akka Cookbook</em>: Learn how to use the Akka framework to build effective applications in Scala.</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  </body></html>

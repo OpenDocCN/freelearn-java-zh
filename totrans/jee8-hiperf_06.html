@@ -1,0 +1,2147 @@
+<html><head></head><body>
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Be Lazy; Cache Your Data</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p class="mce-root">In the previous chapter, we saw how to parallelize the processing of our requests
+               and reduce our response time using our processor more accurately.
+            </p>
+            
+            <p>However, the best way to be efficient and fast is, obviously, not doing anything.
+               This is what caching tries to do, allowing you to use the memory to keep track of
+               the already processed results and read them fast when needed later on.
+            </p>
+            
+            <p>In this chapter, we will go through the following topics:</p>
+            
+            <ul>
+               
+               <li>What caching is, how it works, and when it is interesting</li>
+               
+               <li>Which kind of cache to use: local versus remote caching</li>
+               
+               <li>JCache – a standard API for Java EE</li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Caching challenges</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>To ensure that we keep in mind the pattern we target when we put caching in place,
+               let's use a simple example taken from our quote manager application. Our goal will
+               be to make our <em>find by symbol</em> endpoint go faster. The current logic looks like this pseudo code snippet:
+            </p>
+            <pre>Quote quote = database.find(symbol);<br/>if (quote == null) {<br/>    throw NotFoundException();<br/>}<br/>return convertToJson(quote);</pre>
+            <p>We only have two operations in this code snippet (find it in the database and convert
+               the database model into a JSON model). Wonder what you're caching: the database lookup
+               result, the JSON conversion, or both?
+            </p>
+            
+            <p>We will come back to this part later, but to keep it simple, here, we will just cache
+               the database lookup. Therefore, our new pseudo code can look like the following:
+            </p>
+            <pre>Quote quote = cache.get(symbol);<br/>if (quote == null) {<br/>    quote = database.find(symbol);<br/>    if (quote != null) {<br/>        cache.put(symbol, quote);<br/>    }<br/>}<br/>if (quote == null) {<br/>    throw NotFoundException();<br/>}<br/>return convertToJson(quote);</pre>
+            <p>This is pretty much the same logic as before, except that we try to read the data
+               from the cache before reaching the database, and if we reach the database and find
+               the record, then we'll add it to the cache.
+            </p>
+            
+            <div class="packt_tip">Indeed, you can also cache if you did not find the quote in the database, in order
+               to avoid issuing a query to the database which will not return anything. It depends
+               on your application whether it encounters these kind of requests often or not.
+            </div>
+            
+            <p>So, we now have a cache layer with the data from our database to consider in our application.
+               We can visualize this structural change with the following diagram:
+            </p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="170" src="assets/b011d741-4d12-494e-af15-ce531fd0c867.jpg" width="177"/></div>
+            
+            <p>This image represents the fact that the <strong>Application</strong> goes through the <strong>Cache</strong> and <strong>Database</strong>. The fact that the connection (the arrow) to the <strong>Cache</strong> is bolder than the one to the <strong>Database</strong> represents our assumption that <strong>Cache</strong> access is faster than <strong>Database</strong> access. Therefore, it is cheaper to access the <strong>Cache</strong> than the <strong>Database</strong>. This implies that we want to go more often to the <strong>Cache</strong> than to the <strong>Database</strong> to find our quotes. Finally, this picture represents the <strong>Cache</strong> and the <strong>Database</strong> in the same <em>layer</em>, since with this kind of solution—and even if the <strong>Cache</strong>, access should be very fast<span>—</span>you now have two data sources.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">How does the cache work?</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>What is cache? The word <em>cache</em> is actually very generic and hides a lot of different flavors, which don't target
+               the same needs.
+            </p>
+            
+            <p>However, all cache implementations share a common basis in terms of principles:</p>
+            
+            <ul>
+               
+               <li>The data is accessible by key</li>
+               
+               <li>The cache provides some eviction mechanisms representing the validity of the stored
+                  values
+               </li>
+               
+               <li>The cache relies on memory storage <em>first</em></li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">The cache key</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Most cache APIs are very close to a map in terms of their behavior—you can put some
+               data with <span><kbd>put(key, value)</kbd> </span>and retrieve it back with the same key through a <kbd>get(key)</kbd> invocation.
+            </p>
+            
+            <p>This means that a poor man's cache can be implemented with <kbd>ConcurrentMap</kbd> of the JRE:
+            </p>
+            <pre><span>private final </span>ConcurrentMap&lt;Long, Optional&lt;Quote&gt;&gt; <span>quoteCache </span>= <span>new </span>ConcurrentHashMap&lt;&gt;();<br/><br/><span>@GET<br/></span><span>@Path</span>(<span>"{id}"</span>)<br/><span>public </span>JsonQuote findById(<span>@PathParam</span>(<span>"id"</span>) <span>final long </span>id) {<br/>    <span>return </span><span>quoteCache</span>.computeIfAbsent(id, identifier -&gt; <br/>    <span>quoteService</span>.findById(identifier))<br/>            .map(this::convertQuote)<br/>            .orElseThrow(() -&gt; <span>new </span>WebApplicationException(Response.Status.<span>NO_CONTENT</span>));<br/>}</pre>
+            <p>In this implementation, we wrapped the database access in a concurrent map access,
+               which triggers the database access only if the data is not already in the cache. Note
+               that we cached <kbd>Optional</kbd>, which also represents the fact that we do not have the data in the database. Thus,
+               we will bypass the SQL query, even if the data is absent.
+            </p>
+            
+            <div class="packt_tip">This kind of implementation works, but as it doesn't have any eviction policy, you
+               will keep the same data during the application's lifespan, which means that updates
+               in the database are completely bypassed. Don't use it in production if your data is
+               not constant.
+            </div>
+            
+            <p>The important part of the usage of such structures (let's call them <em>maps</em>) is the choice of the key. Cache implementations will try to limit the locking as
+               much as possible. They can even be lock-free, depending on the implementation. So,
+               you can assume that caches will scale by themselves, but the key is yours and you
+               need to ensure that it is well implemented.
+            </p>
+            
+            <p>The usage of key by the cache generally has multiple strategies, but the most known
+               and used are the following:
+            </p>
+            
+            <ul>
+               
+               <li><strong>By reference</strong>: The equality is tested using a reference equality, which means that you need to
+                  use the same key instance to find the value. It is, by design, limited to local caches.
+               </li>
+               
+               <li><strong>By contract</strong>: This uses <kbd>equals</kbd> and <kbd>hashCode</kbd> of the key.
+               </li>
+               
+               <li><strong>By value</strong>: This is the same as <em>by contract</em>, but it also copies the key when putting it into the cache. It ensures that if the
+                  key is mutable and has somehow been mutated after having put the data into the cache,
+                  it doesn't affect the cache, which will potentially be corrupted by a wrong <kbd>hashCode</kbd> affectation.
+               </li>
+               
+            </ul>
+            
+            <div class="packt_infobox">The <kbd>hashCode</kbd> usage is generally needed to affect the key/value pair of a cell in the cache storing
+               structure. It enables the distribution of data in a structure, which will then be
+               faster to access. If the key's <kbd>hashCode</kbd> changes after the key has been affected to a cell, then the data won't be found,
+               even if <kbd>equals</kbd> is correctly implemented.
+            </div>
+            
+            <p>Most of the time, you will use the <em>by contract</em> solution (or <em>by value</em>, depending on the implementation), since the <em>by reference</em> rarely works in web applications because the key's reference is often bound to the
+               request and changes with each request. This implies that you must define what the
+               key of your data is and that you must implement <kbd>equals</kbd> and <kbd>hashCode</kbd>.
+            </p>
+            
+            <p>With such a constraint, you need to take care of two very important consequences:</p>
+            
+            <ul>
+               
+               <li>These methods must be fast to execute</li>
+               
+               <li>These methods must be constant once the data is put into the cache</li>
+               
+            </ul>
+            
+            <p>To understand what this means, let's put a computing result in our cache, based on
+               our <kbd>Quote</kbd> entity, as a natural key of the computation (we cache some news related to the quote,
+               for instance). As a reminder, here is our entity structure:
+            </p>
+            <pre><span>@Entity<br/></span><span>public class </span>Quote { // skipping getters/setters<br/>    <span>@Id<br/></span><span>    @GeneratedValue<br/></span><span>    </span><span>private long </span><span>id</span>;<br/><br/>    <span>@NotNull<br/></span><span>    @Column</span>(unique = <span>true</span>)<br/>    <span>private </span>String <span>name</span>;<br/><br/>    <span>private double </span><span>value</span>;<br/><br/>    <span>@ManyToMany<br/></span><span>    </span><span>private </span>Set&lt;Customer&gt; <span>customers</span>;<br/>}</pre>
+            <p>If you use your IDE to generate the <kbd>equals</kbd> and <kbd>hashCode</kbd> methods, you will probably get something like the following implementation:
+            </p>
+            <pre><span>@Override<br/></span><span>public boolean </span>equals(Object o) {<br/>    <span>if </span>(<span>this </span>== o) {<br/>        <span>return true</span>;<br/>    }<br/>    <span>if </span>(o == <span>null </span>|| getClass() != o.getClass()) {<br/>        <span>return false</span>;<br/>    }<br/>    Quote quote = (Quote) o;<br/>    <span>return </span><span>id </span>== quote.<span>id </span>&amp;&amp; Double.<span>compare</span>(quote.<span>value</span>, <span>value</span>) == <span>0 </span>&amp;&amp;<br/>    Objects.<span>equals</span>(<span>name</span>,<br/>            quote.<span>name</span>) &amp;&amp; Objects.<span>equals</span>(<span>customers</span>, quote.<span>customers</span>);<br/>}<br/><br/><span>@Override<br/></span><span>public int </span>hashCode() {<br/>    <span>return </span>Objects.<span>hash</span>(<span>id</span>, <span>name</span>, <span>value</span>, <span>customers</span>);<br/>}</pre>
+            <p>It is a very common implementation, but it takes all the fields into account. For
+               a JPA entity, it is a disaster because of the following:
+            </p>
+            
+            <ul>
+               
+               <li>What happens if the identifier is not affected? If the entity is persisted after the
+                  entity is put into the cache, you will lose the cache benefit or cache it again (with
+                  another hash value).
+               </li>
+               
+               <li>What happens when <kbd>customers</kbd> is accessed? This is a lazy relationship, so if not touched before the <kbd>hashCode</kbd> or <kbd>equals</kbd>, then it will load the relationship, which is surely something we do not want.
+               </li>
+               
+               <li>What happens if <kbd>value</kbd>—any state of the entity unrelated to the identifier<span>—</span>changes? The cache usage will also be missed.
+               </li>
+               
+            </ul>
+            
+            <p>JPA is a case where the identifier is really important, even without caching. But
+               with caching, it is more obvious. All these observations lead to the fact that each
+               key of the cache must be based on a natural identifier, which should be immutable,
+               or you must ensure that you evict the cache entry if you receive an event mutating
+               the key hypothesis. In the case of JPA, the natural identifier is the JPA identifier
+               (<kbd>id</kbd> for <kbd>Quote</kbd>), but it must also be affected from the first usage. This is why, most of the time,
+               good technical identifiers are based on UUID algorithms and affected when a newly
+               created entity is instantiated. Corrected, our <kbd>equals</kbd> and <kbd>hashCode</kbd> methods will look as follows:
+            </p>
+            <pre><span>@Override<br/></span><span>public boolean </span>equals(Object o) {<br/>    <span>if </span>(<span>this </span>== o) {<br/>        <span>return true</span>;<br/>    }<br/>    <span>if </span>(o == <span>null </span>|| getClass() != o.getClass()) {<br/>        <span>return false</span>;<br/>    }<br/>    Quote quote = (Quote) o;<br/>    <span>return </span><span>id </span>== quote.<span>id</span>;<br/>}<br/><br/><span>@Override<br/></span><span>public int </span>hashCode() {<br/>    <span>return </span>Long.<span>hashCode</span>(<span>id</span>);<br/>}</pre>
+            <p>These implementations take into account the <kbd>id</kbd> value only, and assuming that it is affected early, it is safe to use as the key
+               in a cache.
+            </p>
+            
+            <div class="packt_infobox">Several databases rely on the key/value paradigm to ensure good performance and efficient
+               storage. However, the main difference from a cache will be the volatility of the data
+               that a cache is not intended to store, whereas a database will ensure the persistence
+               of the data, even if it is an eventually consistent database.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Eviction policy</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The eviction policy is what makes the cache different from a database or <kbd>Map</kbd>. It enables you to define how the data is automatically removed from the cache storage.
+               This is very important because if you cache some reference data taken from a database,
+               then the database storage can be bigger than the memory storage you have available
+               on the machine and, thus, without any eviction, you will end up filling the memory
+               and getting <kbd>OutOfMemoryException</kbd> instead of the performance boost you were expecting from the cache addition.
+            </p>
+            
+            <p>There are several kinds of eviction policies, but there are few mainstream categories:</p>
+            
+            <ul>
+               
+               <li><strong>Least Recently Used</strong> (<strong>LRU</strong>)
+               </li>
+               
+               <li><strong>First In First Out</strong> (<strong>FIFO</strong>)
+               </li>
+               
+               <li>Random</li>
+               
+               <li><strong>Least Frequently Used</strong> (<strong>LFU</strong>)
+               </li>
+               
+            </ul>
+            
+            <div class="packt_infobox">Only LRU, FIFO, and <em>Expire</em> are really mainstream; the other ones highly depend on your provider capabilities.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Least Recently Used (LRU)</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The LRU strategy is based on the usage of cache elements. Some statistics are maintained
+               to be able to <em>sort</em> elements by the last usage date, and when eviction is needed, the cache just goes
+               through the elements in order and evicts them in the same order.
+            </p>
+            
+            <p>You can imagine it as the cache maintaining a map of data (storage) and a list of
+               the usage of the data (or keys). Here is a sequence to help you visualize it:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Action</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Cache storage (unsorted)</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Eviction list (sorted)</strong></div>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>-</td>
+                     
+                     <td>[]</td>
+                     
+                     <td>[]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>add key/value E1</td>
+                     
+                     <td>[E1]</td>
+                     
+                     <td>[E1]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>add key/value E2</td>
+                     
+                     <td>[E1, E2]</td>
+                     
+                     <td>[E1, E2]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><span>add key/value E3</span></td>
+                     
+                     <td>[E1, E2, E3]</td>
+                     
+                     <td>[E1, E2, E3]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><span>read E2</span></td>
+                     
+                     <td><span>[E1, E2, E3]</span></td>
+                     
+                     <td>[E1, E3, E2]</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p>What is important to notice here is that each usage (<em>put</em>, <em>get</em>, and so on) will first put the element in the eviction list. This means that when
+               the eviction is executed, it will remove this element last. In terms of behavior,
+               LRU leads to keeping <span>the most used elements in the cache for</span> the longest possible time, which is exactly when a cache is the most efficient. However,
+               this also means that the cache has to maintain an eviction list state that can be
+               done in several manners (through a list, sorting at eviction time, dynamic matrix,
+               and so on). Since it has additional work to do, it will impact the performance or
+               memory usage, which will no longer be here for the application/cache.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">First In First Out (FIFO)</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The FIFO algorithm is a simplistic flavor of the LRU algorithm aiming to avoid the
+               drawback of the LRU algorithm at the cost of a little less accurate behavior. Concretely,
+               it will bypass the statistics on the usage and just rely on the time of entry into
+               the cache—a bit like when you are waiting in a supermarket line.
+            </p>
+            
+            <p>Here is an illustration similar to the one we used to depict the LRU algorithm:</p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Action</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Cache storage (unsorted)</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Eviction list (sorted)</strong></div>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>-</td>
+                     
+                     <td>[]</td>
+                     
+                     <td>[]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>add key/value E1</td>
+                     
+                     <td>[E1]</td>
+                     
+                     <td>[E1]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>add key/value E2</td>
+                     
+                     <td>[E1, E2]</td>
+                     
+                     <td>[E1, E2]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><span>add key/value E3</span></td>
+                     
+                     <td>[E1, E2, E3]</td>
+                     
+                     <td>[E1, E2, E3]</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><span>read E2</span></td>
+                     
+                     <td><span>[E1, E2, E3]</span></td>
+                     
+                     <td>[E1, E2, E3]</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p>The main difference here is the last entry, which doesn't impact the eviction order
+               between E2 and E3. You can see it as <em>updates don't change the eviction time</em>.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Random</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>As you can guess from its name, this eviction policy randomly selects entries to remove.
+               It looks inefficient because there's a higher probability of removing most used entries
+               and thereby decreasing the cache efficiency. However, there are a few cases where
+               it can be a good choice. The main advantage of this strategy is that it doesn't rely
+               on any eviction order maintenance and is, thus, fast to execute.
+            </p>
+            
+            <p>Before using it, make sure that it is really less efficient than the others: almost
+               20% less efficient than LRU, experimentally.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Least Frequently Used (LFU)</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The last common algorithm you can meet in caches is the LFU algorithm. Like the LRU
+               algorithm, this flavor also maintains statistics on the cache access.
+            </p>
+            
+            <p>The main difference with LRU is that, instead of using a time-based statistic, it
+               uses a frequency statistic. It means that if E1 is accessed 10 times and E2 is accessed
+               5 times, then E2 will be evicted before E1.
+            </p>
+            
+            <p>The issue with this algorithm is that if you have a fast access rate during a small
+               period of time, then you may evict a more regularly used element than the one often
+               used during a very short period of time. So, the final cache distribution may not
+               be that optimal.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Cache eviction trigger</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The previous algorithms define how to select the items to evict when the eviction
+               is triggered. It means that if the eviction is not triggered, they are pointless.
+               Eviction triggers can be of multiple types, but the main ones are the following:
+            </p>
+            
+            <ul>
+               
+               <li><strong>Size</strong>: The <em>size</em> of the cache can be of several types, such as the actual number of objects of the
+                  cache or the memory size (in bits or bytes).
+               </li>
+               
+               <li><strong>Expiration</strong>: With each element, you can associate an <em>end of life</em>. When the <em>end of life</em> is reached, then the element should be evicted (removed) from the cache. Note that
+                  this parameter is not strict, and the element can stay in memory and be removed during
+                  access if the cache doesn't use a background thread to evict the element fast enough.
+                  However, you shouldn't notice it as a client (cache user).
+               </li>
+               
+            </ul>
+            
+            <p>This is the high-level configuration. However, every cache implementation has a lot
+               of different flavors, mixing a bit of everything. For instance, you can configure
+               a cache to support keeping 1 million objects in memory with a cache memory of the
+               maximum size of 10 MB, and if the objects don't fit in memory, then you can use 1
+               GB of disk space (overflow on disk strategy). This kind of advanced configuration
+               may affect a different <em>end of life</em> to each element, and the cache can thus remove elements from the cache when this
+               <em>end of life</em> is reached. Finally, you can associate this <em>per-element end of life</em> with a global maximum <em>end of life</em> policy of 10 minutes.
+            </p>
+            
+            <p>If you browse your cache implementation provider, you will identify a lot of configuration
+               options, and what is important is to not try to copy-paste a cache configuration from
+               an existing application without ensuring you are in a similar scenario.
+            </p>
+            
+            <p>The idea is to start simple and complicate the configuration if <span>your application requires it, or if </span><span>you get a performance benefit from it. </span>For instance, activating the disk overflow of the data can decrease your performance
+               compared with going to your backend, especially if your backend connection is pretty
+               fast and the disk is highly used already.
+            </p>
+            
+            <p>Starting from a simple LRU strategy with a max memory size or object size is generally
+               the most pragmatic choice.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Cache storage – memory or not</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The idea of caching is to keep the instances in order to serve them faster than rebuilding
+               them or fetching them from a <em>slow</em> backend. The first-citizen storage is the heap because it is a fast-access solution.
+               However, several cache vendors allow other strategies. Most of the time, it will allow
+               to be pluggable through a <strong>Service Provider Interface</strong> (<strong>SPI</strong>), so you will often see a lot of implementations. Here is a small list of the ones
+               you can find:
+            </p>
+            
+            <ul>
+               
+               <li>Hard disk</li>
+               
+               <li>RDBMS database (MySQL, Oracle, and so on)</li>
+               
+               <li>NoSQL database (MongoDB, Cassandra, a specific cache server kind of storage, <em>network cache</em>, and so on)
+               </li>
+               
+            </ul>
+            
+            <p>Before discussing the usage of these extensions, don't forget that it is generally
+               a cache-specific way to use backends. For example, it is not rare for hard-disk implementation
+               to keep keys in memory, store the values on the disk to keep a fast lookup of the
+               data, and ensure that memory usage is respectful of the configuration. This means
+               that you will not always be able to use these <em>overflow</em> strategies to persist cached data.
+            </p>
+            
+            <p>The question is that if the overflow leads to using yet another backend, why is it
+               useful and not more efficient to just go to the main backend, where the data is? This
+               has several answers and they become more and more accurate with the microservices
+               trend that we see nowadays.
+            </p>
+            
+            <p>The two main reasons for going through this kind of caching are as follows:</p>
+            
+            <ul>
+               
+               <li>Provide a more reliable access to the data, even if the main backend is not reliable
+                  (and owned by another application you don't control).
+               </li>
+               
+               <li>Work around an access limitation (like a rate limit) without having to entirely rewrite
+                  the application to take it into account. For example, if you access the GitHub API,
+                  you will not be able to do more than 30 requests per minute on some endpoints, so
+                  if your application requires to do 1,500 accesses per minute, you will need to store
+                  the corresponding data on your side. Here, a cache can be fancy because it allows
+                  to put an eviction adapted to the rate limit, time unit, and your own application
+                  through output.
+               </li>
+               
+            </ul>
+            
+            <p>Using a distributed solution (such as a centralized RDBMS or distributed database
+               such as NoSQL) will allow you to share the data between nodes and avoid doing as many
+               queries on the main backend as you have nodes. For instance, if you have 100 nodes
+               of your application in your cluster and you cache the key, <em>myid</em>, then you will request the backend 100 times for the <em>myid</em> data by using in-memory storage. Whereas, using a distributed storage, you will cache
+               it once from one node, then just read it from this distributed storage, which is still
+               faster than the main backend.
+            </p>
+            
+            <div class="packt_tip">Even though using the overflow can be very tempting, don't forget that it is generally
+               slower than in-memory caching (we often say that in-memory access time is one, disk
+               access time is 10, and network access time is 100). There are alternative strategies
+               that allow you to push data eagerly in memory instead of relying on overflow (lazy)
+               reads, which may pay off if your cluster load balancing doesn't use any affinity.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Consistency of the data</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>We can now set up our caching on all our cluster nodes; the question, however, is
+               whether our application is still working. To answer this, we will take a very simple
+               case where two requests are executed in parallel:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Node 1</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Node 2</strong></div>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><span>put data1 in cache at time t1</span></td>
+                     
+                     <td>-</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td/>
+                     
+                     <td>put data1 in cache at time t1</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>access data1 at time t3</td>
+                     
+                     <td>access data1 at time t3</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p class="mce-root">With this simple timeline, we can immediately see that using a local in-memory cache
+               can lead to inconsistencies, since nodes will likely not cache the data at the same
+               time (cache is generally lazy, so the cache is populated at the first request or when
+               the machine starts, if eager, which may lead to potentially inconsistent data in both
+               cases).
+            </p>
+            
+            <p>If the data is cached, it generally means it is okay to not have the most up-to-date
+               data. Is it really an issue?—It can be. In fact, if you load balance without affinity
+               (randomly in terms of business logic, which is the case with a <em>by load</em> or <em>round-robin</em> load balancer), then you can fall into such a situation:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Node 1</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Node 2</strong></div>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td><span>put data1 in cache at time t1</span></td>
+                     
+                     <td/>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td/>
+                     
+                     <td><span>update data1 at time t2</span></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td/>
+                     
+                     <td><span>put data1 in cache at time t3</span></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>get and put data2 in cache at time t4</td>
+                     
+                     <td/>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td/>
+                     
+                     <td><span>put data2 in cache at time t5</span></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>access data1 at time t6</td>
+                     
+                     <td>access data1 at time t6</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>access data2 at time t7</td>
+                     
+                     <td>access data2 at time t7</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p class="mce-root">We are exactly in the same case as the previous one, but we can now use two kinds
+               data (data1 and data2) in our business logic and cache both. Then, to identify the
+               issue, we must consider that data1 and data2 are <em>logically</em> linked (for instance, data1 is an invoice and data2 is a contract with a price).
+               In this situation, if you validate the data (data1 and data2), the processing may
+               fail because the data is cached at different times and in different nodes, which would
+               give more guarantees on the data consistency (since a single node will access a single
+               cache and, therefore, be consistent with its current state).
+            </p>
+            
+            <p>In other words, it is very important to cache the data in a way that guarantees whether
+               your application still works even with the server's concurrency. The direct implication
+               of this statement is to resist putting the cache everywhere during benchmarks, and
+               adding it only when proven useful, while avoiding breaking the application.
+            </p>
+            
+            <div class="packt_tip">The same thing exists in a worse manner with an overflow storage, since the overflow
+               can be local to a node (hard disk, for instance), leading you to use three sources
+               of truth for your data.
+            </div>
+            
+            <p>Generally, <em>reference data</em> is the first type of data we cache. It is the data that rarely changes, like a contract
+               that is not supposed to change every day. This helps the application to go faster,
+               since part of the data will have fast access. However, it will not break the application,
+               since the <em>dynamic</em> data is still looked up from the main source (a database, for instance). Globally,
+               you will end up with a hybrid lookup setup, where part of your data is read from the
+               cache and the other part is read from the main backend.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">HTTP and caching</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Implementing an HTTP server is one of the main purposes of Java EE. Using the Servlet
+               API, JAX-RS, or even JAX-WS, you can easily expose data over HTTP without caring for
+               the transport.
+            </p>
+            
+            <p>However, HTTP defines a caching mechanism that is interesting to take into account
+               in order to optimize the client's behavior.
+            </p>
+            
+            <p>The common communication with your server will look as follows:</p>
+            
+            <div class="CDPAlignCenter CDPAlign"><img height="105" src="assets/137c99fd-c76e-4587-83b0-7e1e0d623329.jpg" width="217"/></div>
+            
+            <p>The server makes a request and the client sends back some data in headers and a payload
+               (which can be huge). On the previous schema, it is a JSON payload, but don't forget
+               that your web applications will probably also serve images and other sorts of resources,
+               which get big very quickly.
+            </p>
+            
+            <p>To avoid having to do it each and every time, even when nothing is changed (a picture
+               will not change very often in general), the HTTP specification defines a set of headers
+               that help identify the resource that didn't change. Thus, the client doesn't need
+               to read the payload, but can just reuse the one it already has.
+            </p>
+            
+            <div class="packt_tip">Even if this way of caching the data is mainly intended to be used with resources
+               and browsers, nothing prevents you from reusing these same mechanisms in a JAX-RS
+               client to avoid fetching the data you access frequently, to ensure you are always
+               up-to-date.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Cache-Control</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p><kbd>Cache-Control</kbd> is a header that helps to deal with the cache. It defines the policy to use for the
+               request/response. Used on a response, it defines how the client should cache the data;
+               on a request, it defines what the server can send back in terms of policy.
+            </p>
+            
+            <p>This header supports multiple values, which can be concatenated when compatible, separated
+               by a comma. Here are the values you can use to define the way data is cached on the
+               client:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Value</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Description</strong></div>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>public/private</td>
+                     
+                     <td>This defines whether the cache is public or private. A private cache is dedicated
+                        to a single client whereas a public cache is shared by several clients.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>no-cache</td>
+                     
+                     <td>This defines the cached entry as outdated and enforces the loading of data once again
+                        from the server.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>no-store</td>
+                     
+                     <td>This prevents the not volatile storage—no disk or persistent storage.</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>no-transform</td>
+                     
+                     <td>This requests additional network layers, such as proxies, to keep the payload <em>as it is</em> .
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>max-age=&lt;duration in seconds&gt;</td>
+                     
+                     <td>This defines how long the data can be cached (0 meaning never), for example, <kbd>max-age=600</kbd> for a 10-minute cache.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>max-stale=&lt;duration in seconds&gt;</td>
+                     
+                     <td>This notifies the server that an outdated response is acceptable while in this range.
+                        For instance, <kbd>max-stale=600</kbd> allows the server to serve data from 9 minutes ago, even if the server policy is
+                        5 minutes.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>min-fresh=&lt;duration in seconds&gt;</td>
+                     
+                     <td>This requests a response that will be valid during N seconds. Note that this is not
+                        always possible.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>min-vers=&lt;value&gt;</td>
+                     
+                     <td>This specifies the HTTP protocol version to consider for caching.</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>must-revalidate</td>
+                     
+                     <td>The cached data will contact the server back (associated with an <kbd><span>If-Modified-Since</span></kbd> header) to validate the cached data.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>proxy-revalidate</td>
+                     
+                     <td>This is same as <kbd>must-revalidate</kbd> but is used for proxies/gateways.
+                     </td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p class="mce-root">Here is an example of the header value you can use to not cache the data:</p>
+            <pre><span>Cache-Control: no-cache, no-store, must-revalidate<br/></span></pre>
+            <p class="mce-root">This is the type of configuration you can use for sensitive data to avoid keeping
+               them and reuse them transparently. A <em>login</em> endpoint often does it.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">ETag</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The <kbd>ETag</kbd> header presence is important for this header more than its value, which is not supposed
+               to be read by the browser. However, its value is often <kbd>W/&lt;content length&gt;-&lt;last modified&gt;</kbd>, where <kbd>content length</kbd> is the size of the resource and <kbd>last modified</kbd> is its last modified timestamp. This is mainly because it is easy to generate and
+               stateless for the server, but it can be anything, including a random string.
+            </p>
+            
+            <p>This header value can be used as a strong validator. The presence of <kbd>W/</kbd> at the beginning marks it as a weak validator, which means multiple resources can
+               have the same value.
+            </p>
+            
+            <p>The value is used with other headers as an identifier, for instance, <kbd>Other-Header: &lt;etag&gt;</kbd>.
+            </p>
+            
+            <p>Used with <kbd>If-None-Match</kbd>, the header takes a list of <kbd>Etag</kbd> values, potentially <kbd>*</kbd> for uploads as well, in a comma-separated fashion. If the server doesn't match any
+               resource (or already uploaded payload for <em>PUT</em>/<em>POST</em>), then the request will be processed; otherwise, it will return an HTTP 304 response
+               for the read methods (<em>GET</em>, <em>HEAD</em>) and 412 (precondition failed) for others.
+            </p>
+            
+            <p>An interesting header linked to this kind of logic is <kbd>If-Modified-Since</kbd>. It will allow you to do almost the same, but based on a date if you don't have <kbd>Etag</kbd> for the resource. It is often associated with the <kbd>Last-Modified</kbd> value sent back by the server.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Vary</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The <kbd>Vary</kbd> header defines how to decide whether a cached response can be used or not. It contains
+               a comma-separated list of headers, which must not change, in order to decide whether
+               the cache can be used.
+            </p>
+            
+            <p>Let's take these two HTTP responses, for example:</p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        <pre>HTTP/1.1 200 OK<br/>App-Target: desktop<br/>....</pre></td>
+                     
+                     <td>
+                        <pre>HTTP/1.1 200 OK<br/>App-Target: mobile<br/>....</pre></td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p>Both the responses are the same, except the <kbd>App-Target</kbd> header. If you add caching, a desktop or mobile request will lead to the same payload
+               being served if cached.
+            </p>
+            
+            <p>Now, if the responses are modified, like in the following snippets, to add the <kbd>Vary</kbd> header, each kind of <kbd>App-Target</kbd> will not reuse the cache of the other one:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        <pre>HTTP/1.1 200 OK<br/>App-Target: desktop<br/><strong>Vary: App-Target</strong><br/>....</pre></td>
+                     
+                     <td>
+                        <pre>HTTP/1.1 200 OK<br/>App-Target: mobile<br/><strong>Vary: App-Target</strong><br/>....</pre></td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p>This way, both <em>desktop</em> and <em>mobile</em> experiences can use different resources. For instance, the server can use a different
+               folder depending on the <kbd>App-Target</kbd> value.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">HTTP caching and the Java EE API</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Java EE doesn't define a dedicated API (or specification) for HTTP caching, but it
+               provides a few helpers.
+            </p>
+            
+            <p>The more direct (and low level) way to configure it is by using the Servlet specification,
+               which abstracts the HTTP layer:
+            </p>
+            <pre><span>public class </span>NoStoreFilter <span>implements </span>Filter {<br/>    <span>@Override<br/></span><span>    </span><span>public void </span>doFilter(ServletRequest request, ServletResponse<br/>    response, FilterChain filterChain)<br/>            <span>throws </span>IOException, ServletException {<br/>        <span>final </span>HttpServletResponse httpResponse =<br/>        HttpServletResponse.<span>class</span>.cast(response);<br/>        <strong>httpResponse.setHeader("Cache-Control", "no-store");</strong><br/>        filterChain.doFilter(request, response);<br/>    }<br/>}</pre>
+            <p>With this filter, the <kbd>Cache-Control</kbd> value will prevent the cached data from being persistently stored. To activate it,
+               just add it in your <kbd>web.xml</kbd> or in the server if you don't want to modify your application:
+            </p>
+            <pre>&lt;web-app <br/>         <br/>         xsi:schemaLocation="<br/>           http://xmlns.jcp.org/xml/ns/javaee<br/>           http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd"<br/>         version="4.0"&gt;<br/><br/>    &lt;filter&gt;<br/>       &lt;filter-name&gt;NoCacheFilter&lt;/filter-name&gt;<br/>       &lt;filter-class&gt;com.company.NoCacheFilter&lt;/filter-class&gt;<br/>    &lt;/filter&gt;<br/>   <br/>    &lt;filter-mapping&gt;<br/>       &lt;filter-name&gt;NoCacheFilter&lt;/filter-name&gt;<br/>       &lt;url-pattern&gt;/*&lt;/url-pattern&gt;<br/>    &lt;/filter-mapping&gt;<br/><br/>&lt;/web-app&gt;</pre>
+            <p>Using this XML declaration, and not the <kbd>@WebFilter</kbd> one, allows you to reuse the same filter on different mappings (URLs) without having
+               to redeclare it or modify the code. The previous declaration put this filter on all
+               the web applications. It can be good for an application that has secured only web
+               services, for instance.
+            </p>
+            
+            <p>If you want a bit higher level API, you can use the JAX-RS API, which provides a <kbd>CacheControl</kbd> API. But for some particular headers, you will still go to a lower level, even while
+               using JAX-RS <kbd>Response</kbd> instead of <kbd>HttpServletResponse</kbd>:
+            </p>
+            <pre><span>@Provider<br/></span><span>public class </span>NoStoreFilter <span>implements </span>ContainerResponseFilter {<br/>    <span>@Override<br/></span><span>    </span><span>public void </span>filter(ContainerRequestContext containerRequestContext,<br/>    ContainerResponseContext<br/>            containerResponseContext)<br/>            <span>throws </span>IOException {<br/>        containerResponseContext.getHeaders().putSingle(<span>"Cache<br/>        -Control"</span>, <span>"no-store"</span>);<br/>    }<br/>}</pre>
+            <p>This JAX-RS filter will do the same as the previous Servlet filter, but in a JAX-RS
+               way. Now, if you return a <kbd>Response</kbd> in your endpoint, you can directly use the <kbd>CacheControl</kbd> API:
+            </p>
+            <pre><span>@GET<br/></span><span>public </span>Response get() {<br/>    CacheControl cacheControl = <span>new </span>CacheControl();<br/>    cacheControl.setNoCache(<span>true</span>);<br/><br/>    <span>return </span>Response.<span>ok</span>(<span>"..."</span>)<br/>                   .cacheControl(cacheControl)<br/>                   .build();<br/>}</pre>
+            <p>This code associates <span>a cache control strategy</span> with the response, which will be converted to headers in the actual HTTP response.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title"> HTTP 2 promise</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Servlet 4.0 specification brings HTTP/2 support, which is new for Java EE and for
+               a lot of applications. The idea is to be able to eagerly push some resources to the
+               client. Here is a basic example to give you a high-level picture in mind:
+            </p>
+            <pre>@WebServlet("/packt")<br/>public class PacktServlet extends HttpServlet {<br/><br/>    @Override<br/>    protected void doGet(HttpServletRequest req, HttpServletResponse resp)<br/>           throws ServletException, IOException {<br/>        PushBuilder pushBuilder = req.newPushBuilder();<br/>        pushBuilder<br/>                .path("images/packt.png")<br/>                .addHeader("content-type", "image/png")<br/>                .push();<br/><br/>        // serve the response which can use images/packt.png<br/><br/>    }<br/>}</pre>
+            <p>This Servlet will start pushing the resource <kbd>images/packt.png</kbd> upfront. This will enable the browser to rely on it in the response it serves after
+               (likely an HTML page), without having the client to load the image later on.
+            </p>
+            
+            <p>This will enable the applications to be more reactive since it is all done in a single
+               connection. Thus, it is faster than opening multiple connections to get multiple resources,
+               but it doesn't mean you don't need caching. As you can see in the preceding code snippet,
+               the headers are supported per resource, so you can still use what we previously saw
+               per resource to make the resources load faster, even on HTTP/2.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">JCache – the standard cache of Java EE</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>JCache was added to Java EE to enable the application and libraries to interact in
+               a standard manner with the caching. Therefore, it has two types of APIs and features:
+            </p>
+            
+            <ul>
+               
+               <li>A programmatic Cache API to write/read data</li>
+               
+               <li>A CDI integration to automatically put data in the cache</li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Setting up JCache</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>To use JCache, you may need to add it to your application—or to your server, depending
+               on how you want to deploy it<span>—</span>since not all servers add it in their distribution(s). To do it with maven, you can
+               add this dependency:
+            </p>
+            <pre>&lt;dependency&gt;<br/>    &lt;groupId&gt;javax.cache&lt;/groupId&gt;<br/>    &lt;artifactId&gt;cache-api&lt;/artifactId&gt;<br/>    &lt;version&gt;1.0.0&lt;/version&gt;<br/>&lt;/dependency&gt;</pre>
+            <p>Then the only thing you will need to do is select an implementation and add it as
+               well. The most common ones are the following:
+            </p>
+            
+            <ul>
+               
+               <li>Apache Ignite</li>
+               
+               <li>JBoss Infinispan</li>
+               
+               <li>Apache JCS</li>
+               
+               <li>Ehcache</li>
+               
+               <li>Oracle Coherence</li>
+               
+               <li>Hazelcast</li>
+               
+            </ul>
+            
+            <p>As often, the choice of the provider is a multicriteria choice and you will probably
+               want to take the following into account:
+            </p>
+            
+            <ul>
+               
+               <li>The performances</li>
+               
+               <li>The dependency stack the provider enforces you to adopt (it can conflict with your
+                  other libraries for the biggest ones)
+               </li>
+               
+               <li>The extensions the provider has (some of them don't even support CDI)</li>
+               
+               <li>The community and support you can get from it</li>
+               
+            </ul>
+            
+            <p>However, using the JCache API, the provider implementation should not impact your
+               code. So, it doesn't impact you and you can start setting up JCache and change the
+               provider later.
+            </p>
+            
+            <div class="packt_tip">If the provider you choose doesn't support CDI, JCS provides a <em>cdi</em> module, which allows you to add CDI integration without using the JCS cache implementation,
+               but using the one you provide.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Programmatic API</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>A JCache cache can be very quickly accessed using the <kbd>Caching</kbd> factory:
+            </p>
+            <pre>Cache&lt;String, Quote&gt; quotes = Caching.<span>getCache</span>(<span>"packt.quotes"</span>, String.<span>class</span>, Quote.<span>class</span>);<br/>quotes.put(symbol, quote);</pre>
+            <p>The <kbd>getCache</kbd> method directly gives you back a <kbd>Cache</kbd> instance, which allows you to write/read data. The API is then close to a plain <kbd>Map</kbd> semantic. However, this only works if the cache already exists; otherwise, the <kbd>getCache</kbd> call will fail. 
+            </p>
+            
+            <p>To understand how JCache works, we need to look at how the instances are managed.
+               This design is pretty common in Java EE and is quite efficient in general:
+            </p>
+            
+            <ul>
+               
+               <li>A factory method gives you a provider instance (a link between the API and implementation)</li>
+               
+               <li>The provider gives you a manager, which stores instances and avoids creating them
+                  for every request
+               </li>
+               
+               <li>The manager allows you to create and get cache instances</li>
+               
+            </ul>
+            
+            <p>Here is what it looks like in terms of code:</p>
+            <pre><span>final </span>ClassLoader loader = Thread.<span>currentThread</span>().getContextClassLoader(); <span>// Caching.getDefaultClassLoader()<br/></span><span><br/></span><span>final </span>CachingProvider cachingProvider = Caching.<span>getCachingProvider</span>(loader);<br/><br/><span>final </span>CacheManager cacheManager = cachingProvider.getCacheManager(cachingProvider.getDefaultURI(), loader, <span>new </span>Properties());<br/><br/><span>final </span>Cache&lt;String, Quote&gt; cache = cacheManager.createCache(<span>"packt.quotes"</span>, <span>new </span>MutableConfiguration&lt;String, Quote&gt;()<br/>    .setTypes(String.<span>class</span>, Quote.<span>class</span>)<br/>    .setStoreByValue(<span>false</span>));<br/><br/>cachingProvider.close();</pre>
+            <p>The caching factory will give a provider on line 2, but we passed a classloader as
+               a parameter to load the provider for potential future uses. We could use <kbd>Caching.getDefaultClassLoader()</kbd>, but depending on the environment, you can get a classloader other than the one in
+               your application. So, it is generally saner to manually pass your own application's
+               classloader. Then, we'll create <kbd>CacheManager</kbd> from the provider we just retrieved. The <kbd>getCacheManager</kbd> method takes three parameters, which are mainly about how to configure the cache.
+               The URI can default to the provider default value using the provider <kbd>getDefaultURI()</kbd> method. It is the path (URI, actually) to the vendor-specific configuration file.
+               The loader is the classloader to use for the manager/caches usages and the property
+               is a list of key/values used to configure the cache in a vendor-specific manner. Then,
+               once we have a manager, <kbd>createCache()</kbd> allows you to define a cache name and its configuration.
+            </p>
+            
+            <p>Note that we have two types of configurations here:</p>
+            
+            <ul>
+               
+               <li>The implementation-specific configuration passed through the URI and properties to
+                  the manager
+               </li>
+               
+               <li>The JCache configuration passed through the <kbd>createCache()</kbd> method
+               </li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">JCache configuration</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The JCache configuration implements <kbd>javax.cache.configuration.Configuration</kbd> or, more often, <kbd>javax.cache.configuration.CompleteConfiguration</kbd>. This specification provides the <kbd>MutableConfiguration</kbd> implementation, which provides a fluent DSL to configure the configuration. Here
+               are the main entry points:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Configuration</strong></div>
+                        
+                     </td>
+                     
+                     <td>
+                        
+                        <div class="CDPAlignCenter CDPAlign"><strong>Description</strong></div>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>key type/value type</td>
+                     
+                     <td>Allows to enforce the keys/values to respect a typing. If a key or value doesn't respect
+                        the configuration type then it will be rejected (the <kbd>put</kbd> will fail).
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>store by value</td>
+                     
+                     <td>If true, it will copy the values to prevent them from being mutable (which is the
+                        case in store by reference mode). It is faster to store by reference, but in such
+                        a case, it is recommended to ensure the key/value pair is immutable in your application.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>cache entry configuration listeners</td>
+                     
+                     <td>
+                        
+                        <p class="mce-root">JCache provides several listeners for all cache events (entry created, updated, deleted,
+                           expired) and registering a configuration listener allows to register such a listener
+                           and define its behavior—which entry to trigger the event for (the listener event filter),
+                           is the listener synchronous, and should the listener provide the old value of the
+                           data if it exists. This last parameter intends to avoid triggering a network communication
+                           if not needed for distributed caches.
+                        </p>
+                        
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>cache loader/writer factory</td>
+                     
+                     <td>JCache provides loader and writer mechanism. The goal is to be able to populate the
+                        cache from an external source (like a database) if the data is not in the cache yet,
+                        and to synchronize the cache with the same - or another - external storage. In your
+                        application, it means you only access the cache, but your data can be persisted. This
+                        is a paradigm change in terms of code where the cache is the source of truth for your
+                        data.
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>management enabled</td>
+                     
+                     <td>Registers a JMX MBean for each cache exposing the cache configuration.</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>statistics enabled</td>
+                     
+                     <td>Registers a JMX MBean for each cache exposing the cache statistics (hits, misses,
+                        removals, and so on) and allows to reset the statistics. This is very helpful to validate
+                        your cache is useful (if you only get misses then the cache just adds an overhead
+                        and is never used as intended).
+                     </td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>read/write through</td>
+                     
+                     <td>Activates the reader/writer if configured.</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">CDI integration</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The JCache specification (and, therefore, complete implementations) comes with a CDI
+               integration. The idea is to enable you to cache your data without having to deal with
+               all the glue of <kbd>Cache</kbd>.
+            </p>
+            
+            <p>The CDI integration provides four operations usable with CDI:</p>
+            
+            <ul>
+               
+               <li><kbd>@CacheResult</kbd>: This is probably the most useful feature that will cache a method result and serve
+                  it from the cache for later invocations.
+               </li>
+               
+               <li><kbd>@CacheRemove</kbd>: This removes data from the cache.
+               </li>
+               
+               <li><kbd>@CacheRemoveAll</kbd>: This removes all the data of the referenced cache.
+               </li>
+               
+               <li><kbd>@CachePut</kbd>: This adds data to the cache. It relies on <kbd>@CacheValue</kbd>, which marks a parameter to identify the value to cache.
+               </li>
+               
+            </ul>
+            
+            <p>If we want to cache our quotes in our service, we can just decorate our finder method
+               with <kbd>@CacheResult</kbd>:
+            </p>
+            <pre><span>@CacheResult<br/></span><span>public </span>Quote findByName(<span>final </span>String name) {<br/>    <span>return ...</span>;<br/>}</pre>
+            <p>Adding the <kbd>@CacheResult</kbd> annotation will allow you to use the cache from the second invocation of this method
+               and bypass the JPA lookup we used to do.
+            </p>
+            
+            <div class="packt_tip"><span>Note that </span><span>here we are not caching an optional, as it was our original signature, which will
+                  work but is not serializable. Being part of the JDK, we could have trouble making
+                  it serializable if our cache needs that constraint to distribute the values into the
+                  cache cluster. In practice, try not to cache optionals, and never cache streams that
+                  are lazily evaluated and not reusable.</span></div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Cache configuration</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>All these annotations share the same type of configuration where you can define if
+               the corresponding action is done before/after the method execution, how the cache
+               behaves in case of an exception (is the cache operation skipped?), what the cache
+               name is and how to resolve the cache and key to use.
+            </p>
+            
+            <p>While the first set of parameters is simple to understand, let's focus on the cache
+               resolution, which is a bit peculiar with CDI, as you don't bootstrap the cache yourself
+               but simply reference it.
+            </p>
+            
+            <p>In the programmatic approach, we saw that the cache configuration is done through
+               a <kbd>CompleteConfiguration</kbd> instance. How do you provide it in a CDI context?
+            </p>
+            
+            <p>All these annotations take two important parameters:</p>
+            
+            <ul>
+               
+               <li><kbd>cacheName</kbd>: This represents the cache name to use for the operation. Note that by default it
+                  is based on the qualified name of the method if not explicitly set.
+               </li>
+               
+               <li><kbd>cacheResolverFactory</kbd>: This is the way a cache instance will be retrieved.
+               </li>
+               
+            </ul>
+            
+            <p>A cache resolver factory provides access from the method metadata to the cache resolver
+               to do the operation associated with the annotation, or a cache resolver for the exception
+               if an exception is thrown and the configuration of the annotation requires to cache
+               it if <kbd>CacheResult#exceptionCacheName</kbd> is set.
+            </p>
+            
+            <p>The cache resolver is just a contextual factory of cache. Here is a simplistic implementation:</p>
+            <pre><span>@ApplicationScoped<br/></span><span>public class </span>QuoteCacheResolver <span>implements </span>CacheResolver {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>CacheManager <span>manager</span>;<br/>    <br/>    <span>@Override<br/></span><span>    </span><span>public </span>&lt;<span>K</span>, <span>V</span>&gt; Cache&lt;<span>K</span>, <span>V</span>&gt; resolveCache(CacheInvocationContext&lt;?<br/>    <span>extends </span>Annotation&gt; cacheInvocationContext) {<br/>        <span>try </span>{<br/>            <span>return <br/>    </span><span>manager</span>.getCache(cacheInvocationContext.getCacheName());<br/>        } <span>catch </span>(<span>final </span>CacheException ce) {<br/>            <span>return </span><span>manager</span>.createCache(cacheInvocationContext.getCacheName(), <span>new </span>MutableConfiguration&lt;&gt;());<br/>        }<br/>    }<br/>}</pre>
+            <p>This implementation is a CDI bean that allows you to reuse the CDI power and tries
+               to retrieve the existing cache from the contextual cache name; if it doesn't exist,
+               it creates a new instance. This is done in this order to avoid passing in the catch
+               block at runtime—it will happen only once.
+            </p>
+            
+            <p>Indeed, to make this implementation work, you need to produce the cache manager somewhere:</p>
+            <pre>@ApplicationScoped<br/>public class JCacheConfiguration {<br/>    @Produces<br/>    @ApplicationScoped<br/>    CacheManager createCacheManager() {<br/>        return ....;<br/>    }<br/><br/>    void releaseCacheManager(@Disposes CacheManager manager) {<br/>        manager.close();<br/>    }<br/>}</pre>
+            <p>This is a plain CDI producer and the associated code can reuse the code we saw in
+               the programmatic API part.
+            </p>
+            
+            <p>The interesting thing using CDI and extracting the resolver is that you can easily
+               integrate with any configuration. For instance, to read a configuration from <kbd>${app.home}/conf/quote-manager-cache.properties</kbd>, you can use this implementation of the cache resolver factory:
+            </p>
+            <pre><span>@ApplicationScoped<br/></span><span>public class </span>QuoteManagerCacheResolverFactory <span>implements </span>CacheResolverFactory {<br/>    <span>private </span>Map&lt;String, String&gt; <span>configuration</span>;<br/><br/>    <span>@Inject<br/></span><span>    </span><span>private </span>CacheManager <span>manager</span>;<br/><br/>    <span>@Inject<br/></span><span>    </span><span>private </span>Instance&lt;Object&gt; <span>lookup</span>;<br/><br/>    <span>@PostConstruct<br/></span><span>    </span><span>private void </span>loadConfiguration() {<br/>        configuration = ...;<br/>    }<br/><br/>    <span>@Override<br/></span><span>    </span><span>public </span>CacheResolver getCacheResolver(<span>final </span>CacheMethodDetails&lt;? <br/>    <span>extends </span>Annotation&gt; cacheMethodDetails) {<br/>        <span>return </span>doGetCache(cacheMethodDetails, <span>"default"</span>);<br/>    }<br/><br/>    <span>@Override<br/></span><span>    </span><span>public </span>CacheResolver getExceptionCacheResolver(<span>final<br/>    </span>CacheMethodDetails&lt;<span>CacheResult</span>&gt; cacheMethodDetails) {<br/>        <span>return </span>doGetCache(cacheMethodDetails, <span>"exception"</span>);<br/>    }<br/><br/>    <span>private </span>CacheResolver doGetCache(<span>final </span>CacheMethodDetails&lt;? <span>extends<br/>    </span>Annotation&gt; cacheMethodDetails, <span>final </span>String qualifier) {<br/>        <span>final </span>MutableConfiguration cacheConfiguration =<br/>        createConfiguration(cacheMethodDetails, qualifier);<br/><br/>        <span>return new </span>CacheResolver() {<br/>            <span>@Override<br/></span><span>            </span><span>public </span>&lt;<span>K</span>, <span>V</span>&gt; Cache&lt;<span>K</span>, <span>V</span>&gt; resolveCache(<span>final<br/>            </span>CacheInvocationContext&lt;? <span>extends </span>Annotation&gt;<br/>            cacheInvocationContext) {<br/>                <span>try </span>{<br/>                    <span>return </span><span>manager</span>.getCache(<span>cache</span>);<br/>                } <span>catch </span>(<span>final </span>CacheException ce) {<br/>                    <span>return </span><span>manager</span>.createCache(<span>cache</span>,<br/>                    <span>cacheConfiguration</span>);<br/>                }<br/>            }<br/>        };<br/>    }<br/>}</pre>
+            <p>With this skeleton, we can see that the cache resolver factory getting injections
+               as any CDI bean, that it read the configuration in a <kbd>@PostConstruct</kbd> method to avoid reading it each time (but this is not mandatory, it just shows that
+               it really can leverage CDI features), and that when a cache needs to be provided,
+               it is created using the strategy we saw previously (see the simplistic implementation).
+            </p>
+            
+            <p>To be complete, we need to see how we read the configuration. It can be as simple
+               as reading a <kbd>properties</kbd> file:
+            </p>
+            <pre><span>final </span>Properties cacheConfiguration = <span>new </span>Properties();<br/><span>final </span>File configFile = <span>new </span>File(System.<span>getProperty</span>(<span>"app.home"</span>, <span>"."</span>), <span>"conf/quote-manager-cache.properties"</span>);<br/><span>if </span>(configFile.exists()) {<br/>    <span>try </span>(<span>final </span>InputStream stream = <span>new </span>FileInputStream(configFile)) {<br/>        cacheConfiguration.load(stream);<br/>    } <span>catch </span>(IOException e) {<br/>        <span>throw new </span>IllegalStateException(e);<br/>    }<br/>}<br/><span>// potentially create defined caches<br/></span><span>configuration </span>= cacheConfiguration.stringPropertyNames().stream()<br/>                          .collect(<span>toMap</span>(<span>identity</span>(), cacheConfiguration::getProperty));</pre>
+            <p>The code is not very complicated and quite common, but the trick is to convert <kbd>Properties</kbd> into <kbd>Map</kbd>, which avoids being synchronized at runtime and would potentially slow down the runtime
+               a little bit while different caches are getting created for no reason.
+            </p>
+            
+            <p>The last missing thing for having a functional implementation is how to create the
+               cache configuration. It is mainly just a matter of converting the configuration into
+               a cache configuration instance. Here is a potential implementation:
+            </p>
+            <pre><span>private </span>MutableConfiguration createConfiguration(<span>final </span>String configurationPrefix) {<br/>    <span>final </span>MutableConfiguration cacheConfiguration = <span>new<br/>    </span>MutableConfiguration&lt;&gt;();<br/>    cacheConfiguration.setStoreByValue(Boolean.<span>getBoolean</span>(<br/>            <span>configuration</span>.getOrDefault(configurationPrefix +<br/>            <span>"storeByValue"</span>, <span>"false"</span>)));<br/>    cacheConfiguration.setStatisticsEnabled(Boolean.<span>getBoolean</span>(<br/>            <span>configuration</span>.getOrDefault(configurationPrefix +<br/>            <span>"statisticsEnabled"</span>, <span>"false"</span>)));<br/>    cacheConfiguration.setManagementEnabled(Boolean.<span>getBoolean</span>(<br/>            <span>configuration</span>.getOrDefault(configurationPrefix +<br/>            <span>"managementEnabled"</span>, <span>"false"</span>)));<br/><br/>    <span>final </span>String loader = <span>configuration</span>.get(configurationPrefix +<br/>    <span>"loaderCdiName"</span>);<br/>    <span>if </span>(loader != <span>null</span>) {<br/>        cacheConfiguration.setReadThrough(<span>true</span>);<br/>        CacheLoader&lt;?, ?&gt; instance = <span>lookup</span>.select(CacheLoader.<span>class</span>,<br/>        NamedLiteral.<span>of</span>(loader)).get();<br/>        cacheConfiguration.setCacheLoaderFactory(<span>new<br/>        </span>FactoryBuilder.SingletonFactory&lt;&gt;(instance));<br/>    }<br/>    <span>final </span>String writer = <span>configuration</span>.get(configurationPrefix +<br/>    <span>"writerCdiName"</span>);<br/>    <span>if </span>(writer != <span>null</span>) {<br/>        cacheConfiguration.setWriteThrough(<span>true</span>);<br/>        CacheWriter&lt;?, ?&gt; instance = <span>lookup</span>.select(CacheWriter.<span>class</span>,<br/>        NamedLiteral.<span>of</span>(writer)).get();<br/>        cacheConfiguration.setCacheWriterFactory(<span>new </span>FactoryBuilder.SingletonFactory&lt;&gt;(instance));<br/>    }<br/>    <span>return </span>cacheConfiguration;<br/>}</pre>
+            <p>To create the cache configuration, we rely on <kbd>MutableConfiguration</kbd> and just read the values from the properties we loaded. The trick is to get instances
+               like the reader or writer. This can be done using CDI <kbd>Instance&lt;Object&gt;</kbd>, which can be seen as a generic CDI lookup; you can also use <kbd>BeanManager</kbd> directly if you prefer. In this implementation, we look up the reader/writer from
+               their CDI name, so we need to provide the <kbd>@Named("...")</kbd> literal. Since CDI 2.0, you can use the <kbd>NamedLiteral</kbd> API, which will create the corresponding annotation instance for you. Finally, readers/writers
+               need to be passed to the JCache runtime through a factory, but JCache provides a singleton
+               factory implementation, preventing you from creating your own.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">@CacheDefaults</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p><kbd>@CacheDefaults</kbd> allows you to define at the cache level, the cache name, the resolver factory, and
+               the key generator to use. It prevents having to do it on all the methods if they all
+               share the same setup:
+            </p>
+            <pre><span>@ApplicationScoped<br/></span><span>@CacheDefaults</span>(<br/>    cacheName = <span>"packt.quotes"</span>,<br/>    cacheResolverFactory = AppCacheResolverFactory.<span>class</span>,<br/>    cacheKeyGenerator = QuoteCacheGenerator.<span>class<br/></span>)<br/><span>public class </span>CachedQuoteService {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>QuoteService <span>service</span>;<br/><br/>    <span>@CachePut<br/></span><span>    </span><span>public </span>Quote create(<span>final </span>Quote newQuote) {<br/>        <span>return </span><span>service</span>.create(newQuote);<br/>    }<br/><br/>    <span>@CacheRemove<br/></span><span>    </span><span>public </span>Quote delete(<span>final </span>Quote quote) {<br/>        <span>return </span><span>service</span>.delete(quote);<br/>    }<br/>}</pre>
+            <p>This class, which delegates the logic to a dedicated service, has two methods using
+               JCache CDI integration. Both are using the same shared configuration relying on the <kbd>@CacheDefaults</kbd> setup done at the class-level. It prevents having to code it this way:
+            </p>
+            <pre><span>@ApplicationScoped<br/></span><span>public class </span>CachedQuoteService {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>QuoteService <span>service</span>;<br/><br/>    <span>@CachePut</span>(<br/>        cacheName = <span>"packt.quotes"</span>,<br/>        cacheResolverFactory = AppCacheResolverFactory.<span>class</span>,<br/>        cacheKeyGenerator = QuoteCacheGenerator.<span>class<br/></span><span>    </span>)<br/>    <span>public </span>Quote create(<span>final </span>Quote newQuote) {<br/>        <span>return </span><span>service</span>.create(newQuote);<br/>    }<br/><br/>    <span>@CacheRemove</span>(<br/>        cacheName = <span>"packt.quotes"</span>,<br/>        cacheResolverFactory = AppCacheResolverFactory.<span>class</span>,<br/>        cacheKeyGenerator = QuoteCacheGenerator.<span>class<br/></span><span>    </span>)<br/>    <span>public </span>Quote delete(<span>final </span>Quote quote) {<br/>        <span>return </span><span>service</span>.delete(quote);<br/>    }<br/>}</pre>
+            <p>In a more simplistic flavor, cache configuration was duplicated by method, which is
+               less readable.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Cache key</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Now, we are able to control our cache and activate our cache operations on our methods;
+               what did we miss?—A way to control the key used for the cache. For instance, let's
+               take the following method:
+            </p>
+            <pre>@CacheResult<br/>public Quote findQuote(String symbol)</pre>
+            <p>Here, the natural key is the symbol, so it would be nice if JCache could do it automatically,
+               right? It is the cache, but the rule is a bit more complicated because if you apply
+               the same reasoning for a <kbd>create</kbd> method, then it doesn't work:
+            </p>
+            <pre>@CacheResult<br/>public Quote create(String symbol, double price)</pre>
+            <p>Here, we want the result to be cached, but if <kbd>findQuote()</kbd> must match the <kbd>create()</kbd> method, then we must have a way to ask JCache to use only <kbd>symbol</kbd> in the key.
+            </p>
+            
+            <p>To do so, JCache relies on the <kbd>@CacheKey</kbd> API. The following are the rules:
+            </p>
+            
+            <ul>
+               
+               <li>If there is no <kbd>@CacheKey</kbd>, then use all parameters
+               </li>
+               
+               <li>If there is <kbd>@CacheValue</kbd> used on some parameter but no <kbd>@CacheKey</kbd>, then use all the parameters except the one decorated with <kbd>@CacheValue</kbd></li>
+               
+               <li>If some parameters (<em>&gt;= 1</em>) are decorated with <kbd>@CacheKey</kbd>, then use them
+               </li>
+               
+            </ul>
+            
+            <p>In other words, our <kbd>create</kbd> method should look like the following:
+            </p>
+            <pre>@CacheResult<br/>public Quote create(@CacheKey String symbol, double price)</pre>
+            <p>This way, and due to the previous rules, the <kbd>findQuote</kbd> and <kbd>create</kbd> methods use the same key, based on the symbol—<em>based</em> because the key of the cache is not directly the value you pass as the parameter.
+               This is mainly because it can be a key composed of multiple parameters, so you need
+               to wrap them in a single object. The actual key type is <kbd>GeneratedCacheKey</kbd>, which just enforces the implementation to be serializable and to implement <kbd>equals</kbd> and <kbd>hashCode</kbd> for the reason we mentioned at the beginning of the chapter.
+            </p>
+            
+            <p>The JCache implementation will, by default, provide an implementation respecting these
+               rules, but in some cases, you can optimize or want to customize the key. In our case,
+               a plain string key, we can optimize <kbd>GeneratedCacheKey</kbd> to fully rely on the String specifics, which allows to cache <kbd>hashCode</kbd>. Here is the implementation:
+            </p>
+            <pre><span>public class </span>StringGeneratedCacheKey <span>implements </span>GeneratedCacheKey {<br/>    <span>private final </span>String <span>value</span>;<br/>    <span>private final int </span><span>hash</span>;<br/><br/>    <span>public </span>StringGeneratedCacheKey(<span>final </span>String value) {<br/>        <span>this</span>.<span>value </span>= value;<br/>        <span>this</span>.<span>hash </span>= value.hashCode();<br/>    }<br/><br/>    <span>@Override<br/></span><span>    </span><span>public boolean </span>equals(<span>final </span>Object o) {<br/>        <span>return this </span>== o ||<br/>                o != <span>null </span>&amp;&amp; getClass() == o.getClass() &amp;&amp;<br/>                Objects.<span>equals</span>(<span>value</span>, StringGeneratedCacheKey.<span>class</span>.cast(o).<span>value</span>);<br/>    }<br/><br/>    <span>@Override<br/></span><span>    </span><span>public int </span>hashCode() {<br/>        <span>return </span><span>hash</span>;<br/>    }<br/>}</pre>
+            <p>Since a cache access is an access to a storage cell through the hash index, optimizing
+               the hash can be worthy if the delegate parameters' hash code computing is long or
+               needs to go through a complex graph. The same kind of logic can apply to <kbd>equals</kbd>.
+            </p>
+            
+            <p>Now, we have an <em>optimized</em> flavor of our key; we need to enable it. This is done through the cache annotation
+               (<kbd>@CacheDefaults</kbd>) and the <kbd>cacheKeyGenerator()</kbd> member. It allows us to reference a <em>key generator</em>. Here, again, it can be a CDI bean, and it gives you the contextual information of
+               the method, so you can instantiate the key:
+            </p>
+            <pre><span>@ApplicationScoped<br/>public class </span>SingleStringCacheKeyGenerator <span>implements </span>CacheKeyGenerator {<br/>    <span>@Override<br/></span><span>    </span><span>public </span>GeneratedCacheKey generateCacheKey(<span>final<br/>    </span>CacheKeyInvocationContext&lt;? <span>extends </span>Annotation&gt; context) {<br/>        <span>return new </span>StringGeneratedCacheKey(String.<span>class</span>.cast(<br/>            context.getKeyParameters()[<span>0</span>].getValue()));<br/>    }<br/>}</pre>
+            <p>This a very simple implementation; directly extract the (assumed) single key parameter
+               of the method and cast it to a string to instantiate our optimized generated cache
+               key. Then, to use it, we just reference this class in the cache annotation:
+            </p>
+            <pre><span>@CacheResult</span>(cacheKeyGenerator = SingleStringCacheKeyGenerator.<span>class</span>)<br/><span>public </span>Quote findByName(<span>final </span>String name) {<br/>    return ...;<br/>}</pre>
+            <p>It is very important to ensure that the generator implementation matches the method
+               signature. Typically, in this last snippet, if we change our <kbd>name</kbd> parameter to <kbd>long</kbd>, then we need to change the key generator; otherwise, it will fail. However, it is
+               not rare to have generators assuming the type of key parameters, since it is generally
+               coupled to optimize their usage.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Cache once</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>If we look back at our quote manager application, we have the following layers through
+               which a request goes:
+            </p>
+            
+            <ul>
+               
+               <li>Servlet</li>
+               
+               <li>JAX-RS</li>
+               
+               <li>Service layer (<kbd>@Transactional</kbd>)
+               </li>
+               
+               <li>JPA</li>
+               
+            </ul>
+            
+            <p>You can add some caching (such as JCache, not HTTP, which is more a client data management
+               solution) to all the layers. On the Servlet side, you can cache the responses using
+               the requests as key. In JAX-RS, you can do the same, but in a more business-oriented
+               manner. In the service layer, you can use CDI JCache integration. And in JPA, you
+               can use level 2 caching, which can be implemented with JCache or a provider-specific
+               implementation—this generally just requires configuration to be set up so that the
+               API is not very crucial.
+            </p>
+            
+            <p>However, if you configure the caching on all layers, it is likely that a part of the
+               cache will be useless, and since all the layers will not have access to the same information,
+               you will duplicate the caches for a poor gain or for nothing. To use an extreme example,
+               if you cache the response from the request in the Servlet layer, the JAX-RS/service/JPA
+               layer will never be called once the data is in the cache and, therefore, setting up
+               caching in these layers is useless. It doesn't mean that the caching in these layers
+               should be avoided because using some caching in the service layer can benefit some
+               background tasks as well (such as a batch developed with JBatch using some reference
+               data).
+            </p>
+            
+            <p>Nonetheless, caching the closest of the outbound of your application will give you
+               the best performance boost, as it will bypass more layers. For instance, caching the
+               response in the Servlet layer will bypass JAX-RS and, thereby, JAX-RS routing and
+               serialization steps, where caching the same data in the service layer will keep executing
+               these steps through the JAX-RS layer.
+            </p>
+            
+            <p>There is no general rule here, since it is a trade-off between the memory it takes
+               (closer to the data you are). The less memory you use in general, the simpler the
+               key handling will be (since you don't accumulate other data such as HTTP headers in
+               Servlet layer). The best you should do is to think about your application and how
+               it uses data and then validate the cache setup by a comparative benchmark.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Summary</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>At the end of this chapter, you have all the keys you need to enhance your application
+               performance. We saw how to send the right data to a browser to not have to load cached
+               data, how to set up a cache using Java EE API (JCache), and the caching challenges
+               you need to think about to not decrease the performance.
+            </p>
+            
+            <p>Being able to cache data in a distributed system is important, since any network call
+               is very impacting on performances. Now that we know how to cache, we can go to the
+               next level about distributed systems and see how to control the performance in a wider
+               system. This is what our next chapter will be about—how to be fault-tolerant and avoid
+               impacting all the applications of a system when one is starting to fail or running
+               slower than usual.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   </body></html>

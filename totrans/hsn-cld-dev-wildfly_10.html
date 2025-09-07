@@ -1,0 +1,481 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Providing Security Using Keycloak</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">In this chapter, we will learn the basics of distributed, token-based security. We will introduce Keycloak—an authentication server that can be used to secure distributed cloud applications. As a practical example, we will secure part of the API of the Petstore application.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Token-based security</h1>
+                </header>
+            
+            <article>
+                
+<p>Keycloak uses token-based security protocols. In order to understand how they work, we will introduce basic information about them.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Rationale</h1>
+                </header>
+            
+            <article>
+                
+<p>In applications that are built using the client-server architecture, the server is often responsible for implementing security. A client provides credentials to the server, which is responsible for authenticating and authorizing users.</p>
+<p>This model doesn't work well with distributed applications that require over-the-network invocations between a number of independent services.</p>
+<p><span>First of all, an architecture in which each service is responsible for implementing security is unscalable. We would preferably like to create a server that is responsible for keeping the data about users and implementing authentication and authorization. All other services will need to rely on it whenever any security decision has to be made.</span></p>
+<p>here is a diagram of how this may look:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/b5673f5b-f1d8-4a86-ad48-b494d33c272f.png" style=""/></div>
+<p>This solution has a fundamental flaw: credential sharing.</p>
+<div class="packt_infobox">In a cloud environment, an invocation may span a number of heterogeneous services, and, in general, we can't assume that those services can be trusted. <span>If at least one of the clients with whom the user has shared its credentials is compromised, then all the systems are compromised.</span></div>
+<p>However, there is another, more subtle problem. In the preceding architecture, it is unable to distinguish between invocation by the user and invocation on behalf of the user. For example, let's suppose that <strong>SERVICE B</strong> is a disk storage service and <strong>SERVICE A</strong> needs to obtain a file from it on behalf of the user. If the user propagates their credentials to A, then A can do whatever the user can do (for example, delete all their files). This is clearly undesirable.</p>
+<p><span>The preceding problems led to the emergence of the protocols based on security tokens. Let's look at those in greater detail now.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">A basic architecture</h1>
+                </header>
+            
+            <article>
+                
+<p>Let's start by introducing the essential concept of access tokens as follows:</p>
+<p>An access <span>token is</span> a string representing <span>a set of authorization credentials issued to the client. When a</span> client <span>wants to perform a</span> request <span>on behalf of</span> a user<span>, it needs to obtain their permission to do so. The token represents such a permission.</span></p>
+<p><span>An access token is created for a specific client</span><span>. As a result, a user can limit the permissions associated with an access token and therefore the client.</span></p>
+<p>An access <span>token contains authorization information—based on the access token, a service can decide whether the client who performs the invocation is allowed to perform the given operation. An access token does not contain information about the user, and possession of the access token does not imply that the request is being performed by a user.</span></p>
+<p>For example, a typical flow of the distributed protocol that uses an access token is as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/b1774cf9-bad2-4748-98c0-1c1e06c91cb6.png" style=""/></div>
+<p>Note the following things in the preceding example:</p>
+<ol>
+<li>The client wants to perform the request on <strong>SERVICE A</strong>, but needs user permission to do that. Because of this, it asks the user for that permission.</li>
+<li>If the user agrees, she authenticates to the authentication server (2).</li>
+<li>If the authentication finishes with success, the server generates an <strong>access token</strong>, which is sent to the client (3).</li>
+<li>The client can use this token to access <strong>SERVICE A</strong> on behalf of the user (4).</li>
+<li>Furthermore, the token can be propagated to other services (5).</li>
+</ol>
+<p>Let's emphasize the most important characteristics of such an architecture:</p>
+<p>The authorization (no matter which method it uses) happens solely between the user and the authentication server. No other component gains access to any kind of user credentials. As a result, the authorization server is the only component that has to be fully trusted.</p>
+<p>Access tokens represent permission to do something on behalf of a user and are generated for the individual client. Because of that, an <strong>access token</strong> issued to a given client can contain a minimal set of permissions that will allow it to do its job. Furthermore, if the token is propagated to a compromised client or is stolen, it can do much less harm than just leaking of user credentials. Nevertheless, to minimize the impact of such a situation, access tokens are issued for a short period of time. As a result, even if a token is stolen, there is only a small time frame in which it can be used (concrete protocols may define a way for the client to refresh an access token).</p>
+<p>To sum up, token-based security protocols allow the implementation of decentralized authentication and authorization: users authenticate to a trusted authentication server and obtain tokens that can be used to authorize access to services. This is especially useful in cloud architecture: based on tokens generated by a trusted authentication server, we can gain access to a number of heterogeneous services distributed across the network, providing them with the ability to perform operations on our behalf, ensuring that the set of permissions associated with the token is minimal for the services to do their job.</p>
+<p>There are a number of protocols that standardize this type of distributed security. One of them is <strong>OpenID Connect</strong> (<strong><span>OIDC</span></strong>), which is the modern protocol used by Keycloak by default; we will use it in our examples. Let's look at it a bit more closely.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">OpenID Connect</h1>
+                </header>
+            
+            <article>
+                
+<p><span>OIDC is built on top of the <strong>Oauth2</strong></span> protocol, which is an open standard for delegating access. Oauth2 specifies directly how this process, outlined in the preceding paragraph should be executed, which actors will take part in it, and how and in which order <span>they</span> should cooperate to obtain the access token and use it for authorization. The hitch is that Oauth2 specifies only that, leaving a very wide margin to its implementations. As a result, it can be thought of as a framework used to build protocols rather than as a protocol itself.</p>
+<p>OIDC is a protocol that was created using this framework. It fills the implementation gaps (such as the token format) and adds authentication information, which Oauth2 lacks. <span>OIDC</span> standardizes the way in which information about the user can be obtained.</p>
+<p>The gritty details of the protocols are beyond the scope of this book. If you are interested in those, refer to the protocol specifications (Further reading, link 1,2). In this chapter, <span>we will teach you the minimum needed for you to understand Keycloak configuration for the basic usage of distributed security, which we will be presenting in the following example</span>.</p>
+<p><span>OIDC</span> specifies the number of flows—procedures that describe the process of obtaining and using tokens in detail. In the following section, we will take a look at the authentication code flow, the default flow used by Keycloak.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Authentication code flow</h1>
+                </header>
+            
+            <article>
+                
+<p>In this section, we will describe authentication code flow. This is a precise description, which, as you will see, will directly impact on the configuration of the authentication server. It assumes that client is a web application running inside the browser. As a result, you should interpret the terms used literally. For example, if we talk about a client redirecting a user to an authentication server, we literally mean the HTTP redirect of a browser to an address of an authentication server. As we've already suggested, you will see those operations later in this chapter, when we will finish securing the pet store application.</p>
+<p>Let's take a look at a diagram of the flow now:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/b149ffe9-47be-4dc1-b843-ab539204feb6.png" style=""/></div>
+<p>The user uses the client, which is a browser-based application. When, at some point, a user performs a login operation, they are automatically redirected to the authentication server. Authentication is performed between the authentication server and user. The client has nothing to do with it: the way in which it was performed is too opaque for it, and the client has no interaction with any credentials provided by the user, no matter what kind of authentication method is used. As a result, the credentials are provided only to one entity on the web; if it is not compromised, then they will not be compromised either.</p>
+<p>If the authentication process finishes with success, the authentication server will generate an authentication code: a very short-lived, single-use code that will redirect the user to the client. The client will authenticate itself to an authentication server using the code and its own credentials. If the client authenticates correctly, an authentication server will generate an access token and return it to a client. Why is this step necessary? As we've already mentioned in the preceding section, an access token has to be generated for the resource owner, that is, the client tuple. Both the user and the client have to authenticate themselves to the authentication server in order to generate the token. The authentication server knows which permissions should be delegated to the client and creates an authentication token accordingly.</p>
+<p>Apart from an access token, the user obtains an ID token and, optionally, a refresh token.</p>
+<p>We have mentioned that <span>OIDC also</span> provides information on the authentication. This is true. This information is provided to the client in the ID token. An ID token, in contrast with the access token, which may be opaque to the client, contains information provided for the client, and cannot be used to gain access to resources. To put it in a different way, an ID token is a token that is generated for the client and allows them to read information about the user. We will use this capability in our example.</p>
+<p>We have also mentioned that a protocol may specify the way to refresh an access token. <span>OIDC</span> does that by using a refresh token. A refresh token allows a client to create a new <strong>access token</strong>, which, as we've mentioned, is short-lived when the old one expires. A client can use a refresh token in order to keep their authorization valid for a required period without having to delegate a new access code (making the user authenticate again). A client <span>should keep a refresh token confidential—even if the access token is compromised, it can be used only for a short period, and only a client would be able to obtain a new one.</span></p>
+<p>As you will see in <em>WildFly Swarm Keycloak adapter</em> section, we will be dealing directly with access tokens (we have to propagate them between our services), but not with other tokens, as their functionality is encapsulated behind APIs. Let's continue with the flow.</p>
+<p>After the client obtains the access token, it sends it to the resource server with the request. The resource server has to verify that the token is correct, extract the authorization data in it, and decide whether the request should be allowed.</p>
+<p>Access tokens that we will use in the example application are bearer tokens. This means that any entity that possesses these token can use them in the same way. As a result, the tokens can be propagated to all of the microservices in our application (which we will take advantage of soon). On the flip side, this means that the leak of the token is dangerous and, as a result, a bearer token cannot be sent by an untrusted network (we will get to that at the end of this chapter).</p>
+<p>We have now introduced enough theory already and, as usual, after a harsh technical introduction, we will head over to the practical section: a land of milk and honey, where the tools do everything for us. Let's jump into that right away!</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Introducing Keycloak</h1>
+                </header>
+            
+            <article>
+                
+<p>In order to secure our Petstore application, we will use Keycloak. Keycloak is an open source, <strong>single sign-on</strong> (<strong>SSO</strong>) identity management server, which supports, among others, <span>OIDC-</span>based security.</p>
+<p>Keycloak is equipped with a convenient, web-based UI, which enables us to configure all aspect of its behavior using the graphical interface. Furthermore, services that we will write have to be integrated with Keycloak as well. In order to make this integration easy, Keycloak provides a bunch of adapters, which are components that can be installed into any given type of service. In the following example, we will discuss how to use both of those tools.</p>
+<p>Before we start, let's outline the functionality that we will be adding to the pet store application.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Cart-service</h1>
+                </header>
+            
+            <article>
+                
+<p>Until this point, all the services that we've implemented could be accessed by anonymous users. In this chapter, we will implement the cart functionality. Obviously, in order to add something to the cart, you have to be authenticated in the application:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/40ef4a40-5fca-47a6-8302-4d2757f8d1c1.png" style=""/></div>
+<p>We will deploy the Keycloak service in our OpenShift cluster, and configure both customer gateway and <strong>Cart service</strong> so that they allow only users who can authorize as customers to use this part of the API. Let's start.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Installing Keycloak</h1>
+                </header>
+            
+            <article>
+                
+<p>In order to use Keycloak, we have to install it first. Keycloak is basically a Java application based on WildFly AS. For the purpose of cloud usage, an OpenShift Docker image is provided:</p>
+<pre>jboss/keycloak-openshift </pre>
+<p><span>The server has been configured in a way that enables it to be deployed directly to the OpenShift cluster.</span> Let's use the OpenShift web console to deploy it:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/7434228f-e324-4188-995b-d84efd59f2f1.png"/></div>
+<p>As we will see shortly, all the configuration will be performed using an admin console. In the configuration, we have to provide the initial admin credentials using <span class="packt_screen">Environment Variables</span>:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/50fa641b-cc13-4153-90d7-37394e147729.png" style=""/></div>
+<p><span>Since the server will be available behind the OpenShift proxy, we have to set the <kbd>PROXY_ADDRESS_FORWARDING</kbd> parameter to <kbd>true</kbd>.</span></p>
+<p>After setting these parameters, we are ready to start deploying the image into our OpenShift cluster. We will need to click on the <span class="packt_screen">Create</span> button and wait until the Keycloak pod starts.</p>
+<p>Keycloak server, as with gateway servers, has to be accessed from outside the cluster (by us, administrators, and <kbd>petstore-ui</kbd>). Let's make a route, then. We will do this as in previous chapters: we have to click on <span class="packt_screen">Create a route</span> in the <span class="packt_screen">Services</span> menu of the web console. We should use the default parameters. After the route is created, we will be able to see its IP address, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/e8a7cab0-9a4c-43eb-9bfd-334d8a4b2c8f.png" style=""/></div>
+<p>Take a note of this IP, as we will use it quite a bit in a configuration.</p>
+<p>OK, we have deployed Keycloak inside our cluster. We are finally ready to take a route to the Keycloak web console (the one that we have just created).</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Creating realm</h1>
+                </header>
+            
+            <article>
+                
+<p>If you followed the created route, you will see the Keycloak welcome page. Click on the <kbd>Authentication console</kbd> link and enter the credentials that we defined when the Keycloak server was deployed to the cluster (<span class="packt_screen">admin/admin</span>). You will see the <span class="packt_screen">Admin</span> console.</p>
+<p>The <span class="packt_screen">Admin</span> console is a UI that allows you to easily configure all aspects of distributed security:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/be959fc7-0c37-4481-9e92-48c81cfe1de0.png"/></div>
+<p>In the preceding screenshot, look at the top-left corner—the menu is titled <span class="packt_screen">Master</span>. What does that mean? Keycloak is responsible for managing a group of users, their credentials, and roles and clients to whom users can delegate access to. Keycloak provides namespaces, which allow the grouping of those objects. Those namespaces are called <strong>realms</strong>. Realms are isolated, and each realm can only manage the objects that it contains. As a result, all services that communicate with the Keycloak server must specify which realm they are referring to.</p>
+<p>For our purpose, we will create our own petstore realm. In order to do this, we have to click on <span class="packt_screen">Master</span> in the top-left corner and add the new domain, called petstore.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Create a client</h1>
+                </header>
+            
+            <article>
+                
+<p>As mentioned in the theoretical section, the authentication server must be aware of all the clients that user can delegate their access to. In case of our application, we will need to configure a client: <kbd>petstore-ui</kbd>. In order to do this, click on <span class="packt_screen">Clients</span> in the left-hand side menu and click on the <span class="packt_screen">Create client</span> button:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/15afb9c4-7abd-4dff-a5c4-ca00fd843f7c.png" style=""/></div>
+<p>We have to set the new client setting <kbd>Client ID</kbd> to <kbd>petstore-ui</kbd>. Remember that our web application will be redirected to Keycloak whenever a login is attempted. After the operation is finished, the authentication server has to redirect the user to the client using the redirect URI sent with the request by the client. Keycloak validates whether the URI is trusted. As a result, we have to provide a list of URI on which the client may be run. We will add the localhost address to which the browser with the UI is running. Also, some browsers perform <strong>Cross-Origin Resource Sharing</strong> (<strong>CORS</strong>) policy check. Setting the <span class="packt_screen">Web Origins</span> parameter to <kbd><span class="packt_screen">+</span></kbd> will make Keycloak return appropriate CORS headers with the redirect URI, if it was validated correctly.</p>
+<p>We have now created our realm and told Keycloak about the client that will use it. Let's configure users now.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Users and roles</h1>
+                </header>
+            
+            <article>
+                
+<p>For the sake of this example, we will configure a user with <span class="packt_screen">customer</span> and admin roles. Let's start with creating the roles themselves.</p>
+<p>In the Keycloak console, we will need to click on <span class="packt_screen">Roles</span> in the left-hand menu, click on <span>the</span> <span class="packt_screen"><span>A</span>dd role</span> <span>button on the right-hand, and enter the</span> <span class="packt_screen"><span>custo</span>mer</span> role:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/07603102-aafa-4b48-b227-58bcb1563f41.png" style=""/></div>
+<p>Next, we will need to repeat the preceding steps for the admin role.</p>
+<p>Later, we will need to add the user in a similar way: click on the <span class="packt_screen">Users</span> menu, then on the <span class="packt_screen">Add user</span> button, and enter the name of our user:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/b9a9dd34-add6-49b4-b3db-d18f3a5fdd9f.png" style=""/></div>
+<p>This time, we have to perform more configuration though. We have to create the password in the <span class="packt_screen">Credentials</span> section, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/037155f7-5a91-4995-9715-822b1ee0538e.png" style=""/></div>
+<p>Then, map the <span class="packt_screen">customer</span> role to the user:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/a7d14698-bf6f-44b2-968b-b7d277bf7b96.png" style=""/></div>
+<p>We have created the <span>user</span> <span class="packt_screen">tomek</span>, and given them <span class="packt_screen">customer</span> and <span class="packt_screen">admin</span> roles. If <span class="packt_screen">tomek</span> uses <kbd>petstore-ui</kbd>, should they be able to invoke request allowed for admin roles? No. The <kbd>petstore-ui</kbd> is meant to be used by shop customers. We mentioned in the theoretical section that the authentication server should create an access token that contains the minimal amoun<span>t of permissions necessary for the client do their job. In this concrete example,</span> <kbd>petstore-ui</kbd> <span>should <span>only </span>be allowed to perform a request allowed for customers on behalf of</span> <span class="packt_screen">tomek</span><span>. In order to configure that, we will need to introduce scopes.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Scopes</h1>
+                </header>
+            
+            <article>
+                
+<p>Keycloak scope is a tool that allows you to specify which roles will be associated with an access token generated for a specific client. Let's create a scope for the <kbd>pestore-ui</kbd> client.</p>
+<p>In order to do this, you have to click on <span class="packt_screen">Clients</span> in the left-hand side menu, choose the <span class="packt_screen">petstore-ui</span> client, and click on the <span class="packt_screen">Scope</span> tab below the client's name:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/281f5096-1274-445c-9954-3c8dec4abfd6.png" style=""/></div>
+<p>As you will have noticed in the preceding screenshot, each client has the full scope allowed parameter set to true by default. This means that each role that an authenticated user has will be associated with an access token created for that client. In order to limit the roles of the given client, we have to turn this option off and manually choose the roles that are allowed. In our example, we will need to choose the <span class="packt_screen">customer</span> role and move it to assigned roles.</p>
+<div class="packt_infobox">The <span class="packt_screen">admin</span> role has not been moved. As a result, if an access token is generated for <kbd>petstore-ui</kbd> on behalf of <span class="packt_screen">tomek</span>, it will only contain the <span class="packt_screen">customer</span> role. As a result, <span class="packt_screen">tomek</span> won't be able to perform any admin operations from within the <kbd>petstore-ui</kbd> client.</div>
+<p>We have pretty much configured Keycloak.</p>
+<p><span>So, how do you configure the Java services? Before finding that out, let's introduce the next functionality that requires user authentication—the cart service.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Cart service</h1>
+                </header>
+            
+            <article>
+                
+<p>Let's introduce the cart service implementation. First of all, we have to add the new resources to the customer-gateway API.</p>
+<div class="packt_infobox packt_tip">Examples reference: <kbd>chapter10/cart-service</kbd></div>
+<pre><span>package </span>org.packt.swarm.petstore<span>;<br/></span><span><br/></span><span>import </span>org.packt.swarm.petstore.api.CartItemView<span>;<br/></span><span>import </span>org.packt.swarm.petstore.api.CatalogItemView<span>;<br/></span><span>import </span>org.packt.swarm.petstore.cart.api.CartItem<span>;<br/></span><span><br/></span><span>import </span>javax.inject.<span>Inject</span><span>;<br/></span><span>import </span>javax.ws.rs.<span>DELETE</span><span>;<br/></span><span>import </span>javax.ws.rs.<span>GET</span><span>;<br/></span><span>import </span>javax.ws.rs.<span>POST</span><span>;<br/></span><span>import </span>javax.ws.rs.<span>Path</span><span>;<br/></span><span>import </span>javax.ws.rs.<span>PathParam</span><span>;<br/></span><span>import </span>javax.ws.rs.<span>Produces</span><span>;<br/></span><span>import </span>javax.ws.rs.<span>QueryParam</span><span>;<br/></span><span>import </span>javax.ws.rs.core.<span>Context</span><span>;<br/></span><span>import </span>javax.ws.rs.core.MediaType<span>;<br/></span><span>import </span>javax.ws.rs.core.Response<span>;<br/></span><span>import </span>javax.ws.rs.core.SecurityContext<span>;<br/></span><span>import </span>java.util.List<span>;<br/></span><span><br/></span><span>@Path</span>(<span>"/"</span>)<br/><span>public class </span>GatewayResource {<br/><br/>    <span>@Inject<br/></span><span>    </span><span>private </span>GatewayService <span>gatewayService</span><span>;<br/></span><span><br/></span><span>    </span><span>@GET<br/></span><span>    @Path</span>(<span>"/catalog/item"</span>)<br/>    <span>@Produces</span>(MediaType.<span>APPLICATION_JSON</span>)<br/>    <span>public </span>Response <span>getItems</span>() {<br/>        List&lt;CatalogItemView&gt; result = <span>gatewayService</span>.getItems()<span>;<br/></span><span>        return </span>Response.<span>ok</span>(result).build()<span>;<br/></span><span>    </span>}<br/><br/><strong>    @GET<br/>    @Path("/cart/{customerId}")</strong><br/><strong>    @Produces(MediaType.APPLICATION_JSON)</strong><br/><strong>    public Response getCart(@PathParam("customerId") String customerId) {</strong><br/><strong>        List&lt;CartItemView&gt; cart = gatewayService.getCart(customerId);<br/>        return Response.ok(cart).build();<br/>    }</strong><br/><strong><br/>    @POST<br/>    @Path("/cart/{customerId}")</strong><br/><strong>    @Produces(MediaType.APPLICATION_JSON)</strong><br/><strong>    public Response addToCart(@PathParam("customerId") String customerId, CartItem item, @QueryParam("additive") boolean additive) {</strong><br/><strong>        gatewayService.addToCart(customerId, item, additive);<br/>        return Response.ok().build();<br/>    }</strong><br/><strong><br/>    @DELETE<br/>    @Path("/cart/{customerId}/{itemId}")</strong><br/><strong>    @Produces(MediaType.APPLICATION_JSON)</strong><br/><strong>    public Response deleteFromCart(@PathParam("customerId") String customerId, @PathParam("itemId") String itemId) {</strong><br/><strong>        gatewayService.deleteFromCart(customerId, itemId);<br/>        return Response.ok().build();<br/>    }</strong><br/>    <br/>    <span>@POST<br/></span><span>    @Path</span>(<span>"payment"</span>)<br/>    <span>@Produces</span>(MediaType.<span>APPLICATION_JSON</span>)<br/>    <span>public </span>Response <span>payment</span>(<span>@QueryParam</span>(<span>"customerId"</span>) <span>int </span>customerId<span>, </span><span>@Context  </span>SecurityContext securityContext){<br/>        <span>try </span>{<br/>            String paymentUUID = <span>gatewayService</span>.buy(customerId)<span>;<br/></span><span>            return </span>Response.<span>ok</span>(paymentUUID).build()<span>;<br/></span><span>        </span>} <span>catch </span>(Exception e) {<br/>            <span>return </span>Response.<span>status</span>(Response.Status.<span>BAD_REQUEST</span>).build()<span>;<br/></span><span>        </span>}<br/>    }<br/><br/>}</pre>
+<p>As you will have noticed in the preceding code, we have added three cart methods. All of them identify the cart by <kbd>customerId</kbd> (we will show you how to obtain this in few moments) and the cart item using the <kbd>itemId</kbd> of the application. As in previous chapters, all the methods delegate the implementation to the gateway service, which in turn uses proxies to propagate the invocation to backend services.</p>
+<p>In order to perform operations on the cart, a user has to be authenticated to the system. Let's secure the <kbd>GatewayResource</kbd> to make sure that an unauthorized user will be denied access to those methods.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">WildFly Swarm Keycloak adapter</h1>
+                </header>
+            
+            <article>
+                
+<p>As you will know from the theoretical section, services with a secured API will have to authorize their users based on authentication tokens. In order to do that, they have to cooperate with the Keycloak server using, in our example, the <span>OIDC</span> protocol. Obviously, we will not implement this functionality ourselves. As we've suggested, Keycloak provides a number of adapters for different tools. WildFly Swarm has its own adapter too. So, how will we install it?</p>
+<p>Let's extend customer-gateway's <kbd>pom.xml</kbd>:</p>
+<pre>(...)<br/><strong>&lt;dependency&gt;<br/>    &lt;groupId&gt;org.wildfly.swarm&lt;/groupId&gt;<br/>    &lt;artifactId&gt;keycloak&lt;/artifactId&gt;<br/>    &lt;version&gt;${version.wildfly.swarm}&lt;/version&gt;<br/></strong><span><strong>&lt;/dependency&gt;</strong><br/>(...)</span></pre>
+<p>That's it—the adapter is installed.</p>
+<p>We have one <span>more</span> thing to do. We have to configure the adapter. In order to do this, we have to add the <kbd>keycloak.json</kbd> file inside the Maven's resources directory. The file contains a bunch of adapter configuration properties. In our case, it's pretty simple:</p>
+<pre>{<br/>  <span>"realm"</span><span>: </span><span>"petstore"</span><span>,<br/></span><span>  </span><span>"auth-server-url"</span><span>: </span><span>"${env.KEYCLOAK_URL}/auth"</span><span>,<br/></span><span>  </span><span>"resource"</span><span>: </span><span>"petstore-ui"<br/></span>}</pre>
+<p>Basically, the files tell the adapter the <kbd>auth-server</kbd>'s location, the realm, and the resource name. As you may recall, we were behind all of those: we created the route to the Keycloak server deployed on OpenShift, created the realm for our petstore application, and told Keycloak that we will authenticate using the <kbd>petstore-ui</kbd> client, which we configured.</p>
+<p><span>Please, note that we need to provide <kbd>KEYCLOAK_URL</kbd> as an environment variable. This is an URL of the keycloak proxy that we have created. You are able to configure this variable in the web-console:</span></p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/891df04f-75c0-4a05-bb41-c83ade4c344d.jpg" style=""/></div>
+<p>After this information is provided, the Keycloak adapter will be able to authorize users based on the access token provided by the UI. This is good, but we haven't protected our resources yet.</p>
+<p>In order to do this, we have to introduce few changes to <span><span>customer-gateway</span></span>'s main class:</p>
+<pre><span>package </span>org.packt.swarm.petstore<span>;<br/></span><span><br/></span><span>import</span><span> </span>org.jboss.shrinkwrap.api.Archive<span>;<br/></span><span>import </span>org.wildfly.swarm.Swarm<span>;<br/></span><strong>import org.wildfly.swarm.keycloak.Secured</strong><span><strong>;</strong><br/></span><span><br/></span><span>public class </span>Main {<br/><br/>    <span>public static void </span><span>main</span>(String[] args) <span>throws </span>Exception {<br/>        <br/>       (...)    <br/><span>    </span><span><br/></span><span>        </span><span>Archive</span>&lt;?&gt; deployment = swarm.createDefaultDeployment()<span>;<br/></span><span>        </span><strong>secureDeployment(deployment)</strong><span><strong>;</strong><br/></span><span><br/></span><span>        </span>swarm.deploy(deployment)<span>;<br/></span><span>    </span>}<br/><br/>    <span>private static void </span><span>secureDeployment</span>(<span>final </span><span>Archive</span>&lt;?&gt; deployment){<br/>   <strong>     deployment.as(Secured.class)</strong><br/><strong>                .protect("/cart/*")</strong><br/><strong>                .withMethod("POST","GET","DELETE")</strong><br/><strong>                .withRole("customer")</strong><span><strong>;</strong><br/></span><span>    </span>}<br/>}</pre>
+<p>As you will have noticed in the preceding code, after marking <kbd>deployment</kbd> as <kbd>Secured</kbd>, we are able to use a chained API that we use to specify which request on which resources to protect and which roles are allowed.</p>
+<p>With the preceding code, we have made sure that only users with the <kbd>customer</kbd> role is able to use cart-associated methods in the customer API. Note, however, that the backend cart service has to be secured as well.</p>
+<p>We will secure it to the gateway service in an analogous way, which makes sure that it has dependency on swarm's Keycloak adapter, adding <kbd>keycloak.json</kbd> to the classpath (note that the context of the file will be the same, as all the properties stay valid), and making deployment secure in the main function.</p>
+<p>We have one problem though: in the gateway service, we have relied on the UI to send us access token each time the request is performed by an authenticated user. As you may recall from the previous chapters, we use Rest Client to perform the invocation on the backend service, and are responsible for attaching all the necessary information. As a result, we also have to propagate the access token to backend services during the invocation. If we don't do this, Keycloak adapter in the backend service will recognize the request being performed as anonymous, which is clearly invalid.</p>
+<p>In order to propagate the context, we will implement a simple JAX-RS client request filter. In our scenario, we will check whether the access token is present and, if true, propagate it further to the invocation:</p>
+<pre><span>package </span>org.packt.swarm.petstore.security<span>;<br/></span><span><br/></span><span>import </span>org.keycloak.KeycloakPrincipal<span>;<br/></span><span><br/></span><span>import </span>javax.<span>ws</span>.rs.client.ClientRequestContext<span>;<br/></span><span>import </span>javax.<span>ws</span>.rs.client.ClientRequestFilter<span>;<br/></span><span>import </span>javax.<span>ws</span>.rs.core.<span>Context</span><span>;<br/></span><span>import </span>javax.<span>ws</span>.rs.core.HttpHeaders<span>;<br/></span><span>import </span>javax.<span>ws</span>.rs.core.SecurityContext<span>;<br/></span><span>import </span>javax.<span>ws</span>.rs.ext.<span>Provider</span><span>;<br/></span><span>import </span>java.io.IOException<span>;<br/></span><span><br/>//1</span><span><br/></span><span>public class </span>AuthTokenPropagationFilter <span>implements </span>ClientRequestFilter {<br/><br/>    <span>private static final </span>String <span>BEARER </span>= <span>"Bearer"</span><span>;<br/></span><span><br/>    //2<br/></span><span>    </span><span>@Context<br/></span><span>    </span>SecurityContext <span>securityContext</span><span>;<br/></span><span><br/></span><span>    </span><span>@Override<br/></span><span>    </span><span>public void </span><span>filter</span>(ClientRequestContext requestContext) <span>throws </span>IOException {<br/>        //3<br/>        KeycloakPrincipal keycloakPrincipal = (KeycloakPrincipal) <span>securityContext</span>.getUserPrincipal()<span>;<br/>        //4<br/></span><span>        if</span>(keycloakPrincipal != <span>null </span>&amp;&amp; keycloakPrincipal.getKeycloakSecurityContext()!=<span>null</span>) {<br/>            //5<br/>            String token = keycloakPrincipal.getKeycloakSecurityContext().getTokenString()<span>;<br/></span><span>            if</span>(token != <span>null</span>) {<br/>            //6<br/>                requestContext.getHeaders().add(HttpHeaders.<span>AUTHORIZATION</span><span>, </span><span>BEARER </span>+ <span>" " </span>+ token)<span>;<br/></span><span>            </span>}<br/>        }<br/>    }<br/>}</pre>
+<p>Let's analyze this code step by step:</p>
+<ol>
+<li>As you may recall, JAX-RS <kbd>ClientRequestFilter</kbd> (1) filters every invocation performed by the client associated with it before it is propagated to the server. In our scenario, we will check whether the access token is present and attach it to each request if true.</li>
+<li>In (2), we are injecting the <kbd>SecurityContext</kbd>. If Keycloak has authorized the user using the access token, it creates the <kbd>SecurityContext</kbd> and attaches it to the request. As a result, we will inject it into the objects on the invocation thread.</li>
+<li>The <kbd>SecurityContext</kbd> created by Keycloak contains the <kbd>KeycloakPrincipal</kbd> implementation of the principal interface (3).</li>
+<li>If the principal is present, we will be able to obtain further <kbd>KeycloakSecurityContext</kbd> from it (5).</li>
+<li>Finally, the token can be obtained from the context and propagated further as a <kbd>BEARER</kbd> token.</li>
+</ol>
+<p>Let's look at <kbd>CartProxy</kbd> now:</p>
+<pre><span>package </span>org.packt.swarm.petstore.proxy<span>;<br/></span><span><br/></span><span>import </span>org.packt.swarm.petstore.cart.api.CartItem<span>;<br/></span><span>import </span>org.packt.swarm.petstore.security.AuthTokenPropagationFilter<span>;<br/></span><span><br/></span><span>import </span>javax.annotation.<span>PostConstruct</span><span>;<br/></span><span>import </span>javax.enterprise.context.<span>ApplicationScoped</span><span>;<br/></span><span>import </span>javax.ws.rs.client.Client<span>;<br/></span><span>import </span>javax.ws.rs.client.ClientBuilder<span>;<br/></span><span>import </span>javax.ws.rs.client.Entity<span>;<br/></span><span>import </span>javax.ws.rs.client.WebTarget<span>;<br/></span><span>import </span>javax.ws.rs.core.MediaType<span>;<br/></span><span>import </span>java.util.Arrays<span>;<br/></span><span>import </span>java.util.List<span>;<br/></span><span><br/></span><span>@ApplicationScoped<br/></span><span>public class </span>CartProxy {<br/><br/>    (...)<br/><br/>    <span>public </span>List&lt;org.packt.swarm.petstore.cart.api.CartItem&gt; <span>getCart</span>(String customerId){<br/>            Client client = ClientBuilder.<span>newClient</span>()<span>;<br/></span><span>            </span><strong>client.register(new AuthTokenPropagationFilter())</strong><span><strong>;</strong><br/></span><span>            </span>WebTarget target = client.target(<span>targetPath </span>+ <span>"/cart/" </span>+ customerId)<span>;<br/></span><span>            return </span>Arrays.<span>asList</span>(target.request(MediaType.<span>APPLICATION_JSON</span>).get(org.packt.swarm.petstore.cart.api.CartItem[].<span>class</span>))<span>;<br/></span><span>    </span>}<br/><br/>    (...)<br/><br/>}</pre>
+<p>The proxy is similar to the proxies that we created in previous chapters and uses the standard JAX-RS client API to create an appropriate request to the backend cart-service. <span>However,  we have to register the </span><kbd>TokenPropagationFilter</kbd><span> that we have just created for the client</span></p>
+<p>Let's sum up what we have already done: we have extended the customer-gateway with cart methods, added a Keycloak adapter and its configuration to the project, and marked deployment as <kbd>Secured</kbd>, specifying the roles that are authorized to use the given methods. We did this for both customer-gateway and backend cart-service. In order to make sure that the access token is propagated to the backend service, we have implemented an appropriate filter and registered it inside our proxy. It seems that the authentication should work now. Let's try it!</p>
+<div class="packt_infobox">You are going to find UI application in the attached code:<br/>
+<kbd>chapter10/petstore-ui</kbd>.</div>
+<p>Let's start the petstore application and open the UI:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/407336b0-d574-4968-9fe0-049ce30dcb4a.png" style=""/></div>
+<p>In the preceding screenshot, no user is logged in to the application. To obtain all the necessary data, the client had to perform the invocation on the items resource. As the resource is not protected, the invocation was successful. In order to log in to the cart, we have to be authenticated. Let's do it:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/576df6c1-a780-431f-b200-1b4ae6b61516.png" style=""/></div>
+<p>Clicking on the <span class="packt_screen">Log in</span> button redirected us to Keycloak server. After providing your credentials, Keycloak will authenticate you and redirect you to the store:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/2ff6da6f-2519-4a22-a3f7-fad96f83d811.png" style=""/></div>
+<p>As you will have noticed in the preceding screenshot, we have successfully logged in to the UI. You can now add items to the cart and take a look at the cart view:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/f9195f0f-b709-48d4-a731-b672332b7ed1.png" style=""/></div>
+<p>We have shown you the operation of the store with a valid security configuration, but feel free to play with the sample application in order to confirm that the security works correctly. You may create and remove roles from the user in the Keycloak console, or make the service require different roles for authorization. You will see that Keycloak is indeed able to correctly authorize a user; users with valid roles will be allowed to perform a request and users lacking valid roles will be forbidden.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">SSL configuration</h1>
+                </header>
+            
+            <article>
+                
+<p>As we mentioned at the beginning of this chapter, when we describe bearer tokens, when you use this kind of authentication in a production environment, you have to use encrypted connections. In this section, we will describe how WildFly Swarm and OpenShift support the use of secure connections.</p>
+<p>We will separate this section into two different cases, depending on whether we consider our cloud environment to be secured or not.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Secured cloud</h1>
+                </header>
+            
+            <article>
+                
+<p>In a scenario where the cloud environment that you are using is secure, you will need to configure an encrypted connection between external clients and routers:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/8e2d2f1c-144e-4e50-9cc0-1be157f5b840.png" style=""/></div>
+<p>In such a case, we have to configure an <span class="packt_screen">Edge</span> router. An <span class="packt_screen">Edge</span> router has its own certificate and is able to establish secure connections with external clients. Before proxying traffic to the destination, the router encrypts the connection. As a result, in the OpenShift cluster, communication happens through unsecured connections.</p>
+<p>You are able to configure edge routing for each route that you create. In order to do so, you have to create routes in the standard way (choose the service to which you want the route to be established and click on <span class="packt_screen">Create route</span>). Later, you have to choose a <span class="packt_screen">Secure route</span> so, pick <span class="packt_screen">Edge</span> from the <span class="packt_screen">TLS termination</span> drop-down menu and enter your <span class="packt_screen">Certificate</span> in the PEM format in the form, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/eac9287b-a02c-4925-9549-aa1b0e75c72a.png"/></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Unsecured cloud</h1>
+                </header>
+            
+            <article>
+                
+<p>In some circumstances, you may need to configure secure connections for all communication, both with external services and within the cloud:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/71073c02-2403-439f-8a4b-33865f8d80c9.png" style=""/></div>
+<p>In order to do so, you have to configure a route with passthrough TLS termination (by creating the route in the same way as in the paragraph before and choosing pass-through termination).</p>
+<p>With the pass-through termination, the router does not terminate the TLS connection and the encrypted traffic is propagated to the target. One of its implications is that targets (and all other services) need to have their security setting configured.</p>
+<p>Swarm enables you to do this easily by providing HTTP configuration. Let's look at the example configuration:</p>
+<pre><span>swarm:<br/></span><span>  https:<br/></span><span>    only: </span>true<br/>    port: 8443<br/>  <span>http:<br/></span><span>    keystore:<br/></span><span>      path: </span>keystore.jks<br/>      <span>password: </span>password<br/>    truststore:<br/>      path: truststore.jks<br/>      password: password<br/>    </pre>
+<p>The preceding configuration specifies that the server will only <span>use the</span> secured connection on the <kbd>8443</kbd> port. It specifies the location of both <kbd>trustore</kbd> and <kbd>keystore</kbd> (classpath) and their <kbd>password</kbd>s.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we've shown how you can use distributed security protocols to secure your cloud applications <span>using our practical example</span>.</p>
+<p>We started this chapter by introducing concepts based on distributed authentication and authorization: the rationale for tokens and how they can be obtained and used. Later, we introduced basic information about a concrete distributed security protocol: OpenID Connect.</p>
+<p>In the practical section, we used the Keycloak SSO server to secure the cart service in the Petstore application.</p>
+<p>In the, we will discuss how do deal with an unreliable network problem using a circuit breaker pattern; specifically, the Hystrix library.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Further reading</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li><a href="https://oauth.net/2/">https://oauth.net/2/</a></li>
+<li><a href="http://openid.net/developers/specs/">http://openid.net/developers/specs/</a></li>
+<li><a href="https://www.keycloak.org/">https://www.keycloak.org/</a></li>
+</ol>
+<p> </p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

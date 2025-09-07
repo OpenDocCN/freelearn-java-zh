@@ -1,0 +1,451 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Handling Errors</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">Resilience is an important aspect of reactive systems. As per the Reactive Manifesto, a reactive system must remain responsive during failure. The system must handle errors gracefully, and generate a user response in a timely manner. This cannot be accomplished without an effective error handling mechanism. Reactor offers a number of operators to handle errors. In this chapter, we will look at each of them.</p>
+<p>In this chapter, we will cover the following topics:</p>
+<ul>
+<li>Handling errors</li>
+<li>Error operators</li>
+<li>Timeout and retry</li>
+<li>WebClient error handling</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Technical requirements</h1>
+                </header>
+            
+            <article>
+                
+<ul>
+<li>Java Standard Edition, JDK 8 or above</li>
+<li><span>IntelliJ IDEA IDE, 2018.1 or above</span></li>
+</ul>
+<p>The GitHub link for this chapter is <a href="https://github.com/PacktPublishing/Hands-On-Reactive-Programming-with-Reactor/tree/master/Chapter08">https://github.com/PacktPublishing/Hands-On-Reactive-Programming-with-Reactor/tree/master/Chapter08</a>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Generating errors</h1>
+                </header>
+            
+            <article>
+                
+<p>Before we try to handle errors, let's first try to raise a few. In Java ecosystems, error conditions are raised by throwing exceptions. Exceptions can be raised under the following conditions:</p>
+<ul>
+<li>The producer can throw an exception while generating the next value.</li>
+<li>The subscriber can throw an exception while processing the next value or subscription event, or in any operators.</li>
+</ul>
+<p>In all of the preceding conditions, there must be an effective procedure for handling the error <span>raised</span>. Reactive Streams prescribe the error event for the same purpose. The specification states that a producer should raise an error event, instead of throwing an exception. However, the specification does not discuss exceptions raised while processing events in the subscriber. Let's start to work on our Fibonacci series, to understand how error handling happens in Reactor:</p>
+<pre>    @Test<br/>    public void testThrownException() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                throw new RuntimeException("Value out of bounds");<br/>            else<br/>                sink.next(state.getT1());<br/><br/>            return Tuples.of(state.getT2(), state.getT1() + state.getT2());<br/>        });<br/>        fibonacciGenerator<br/>                .subscribe(System.out::println);<br/>    }  </pre>
+<p>In the preceding test case, the following occurs:</p>
+<ol>
+<li>The generator implementation throws <kbd>RuntimeException</kbd> when the value becomes negative.</li>
+<li>If we compare this to the original implementation, created in <a href="2886252b-5c5e-4b42-ab25-dd1145fe9d60.xhtml" target="_blank">Chapter 2</a> , <span><em>The Publisher and Subscriber APIs in a Reactor</em>, </span>we are no longer raising a completion event.</li>
+<li>There is no error function configured in the subscriber.</li>
+</ol>
+<p>Let's run the test case to see how the Reactor responds, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/1c901d86-36df-49af-baa0-69a51cd7d7e9.png"/></div>
+<p>In the preceding execution, you can see the following:</p>
+<ol>
+<li>All positive values are first printed to the console.</li>
+<li>The exception thrown is propagated to the subscriber.</li>
+<li>The subscriber raises the <kbd>ErrorCallbackNotImplemented</kbd> exception, since no error function was configured.</li>
+<li>The exception failed the test case.</li>
+</ol>
+<div class="packt_infobox">In the preceding test execution, please note that we did not raise an error event. However, Reactor raised the error event when the exception was thrown. The event was then handled at the subscriber end.</div>
+<p>Now, let's enhance our test case and raise an error while processing events in the subscriber, with the following code:</p>
+<pre>@Test<br/>    public void testThrownException() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                throw new RuntimeException("Value out of bounds");<br/>            else<br/>                sink.next(state.getT1());<br/><br/>            return Tuples.of(state.getT2(), state.getT1() + state.getT2());<br/>        });<br/>        fibonacciGenerator<br/>                .subscribe(x -&gt; <span>throw new RuntimeException("Subscriber threw error")</span>);<br/>    }     </pre>
+<p>The preceding code now does the following:</p>
+<ol>
+<li>Configures a lambda, instead of the <kbd>System.out.println</kbd> function, in the event handler.</li>
+<li>The lambda throws a <kbd>RuntimeException</kbd>, instead of printing numbers to the console.</li>
+</ol>
+<p>If we run the preceding test case, the output will be similar to our previous execution. The test case will fail, with the following stacktrace:</p>
+<pre>Caused by: java.lang.RuntimeException: Subscriber threw error<br/>    at ErrorHandlingTest.lambda$testThrownException$1(ErrorHandlingTest.java:16)<br/>    at reactor.core.publisher.FluxGenerate$GenerateSubscription.fastPath(FluxGenerate.java:223)<br/>    at reactor.core.publisher.FluxGenerate$GenerateSubscription.request(FluxGenerate.java:202)<br/>    at reactor.core.publisher.LambdaSubscriber.onSubscribe(LambdaSubscriber.java:89)<br/>    at reactor.core.publisher.FluxGenerate.subscribe(FluxGenerate.java:83)</pre>
+<p>Looking at the preceding two pieces of output, we can say that Reactor handles exceptions thrown by the producer and the subscriber in the same manner. A subscriber must provide an error function to allow the Reactive Streams to finish successfully.</p>
+<p>We have one more scenario left. Instead of throwing <kbd>RuntimeException</kbd> in the producer, we must raise an error event. This can be accomplished by replacing the <kbd>throw new RuntimeException</kbd> with <kbd>sink.error(e)</kbd>, as follows:</p>
+<pre>  @Test<br/>    public void testErrorRaised() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                sink.error(new RuntimeException("Value out of bounds"));<br/>            else           <br/>                // Rest removed for Brevity<br/>        });<br/>    }</pre>
+<p>I will leave it to the reader to determine the output of the preceding test case. All of the test cases discussed have failed, due to a missing error callback handler. Consequently, we must define an error function for the subscriber. This can be accomplished by passing an additional lambda function in the <kbd>subscriber()</kbd> API. For this, consider the following code:</p>
+<pre>   @Test<br/>    public void testErrorRaised() {<br/><br/>        // Rest Removed for Brevity<br/><br/>        fibonacciGenerator<br/>                .subscribe(System.out::println, System.out::println);<br/>    }</pre>
+<p>In the preceding code, we have passed the <kbd>println</kbd> function in both the consumer and error consumer events. As a result, the subscriber will print both events to the console. Now, run all of our previously failing test cases; they will print the error to the console, and then finish successfully. This is shown in the following screenshot:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/84983939-28e9-4ad5-996a-426a28372225.png"/></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Checked exceptions</h1>
+                </header>
+            
+            <article>
+                
+<p>We cannot throw checked exceptions from the producer and the subscriber. Each of the respective Reactor methods take a <kbd>Consumer</kbd> function, without any exception declarations. So, the implementations cannot throw it. However, there are scenarios where the producer invokes resources, such as files, which can throw checked exceptions. Reactor provides the <kbd>Exceptions</kbd> utility class for handling such scenarios. The <kbd>Exceptions</kbd> class provides a <kbd>propagate</kbd> method, which can wrap any checked exception into an unchecked exception, as follows:</p>
+<pre>      @Test<br/>    public void testCheckedExceptions() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            try {<br/>                raiseCheckedException();<br/>            } catch (IOException e) {<br/>                throw Exceptions.propagate(e);<br/>            }<br/>            return Tuples.of(state.getT2(), state.getT1() + state.getT2());<br/>        });<br/>        fibonacciGenerator<br/>                .subscribe(System.out::println,<br/>                 e -&gt; Exceptions.unwrap(e));<br/>    }<br/><br/>    void raiseCheckedException() throws IOException {<br/>        throw new IOException("Raising checked Exception");<br/>    }<br/><br/></pre>
+<p>In the preceding code, we did the following:</p>
+<ol>
+<li>Checked that the <kbd>IOException</kbd> is thrown by the <kbd>raiseCheckedException</kbd> method</li>
+<li>Used <kbd>Exception.propagate</kbd> to wrap the exception and throw it back</li>
+<li>Used <kbd>Exception.unwrap</kbd> to get the original checked exception</li>
+</ol>
+<p>Next, let's begin with some <kbd>try...catch</kbd> error <span>type</span><span>s</span><span>.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The doOnError hook</h1>
+                </header>
+            
+            <article>
+                
+<p>We discussed life cycle hooks in <a href="2886252b-5c5e-4b42-ab25-dd1145fe9d60.xhtml" target="_blank">Chapter 2</a>, <em><span>The Publisher and Subscriber APIs in a Reactor.</span></em> <span>These </span>can be used to configure callbacks for every life cycle event. Reactor provides the life cycle error callback hook to configure the error handler. The <kbd>doOnError</kbd> hook allows us to consume an error and perform the intended function. If we have configured the <kbd>doOnError</kbd> hook along with the error callback, then both will be invoked simultaneously by Reactor. The following code shows this:</p>
+<pre>    @Test<br/>    public void testDoError() {<br/>        // Removed for brevity<br/>        fibonacciGenerator<br/>                .doOnError(System.out::println)<br/>                .subscribe(System.out::println, e -&gt; e.printStackTrace());<br/>    }</pre>
+<p>The preceding code does the following:</p>
+<ol>
+<li>Configures the <kbd>println</kbd> function in the <kbd>doOnError</kbd> hook. This function prints the error to the console.</li>
+<li>Configures on error lambda in the subscriber API. The implementation prints the stacktrace of the thrown exception.</li>
+</ol>
+<p>Let's run the preceding test case and validate the output printed on the console. Both error functions are invoked simultaneously, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/7bbfbc37-de16-4d79-ac66-c8908cac0ec5.png"/></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The doOnTerminate hook</h1>
+                </header>
+            
+            <article>
+                
+<p>Similar to the <kbd>doOnError</kbd> life cycle hook, there is the <kbd>doOnTerminate</kbd> hook. This is a generic hook that is invoked for <kbd>on completion</kbd> and <kbd>on error</kbd> <span>stream termination events</span><span>. Unlike the specific error hook, which provides the exception thrown, this hook does not provide any kind of input. It just executes the lambda provided. It is important to note that the</span> <kbd>doOnTerminate</kbd> <span>hook is invoked as soon as we receive termination events. It does not wait for the error callback to be processed. Consider the following code:</span></p>
+<pre>    @Test<br/>    public void testDoTerminate() {<br/>       // Removed for brevity<br/>        fibonacciGenerator<br/>                .doOnTerminate(() -&gt; System.out.println("Terminated"))<br/>                .subscribe(System.out::println,e -&gt; e.printStackTrace() );<br/>    }</pre>
+<p>The preceding code does the following:</p>
+<ol>
+<li>Configures the <kbd>println</kbd> function in the <kbd>doOnTerminate</kbd> hook. This function prints <kbd>Terminated</kbd> to the console.</li>
+<li>Configures an error lambda in the subscriber API. This implementation prints the stacktrace of the thrown exception.</li>
+</ol>
+<p>Let's run the preceding test case and validate the output printed on the console. Both functions are invoked simultaneously, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/7998c695-4ad2-4d86-8687-50fb2c29f869.png"/></div>
+<p>Similar to the <kbd>doOnTerminate</kbd> life cycle hook, there is a <kbd>doAfterTerminate</kbd> life cycle hook. This hook is invoked after the close events have been delivered to the subscriber. Just like the <kbd>doOnTerminate</kbd> hook, <kbd>doAfterTerminate</kbd> is a generic hook that does not provide any events. Since the hook is invoked after the events are delivered, it requires error callback subscriber configuration. If we do not provide this, the stream fails with an <kbd>ErrorCallbackNotImplemented</kbd> exception.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The doFinally hook</h1>
+                </header>
+            
+            <article>
+                
+<p>Similar to the <kbd>doOnError</kbd> life cycle hook, there is the <kbd>doFinally</kbd> hook. This hook  is invoked post-stream completion. The hook executes the lambda provided. It is important to note that the <kbd>doFinally</kbd> hook is invoked post-stream close callback processing, unlike the previously discussed <kbd>doOnTerminate</kbd> hook, which is invoked as soon as we received the close events. Consider the following code:</p>
+<pre>    @Test<br/>    public void testDoFinally() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                sink.error(new RuntimeException("Value out of bounds"));<br/>            else<br/>                sink.next(state.getT1());<br/><br/>            return Tuples.of(state.getT2(), state.getT1() + state.getT2());<br/>        });<br/>        fibonacciGenerator<br/>                .doFinally( x -&gt; System.out.println("invoking finally"))<br/>                .subscribe(System.out::println, e -&gt; e.printStackTrace());<br/>    }</pre>
+<p>The preceding code does the following:</p>
+<ol>
+<li><kbd>fibonacciGenerator</kbd> raises an error on a negative value.</li>
+<li>It configures the <kbd>println</kbd> function in the <kbd>doFinally</kbd> hook. The function prints <kbd>invoking finally</kbd> to the console.</li>
+<li>It configures on error lambda in the subscriber API. The implementation prints the stacktrace of the thrown exception.</li>
+</ol>
+<p>Let's run the preceding test case and validate the output printed on the console, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/81cb7987-b2d3-49f0-afc0-3ceaba650c48.png"/></div>
+<p>As an alternative to the <kbd>doFinally</kbd> hook, there is the <kbd>Flux.using</kbd> API. This API configures a resource mapped for a publisher. It also configures a callback lambda, which is invoked with the respective publisher resource upon stream closure. This is synonymous with the <kbd>try-with-resource</kbd> Java API:</p>
+<pre> @Test<br/>    public void testUsingMethod() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                sink.complete();<br/>            else<br/>                sink.next(state.getT1());<br/><br/>            return Tuples.of(state.getT2(), state.getT1() + state.getT2());<br/>        });<br/>        Closeable closable = () -&gt; System.out.println("closing the stream");<br/>        Flux.using(() -&gt; closable, x -&gt; fibonacciGenerator, e -&gt; {<br/>            try {<br/>                e.close();<br/>            } catch (Exception e1) {<br/>                throw Exceptions.propagate(e1);<br/>            }<br/>        }).subscribe(System.out::println);<br/>    }</pre>
+<p>The preceding code does the following:</p>
+<ol>
+<li>It generates a <kbd>Flux&lt;Long&gt;</kbd> by invoking the <kbd>Using</kbd> API.</li>
+<li>It maps a <kbd>closable</kbd> instance to an instance of <kbd>fibonacciGenerator</kbd>.</li>
+<li>It invokes the <kbd>close</kbd> method upon stream completion. The <kbd>close</kbd> method can raise checked exceptions, so <kbd>Exceptions.propagate</kbd> is used to wrap the error.</li>
+</ol>
+<p>Let's run the preceding test case and validate the output printed on the console, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/d2e6c2e5-8330-4f32-bed9-3d783e5b25dc.png"/></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Error recovery</h1>
+                </header>
+            
+            <article>
+                
+<p>In the preceding section, we determined how to configure an error callback. However, when performing error handling, we may encounter cases in which we want to continue execution with some alternative values. There are many use cases for such scenarios. For example, quote aggregating systems can have errors thrown while getting the latest tick value, but the aggregation must continue with the last value. In the following sections, we will cover each of the operators offered, in order to accomplish this. </p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The onErrorReturn operator</h1>
+                </header>
+            
+            <article>
+                
+<p>Reactor provides the <kbd>OnErrorReturn</kbd> operator to provide a fallback value in the event of an error. As a result of the fallback, the original error event is not propagated to the error callback. The event processing continues by using the event handler, as follows:</p>
+<pre>    @Test<br/>    public void testErrorReturn() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                sink.error(new RuntimeException("Value out of bounds"));<br/>            else<br/>                sink.next(state.getT1());<br/><br/>            return Tuples.of(state.getT2(), state.getT1() + state.getT2());<br/>        });<br/>        fibonacciGenerator<br/>                .onErrorReturn(0L)<br/>                .subscribe(System.out::println);<br/>    }</pre>
+<p>In the preceding code, the following applies:</p>
+<ol>
+<li>The <kbd>onErrorReturn</kbd> operator is used to provide <kbd>0</kbd> when an error is received by the subscriber</li>
+<li>No error callback is configured in the subscriber API</li>
+</ol>
+<p>Let's run our test case and validate the understanding of the preceding code:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/3514975b-60f9-4b78-a63a-91be791d5f4e.png"/></div>
+<p>The <kbd>onErrorReturn</kbd> operator also provides exception-specific handling. This is an overloaded method that takes the exception class, as well as a fallback value. Reactor picks the first match it finds by validating whether or not the exception thrown is an instance of the exception configured. Consequently, we must configure the most specific exception matches first, and the most generic ones last. Now, let's write a test case to validate the exception handling, as follows:</p>
+<pre>      @Test<br/>    public void testErrorReturn() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                sink.error(new IllegalStateException("Value out of bounds"));<br/>         // Removed for Brevity<br/>        });<br/>        fibonacciGenerator                <br/>                .onErrorReturn(RuntimeException.class,0L)<br/>                .onErrorReturn(IllegalStateException.class,-1L)<br/>                .subscribe(System.out::println);<br/>    }</pre>
+<p>In the preceding code, we are now throwing <kbd>IllegalStateException</kbd>, instead of <kbd>RuntimeException</kbd>. <kbd>IllegalStateException</kbd> is a sub-type of <kbd>RuntimeException</kbd>. The subscriber is configured for both of these exceptions. It is important to note the order of the configuration here. <kbd>RuntimeException</kbd> has been configured first, with a default value of <kbd>0</kbd>, and the <kbd>IllegalStateException</kbd> with the value <kbd>-1</kbd>. Reactor will match the thrown exception against <kbd>RuntimeException</kbd>. Run the test case and validate the result here.</p>
+<p>Finally, there is also an <kbd>onErrorReturn</kbd>, which matches the exception by validating it against the predicate <span>provided</span>. The configured predicate takes the exception thrown as input, and provides a Boolean result in return. Here, we also configure multiple predicates. Reactor will pick the first matching predicate and use its fallback value.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The onErrorResume operator</h1>
+                </header>
+            
+            <article>
+                
+<p>Similar to the <kbd>OnErrorReturn</kbd> operator, there is the <kbd>OnErrorResume</kbd> operator, which provides a fallback  value stream instead of a single fallback value. In the event of an error, the fallback stream is returned. The original error event is not propagated to the error callback. The event processing continues by using the configured event handler, as follows:</p>
+<pre>    @Test<br/>    public void testErrorResume() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>          // Removed for Brevity<br/>        });<br/>        fibonacciGenerator<br/>                .onErrorResume(x -&gt; Flux.just(0L,-1L,-2L))<br/>                .subscribe(System.out::println);<br/>    }</pre>
+<p>In the preceding code, the following applies:</p>
+<ol>
+<li>The <kbd>onErrorResume</kbd> operator is used to provide back <kbd>Flux&lt;Long&gt;</kbd> when any error is received by the subscriber.</li>
+<li>No error callback is configured in the subscriber API.</li>
+</ol>
+<p>Let's run our test case and validate our understanding, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/08af6ed3-12ff-4667-aa08-d02f063d92e5.png"/></div>
+<p>Similar to the lines of <kbd>onErrorReturn</kbd>, the <kbd>onErrorResume</kbd> operator is overloaded to provide specific, exception-based fallback values. Exceptions can be provided directly, or can be matched using a predicate. Reactor will pick the value that matches first.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The onErrorMap operator</h1>
+                </header>
+            
+            <article>
+                
+<p>Reactor's <kbd>onErrorMap</kbd> operator allows us to convert an exception of one type to another type. Unlike the previous two operators, the <kbd>onErrorMap</kbd> operator requires an error callback to be configured with the subscriber. If no handler is configured, the subscriber throws back an <kbd>ErrorCallbackNotImplemented</kbd> exception. The <kbd>onErrorMap</kbd> operator provides overloaded functions, similar to the previous operators, which can be used to match exceptions based on type or a provided predicate.</p>
+<p>Now, let's build a simple test case to validate our understanding of the <kbd>onErrorMap</kbd> operator:</p>
+<pre>    @Test<br/>    public void testErrorMap() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>           // Removed for brevity<br/>        });<br/>        fibonacciGenerator<br/>                .onErrorMap(x -&gt; new IllegalStateException("Publisher threw error", x))<br/>                .subscribe(System.out::println,System.out::println);<br/>    }</pre>
+<p>In the preceding code, the following applies:</p>
+<ol>
+<li>The <kbd>onErrorMap</kbd> operator is configured to throw <kbd>IllegalStateException</kbd> when any error is received by the subscriber.</li>
+<li>The error callback was configured in the subscriber API.</li>
+</ol>
+<p>Let's run it and confirm the output, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/da1c8b8a-3d7b-4806-941b-57daf3042657.png"/></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Timeout</h1>
+                </header>
+            
+            <article>
+                
+<p>As discussed in the preceding sections, generating a timely response is an important aspect of reactive systems. The requirement means that reactive systems must provide a deterministic response in a timely manner. However, all software systems are <span>inherently</span><span> </span><span>unreliable. The underlying network itself is unreliable. All components can fail without providing a response. As a result, systems with streaming results can get stuck waiting for a response.</span></p>
+<p>A way to address this unreliability is to adapt the fail-fast system design. This design dictates that a system makes some assumptions for normal operations, and it must fail as soon as these assumptions are broken. This leads to the early reporting of likely issues. In order to do this, we must assume a likely response time, the most common fail-fast metric. If the response is not received in this time, then the system must trigger the fallback/error response.</p>
+<p>Reactor offers the <kbd>timeout()</kbd> operator to enable a response time check. The timeout fails when there is no response received in the specific time interval. Once the timeout expires, it triggers the error callback configured for the subscriber. Let's validate the operator by using the following code:</p>
+<pre>    @Test<br/>    public void testTimeout() throws  Exception{<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            if (state.getT1() &lt; 0)<br/>                throw new RuntimeException("Value out of bounds");<br/>            else<br/>                sink.next(state.getT1());<br/><br/>            return Tuples.of(state.getT2(), state.getT1() + state.getT2());<br/>        });<br/>        CountDownLatch countDownLatch = new CountDownLatch(1);<br/>        fibonacciGenerator<br/>                .delayElements(Duration.ofSeconds(1))<br/>                .timeout(Duration.ofMillis(500))<br/>                .subscribe(System.out::println, e -&gt; {<br/>                    System.out.println(e);<br/>                    countDownLatch.countDown();<br/>                });<br/>        countDownLatch.await();<br/>    }</pre>
+<p>In the preceding code, the following applies:</p>
+<ol>
+<li>The <kbd>delayElements</kbd> operator is responsible for slowing down each element by the configured time. In our case, it sends each element after a one second delay.</li>
+<li>The <kbd>timeout()</kbd> operator is configured for an interval of <kbd>500</kbd> milliseconds. This operator will raise an error when it first discovers a delay of more than <kbd>500</kbd> milliseconds.</li>
+<li>The <kbd>onError</kbd> callback is configured for the subscriber. We also added a <kbd>CountDownLatch</kbd>, as we want to hold the test execution until the error is received.</li>
+</ol>
+<p>Let's run this and confirm the output, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/8dbff4db-7bda-4550-8e2f-36f855580b32.png"/></div>
+<p>The <kbd>timeout()</kbd> operator also offers to provide a fallback <kbd>Flux&lt;&gt;</kbd> value when the timeout is triggered. In this case, the fallback value does not throw a timeout error. Consequently, it does not trigger the configured error callbacks. Instead, the flow is executed as next events, as follows:</p>
+<pre>    @Test<br/>    public void testTimeoutWithFallback() throws  Exception{<br/>     // Removed for brevity <br/>    fibonacciGenerator<br/>                .delayElements(Duration.ofSeconds(1))<br/>                .timeout(Duration.ofMillis(500),Flux.just(-1L))<br/>                .subscribe(e -&gt; {<br/>                    System.out.println(e);<br/>                    countDownLatch.countDown();<br/>                });<br/>        countDownLatch.await();<br/>    }</pre>
+<p>In the preceding code, the following applies:</p>
+<ol>
+<li>The <kbd>delayElements</kbd> operator is responsible for slowing down each element by the configured time. In our case, it sends each element after a one second delay.</li>
+<li>The <kbd>timeout()</kbd> operator is configured for an interval of <kbd>500</kbd> milliseconds. This operator will raise an error when it first discovers a delay of more than <kbd>500</kbd> milliseconds. The operator also has a fallback Flux. The fallback value is returned once the timeout expires.</li>
+<li>The <kbd>onNext</kbd> handler is configured to print the received value. We added a <kbd>CountDownLatch</kbd>, as we want to hold the test execution until the value is received.</li>
+<li>There is no <kbd>onError</kbd> callback configured.</li>
+</ol>
+<p>Let's run it and validate the output, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/b0e52e9c-04fb-49dd-b0e9-2c755a5b72e2.png"/></div>
+<p>While we are discussing errors and timeouts, it is important to mention the <kbd>retry</kbd> operator. This operator allows us to re-subscribe to the published stream when an error is discovered. The retry can only be performed a fixed number of times. The re-subscribed events are handled as next events by the subscriber. If the stream completes normally, no next retry takes place. Error callback is only triggered when an error is thrown during the last retry cycle:</p>
+<pre>    @Test<br/>    public void testRetry() throws  Exception{<br/><br/>      // Removed for brevity<br/><br/>        CountDownLatch countDownLatch = new CountDownLatch(1);<br/>        fibonacciGenerator<br/>                 .retry(1)<br/>                .subscribe(System.out::println, e -&gt; {<br/>                    System.out.println("received :"+e);<br/>                    countDownLatch.countDown();<br/>                },countDownLatch::countDown);<br/>        countDownLatch.await();<br/>    }</pre>
+<p>In the preceding code, the following applies:</p>
+<ol>
+<li>The <kbd>delayElements</kbd> operator is responsible for slowing down each element by the configured time. In our case, it sends each element after a one second delay.</li>
+<li>The <kbd>timeout()</kbd> operator is configured for an interval of <kbd>500</kbd> milliseconds. The operator will raise an error when it first discovers a delay of more than <kbd>500</kbd> milliseconds. The operator also has a fallback Flux. The fallback value is returned once the timeout expires.</li>
+<li>The <kbd>onNext</kbd> handler is configured to print the received value. We added a <kbd>CountDownLatch</kbd>, as we want to hold the test execution until the value is received.</li>
+<li>No <kbd>onError</kbd> callback is configured.</li>
+</ol>
+<p>Let's run it and validate the output, as follows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/aca7cc62-8f7a-421c-811e-053c081e069e.png"/></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">WebClient</h1>
+                </header>
+            
+            <article>
+                
+<p>In <a href="5e6f3f39-3172-4cde-9e50-d4892791d847.xhtml" target="_blank">Chapter 6</a>, <span><em>Dynamic Rendering</em>,</span> we discussed using the Spring WebClient to make web calls in a non-blocking and asynchronous manner. The operators that we have discussed so far are applicable to Reactive Stream publishers and subscribers. WebClient also produces a Mono publisher of <kbd>ServerResponse</kbd>. So, how should we handle errors generated in WebClient, and generate a valid response? First, let's take a look at WebClient's default handling of server-side errors. To do this, we should first generate errors in our Fibonacci handler function, as follows:</p>
+<pre>   @Bean<br/>    RouterFunction&lt;ServerResponse&gt; fibonacciEndpoint() {<br/>        Flux&lt;Long&gt; fibonacciGenerator = Flux.generate(() -&gt; Tuples.&lt;Long,<br/>                Long&gt;of(0L, 1L), (state, sink) -&gt; {<br/>            throw new RuntimeException("Method unsupported");         <br/>        });<br/>      RouterFunction&lt;ServerResponse&gt; fibonacciRoute =<br/>                RouterFunctions.route(RequestPredicates.path("/fibonacci"),<br/>                        request -&gt;  ServerResponse.ok()<br/>                                    .body(fromPublisher(fibonacciGenerator, Long.class)));<br/><br/>        return fibonacciRoute;<br/>    }</pre>
+<p>In the preceding code, we modified our generator to raise a <kbd>RuntimeException</kbd>. The exception will be raised as soon as the server builds a response. This, in turn, sends the HTTP 500 status error back, with the exception message in the body:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/93510c10-e8b0-4f22-8f92-8b9b18d8ff78.png" style=""/></div>
+<p>Alternatively, we can raise an error using the <kbd>sink.error()</kbd> method. This method will take an <span>exception</span><span> </span><span>instance and throw it back. It will also raise a 500 status code, with an </span><kbd>out of bound</kbd> <span>error message, as follows:</span></p>
+<pre><span>@Bean<br/></span>RouterFunction&lt;ServerResponse&gt; fibonacciEndpoint() {<br/>    Flux&lt;Long&gt; fibonacciGenerator = Flux.<span>generate</span>(() -&gt; Tuples.&lt;Long,<br/>            Long&gt;<span>of</span>(<span>0L</span>, <span>1L</span>), (state, sink) -&gt; {<br/>        <span>if </span>(state.getT1() &lt; <span>0</span>)<br/>            sink.error(<span>new </span>RuntimeException(<span>"out of bound"</span>));<br/>        <span>else<br/></span><span>            </span>sink.next(state.getT1());<br/>        <span>return </span>Tuples.<span>of</span>(state.getT2(), state.getT1() + state.getT2());<br/>    });<br/> <br/>    // Rest removed for Brevity<br/><br/>    <span>return </span>fibonacciRoute;<br/>}</pre>
+<p>We will invoke the preceding URL by using WebClient so as to understand its default behavior. Let's revisit the WebClient sample from <a href="5e6f3f39-3172-4cde-9e50-d4892791d847.xhtml" target="_blank">Chapter 6</a>, <em>Dynamic Rendering</em>:</p>
+<pre>Flux&lt;Long&gt; result = client.get()<br/>        .uri("/fibonacci")<br/>        .retrieve().bodyToFlux(Long.class)<br/>        .limitRequest(10L);<br/>result.subscribe( x-&gt; System.out.println(x));</pre>
+<p>In the preceding code, the following applies:</p>
+<ol>
+<li>We invoked the <kbd>/fibonacci</kbd> URL.</li>
+<li>We converted the body, using the <kbd>retrieve</kbd> method.</li>
+<li>We used the limit operator to select 10 results.</li>
+<li>In the end, the results were printed to the console.</li>
+</ol>
+<p>Note that there is no explicit error handler configured; run the code to see how it responds. The code does not generate any output or convert the body when it receives error status codes from the server. Alternatively, let's configure an error handler in the subscriber method and print the exception, as follows:</p>
+<pre>result.subscribe( x-&gt; System.out.println(x), e-&gt; e.printStackTrace);</pre>
+<p>Now, let's execute the WebClient code to determine the output:</p>
+<pre>org.springframework.web.reactive.function.client.WebClientResponseException: ClientResponse has erroneous status code: 500 Internal Server Error<br/>    at org.springframework.web.reactive.function.client.DefaultWebClient$DefaultResponseSpec.lambda$createResponseException$7(DefaultWebClient.java:464)<br/>    at reactor.core.publisher.FluxMap$MapSubscriber.onNext(FluxMap.java:100)<br/>    at <br/> ...............</pre>
+<p>Interestingly, this time around, we can see a <kbd>WebClientResponseException</kbd>, with the status code as an error message. If we look at the <kbd>WebClientResponseException</kbd> class, the exception allows us to get the response text, status code, and more. Typecasting the error and printing the response text would generate the following output:</p>
+<pre>{"timestamp":1533967357605,"path":"/fibonacci","status":500,"error":"Internal Server Error","message":"Unsupported Method"}</pre>
+<p>It is important to note the behavior of the WebClient API. Although the stream generated an error, we never saw the <kbd>ErrorCallbackNotImplemented</kbd> exception, unlike the behavior of Reactive Stream subscribers without a configured error handler.</p>
+<p>WebClient works well with the <kbd>onError</kbd> operators that were discussed in the previous sections. We can configure either <kbd>onErrorReturn</kbd> or <kbd>onErrorResume</kbd> operators. This would provide fallback values, which are returned in the case of an error, as follows:</p>
+<pre>Flux&lt;Long&gt; result = client.get()<br/>        .uri("/fibonacci")<br/>        .retrieve()<br/>        .bodyToFlux(Long.class)<br/>        .onErrorResume( x -&gt; Flux.just(-1L, -2L))<br/>        .limitRequest(10L);<br/>result.subscribe( x-&gt; System.out.println(x));</pre>
+<p>Now, execute the preceding code and confirm the fallback values in the output.</p>
+<p>Here, the WebClient that retrieves an API also offers an <kbd>onStatus</kbd> method to configure response handling. The <kbd>onStatus</kbd> method takes exception mapping and invokes it for the configured HTTP status codes. In our preceding sample, let's try to throw a <kbd>RuntimeException</kbd> for a 500 server response:</p>
+<pre>Flux&lt;Long&gt; result = client.get()<br/>        .uri("/fibonacci")<br/>        .retrieve()<br/>        .onStatus(HttpStatus::isError, x -&gt; Mono.error(new <br/>         RuntimeException("Invalid Response ")))<br/>        .bodyToFlux(Long.class)<br/>        .limitRequest(10L);</pre>
+<p>In the preceding code, the following applies:</p>
+<ul>
+<li><kbd>RuntimeException</kbd> is raised as <kbd>Mono.error</kbd>.</li>
+<li>The Mono is configured for all HTTP error status codes (<kbd>4XX</kbd>, <kbd>5XX</kbd>).</li>
+</ul>
+<p>When the preceding code is executed, a <kbd>RuntimeException</kbd> is thrown. However, the exception leads to an <kbd>ErrorCallbackNotImplemented</kbd> exception, unlike the previous behavior, where <kbd>WebClientResponseException</kbd> did not ask for an exception handler:</p>
+<pre>reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.RuntimeException: Invalid Response <br/>Caused by: java.lang.RuntimeException: Invalid Response </pre>
+<p>Now, we can configure exception mapping or a fallback value provider to recover from the thrown exception.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we looked at the various ways to add resilience to our application. First, we covered possible error scenarios involving the producer and the subscriber. Next, we looked at how Reactor performs error handling under each of those conditions. This enabled us to configure the required error handling in Reactor, by using the various operations that are offered. Reactor allows us to configure fallback values for the thrown exceptions by using <kbd>onErrorReturn</kbd> and <kbd>onErrorResume</kbd> operators. We also configured timeouts and retry machines, using the available operators, in order to generate timely responses. Finally, we configured error handling in WebClient. In a nutshell, we explored the possible ways to configure error handlers in Reactor.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Questions</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>How is an error handled in Reactor?</li>
+<li>Which operators allow us to configure error handling?</li>
+<li>What is the difference between <kbd>onErrorResume</kbd> and <kbd>onErrorReturn</kbd>?</li>
+<li>How can we generate a timely response for a Reactive Stream?</li>
+<li>How does the <kbd>retry</kbd> operator behave?</li>
+</ol>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

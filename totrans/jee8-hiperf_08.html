@@ -1,0 +1,1790 @@
+<html><head></head><body>
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Loggers and Performances – A Trade-Off</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p class="mce-root">Logs are probably one of the most important parts of an application, whatever technology
+               it uses. Why is that? Because without logs, you have no idea what your application
+               is doing or why your application is behaving in a particular way.
+            </p>
+            
+            <p>Of course, we saw in <a href="c4d7d24f-3ce9-428c-915c-04296a2c3a85.xhtml">Chapter 3</a>, <em>Monitor Your Application</em>, how to instrument the application to get some monitoring information about the JVM
+               and application, but it was very technical and mainly performance or tracking oriented.
+               This is important but rarely enough and generally not helpful enough for operation
+               and support teams who generally prefer a higher level view of application tracing.
+               This is where logging enters into the game. However, it is important that you correctly
+               use it and configure it, so that you do not impact your application performance.
+            </p>
+            
+            <p>You may think that Java EE and logging are not directly related, but actually it is
+               probably way more important to ensure you understand what logging is doing in an EE
+               context. The main things you get from an EE container are services. Services are code
+               and therefore have the same kind of constraints as your own code. You can take any
+               Java EE library, and most services, if not all, will use some logger to let you understand
+               what happens without having to look into the code. There are even some coding practices
+               of some vendors that require you to log each time a method starts and stops. Long
+               story short, loggers and log statements are everywhere, whether you wrote it yourself
+               in your codebase or not because they are present in a library codebase.
+            </p>
+            
+            <p>Therefore, in this chapter, we will cover:</p>
+            
+            <ul>
+               
+               <li>When to use logging</li>
+               
+               <li>The work implied by a logging statement</li>
+               
+               <li>Some common and useful performance-related logging patterns</li>
+               
+               <li>Some well-known logging libraries and how to configure them in EE land</li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">I log, you log, they log</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>When do we use logging? This very technically-oriented question should be rephrased
+               this way: <em>when do we provide information about what the application is doing?</em> This is exactly what logging is used for; it lets the user know what the application
+               did at some point.
+            </p>
+            
+            <p>This is something we, as developers, often forget because we are focused on the feature
+               we are implementing. But if the application intends to hit production, it is crucial
+               to not forget to make sure the operation teams can work with it very efficiently as
+               well. Don't forget that if the development takes six months, the production will probably
+               last for some years and the cost of an incident is way higher than a small delay before
+               the production is launched. Therefore, investing in a system communicating enough
+               information is often worth it.
+            </p>
+            
+            <p>However, logging is not a trivial task to underestimate. All the difficulty is about:</p>
+            
+            <ul>
+               
+               <li>Designing messages that are meaningful for someone with poor—or without—knowledge
+                  of the code
+               </li>
+               
+               <li>Ensuring the message is logged, whatever happens</li>
+               
+               <li>Log error cases which can be <em>invisible</em> in the code by default
+               </li>
+               
+            </ul>
+            
+            <p>Let's just take a moment on this last case to deal with a more and more common use
+               case in EE applications, particularly in microservice environments—an HTTP client
+               in a REST endpoint:
+            </p>
+            <pre><span>@Path</span>(<span>"quote"</span>)<br/><span>@ApplicationScoped<br/></span><span>public class </span>QuoteEndpoint {<br/>    <span>@Inject<br/></span><span>    </span><span>private </span>Client <span>client</span>;<br/><br/>    <span>@GET<br/></span><span>    @Path</span>(<span>"{id}"</span>)<br/>    <span>public </span>Quote getQuote(<span>@PathParam</span>(<span>"id"</span>) <span>final </span>String id) {<br/>        <span>return </span><span>client</span>.target(<span>"http://remote.provider.com"</span>)<br/>                .path(<span>"quote/{id}"</span>)<br/>                .resolveTemplate(<span>"id"</span>, id)<br/>                .request(<span>APPLICATION_JSON_TYPE</span>)<br/>                .get(Quote.<span>class</span>);<br/>    }<br/>}</pre>
+            <p>This is a very common pattern used in microservice infrastructure, a service calling
+               another one. This particular implementation is a flat proxy (no additional logic),
+               but it can be used to hide some machine to machine credential or security mechanisms,
+               for instance. What is important to identify here is that a JAX-RS client is called
+               in a JAX-RS endpoint (<kbd>getQuote</kbd>). Now, when you think about error handling, what can happen with such code?
+            </p>
+            
+            <p>If the client call fails because the server returns an error (let's consider an HTTP
+               404 as the ID is invalid), then the client <kbd>get()</kbd> invocation will throw a <kbd>javax.ws.rs.NotFoundException</kbd>. Since there is no exception handling around the client invocation, your endpoint
+               will throw the same exception, which means an HTTP 404 for JAX-RS on the server side,
+               and thus, your own endpoint will throw the same exception.
+            </p>
+            
+            <p>It can be what you want—in the case of a proxy, for instance—but it is not very good
+               in terms of implementation because when you get HTTP 404 responses on the client side
+               (final client, not the endpoint client), then how do you know whether your endpoint
+               or the remote service is broken?
+            </p>
+            
+            <p>A way to mitigate that side effect is to change the implementation of the endpoint
+               a bit, as in the following snippet:
+            </p>
+            <pre><span>@GET<br/></span><span>@Path</span>(<span>"{id}"</span>)<br/><span>public </span>Quote getQuote(<span>@PathParam</span>(<span>"id"</span>) <span>final </span>String id) {<br/>    try {<br/>        <span>return </span><span>client</span>.target(<span>"http://remote.provider.com"</span>)<br/>                .path(<span>"quote/{id}"</span>)<br/>                .resolveTemplate(<span>"id"</span>, id)<br/>                .request(<span>APPLICATION_JSON_TYPE</span>)<br/>                .get(Quote.<span>class</span>);<br/>    } catch (final ClientErrorException ce) {<br/>        <strong>logger.severe(ce.getMessage());</strong><br/>        throw ce;<br/>    }<br/>}</pre>
+            <p>This is not a perfect implementation, but at least now, in the server logs, you will
+               be able to identify that the invocation failed due to an error on the remote service.
+               And that is already better than being silent. In real life, you can notify the final
+               client that the error is not your fault and either use another status code or add
+               a header, allowing the client to identify it depending on the type of service you
+               implement. However, what doesn't change is that, at least, logging the error is allowing
+               your application to give enough information for you to investigate where the issue
+               comes from. Then, all the enrichments you can do on top of it (logging format, MDC,
+               and so on) are mainly about making the information easy to find and fast to analyze.
+            </p>
+            
+            <p>Logging is a simple way—probably the simplest—to communicate from the JVM to outside
+               of it. This is also probably why it is so widely used in all layers of any application.
+               You can be sure that most (if not all) libraries and containers rely on a logger,
+               somewhere. Generally, this is also the first contact you get with your container.
+               When you start it as <em>empty</em>, the first thing you see is this output:
+            </p>
+            <pre>[2017-10-26T17:48:34.737+0200] [glassfish 5.0] [INFO] [NCLS-LOGGING-00009] [javax.enterprise.logging] [tid: _ThreadID=16 _ThreadName=RunLevelControllerThread-1509032914633] [timeMillis: 1509032914737] [levelValue: 800] [[<br/>  Running GlassFish Version: GlassFish Server Open Source Edition 5.0 (build 23)]]<br/><br/>[2017-10-26T17:48:34.739+0200] [glassfish 5.0] [INFO] [NCLS-LOGGING-00010] [javax.enterprise.logging] [tid: _ThreadID=16 _ThreadName=RunLevelControllerThread-1509032914633] [timeMillis: 1509032914739] [levelValue: 800] [[<br/>  Server log file is using Formatter class: com.sun.enterprise.server.logging.ODLLogFormatter]]<br/><br/>[2017-10-26T17:48:35.318+0200] [glassfish 5.0] [INFO] [NCLS-SECURITY-01115] [javax.enterprise.system.core.security] [tid: _ThreadID=15 _ThreadName=RunLevelControllerThread-1509032914631] [timeMillis: 1509032915318] [levelValue: 800] [[<br/>  Realm [admin-realm] of classtype [com.sun.enterprise.security.auth.realm.file.FileRealm] successfully created.]]</pre>
+            <p>What is important here is not really the content of the output, but more that you
+               can control it from the logging configuration. Java EE containers are not uniform
+               on the implementation they use, but most of them rely on <strong>Java Util Logging</strong> (<strong>JUL</strong>), which is the Java standard logging solution. We will get back to the logger implementations
+               later. But just to continue giving you an idea of why it is not directly done with
+               console output or file management, we will open the GlassFish configuration.
+            </p>
+            
+            <p>GlassFish, relying on JUL, uses a <kbd>logging.properties</kbd> configuration. If you use the default GlassFish domain, you will find it in the <kbd>glassfish/domains/domain1/config/logging.properties</kbd> file. If you open this file, you will see these lines:
+            </p>
+            <pre>handlers=java.util.logging.ConsoleHandler<br/>handlerServices=com.sun.enterprise.server.logging.GFFileHandler<br/>java.util.logging.ConsoleHandler.formatter=com.sun.enterprise.server.logging.UniformLogFormatter<br/>com.sun.enterprise.server.logging.GFFileHandler.formatter=com.sun.enterprise.server.logging.ODLLogFormatter<br/>com.sun.enterprise.server.logging.GFFileHandler.file=${com.sun.aas.instanceRoot}/logs/server.log<br/>com.sun.enterprise.server.logging.GFFileHandler.rotationTimelimitInMinutes=0<br/>com.sun.enterprise.server.logging.GFFileHandler.flushFrequency=1<br/>java.util.logging.FileHandler.limit=50000<br/>com.sun.enterprise.server.logging.GFFileHandler.logtoConsole=false<br/>com.sun.enterprise.server.logging.GFFileHandler.rotationLimitInBytes=2000000<br/>com.sun.enterprise.server.logging.GFFileHandler.excludeFields=<br/>com.sun.enterprise.server.logging.GFFileHandler.multiLineMode=true<br/>com.sun.enterprise.server.logging.SyslogHandler.useSystemLogging=false<br/>java.util.logging.FileHandler.count=1<br/>com.sun.enterprise.server.logging.GFFileHandler.retainErrorsStasticsForHours=0<br/>log4j.logger.org.hibernate.validator.util.Version=warn<br/>com.sun.enterprise.server.logging.GFFileHandler.maxHistoryFiles=0<br/>com.sun.enterprise.server.logging.GFFileHandler.rotationOnDateChange=false<br/>java.util.logging.FileHandler.pattern=%h/java%u.log<br/>java.util.logging.FileHandler.formatter=java.util.logging.XMLFormatter<br/><br/>#All log level details<br/>javax.org.glassfish.persistence.level=INFO<br/>javax.mail.level=INFO<br/>org.eclipse.persistence.session.level=INFO</pre>
+            <p>We will not enter into the way JUL is configured here, but what we can identify from
+               this snippet is that the logging abstraction allows us to:
+            </p>
+            
+            <ul>
+               
+               <li>Configure where the logs (messages) are going. We can see that <kbd>GFFileHandler</kbd> is pointing to the <kbd>server.log</kbd> file for instance, but that the <kbd>ConsoleHandler</kbd> is also set, which is consistent with the fact that we see the logs in the console.
+               </li>
+               
+               <li>Configure the log level, which is something we will detail a bit more later; very
+                  high level, it allows you to select the logs you want to keep or not
+               </li>
+               
+            </ul>
+            
+            <p>If the implementation didn't use a logger abstraction, you wouldn't have the choice
+               of the output (handler) and the level selection would be per case (not standardized),
+               which would make the work of the operation teams way harder.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logging frameworks and concepts</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>There are lots of logging frameworks and this is probably one challenge integrators
+               have, since the more you integrate libraries, the more you will need to ensure loggers
+               are consistent and potentially go to the same output. However, they all share the
+               same basic concepts, which are important to understand to know how to properly use
+               loggers and how they can impact the application performance in a bad way if you don't
+               take care of their usages.
+            </p>
+            
+            <p>These concepts can be differently named depending on the framework, but to identify
+               them, we will use the JUL names in this book:
+            </p>
+            
+            <ul>
+               
+               <li>Logger</li>
+               
+               <li>Logger Factory</li>
+               
+               <li>LogRecord</li>
+               
+               <li>Handler</li>
+               
+               <li>Filter</li>
+               
+               <li>Formatter</li>
+               
+               <li>Level</li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logger</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The logger is the entry point of the logging framework. This is the instance you use
+               to <em>write</em> messages. The API has, generally, a set of helper methods but the requisite API elements
+               are:
+            </p>
+            
+            <ul>
+               
+               <li>To allow passing a level with the message.</li>
+               
+               <li>To allow passing a precomputed message of what is needed to compute a message (it
+                  can be a pattern with some variables or a <kbd>Supplier&lt;&gt;</kbd> as of Java 8). In this last case, the goal is to not evaluate/interpolate the message
+                  if not needed and avoid paying the cost of that computation if the message is <em>hidden</em>.
+               </li>
+               
+               <li>To allow association with an <kbd>Exception</kbd> (mainly for error cases) to the message.
+               </li>
+               
+            </ul>
+            
+            <p>The most common example of a logger usage will probably be:</p>
+            <pre>logger.info("Something happent {0}", whatHappent);</pre>
+            <p>This logger invocation is equivalent to the following line, but avoids the concatenation
+               if not needed:
+            </p>
+            <pre>logger.info("Something happent" + whatHappent);</pre>
+            <p>Then, it will also trigger the sending of the message (<kbd>String</kbd>) to the final output (console, file, and so on). It may not look that important,
+               but think how many logger invocations you can have in a single request with the multiple
+               and complex layers we saw in <a href="f9d9ccb7-8c28-4f87-9642-8c62a05fa856.xhtml">Chapter 2</a>, <em>Looking Under the Cover – What is This EE Thing?</em>. It can be important to avoid all these small operations, particularly because in
+               general, you don't have just a simple concatenation but multiple ones on complex objects.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logger Factory</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The Logger Factory is generally a utility method (<kbd>static</kbd>) giving you a logger instance.
+            </p>
+            
+            <p>Most of the time, it looks like this:</p>
+            <pre>final Logger logger = LoggerFactory.getLogger(...);<br/>// or<br/>final Logger logger = Logger.getLogger(...);</pre>
+            <p>The Logger Factory is either a specific class or the <kbd>Logger</kbd> class itself depending on the logging framework, but in all cases, it gives you a <kbd>Logger</kbd> instance. The parameter of this factory method can change, but generally leads to
+               a <kbd>String</kbd> (a lot of libraries allow a <kbd>Class</kbd> shortcut) which can be used to configure the log level as we saw earlier in the JUL
+               configuration file.
+            </p>
+            
+            <p>Why do logger frameworks need a factory and why don't they allow you to instantiate
+               the logger yourself with a plain <kbd>new</kbd>? Because the way the logger instance is resolved can depend on the environment. Don't
+               forget that most of the logger consumers (the code using a logger) can be deployed
+               in a lot of environments, such as:
+            </p>
+            
+            <ul>
+               
+               <li>A standalone application with a flat classpath</li>
+               
+               <li>A JavaEE container with a hierarchic classloader (tree)</li>
+               
+               <li>An OSGI container with a graph classloading</li>
+               
+            </ul>
+            
+            <p>It is always possible, in all logging frameworks, to configure the way the configuration
+               is resolved and thus how the loggers are instantiated. Specially, as soon as you have
+               a container, you will want to handle a global—container—configuration and a <em>per application</em> configuration to be able to make one application configuration more specific than
+               the default one. To do that, containers  (or logging frameworks when the implementation
+               is generic enough) will implement a custom configuration resolution and let the logging
+               framework instantiate a logger with this configuration.
+            </p>
+            
+            <p>Typically, in an EE container, you will get a different logging configuration per
+               application. And if the application doesn't provide any configuration, then the container
+               configuration will be used. If you take Apache Tomcat implementation for instance,
+               it will read <kbd>conf/logging.properties</kbd> by default, and for each application, it will try to read <kbd>WEB-INF/logging.properties</kbd> if the file exists.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">LogRecord</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The <kbd>LogRecord</kbd> is the logging message structure. It encapsulates more data than just the <kbd>String</kbd> message you passed, allowing you to get the information we often see in the log messages,
+               such as:
+            </p>
+            
+            <ul>
+               
+               <li>The log level</li>
+               
+               <li>Optionally, a log sequence number</li>
+               
+               <li>The source class name</li>
+               
+               <li>The source method name</li>
+               
+               <li>The message indeed</li>
+               
+               <li>The thread (often identified by its identifier rather than its name but this last
+                  one is not always unique)
+               </li>
+               
+               <li>The logger invocation date (often in milliseconds as of 1970)</li>
+               
+               <li>Optionally, an exception associated with the logger invocation</li>
+               
+               <li>The logger name</li>
+               
+               <li>Optionally, a resource bundle if the logger supports internationalization</li>
+               
+               <li>Optionally, a call context such as a set of contextual data based on custom values
+                  (MDC) or the current HTTP request, for instance
+               </li>
+               
+            </ul>
+            
+            <p>In this list, we find the information we see (such as the message) but also all the
+               metadata associated with the logger call such as the caller of the logger (class and
+               method), the call context (its date and thread for instance), and so on.
+            </p>
+            
+            <p>Thus, it is this <em>record</em> which is passed into the logging chain, as we will see next.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Handler</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Sometimes called <kbd>Appender</kbd>, the handlers are the output implementations. They are the ones receiving the <kbd>LogRecord</kbd> of the previous part and doing <em>something</em> with it.
+            </p>
+            
+            <p>The most common implementations are:</p>
+            
+            <ul>
+               
+               <li>The <kbd>FileHandler</kbd> : Outputs the messages in a file.
+               </li>
+               
+               <li>A <kbd>MailHandler</kbd> : Sends the messages by mail. This is a particular handler that should not be used
+                  for a high volume of messages but it can be used with a <em>particular</em> logger dedicated to sending some messages under specific circumstances.
+               </li>
+               
+               <li>The <kbd>ConsoleHandler</kbd> to output messages into the console.
+               </li>
+               
+               <li>There are more, such as <kbd>JMSHandler</kbd>, <kbd>ElasticsearchHandler</kbd>, <kbd>HTTPHandler</kbd>, and so on.
+               </li>
+               
+            </ul>
+            
+            <p>In any case, the handlers are sending data to a <em>backend</em> which can be anything, and the logging framework always ensures you can plug in your
+               own implementation if you need to extend the default handlers.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Filter</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>A <kbd>Filter</kbd> is simply a class allowing you to let the <kbd>LogRecord</kbd> be passed or not. In the Java 8 ecosystem, it can be seen as a <kbd>Predicate&lt;LogRecord&gt;</kbd>; this class has been in Java since its 1.4 version, far before <kbd>Predicate</kbd> was created.
+            </p>
+            
+            <p>It is often bound to a particular <kbd>Handler</kbd>.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Formatter</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p class="mce-root">A <kbd>Formatter</kbd> is a class taking a <kbd>LogRecord</kbd> and converting it into a <kbd>String</kbd>. It is the one responsible for preparing the content to be sent to the backend. The
+               idea is to separate the <em>writing</em> and <em>formatting</em> concerns, allowing you to reuse one part without having to create a new <kbd>Handler</kbd>.
+            </p>
+            
+            <p><span>Again, it is often bound to a particular </span><kbd>Handler</kbd><span>.</span></p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Level</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p><kbd>Level</kbd> is a simple concept. It is the metadata of the log record but also most of the logging
+               components we just looked at. The main idea is to be able to compare the log record
+               level to the level of the component the record goes through to skip the message if
+               it is not compatible. The common (sorted) logging levels are:
+            </p>
+            
+            <ul>
+               
+               <li><kbd>OFF</kbd>: Not directly used by the log record, but generally used only by other components,
+                  it disables any log message.
+               </li>
+               
+               <li><kbd>SEVERE</kbd> (or <kbd>ERROR</kbd>): The highest log level. It is intended to be used when something bad occurs. A record
+                  is logged if the component level is not <kbd>OFF</kbd>.
+               </li>
+               
+               <li><kbd>WARNING</kbd>: Generally used when something wrong happened (but is not preventing the application
+                  to work); a record is logged if the level of the components is not <kbd>OFF</kbd> or <kbd>SEVERE</kbd>.
+               </li>
+               
+               <li><kbd>INFO</kbd>: The default logging level of a lot of applications, it is used to notify us that
+                  something normal but interesting happened.
+               </li>
+               
+               <li><kbd>CONFIG</kbd>: Not the most used level, it is intended to be used for messages related to the configuration.
+                  In practice, applications and libraries often use <kbd>INFO</kbd> or <kbd>FINE</kbd> instead.
+               </li>
+               
+               <li><kbd>FINE</kbd>,<kbd>FINER</kbd>,<kbd>FINEST</kbd>,<kbd>DEBUG</kbd>: These levels are intended to give low granularity information about the application.
+                  The message computing can be costly and it is not intended to be turned on in production
+                  in general. However, it can be a very useful piece of information when investigating
+                  an issue.
+               </li>
+               
+               <li><kbd>ALL</kbd>: Not used for the log record itself but only for component levels, it lets any message
+                  be logged.
+               </li>
+               
+            </ul>
+            
+            <p>The log levels are sorted (associated with an integer) and a log record level is <em>active</em> if all the component levels are lower than the log record level. For instance, a <kbd>WARNING</kbd> message will be logged if the component levels are <kbd>INFO</kbd> or <kbd>FINE</kbd>.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logging invocations</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Before looking at how to properly integrate loggers into your application using some
+               common patterns, let's see what a logger invocation will trigger.
+            </p>
+            
+            <p>A simple logger invocation, like <span> </span><kbd>logger.info(message)</kbd> , can be inspected to be represented as equivalent to the following steps:
+            </p>
+            
+            <ul>
+               
+               <li>Check if the level of the logger is active; if not, exit</li>
+               
+               <li>Create a log record (set the message and level, initialize the source of the log,
+                  class, method, and so on)
+               </li>
+               
+               <li>Check if the message is filtered with a <kbd>Filter</kbd>; if the filter filters it, then exit
+               </li>
+               
+               <li>For all handlers, publish the log record to the handler:<br/>
+                  
+                  <ul>
+                     
+                     <li>Check the level of the handler versus the log record level, if not compatible then
+                        exit (note: this check is often done multiple times; it is fast because it is just
+                        an integer comparison)
+                     </li>
+                     
+                     <li>Format the log record (convert it to a <kbd>String</kbd>)
+                     </li>
+                     
+                     <li>Write the formatted message to the actual backend (file, console, and so on)</li>
+                     
+                  </ul>
+                  
+               </li>
+               
+            </ul>
+            
+            <p>This high-level drilling down of a single logger invocation shows many interesting
+               things about the loggers. The first one is that using a logger and having levels in
+               all logging components allows the logging framework to bypass a lot of logic if the
+               levels are not compatible. This is true at the logger level, and potentially at the
+               filter level, and finally at the handler level. Then, we can identify that there are
+               two layers where the logic depends on the configuration, and the processing time will
+               be the function of the complexity of these elements, the filtering and the formatting.
+               Lastly, the actual work—and generally the slowest part of the chain—is the backend
+               interaction. Concretely, writing a line in a file is slow compared to the rest of
+               the chain as it interacts with some hardware (your hard disk).
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Filters</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>In JUL, there is no default filter implementation. But some common filters you can
+               find in other frameworks or JUL extensions are:
+            </p>
+            
+            <ul>
+               
+               <li>A time-based filter:
+                  
+                  <ul>
+                     
+                     <li>If the log message is outside a time range, then skip it</li>
+                     
+                     <li>If a log message is older than <span>some configured duration</span>, then skip it (can be useful depending on the work done before the filter in the
+                        chain and if the machine has a hot peak)
+                     </li>
+                     
+                  </ul>
+                  
+               </li>
+               
+               <li>A <strong>Mapped Diagnostic Context</strong> (<strong>MDC</strong>) based filter: Typically, if an MDC value is matched (for example if MDC['tenant']
+                  is <em>hidden_customer),</em> then skip the message
+               </li>
+               
+               <li>Throttling: If you know you use a handler that can't support more than 1,000 messages/seconds—or
+                  if the actual backend, such as a database, can't support more—then you can use a filter
+                  to enforce that limitation
+               </li>
+               
+               <li>Regex-based: If the message doesn't (or does) match a regex, then it is skipped</li>
+               
+            </ul>
+            
+            <p>These examples are just a short list of potential filters you can encounter, but it
+               illustrates the fact that the complexity can be more or less important and thus the
+               execution duration of the filter layer can be more or less fast.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Formatters</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>As for filters, there are several formatters, and since it is really about how to
+               convert the log record—the logging API—to the backend representation (String), then
+               it can be more or less pricey. To get a high-level idea about that, here are some
+               examples:
+            </p>
+            
+            <ul>
+               
+               <li>XML: Convert the log record to an XML representation; it generally uses string concatenation
+                  and logs all the record information (logger, thread, message, class, and so on).
+               </li>
+               
+               <li>Simple: Just the log level and the message.</li>
+               
+               <li>Pattern: Based on a configured pattern, the output is computed. Generally, the logging
+                  frameworks allows you to include, in this pattern, the thread identifier or name,
+                  the message, the log level, the class, the method, the exception if there is one,
+                  and so on.
+               </li>
+               
+            </ul>
+            
+            <p><span>The default JUL pattern is </span><kbd>%1$tb %1$td, %1$tY %1$tl:%1$tM:%1$tS %1$Tp %2$s%n%4$s: %5$s%6$s%n</kbd><span>. This pattern leads to this sort of output:</span></p>
+            <pre><span>oct. 27, 2017 6:58:16 PM com.github.rmannibucau.quote.manager.Tmp main<br/>INFOS: book message</span></pre>
+            <p>We will not detail the syntax here, but it reuses the Java <kbd>java.util.Formatter</kbd> syntax behind the <kbd>SimpleFormatter</kbd> which was used for that output. This implementation passes, to the formatter, the
+               following parameters:
+            </p>
+            
+            <ul>
+               
+               <li>Date of the log event</li>
+               
+               <li>Source of the log event (<kbd>class method</kbd>)
+               </li>
+               
+               <li>Logger name</li>
+               
+               <li>Level</li>
+               
+               <li>Message</li>
+               
+               <li>Exception</li>
+               
+            </ul>
+            
+            <p>What is interesting with this last type of formatter is that it lets you customize
+               the output and change its formatting depending on your needs. For instance, instead
+               of using the default format on two lines, you could set the format to be <kbd>%1$tb %1$td, %1$tY %1$tl:%1$tM:%1$tS %1$Tp %2$s %4$s: %5$s%6$s%n</kbd>, then the output would be:
+            </p>
+            <pre>oct. 27, 2017 7:02:42 PM com.github.rmannibucau.quote.manager.Tmp main INFOS: book message</pre>
+            <p>The big advantage is to really customize the output to your needs and potentially
+               match a log forwarder like Splunk or Logstash.
+            </p>
+            
+            <div class="packt_tip">To activate this pattern with JUL, you need to set the system property <kbd>"-Djava.util.logging.SimpleFormatter.format=&lt;the pattern&gt;"</kbd>.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Using handlers</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>When dealing with performance, it is important to define the trade-off you want in
+               terms of logging. An interesting metric can be to compare the application without
+               any active logging statement versus the ones you want to keep (for production). If
+               you identify that the performance drastically decreases with logging activated, then
+               you probably have a configuration issue, either in one of the logging layers or—more
+               commonly—with the backend usage (such as overusing a remote database).
+            </p>
+            
+            <p>The handler, being the part <em>exiting</em> the application, is the one requiring most of the attention. This doesn't mean other
+               layers are not important, but they are generally faster to check since they often
+               lead to a constant evaluation time.
+            </p>
+            
+            <p>There are several implementations of handlers, but it is not rare to have specific
+               ones in companies because you want to target a specific backend or you want custom
+               integration. In these cases, you have to make sure it doesn't introduce some bottleneck
+               or performance issues. To illustrate that statement, we will use a case where you
+               want to send the log records to an HTTP server in JSON format. For each message, if
+               you send a request, then you can send many requests as threads in parallel and you
+               will pay the HTTP latency for each logger invocation. When you think that a method
+               can have multiple logger invocations and that a logger can have multiple handlers
+               (you can log the same messages in the console and a file and a server), then you quickly
+               understand this synchronous <em>per message</em> first implementation will not scale for very long.
+            </p>
+            
+            <p>This is why all the backend integrations, which are implying remote operations, are
+               using alternative implementations and generally support some bulking of the messages
+               to send them in chunks (multiple messages at once). Then, the handler reception of
+               the message just triggers an addition in a <em>stack</em>, and later, another condition will trigger the actual request (HTTP request in our
+               previous case). In terms of performance, we converted a high latency implementation
+               in a low latency operation, as the operation is as fast as adding an object to a queue.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logging components and Java EE</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>It can be tempting to reuse Java EE to implement logging components. It is not impossible,
+               but there are some points to consider before doing so:
+            </p>
+            
+            <ul>
+               
+               <li>JUL doesn't always support the loading of classes with the container or application
+                  classloader, so you may need a facade implementation that contextually loads the container
+                  or application classes. In other words, you will not always be able to programmatically
+                  depend on CDI, but you may need some reflection which has a cost you want to minimize.
+                  So, make sure to keep the results of your CDI lookup if you can.
+               </li>
+               
+               <li>In the first chapters, we looked at the Java EE layers. Make sure you don't rely on
+                  something too heavy for a logger implementation to avoid being impacted by all this
+                  work and to avoid hiding the fact that you have <em>an application under the application</em> through your loggers.
+               </li>
+               
+               <li>Logging context is not controlled. Generally, you don't know when a logger is used.
+                  So, if you implement a component using CDI, make sure you use features available only
+                  in all contexts. Concretely, don't use <kbd>@RequestScoped</kbd> if you don't use the <kbd>RequestContextController</kbd> to activate the scope yourself. Also, ensure you have configured the <em>EE</em> component on a logger only, used in an EE context.
+               </li>
+               
+            </ul>
+            
+            <p>It is not impossible to do a logging-EE bridge, but for logging, we generally want
+               to be very efficient and as raw as possible. See it more as a potential fallback if
+               you can't modify the application than the opposite by default. In a realistic manner,
+               it is better to send an EE event you observe and call a logger from an observer, than
+               the opposite.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logging patterns</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>There are but a <span>few</span> important logging patterns you can utilize to try to minimize the logging overhead
+               implied, without any benefit from a functional point of view. Let's go through the
+               most common ones.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Testing your level</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>The most important thing about a log message is its level. It is the information allowing
+               you to efficiently ignore the messages - and their formatting/templating - if they
+               will be ignored later anyway.
+            </p>
+            
+            <p>For instance, take this method that relies on loggers at different levels:</p>
+            <pre><span>public void </span>save(<span>long </span>id, Quote quote) {<br/>    <span>logger</span>.finest(<span>"Value: " </span>+ quote);<br/>    String hexValue = converter.toHexString(id);<br/>    doSave(id, quote);<br/>    <span>logger</span>.info(<span>"Saved: " </span>+ hexValue);<br/>    <span>logger</span>.finest(<span>"Id: " </span>+ hexValue + <span>", quote=" </span>+ quote);<br/>}</pre>
+            <p>This method is mixing <em>debug</em> and <em>info</em> log messages. Nevertheless, it is very likely that the <em>debug</em> messages will not be activated in production, but <em>info </em>messages will be if you use the <em>info</em> level as optional messages, then do the same reasoning with the <em>warning</em> level. For that reason, it is pointless to log the <em>debug</em> messages in most cases. It is also useless to compute the concatenations of these
+               messages as they will not be logged.
+            </p>
+            
+            <p>To avoid these computations—and don't forget a <kbd>toString()</kbd> can be complex in some cases or at least <kbd>long</kbd> to compute—a common pattern is to test the log level in the application yourself,
+               instead of waiting for the logging framework to do it:
+            </p>
+            <pre><span>public void </span>save(<span>long </span>id, Quote quote) {<br/>    <span>if </span>(<span>logger</span>.isLoggable(Level.<span>FINEST</span>)) {<br/>        <span>logger</span>.finest(<span>"Value: " </span>+ quote);<br/>    }<br/><br/>    String hexValue = converter.toHexString(id);<br/>    doSave(id, quote);<br/>    <span>logger</span>.info(<span>"Saved: " </span>+ hexValue);<br/><br/>    <span>if </span>(<span>logger</span>.isLoggable(Level.<span>FINEST</span>)) {<br/>        <span>logger</span>.finest(<span>"Id: " </span>+ hexValue + <span>", quote=" </span>+ quote);<br/>    }<br/>}</pre>
+            <p>Simply wrapping the rarely logged messages in a <kbd>isLoggable()</kbd> conditional block will do a quick test against the logger level and bypass the message
+               computation, and all the logging chains most of the time, ensuring the performance
+               is not too affected by debug statements.
+            </p>
+            
+            <p class="mce-root">Since Java 8, there has been an alternative to that pattern which is quite interesting:
+               using <kbd>Supplier&lt;&gt;</kbd> to create the message. It provides a way to compute the message rather than the message
+               itself. This way, the code is more condensed thanks to the lambda which is compatible
+               with the related signatures. But the cost of the string evaluation is not paid anyway:
+            </p>
+            <pre><span>logger</span>.finest(() -&gt; <span>"Value: " </span>+ <span>quote</span>);</pre>
+            <p>Here, we passed a lambda computing the actual message only if the log statement passed
+               the first test, which is about the log level of the logger. This is really close to
+               the previous pattern but still a bit more costly than an integer test which is generally
+               the <kbd>isLoggable()</kbd> implementation. Yet, the overhead is not that significant and the code is less verbose,
+               but generally efficient enough.
+            </p>
+            
+            <div class="packt_tip">If you use the same log level multiple times, it can be worth factorizing the log
+               level check a single time at the beginning of the method, instead of calling it multiple
+               times in the same methods. The more you use a logger abstraction, and therefore go
+               through layers, the more it will be true. Since it is a very simple optimization—your
+               IDE can even suggest you to do it for you—you shouldn't hesitate to do it. Though,
+               don't do it at class level (such as storing the loggable test in a <kbd>@PostConstruct</kbd>; since most logger implementations support dynamic levels; you could break that feature).
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Using templates in your messages</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>In the previous section, we looked at how to bypass the logging of a message. With
+               JUL, it is often done with the methods called log levels, but there is a more generic
+               log method  called <kbd>log</kbd>, which can take the level, the message (or a key in a resource bundle if you internationalize
+               the messages), and an object array parameter. This type of method exists in all frameworks
+               and most of them will also provide some particular signatures with one, two, or more
+               parameters to make it smoother to use.
+            </p>
+            
+            <p>In any case, the idea is to use the message as a pattern and the parameters to valorize
+               some variables of the message. This is the feature this log pattern uses:
+            </p>
+            <pre>logger.log(Level.INFO, "id={0}, quote={1}", new Object[]{ id, quote });</pre>
+            <p>This log statement will replace the <kbd>{i}</kbd> templates with the i<sup>th</sup> value in the <kbd>Object[]</kbd> array.
+            </p>
+            
+            <p>Using this pattern is interesting as it avoids computing the actual string value if
+               not needed. This solution seems better than the previous <kbd>isLoggable()</kbd> check in terms of code impact, right? It actually depends on the logger implementation.
+               JUL doesn't support it. But for the frameworks supporting parameters without arrays,
+               they can have some optimization, which would make this assumption right. However,
+               for JUL or all the cases where you have enough parameters to require an array creation,
+               it is not right. The fact that you have to create an array is impactful and therefore
+               it is better to skip it if you don't need it, which means to fallback on the previous
+               pattern or the <kbd>Supplier&lt;&gt;</kbd> based API.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Asynchronous or not?</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Due to modern requirements in terms of scaling, the loggers needed to be enhanced
+               to support a higher message rate, but still needed to be less impactful on the application
+               performance itself.
+            </p>
+            
+            <p>The first step to reduce the latency of a logger is to make the handlers asynchronous.
+               This is not yet standard with JUL but you can find some libraries providing that feature—some
+               containers like Apache TomEE even provide it out of the box. The idea is exactly the
+               one we described in the section about handlers, compute the minimum context for the
+               log record and push the record in a <em>queue</em> in the caller thread, then actually <em>store</em>/publish the message in another thread (or threads depending on the backend).
+            </p>
+            
+            <p>This pattern already solves most of the logger impact in terms of performance, but
+               some logging frameworks (such as Log4j2) go further, making the loggers themselves
+               asynchronous. Since the filtering (and sometimes formatting) is now fully asynchronously
+               done, then the caller duration is way smaller and the performance impact is reduced
+               a lot (still, considering, you have enough CPU to handle this additional work as you
+               execute more code in parallel).
+            </p>
+            
+            <p>If you add some modern implementation to the asynchronous handling, based on the ring
+               buffer pattern, as Log4j2 did using the disruptor (<a href="https://lmax-exchange.github.io/disruptor/">https://lmax-exchange.github.io/disruptor/</a>) library, then you have a solution scaling very well. More you will have threads,
+               more the impact of such an implementation will be significative, even compared to
+               an asynchronous handler (appender for log4j2).
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logging implementations – which one to pick</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Logging is one of the oldest topics you can encounter in computer science, but it
+               is also one that has been solved many times. Understand that you will find lots of
+               frameworks about logging. Let's have a quick look at them and see how they can sometimes
+               relate.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logging facade – the good bad idea</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Logging facades are frameworks such as SLF4J (<a href="https://www.slf4j.org/">https://www.slf4j.org/</a>), commons-logging, jboss-logging, or more recently, the log4j2 API (<a href="https://logging.apache.org/log4j/2.x/">https://logging.apache.org/log4j/2.x/</a>). They intend to provide a uniform API usable with any sort of logging implementation.
+               You must really see it as an API (as Java EE is an API), and the logging frameworks
+               as implementations (as GlassFish, WildFly, or TomEE are Java EE implementations).
+            </p>
+            
+            <p>These facades need a way to find the implementation they have to use. You can encounter
+               several strategies, such as the following ones:
+            </p>
+            
+            <ul>
+               
+               <li>SLF4J, for instance, will look up a particular class all implementations provide in
+                  their distribution (called <em>bindings</em> for SLF4J), and once instantiated it will give SLF4J API the link with the final
+                  implementation (JUL, Log4J, Logback, and so on). The issue here is that you cannot
+                  have multiple implementations in the same classloader and you cannot just configure
+                  the one you want.
+               </li>
+               
+               <li>Commons-logging will read a configuration file to know which implementation to pick.</li>
+               
+               <li>A global system property-based configuration with a hardcoded default allowing to
+                  select the implementation to use.
+               </li>
+               
+            </ul>
+            
+            <p>Using a logging facade is generally a good idea as it allows your code, or the code
+               of the libraries you use, to be decoupled from the logging implementation, delegating
+               the choice of that implementation to the application packager or the deployer. It
+               allows you to run it in all circumstances without you having to care about it during
+               development.
+            </p>
+            
+            <p>Even ignoring the fact that there are multiple implementations of such an API, which
+               makes things complicated already, their usage is not that elegant depending on the
+               implementation you use. Several implementations will need to fill some parameters
+               that are costly to evaluate.
+            </p>
+            
+            <p>The best example is the computation of the source class and method. In several implementations,
+               it will be done by creating an <kbd>Exception</kbd> to get its associated stack trace and, after having dropped the known caller of the
+               logging framework, will deduce the business caller. In a Java EE environment, and
+               due to the stacks it uses to provide a simple programming model, the exception stack
+               can be huge and <em>slow</em> to compute and fill (allocate the array). This means that each log message will be
+               slowed down a bit to implement the bridge between this facade API and the actual logger
+               implementation you use.
+            </p>
+            
+            <p>For that reason, it can be worth checking the implementation you use with such a facade.
+               For the most common one, SLF4J, there are two well-known implementations very well
+               integrated with the API:
+            </p>
+            
+            <ul>
+               
+               <li>Logback: A native implementation of the API</li>
+               
+               <li>Log4j2: Has got an SLF4J direct implementation (binding)</li>
+               
+            </ul>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logging frameworks</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>As mentioned, there are several logging frameworks you can encounter. The most famous,
+               and the ones you have probably already heard about, are:
+            </p>
+            
+            <ul>
+               
+               <li>Log4j1: The historical standard de facto, slowly replaced by log4j2.</li>
+               
+               <li>Log4j2: Probably one of the most advanced implementations today. Supports asynchronous
+                  loggers and has a ring buffer integration.
+               </li>
+               
+               <li>Logback: The native SLF4J implementation. It was probably the best choice before log4j2
+                  was done.
+               </li>
+               
+               <li>Java Util Logging: The JVM standard logging API. Not the most evolved API, but it
+                  works and doesn't require any dependency, though, you may need some custom integrations
+                  (handlers) for production. Check out your server which can already provide some solutions
+                  here.
+               </li>
+               
+            </ul>
+            
+            <p>Each of these share the concepts we just went through, but may have some small differences.
+               To let you work faster with them, we will quickly go through these implementations
+               to define the semantics used by the framework and show you how to configure each of
+               them. When you do some benchmarks, it is very important to know how to configure the
+               logging and guarantee it doesn't slow down your performance due to a bad configuration.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Log4j</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Logj4 (1.x) uses the <kbd><span>org.apache.log4j</span></kbd> <span>base package. </span>Here are the logging concepts we talked about adapted to log4j1 semantic:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td><strong>Concept</strong></td>
+                     
+                     <td><strong>Name</strong></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Logger</td>
+                     
+                     <td>Logger</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Logger Factory</td>
+                     
+                     <td>Logger</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Handler</td>
+                     
+                     <td>Appender</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Filter</td>
+                     
+                     <td>Filter</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Formatter</td>
+                     
+                     <td>Layout</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Level</td>
+                     
+                     <td>Level</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p>Most of the concepts are the same as in JUL, but with a few different names.</p>
+            
+            <p>In terms of usage, it is the same as in JUL, except it uses another package:</p>
+            <pre>final Logger logger = Logger.getLogger("name.of.the.logger");<br/>logger.info("message");</pre>
+            <p>What is a bit different is the configuration. It uses a <kbd>log4j.properties</kbd> or <kbd>log4j.xml</kbd> in the classpath (by default) which looks like this:
+            </p>
+            <pre>log4j.rootLogger=DEBUG, stdout<br/><br/>log4j.appender.stdout=org.apache.log4j.ConsoleAppender<br/>log4j.appender.stdout.layout=org.apache.log4j.PatternLayout<br/>log4j.appender.stdout.layout.ConversionPattern=%-4r [%t] %-5p %c %x - %m%n<br/><br/>log4j.com.packt.quote = WARN</pre>
+            <p>With this sample configuration the root logger (default) level is <kbd>DEBUG</kbd> and it will use a <kbd>stdout</kbd> appender. The appender is using <kbd>ConsoleAppender</kbd>; it will log the messages on the <kbd>System.out</kbd> and uses a pattern layout with a custom pattern (<kbd>ConversionPattern</kbd>). The package <kbd>com.packt.quote</kbd> log level is set to <kbd>WARN</kbd>. So, loggers using this name or a sub-name of this package will only log <kbd>WARN</kbd> and <kbd>ERROR</kbd> messages.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Log4j2</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Log4j2 was obviously inspired by Log4j1 but was completely rewritten. It still has
+               some differences and it is completely different in terms of behavior and performance.
+               Here is the concept mapping for log4j2:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td><strong>Concept</strong></td>
+                     
+                     <td><strong>Name</strong></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Logger</td>
+                     
+                     <td>Logger</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Logger Factory</td>
+                     
+                     <td>LoggerManager</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Handler</td>
+                     
+                     <td>Appender</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Filter</td>
+                     
+                     <td>Filter</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Formatter</td>
+                     
+                     <td>Layout</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Level</td>
+                     
+                     <td>Level</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p class="mce-root">The configuration has some fallbacks, but the default file is looked up in the classpath
+               and is called <kbd>log4j2.xml</kbd>. It uses a different syntax than the XML version of Log4j1, based on the new plugin
+               system of Log4j2, to have a nicer syntax (less technical):
+            </p>
+            <pre>&lt;?xml version="1.0" encoding="UTF-8"?&gt;<br/>&lt;Configuration status="WARN"&gt;<br/>  &lt;Appenders&gt;<br/>    &lt;Console name="stdout" target="SYSTEM_OUT"&gt;<br/>      &lt;PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} -<br/>      %msg%n"/&gt;<br/>    &lt;/Console&gt;<br/>  &lt;/Appenders&gt;<br/>  &lt;Loggers&gt;<br/>    &lt;Root level="debug"&gt;<br/>      &lt;AppenderRef ref="stdout"/&gt;<br/>    &lt;/Root&gt;<br/>  &lt;/Loggers&gt;<br/>&lt;/Configuration&gt;</pre>
+            <p>This is the same sort of configuration as the one in the previous section, but it
+               uses this new syntax that relies on the plugin names (<kbd>Console</kbd> is the name of the console appender in log4j2 for instance). Nevertheless, we still
+               have the same structure where loggers are defined in a loggers block with the specific
+               root logger, and where appenders have their own block linked to the loggers through
+               a reference/idenfitier (<kbd>ref</kbd>).
+            </p>
+            
+            <div class="packt_tip">Log4j2 has other nice features such as the hot reloading of the configuration, JMX
+               extensions, and so on, which can be worth a look. It can help you change the logging
+               configuration without restarting the application during your benchmarks.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Logback</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>Logback is a native implementation of SLF4J and an advanced logging implementation.
+               Here is its mapping with the concepts we talked about:
+            </p>
+            
+            <table>
+               
+               <tbody>
+                  
+                  <tr>
+                     
+                     <td><strong>Concept</strong></td>
+                     
+                     <td><strong>Name</strong></td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Logger</td>
+                     
+                     <td>Logger (from SLF4J)</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Logger Factory</td>
+                     
+                     <td>LoggerFactory (from SLF4J)</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Handler</td>
+                     
+                     <td>Appender</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Filter</td>
+                     
+                     <td>Filter</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Formatter</td>
+                     
+                     <td>Encoder/Layout</td>
+                     
+                  </tr>
+                  
+                  <tr>
+                     
+                     <td>Level</td>
+                     
+                     <td>Level</td>
+                     
+                  </tr>
+                  
+               </tbody>
+               
+            </table>
+            
+            <p> </p>
+            
+            <p class="mce-root">Note that logback also has the concept of <kbd>Encoder</kbd> to link the messages to <kbd>byte[]</kbd>.
+            </p>
+            
+            <p>The configuration relies, by default, on a <kbd>logback.xml</kbd> file in the classpath, looking like this:
+            </p>
+            <pre>&lt;configuration&gt;<br/>  &lt;appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender"&gt;<br/>    &lt;encoder&gt;<br/>      &lt;pattern&gt;%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n&lt;/pattern&gt;<br/>    &lt;/encoder&gt;<br/>  &lt;/appender&gt;<br/><br/>  &lt;root level="debug"&gt;<br/>    &lt;appender-ref ref="STDOUT" /&gt;<br/>  &lt;/root&gt;<br/>&lt;/configuration&gt;</pre>
+            <p>This is a configuration close to the previous one (log4j1, log4j2) and recognizes
+               the same kind of configuration, except the <kbd>encoder</kbd> layer wrapping the <kbd>pattern</kbd>. This is mainly because the encoder will pass a <kbd>byte[]</kbd> value to the appender and the pattern will pass a <kbd>String</kbd> to the encoder, allowing the implementation to be more easily composed, even if rarely
+               used.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">JUL</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>We used JUL to name the concepts we talked about, so we don't need a mapping table
+               for the concept. Yet, it is interesting to see how JUL is configured since it is used
+               in lots of containers.
+            </p>
+            
+            <p>Very high-level JUL uses a <kbd>LogManager</kbd>, which is the Logger Factory (hidden behind the <kbd>Logger.getLogger(...)</kbd>Logger Factory).
+            </p>
+            
+            <p>The <kbd>LogManager</kbd> is instantiated from the class passed to the <kbd>java.util.logging.config.class</kbd> <span>system property.</span> If not set, the default implementation will be used, but note that most EE containers
+               will override it to support additional features such as a configuration per application,
+               for instance, or a custom configuration, generally dynamic and managed through a nice
+               UI.
+            </p>
+            
+            <p>The configuration is located with the system property <kbd>java.util.logging.config.file</kbd> or falls back on <kbd>${java.jre.home}/lib/logging.properties</kbd>—note that Java 9 used the folder <kbd>conf</kbd> instead of <kbd>lib</kbd>. The syntax of this properties file is the same as we saw earlier:
+            </p>
+            <pre>handlers= java.util.logging.FileHandler, java.util.logging.ConsoleHandler<br/><br/>java.util.logging.FileHandler.pattern = %h/java%u.log<br/>java.util.logging.FileHandler.limit = 50000<br/>java.util.logging.FileHandler.count = 1<br/>java.util.logging.FileHandler.formatter = java.util.logging.XMLFormatter<br/><br/>java.util.logging.ConsoleHandler.level = INFO<br/>java.util.logging.ConsoleHandler.formatter = java.util.logging.SimpleFormatter<br/><br/>.level = INFO<br/>com.packt.level = SEVERE</pre>
+            <p>At the end of the snippet, we identify how to set a level to a package (the key is
+               just suffixed by <kbd>.level</kbd> and the value is the level name). The same sort of logic applies to the default logger,
+               which has an empty name, so its level is set using the <kbd>.level</kbd> key directly. The <kbd>handlers</kbd> key gets a list of handlers to configure (comma separated). It is generally a fully
+               qualified name of a handler. Then, the two blocks in the middle, starting with handler
+               names, are the handler configurations. It generally uses a dotted notation (<kbd>&lt;handler class&gt;.&lt;configuration&gt; = &lt;value&gt;</kbd>), but there is no obligation since the handler has access to all the properties through
+               the <kbd>LogManager</kbd>.
+            </p>
+            
+            <div class="packt_tip">Apache Tomcat/TomEE <kbd>ClassLoaderLogManager</kbd> allows you to prefix the handler with a custom prefix value starting with a number.
+               It enables you to define N times the same handler with different configuration, which
+               is not supported out of the box by JUL, which can only define a handler once.
+            </div>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Choosing an implementation</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>If you can choose your implementation, you should check where you want to send your
+               logs and pick the implementation already doing what you need, or the implementation
+               which has a very close feature. Then, if multiple implementations fit your requirements,
+               you need to check which one is the fastest.
+            </p>
+            
+            <p>Starting from log4j2 or logback is generally a good choice. Yet, in practice, you
+               rarely have the choice and part of your stack is imposed by your environment (dependencies
+               and containers). Thus, it is highly probable you will need to configure JUL as well.
+               In such a case, a good option is to check if you can reuse your container backbone
+               without being dependent on your container in terms of code (that is, <span>you </span>can use the JUL API and delegate, to your container, the JUL configuration for instance).
+               Then, you need to evaluate if JUL will fit your runtime needs in terms of performance.
+               JUL gets lots of bad reviews on the internet, but it is more than sufficient for a
+               lot of applications asynchronously logging into a file. Don't disregard it without
+               evaluating it against your concrete needs. It can avoid configuration headaches and
+               dependencies in a lot of cases.
+            </p>
+            
+            <p>Another criteria can be the easiness to redirect all logs to the same logging stack.
+               One of the best ones in that area is log4j2, which supports pretty much all integrations
+               (SLF4J, commons-logging, log4j1, log4j2, and so on).
+            </p>
+            
+            <p>If you use file-based handlers/appenders, probably the most common use case, you should
+               also have a look at the rotation policies. It is generally configurable and the most
+               common strategies are:
+            </p>
+            
+            <ul>
+               
+               <li>Per day: Each day, you get a new log file for the handler (mylog.2017-11-14.log, <span>mylog.2017-11-15.log, and so on</span>).
+               </li>
+               
+               <li>At restart: Each time the server is restarted, a new log file is created. Note this
+                  strategy doesn't work well except for batch instances or no long running instances.
+               </li>
+               
+               <li>Per size: If the log file size exceeds some disk space, then create a new one.</li>
+               
+            </ul>
+            
+            <p>Note that all these strategies can often be mixed or accumulated. Only JUL will not
+               support it out of the box, but containers often try to fill that gap. It is not because
+               your container uses JUL that you don't have this feature. Don't hesitate to have a
+               look at your container logging configuration and investigate it before rejecting JUL
+               as an API.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   
+
+      
+      <section>
+         
+         
+         <header>
+            
+            <h1 class="header-title">Summary</h1>
+            
+         </header>
+         
+         
+         <article>
+            
+            
+            <p>In this chapter, we looked at why logging is important to get a good and easy monitoring
+               level. We also saw that a logging statement must be as minimally impactful on performance
+               as possible so as not to defeat the optimization and coding you may have done elsewhere
+               in your application.
+            </p>
+            
+            <p>This chapter gave you some common and simple patterns that can help you to rely, as
+               much as possible, on the logging framework to make sure you maintain good performance.
+            </p>
+            
+            <p>Finally, we saw that several implementations may need to be configured in your applications,
+               but that they will all share the same concepts, and that it is possible to rely on
+               a single API, or even a single implementation from multiple APIs.
+            </p>
+            
+            <p>At this point of the book, you know what Java EE does and how to code and monitor
+               an application. Now it is time to look at how you should approach a benchmark. This
+               will be the topic of our next chapter.
+            </p>
+            
+            
+            
+         </article>
+         
+         
+         
+      </section>
+      
+   </body></html>

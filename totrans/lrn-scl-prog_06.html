@@ -1,0 +1,658 @@
+<html><head></head><body><div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Exploring Built-In Effects</h1>
+                </header>
+            
+            <article>
+                
+<p class="p1">Sometimes, computers do things differently compared to what the developer expects. Sometimes, a function can't return a value for a given set of arguments, a device is not available at runtime, or calling an external system takes much longer than expected. </p>
+<p class="p1">Functional approaches strive to capture these aspects and express them with types. This allows for precise reasoning about the program and helps to avoid surprises at runtime.</p>
+<p class="p1">In this chapter, we will study how the mentioned aspects are covered by Scala's standard library. We'll take a look at the following:</p>
+<ul>
+<li class="p1">Foundations of encoding runtime aspects with types</li>
+<li class="p1">Option</li>
+<li class="p1">Either</li>
+<li class="p1">Try</li>
+<li class="p1">Future</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Technical requirements</h1>
+                </header>
+            
+            <article>
+                
+<p>Before we begin, make sure you have the following installed:</p>
+<ul>
+<li>JDK 1.8+</li>
+<li>SBT 1.2+</li>
+</ul>
+<p>The source code for this chapter is available under our GitHub repository at: <a href="https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter06">https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter06</a>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Introduction to effects</h1>
+                </header>
+            
+            <article>
+                
+<p>Scala code compiles to the Java bytecode and runs on the JVM (Java Virtual Machine). As the name suggests, the JVM was not built specifically for Scala. Because of this, there is a mismatch between what is expressible with the Scala language and what the JVM supports. The consequences are twofold:</p>
+<ul>
+<li>The compiler converts Scala features that are not supported by the JVM into the proper bytecode, mostly by creating wrapper classes. As a result, the compilation of a simple Scala program might lead to the creation of dozens or hundreds of classes, which in turn leads to decreased performance and a higher garbage footprint. These negative consequences, in essence, <span>are </span>just an implementation detail. As the JVM improves, it is possible to optimize the bytecode produced by the compiler for the newer versions of Java without any efforts from the application developer.</li>
+<li>Looking in the opposite direction, there are some features of the platform that are not especially consistent with Scala. Support for them is required, though, partly for Scala-Java interoperability reasons, and partly because if something happens in the underlying runtime, it needs to be expressible in the language. </li>
+</ul>
+<p>For us, as users of the language, the first class of differences is more of a theoretical interest as it is comfortable to assume that the compiler developers are doing their best to generate the bytecode which is of the best standards for the current version of the JVM, so we can just rely on them. Consequences of the second kind concern us more directly because they might influence the way we structure our code, and they definitely affect the code we write to interact with existing libraries, especially Java libraries.</p>
+<p>Here, we're talking about features that might negatively impact on our possibility to reason about the code, especially those which break their referential transparency. </p>
+<p>To illustrate the last point, let's take a look at the following code:</p>
+<pre>scala&gt; import java.util<br/>import java.util<br/>scala&gt; val map = new util.HashMap[String, Int] { put("zero", 0) }<br/>map: java.util.HashMap[String,Int] = {zero=0}<br/>scala&gt; val list = new util.ArrayList[String] { add("zero") }<br/>list: java.util.ArrayList[String] = [zero]<br/>scala&gt; println(map.get("zero"))<br/>0<br/>scala&gt; println(list.get(0))<br/>zero</pre>
+<p>We've defined a Java <kbd>HashMap</kbd>, an <kbd>ArrayList</kbd>, put some items in them, and got these back as expected. <span>So far, so good.</span></p>
+<p>Let's push this a bit further:</p>
+<pre>scala&gt; println(map.get("one"))<br/>null<br/>scala&gt; :type null<br/>Null</pre>
+<p>For an element that can't be found in the <kbd>map</kbd>, we got a <kbd>null: Null</kbd> back, which is a bit unexpected. Is it really so bad? Well, it probably is:</p>
+<pre>scala&gt; println(map.get("one").toString)<br/>java.lang.NullPointerException<br/>  ... 40 elided</pre>
+<p>We've got a <kbd>NullPointerException</kbd> which would crash our program at runtime<span> if not caught</span>! </p>
+<p>OK, but we <em>can</em> check if the returned element is <kbd>null.</kbd> We just need to remember to do this each time we call a function that can potentially return <kbd>null</kbd>. Let's do this with the <kbd>list</kbd>:</p>
+<pre>scala&gt; list.get(1) match {<br/>     | case null =&gt; println("Not found")<br/>     | case notNull =&gt; println(notNull)<br/>     | }<br/>java.lang.IndexOutOfBoundsException: Index: 1, Size: 1<br/>  at java.util.ArrayList.rangeCheck(ArrayList.java:653)<br/>  at java.util.ArrayList.get(ArrayList.java:429)<br/>  ... 49 elided</pre>
+<p>Oh, the list does not return <kbd>null</kbd> for absent elements, it just throws the <kbd>IndexOutOfBoundsException</kbd> straight away! Looks like we need to add a <kbd>catch</kbd> clause to our call so that we can make it safe...</p>
+<p>At this moment, our point is already clear <span>– </span>it is hard or impossible to reason about what the possible result of execution of some code written in this style is without looking at the JavaDocs, and eventually at the implementations' source code. The reason for this is that the functions we're calling can return the result in a way that's not encoded in their types. In the first example, the function returns a special <kbd>null</kbd> value for the case where there's no element in the collection. But this special value could also be something different! Another example is <kbd>-1</kbd> for the <kbd>indexOf</kbd> method that's defined on the <kbd>ArrayList</kbd>. Yet another case is the indication of the impossibility to perform an operation, which is done by throwing an exception.</p>
+<p>In a way, the functions we've called altered the environment they were executed in. In the case of an exception, the execution path of the program changed to propagate the exception, and in the case of <kbd>null</kbd> being returned, the caller's expectations had changed, unfortunately not at compile time but at runtime.</p>
+<p>In functional programming, we call such a behavior an <em>effect</em>, and strive to express this effect at the type level. Effects in <span><span>functional programming (FP)</span></span> overlap with <em>side-effects</em>, but represent a wider concept. For example, an effect of optionality (returning <kbd>null</kbd>) of the result is not a side-effect. </p>
+<p>Effects have the advantage that they don't need to be implemented on the language level. Because of this, the same effect can be designed in different ways, depending on the goals and architectural considerations of the library author. Most importantly, they can be extended and combined, which allows us to represent complex sets of effects in a structured and type-safe way.</p>
+<p>In further sections of this chapter, we will take a look at four different kinds of effects that are available in the standard library, starting with <kbd>Option</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Option</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Option</kbd> is probably the first effect that a novice Scala developer gets familiar with. It encodes the situation that the function might return no result. Simplified, it is represented in <kbd>stdlib</kbd> as an algebraic data type, as shown in the following code:</p>
+<pre><span>sealed abstract class </span>Option[<span>+A</span>]<br/><span>case object </span>None <span>extends </span>Option[Nothing]<br/>final case class Some[+A](value: A) extends Option[A]</pre>
+<p><kbd>None</kbd> represents the case of an absent result, while <kbd>Some(value)</kbd> represents the case where a result exists. Next, we'll look at a three-step approach to gain more understanding of how to work with an <kbd>Option</kbd>—how to create it, read the value from it (if there is one) and which possibilities emerge from the fact that <kbd>Option</kbd> is an effect.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Creating an Option</h1>
+                </header>
+            
+            <article>
+                
+<p>An <kbd>Option</kbd> can be created in a variety of ways. The most straightforward, though not recommended, is to use the constructor of the case class or to return <kbd>None</kbd> directly:</p>
+<pre><span>val </span><span>opt1 </span>= None<br/><span>val </span><span>opt2 </span>= <span>Some</span>(<span>"Option"</span>)</pre>
+<p>This is not recommended because it is absolutely possible to return <kbd>null</kbd> wrapped in <kbd>Option</kbd> again, thus defeating the purpose of it: </p>
+<pre>val opt3 = Some(null)</pre>
+<p>Because of this, we need to check whether the constructor argument is <kbd>null</kbd> first:</p>
+<pre><span>def </span>opt4[<span>A</span>](a: <span>A</span>): Option[<span>A</span>] = <span>if </span>(a == <span>null</span>) None <span>else </span><span>Some</span>(a)</pre>
+<p>In fact, this pattern is so common that the <kbd>Option</kbd> companion object provides the corresponding constructor:</p>
+<pre><span>def </span>opt5[<span>A</span>](a: <span>A</span>): Option[<span>A</span>] = <span>Option</span>(a)</pre>
+<p>The companion object defines a few more constructors which allow you to refrain from direct use of <kbd>Some</kbd> or <kbd>None</kbd> altogether:</p>
+<pre>val empty = Option.empty[String]<br/>val temperature: Int = 26<br/>def readExactTemperature: Int = 26.3425 // slow and expensive method call<br/>val temp1 = Option.when(temperature &gt; 45)(readExactTemperature)<br/>val temp2 = Option.unless(temperature &lt; 45)(readExactTemperature)</pre>
+<p>The first constructor creates the type <kbd>None</kbd>, and the second and third return <kbd>Some</kbd>, but only if the condition is <kbd>true</kbd> or <kbd>false</kbd>, respectively. The second argument is a by-name parameter and is only calculated if the condition holds.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Reading from an Option</h1>
+                </header>
+            
+            <article>
+                
+<p>Now we have an <kbd>Option</kbd> and need to take the value out of it. The most obvious way to do this is in a "null-checking" style:</p>
+<pre><span>if </span>(<span>opt1</span>.isDefined) <span>println</span>(<span>opt1</span>.<span>get</span>)<br/><span>if </span>(<span>opt1</span>.<span>isEmpty</span>) <span>println</span>(<span>"Ooops, option is empty"</span>) <span>else </span><span>println</span>(<span>opt1</span>.<span>get</span>)</pre>
+<p>Here, we're using one of two emptiness checks and in this case, if an <kbd>Option</kbd> is non-empty, we call <kbd>.get</kbd> to retrieve its value. Besides being quite verbose, the main disadvantage of this approach is that it is easy to forget to check if an option has been defined. If <kbd>None.get</kbd> gets called, it will throw a <kbd>NoSuchElementException</kbd>:</p>
+<pre>scala&gt; None.<span>get<br/></span>java.util.NoSuchElementException: None.get<br/>  at scala.None$.get(Option.scala:<span>378</span>)<br/>  ... <span>40 </span>elided</pre>
+<p>There are a few more methods that allow you to check whether the contents of the option satisfy a given criteria, but they all suffer in the same way:</p>
+<pre><span>if </span>(<span>option</span>.contains(<span>"boo"</span>)) <span>println</span>(<span>"non-empty and contains 'boo'"</span>)<br/><span>if </span>(option.exists(_ &gt; <span>10</span>)) <span>println</span>(<span>"non-empty and greater then 10"</span>)<br/><span>if </span>(option.forall(_ &gt; <span>10</span>)) <span>println</span>(<span>"empty or greater then 10"</span>)</pre>
+<p>The <kbd>contains</kbd> method compares its argument with the contents of the option if it has been defined. <kbd>exists</kbd> takes a predicate that is applied to the value of an option if it is non-empty. <span>Compared to the other methods, </span><kbd>forall</kbd> is special because it returns <kbd>true</kbd> if a predicate applied to the argument holds for a non-empty option or if an option is empty. </p>
+<p>Another way to get a value out of <kbd>Option</kbd> is to deconstruct it:</p>
+<pre><span>if </span>(<span>opt</span>.isDefined) { <span>val </span><span>Some</span>(value) = <span>opt </span>}</pre>
+<p>You can also use pattern matching to avoid checking for non-emptiness completely:</p>
+<pre><span>opt </span><span>match </span>{<br/>  <span>case </span><span>Some</span>(value) =&gt; <span>println</span>(value)<br/>  <span>case </span>None =&gt; <span>println</span>(<span>"there is nothing inside"</span>)<br/>}</pre>
+<p>Sometimes, all that is needed for the caller is a "default" value if an <kbd>Option</kbd> is empty. There is a special method for this called <kbd>getOrElse</kbd>:</p>
+<pre><span>val resultOrDefault = opt</span>.getOrElse(<span>"No value"</span>)</pre>
+<p>Another similar method <span>is <kbd>orNull</kbd>. It </span>is not very useful in Scala code, but is very convenient for Java interoperability and is available for <kbd>Option[AnyRef]</kbd>. It returns <kbd>null</kbd> in the case of an empty option or the option's value otherwise:</p>
+<pre>scala&gt; None.orNull<br/>res8: Null = null</pre>
+<p><span><span>The</span></span> <kbd>foreach</kbd> method feels quite different from what we've seen so far as it executes a function on a value of an <kbd>Option</kbd> in the case it is defined:</p>
+<pre>scala&gt; val opt2 = Some("I'm a non-empty option")<br/>opt2: Some[String] = Some(I'm a non-empty option)<br/>scala&gt; opt2.foreach(println)<br/>I'm a non-empty option</pre>
+<p>The reason why it is special compared to the other methods we've seen so far is that it does not treat the option as a special value. Instead, it is semantically formulated as a callback <span>– </span>"if this effect has (had) place, execute the following code on it."</p>
+<p>This view of an <kbd>Option</kbd> offers another possibility so that we can work with it <span>– </span>to provide higher order functions that will be executed in the case of an empty or non-empty option. Let's see how this works in detail.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Option as an effect</h1>
+                </header>
+            
+            <article>
+                
+<p>The first consequence of the aforementioned approach is that it is possible to constrain the possible values of the <kbd>Option</kbd> (and convert it to <kbd>None</kbd> if the conditions don't hold) without inspecting its contents. Here is an example of filtering options further containing a number bigger or less than <kbd>10</kbd>, respectively:</p>
+<pre><span>val </span><span>moreThen10</span>: Option[Int] = <span>opt</span>.filter(_ &gt; <span>10</span>)<br/><span>val </span><span>lessOrEqual10</span>: Option[Int] = <span>opt</span>.filterNot(_ &gt; <span>10</span>)</pre>
+<p class="mce-root">It is also possible to use a partial function as a filter. This allows you to filter and transform the value at the same time. For example, you can filter numbers bigger than <kbd>10</kbd> and convert them into a <kbd>String</kbd>:</p>
+<pre><span>val </span><span>moreThen20</span>: Option[<span>String</span>] = <span>opt</span>.collect {<br/>  <span>case </span>i <span>if </span>i &gt; <span>20 </span>=&gt; <span>s"More then 20: </span><span>$</span>i<span>"<br/></span>}</pre>
+<p>Functionally, the <kbd>collect</kbd> method can be seen as a combination of <kbd>filter</kbd> and <kbd>map</kbd>, where the latter can be used separately to transform the contents of a non-empty option. For instance, let's imagine a chain of calls we'd need to make in order to catch a fish:</p>
+<pre><span>val </span><span>buyBait</span>: <span>String </span>=&gt; Bait<span> </span>= <span>???<br/></span><span>val </span><span>castLine</span>: Bait<span> </span>=&gt; <span>Line </span>= <span>???<br/></span><span>val </span><span>hookFish</span>: <span>Line </span>=&gt; <span>Fish </span>= <span>???<br/></span><span><br/></span><span>def </span><span>goFishing</span>(bestBaitForFish: Option[<span>String</span>]): Option[<span>Fish</span>] =<br/>  bestBaitForFish.map(<span>buyBait</span>).map(<span>castLine</span>).map(<span>hookFish</span>)</pre>
+<p>Here, we're buying some bait, casting the line, and hooking the fish at the appropriate moment. The argument for our implementation is optional because we might not know what the best bite for a fish would be.</p>
+<p>There is an issue with this implementation, though. We're ignoring the fact that our functions will have no results for the given parameters. The fishing store might be closed, the cast might break, and the fish can slip out. It turns out that we violate our own rules about expressing effects with types that we defined a couple of pages ago!</p>
+<p>Let's fix that by making our functions return <kbd>Option</kbd>. We'll start with <kbd>hookFish</kbd>:</p>
+<pre>val hookFish: Line =&gt; Option[Fish]<br/><span><br/>def goFishingOld(bestBaitForFish: Option[String]): Option[Option[Fish]] =<br/>  bestBaitForFish.map(buyBait).map(castLine).map(hookFish)<br/></span></pre>
+<p>But now our function returns a nested <kbd>Option</kbd>, which is hard to work with. We can address this by flattening the result using the corresponding method:</p>
+<pre>def goFishingOld(bestBaitForFish: Option[String]): Option[Fish] =<br/>  bestBaitForFish.map(buyBait).map(castLine).map(hookFish).flatten</pre>
+<p>Now, we can also make the <kbd>castLine</kbd> return <kbd>Option</kbd>:</p>
+<pre>val castLine: Bait =&gt; Option[Line]<br/>val hookFish: Line =&gt; Option[Fish]<br/><br/>def goFishingOld(bestBaitForFish: Option[String]): Option[Fish] =<br/>  bestBaitForFish.map(buyBait).map(castLine).map(hookFish).flatten</pre>
+<p>Unfortunately, this implementation ceases to compile:</p>
+<pre>error: type mismatch;<br/> found : FishingOptionExample.this.Line =&gt; Option[FishingOptionExample.this.Fish]<br/> required: Option[UserExample.this.Line] =&gt; ?</pre>
+<p>To deal with chained, non-empty options, there is a <kbd>flatMap</kbd> method, which accepts a function returning an <kbd>Option</kbd> and flattens the result before returning it. With <kbd>flatMap</kbd>, we can implement our chain of calls without the need to call <kbd>flatten</kbd> at the end:</p>
+<pre>val buyBait: String =&gt; Option[Bait]<br/>val makeBait: String =&gt; Option[Bait]<br/>val castLine: Bait =&gt; Option[Line]<br/>val hookFish: Line =&gt; Option[Fish]<br/><br/>def goFishingOld(bestBaitForFish: Option[String]): Option[Fish]   bestBaitForFish.flatMap(buyBait).flatMap(castLine).flatMap(hookFish)</pre>
+<p>Having <kbd>map</kbd> and <kbd>flatMap</kbd> also allows us to use <kbd>Option</kbd> in <kbd>for</kbd> comprehensions. For instance, we can rewrite the preceding example like so:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFish: Option[<span>String</span>]): Option[<span>Fish</span>] =<br/>  <span>for </span>{<br/>    baitName &lt;- bestBaitForFish<br/>    bait &lt;- buyBait(baitName).orElse(makeBait(baitName))<br/>    line &lt;- castLine(bait)<br/>    fish &lt;- hookFish(line)<br/>  } <span>yield </span>fish</pre>
+<p>Here, we also added a fallback case for the situation of the fishing shop being closed, and when you need to make the bait by hand. This demonstrates that empty options can also be chained. The <kbd>orElse</kbd> method resolves a series of options until the first one that's defined is found or returns the last <kbd>Option</kbd> in the chain, regardless of its contents:</p>
+<pre><span>val </span><span>opt5 </span>= <span>opt0 </span>orElse <span>opt2 </span>orElse <span>opt3 </span>orElse opt4</pre>
+<p>There is a possibility to map over the <kbd>Option</kbd> and provide a default value for the empty case. This is done with the <kbd>fold</kbd> method, which accepts the default value as a first argument list and a mapping function as a second one:</p>
+<pre><span>opt</span>.fold(<span>"Value for an empty case"</span>)((i: Int) =&gt; <span>s"The value is </span><span>$</span>i<span>"</span>)</pre>
+<p>The last pair of methods available for an <kbd>Option</kbd> are <kbd>toRight</kbd> and <kbd>toLeft</kbd>. They return instances of the next effect we want to take a look at, <kbd>Either</kbd>. <kbd>toRight</kbd> returns <kbd>Left</kbd>, which contains its argument for <kbd>None</kbd>, or <kbd>Right</kbd>, containing the value of <kbd>Some</kbd>:</p>
+<pre><span>opt</span>.toRight(<span>"If opt is empty, I'll be Left[String]"</span>)</pre>
+<p><kbd>toLeft</kbd> does the same but returns on different sides of <kbd>Either</kbd>, respectively:</p>
+<pre>scala&gt; val opt = Option.empty[String]<br/>opt: Option[String] = None<br/><br/>scala&gt; opt.toLeft("Nonempty opt will be Left, empty - Right[String]")<br/>res8: Either[String,String] = Right(Nonempty opt will be Left, empty - Right[String])</pre>
+<p>But what are these <kbd>Left</kbd> and <kbd>Right</kbd> options we are talking about?</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Either</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Either</kbd> represents the possibility of a function having one of two alternative results which can't be represented by a single type.</p>
+<p>For example, let's imagine that we have a new simulation system that replaced an old one. The new system is very popular, and so is constantly under load and thus not always available. The old one is kept as a fallback for this reason. Unfortunately, the results of the simulation have very different formats for both systems. Hence, it makes sense to represent them as <kbd>Either</kbd>:</p>
+<pre><span>type </span><span>OldFormat<br/></span><span>type </span><span>NewFormat<br/></span><span><br/></span><span>def </span>runSimulation(): <span>Either</span>[<span>OldFormat</span>, <span>NewFormat</span>]</pre>
+<p>If this example gives you the feeling that types of alternatives must be related, then you are getting the wrong feeling. Usually, the types of the results would be completely unrelated. To illustrate this, let's consider another example.</p>
+<p>As we're fishing, there is the possibility of us catching very different kinds of fish. Yet another possibility is to pull something completely different—an old boot that was lost by a tourist two years ago, or potential evidence that had been concealed by a criminal:</p>
+<pre><span>def catchFish</span>(): <span>Either</span>[Boot, <span>Fish</span>]</pre>
+<p>Traditionally, the right side is preferred to represent the more desirable, <em>right</em> outcome, the left side is less desirable. </p>
+<p>The simplified definition of <kbd>Either</kbd> looks like this in the Scala library:</p>
+<pre><span>sealed abstract class </span>Either[<span>+A</span>, <span>+B</span>]<br/>final case class Left[+A, +B](value: A) extends Either[A, B]<br/>final case class Right[+A, +B](value: B) extends Either[A, B]</pre>
+<p>It takes two type parameters for the left and right sides, and there are two case classes representing these sides. Let's dive a bit deeper using the same approach that we did with <kbd>Option</kbd><span> – </span>create an effect, read from the effect, and abstract over it. </p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Creating Either</h1>
+                </header>
+            
+            <article>
+                
+<p>Again, as in the case of <kbd>Option</kbd>, an obvious way to create an instance of <kbd>Either</kbd> is to use the constructor of the respective case class:</p>
+<pre>scala&gt; Right(10)<br/>res1: scala.util.Right[Nothing,Int] = Right(10)</pre>
+<p>The caveat is that the preceding definition leaves us with an <kbd>Either</kbd> whose left side is of the type <kbd>Nothing</kbd>. This probably wasn't our intention. Therefore, it is desirable to provide type parameters for both sides:</p>
+<pre>scala&gt; Left[String, Int]("I'm left")<br/>res2: scala.util.Left[String,Int] = Left(I'm left)</pre>
+<p><span>This is arguably a bit cumbersome.</span></p>
+<p>Again, similar to <kbd>Option</kbd>, the <kbd>Either</kbd> companion object offers a helpful constructor which takes a predicate and two by-name constructors for the right and left sides:</p>
+<pre>scala&gt; val i = 100<br/>i: Int = 100<br/>scala&gt; val either = Either.cond(i &gt; 10, i, "i is greater then 10")<br/>either: scala.util.Either[String,Int] = Right(100)</pre>
+<p>If the condition holds, the <kbd>Right</kbd> with a given argument is constructed, otherwise a <kbd>Left</kbd> is created. Because both sides are defined, the compiler can inference the resulting type of <kbd>Either</kbd> properly.</p>
+<p>There are two helper methods that are defined on both the <kbd>Left</kbd> and <kbd>Right</kbd> that help to upcast the previously defined side to full <kbd>Either</kbd>:</p>
+<pre>scala&gt; val right = Right(10)<br/>right: scala.util.Right[Nothing,Int] = Right(10)<br/>scala&gt; right.withLeft[String]<br/>res11: scala.util.Either[String,Int] = Right(10)<br/>scala&gt; Left(new StringBuilder).withRight[BigDecimal]<br/>res12: scala.util.Either[StringBuilder,BigDecimal] = Left()</pre>
+<p class="mce-root">Here, we upcast <kbd>Right[Nothing,Int]</kbd> to <kbd>Either[String,Int]</kbd> and do the same with <kbd>Left</kbd>, which produces the resulting value of the type <kbd>Either[StringBuilder,BigDecimal]</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Reading values from Either</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Either</kbd> is different from <kbd>Option</kbd> in the sense that it represents two possible values instead of one. Accordingly, we can't just check if <kbd>Either</kbd> contains a value. We have to specify which side we're talking about:</p>
+<pre><span>if </span>(<span>either</span>.isRight) <span>println</span>(<span>"Got right"</span>)<br/><span>if </span>(either.isLeft) <span>println</span>(<span>"Got left"</span>)</pre>
+<p>They are of little use if compared to the Option's approach because <kbd>Either</kbd> does not offer a method to extract the value from it. In the case of <kbd>Either</kbd>, pattern matching is a way to go:</p>
+<pre><span>either </span><span>match </span>{<br/>  <span>case </span><span>Left</span>(value) =&gt; <span>println</span>(<span>s"Got Left value </span><span>$</span>value<span>"</span>)<br/>  <span>case </span><span>Right</span>(value) =&gt; <span>println</span>(<span>s"Got Right value </span><span>$</span>value<span>"</span>)<br/>}</pre>
+<p>The predicate functions are also available with semantics similar to <kbd>Option</kbd>, with <kbd>None</kbd> represented by <kbd>Left</kbd> and <kbd>Some</kbd> by <kbd>Right</kbd>:</p>
+<pre><span>if </span>(either.contains(<span>"boo"</span>)) <span>println</span>(<span>"Is Right and contains 'boo'"</span>)<br/><span>if </span>(either.exists(_ &gt; <span>10</span>)) <span>println</span>(<span>"Is Right and &gt; 10"</span>)<br/><span>if </span>(either.forall(_ &gt; <span>10</span>)) <span>println</span>(<span>"Is Left or &gt; 10"</span>)</pre>
+<p>This special treatment of <kbd>Right</kbd> as a default side makes <kbd>Either</kbd> <em>right-biased</em>. Another example of this bias is the <kbd>getOrElse</kbd> function, which also returns the contents of the <kbd>Right</kbd> side or the default value provided as an argument in the case of <kbd>Left</kbd>:</p>
+<pre>scala&gt; val left = Left(new StringBuilder).withRight[BigDecimal]<br/>res14: scala.util.Either[StringBuilder,BigDecimal] = Left()<br/><br/>scala&gt; .getOrElse("Default value for the left side")<br/>res15: String = Default value for the left side</pre>
+<p>The right bias plays very well for the conversion to <kbd>Option</kbd>, with <kbd>Some</kbd> representing the right side and <kbd>None</kbd> the left side, regardless of the <kbd>value</kbd> of <kbd>Left</kbd>:</p>
+<pre>scala&gt; left.toOption<br/>res17: Option[BigDecimal] = None</pre>
+<p>Similarly, <kbd>toSeq</kbd> represents <kbd>Right</kbd> as a <kbd>Seq</kbd> of one element and <kbd>Left</kbd> as an empty <kbd>Seq</kbd>:</p>
+<pre>scala&gt; left.toSeq<br/>res18: Seq[BigDecimal] = List()</pre>
+<p>In the case of there being a <kbd>Left</kbd> that we'd like to be <kbd>Right</kbd> or vice versa, there is a <kbd>swap</kbd> method whose sole purpose is to changes sides:</p>
+<pre>scala&gt; left.swap<br/>res19: scala.util.Either[BigDecimal,StringBuilder] = Right()</pre>
+<p class="mce-root">This can help to apply the right-biased methods if a value that needs to be applied is on the left side.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Either as an Effect</h1>
+                </header>
+            
+            <article>
+                
+<p>Naturally, methods defined in terms of an effect are also right-biased for <kbd>Either</kbd>. So is, for example, the callback method <kbd>foreach</kbd>, which we already know from <kbd>Option</kbd>:</p>
+<pre>scala&gt; val left = Left("HoHoHo").withRight[BigDecimal]<br/>left: scala.util.Either[String,BigDecimal] = Left(HoHoHo)<br/>scala&gt; left.foreach(println)<br/>scala&gt; left.swap.foreach(println)<br/>HoHoHo</pre>
+<p>In the preceding example, the callback is not executed for the <kbd>left</kbd>, but is called as soon as it becomes <kbd>Right</kbd> after we call <kbd>swap</kbd> on it. The filtering has a bit of a different definition, as it accepts a predicate to filter the right side, and a value to return as a <kbd>Left</kbd> if the predicate does not hold:</p>
+<pre>scala&gt; left.swap.filterOrElse(_.length &gt; 10, "Sorry, too short")<br/>res27: ... = Left(Sorry, too short)</pre>
+<p><kbd>map</kbd> and <kbd>flatMap</kbd> allow you to transform the right side if you provide the appropriate functions. <kbd>flatMap</kbd> expects the result of the function to have a type of <kbd>Either</kbd> as well. To demonstrate this, we'll reuse our <kbd>Option</kbd> example:</p>
+<pre>val buyBait: String =&gt; Bait = ???<br/>val makeBait: String =&gt; Bait = ???<br/>val castLine: Bait =&gt; Line = ???<br/>val hookFish: Line =&gt; Fish = ???</pre>
+<p>But this time we'll start with <kbd>bestBaitForFish</kbd>, which is the result of us asking about this other fisherman. The fisherman may be in a bad mood and we might hear them cursing instead of the hint we're expecting to get. These are both of the <kbd>String</kbd> type, but we absolutely want to differentiate between them:</p>
+<pre>def goFishing(bestBaitForFishOrCurse: Either[String, String]): Either[String, Fish] =<br/>  bestBaitForFishOrCurse.map(buyBait).map(castLine).map(hookFish)</pre>
+<p>Again, we're not living up to the standards we've defined for ourselves. We might get an explanation from the seller in the shop as to why we can't have the bait we want to buy. In the case that we fail to make bait, cast a line, or hook a fish, we might express ourselves verbally as well with some text that we will not put in the examples of this book. It makes sense to express the possibility that our functions return this verbal feedback i<span>f something goes wrong:</span></p>
+<pre>val buyBait: String =&gt; Either[String, Bait]<br/>val makeBait: String =&gt; Either[String, Bait]<br/>val castLine: Bait =&gt; Either[String, Line]<br/>val hookFish: Line =&gt; Either[String, Fish]</pre>
+<p>Now, we can rewrite the code that used <kbd>map</kbd> with <kbd>flatMap</kbd>. It makes sense to write it as a <kbd>for</kbd> comprehension:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFishOrCurse: <span>Either</span>[<span>String</span><span>, </span><span>String</span>]): <span>Either</span>[<span>String</span><span>, </span><span>Fish</span>] = <span>for </span>{<br/>  baitName &lt;- bestBaitForFishOrCurse<br/>  bait &lt;- buyBait(baitName).fold(_ =&gt; makeBait(baitName)<span>, </span><span>Right</span>(_))<br/>  line &lt;- castLine(bait)<br/>  fish &lt;- hookFish(line)<br/>} <span>yield </span>fish</pre>
+<p class="mce-root">The calls will be carried over until the last one succeeds or one of them produces a <kbd>Left</kbd>. In the second case, the first <kbd>Left</kbd> we meet will be returned as the result of the function call.</p>
+<p>In the preceding example, we used the <kbd>fold</kbd> method, which allows us to apply the given functions to one side of <kbd>Either</kbd>. In our use case, we did this to ignore any eventual error message that will be returned by the seller in the shop and to make the bait ourselves. If we succeed, we wrap the bait into the <kbd>Right</kbd> before returning it so that we have proper type <span>alignment</span>.</p>
+<p>The <kbd>fold</kbd> method is <em>unbiased</em> as it treats the left and right sides of <kbd>Either</kbd> equally.</p>
+<p>In the last example we looked at, the model we represented with <kbd>Either</kbd> had its left side dedicated to the description of failures that happened during its operation. It is always useful to have the type of the error  more specific than <kbd>String</kbd>. Often, <span>especially in cases involving integration with Java, the most suitable choice would be to represent errors as subtypes of the <kbd>Exception</kbd>. In fact, this is so ubiquitous that there is a special effect available for this in Scala called <kbd>Try</kbd>. An <kbd>Either</kbd> having a type of its left side inheriting from a <kbd>Throwable</kbd> can be converted into a <kbd>Try</kbd> with the respective method:</span></p>
+<pre><span>def </span>toTry(<span>implicit </span>ev: A &lt;:&lt; <span>Throwable</span>): Try[B] = <span>this match </span>{<br/>  <span>case </span><span>Right</span>(b) =&gt; Success(b)<br/>  <span>case </span><span>Left</span>(a)  =&gt; Failure(a)<br/>}</pre>
+<p>Let's examine cases in which <kbd>Try</kbd> is a better choice then <kbd>Either</kbd> and learn how to use it.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Try</h1>
+                </header>
+            
+            <article>
+                
+<p>In the same way that <kbd>Either</kbd> stands for an effect of possible alternative results, <kbd>Try</kbd> denotes the effect of throwing an <kbd>Exception</kbd> by the function. In a sense, it is just a subset of <kbd>Either</kbd>, but it is so common that it has its own implementation. Unsurprisingly, the simplified representation of it looks quite familiar:</p>
+<pre>sealed abstract class Try[+T]<br/>final case class Success[+T](value: T) extends Try[T]<br/>final case class Failure[+T](exception: Throwable) extends Try[T]</pre>
+<p>Obviously, <kbd>Success</kbd> represents the happy-path outcome of the operation, and <kbd>Failure</kbd> is for exceptional conditions. The type for the contents of the <kbd>Failure</kbd> is fixed to be a subclass of <kbd>Throwable</kbd>, so we're back to the single type parameter for the whole ADT, which is similar to <kbd>Option</kbd>.</p>
+<p>We'll study <kbd>Try</kbd> in the same way as we did with <kbd>Option</kbd> and <kbd>Either</kbd> <span>– by </span>creating, reading from, and abstracting over the effect.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Creating a Try</h1>
+                </header>
+            
+            <article>
+                
+<p>The definition of <kbd>Try</kbd> is already familiar because of its similarity to <kbd>Either</kbd>, and so are the ways of creating an instance of it. For starters, we can use the constructors of the case classes to create instances directly:</p>
+<pre>scala&gt; import scala.util._<br/>import scala.util._<br/>scala&gt; Success("Well")<br/>res1: scala.util.Success[String] = Success(Well)<br/>scala&gt; Failure(new Exception("Not so well"))<br/>res2: scala.util.Failure[Nothing] = Failure(java.lang.Exception: Not so well)</pre>
+<p>The idea behind <kbd>Try</kbd> is that it can be used in scenarios where an exception would normally be thrown. Hence, the constructors we just mentioned would normally form the following pattern:</p>
+<pre><span>try </span><span>Success</span>(System.<span>console</span>().readLine()) <span>catch </span>{<br/>  <span>case </span>err: IOError =&gt; <span>Failure</span>(err)<br/>}</pre>
+<p>This will end with the result of the <kbd>try</kbd> block being wrapped in <kbd>Success</kbd> and the <kbd>catch</kbd> exception wrapped in <kbd>Failure</kbd>. Again, <kbd>stdlib</kbd> already has this pattern implemented in the companion object of <kbd>Try</kbd>. The <kbd>apply</kbd> method takes a single by-name parameter for the <kbd>try</kbd> block, like so:</p>
+<pre><span>Try</span>(System.<span>console</span>().readLine())</pre>
+<p>And then catches all <kbd>NonFatal</kbd> exceptions.</p>
+<div class="packt_infobox"><kbd>NonFatal</kbd> represents a class of exceptions that the developer is able to deal with. It does not include fatal errors such as <kbd>OutOfMemoryError</kbd>, <kbd>StackOverflowError</kbd>, <kbd>LinkageError</kbd>, or <kbd>InterruptedException</kbd>. It does not make sense to deal with these programmatically. Another group of Throwables not matched by <kbd>NonFatal</kbd> is <kbd>scala.util.control.ControlThrowable</kbd>, which is used internally to control program flow and thus should not be used in a catch exception either.</div>
+<p>It is common to provide multiline blocks wrapped in curly braces as a parameter for the <kbd>Try</kbd> constructor to makes it appear like it's a language feature:</p>
+<pre><span>scala&gt;val line = Try </span>{<br/>  <span>val </span>line = System.<span>console</span>().readLine()<br/>  <span>println</span>(<span>s"Got </span><span>$</span>line<span> from console"</span>)<br/>  line<br/>}</pre>
+<p>This constructor is so common that it covers the absolute majority of use cases.</p>
+<p>Now, let's take a look at how we <span>can</span> get back the value from an instance of <kbd>Try</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Reading values from Try</h1>
+                </header>
+            
+            <article>
+                
+<p>There are multiple ways to approach this task. It is possible to use methods similar to <kbd>isDefined</kbd> and <kbd>isEmpty</kbd> for <kbd>Option</kbd>, which allow for a null-pointer checking style:</p>
+<pre><span>if </span>(<span>line</span>.isSuccess) <span>println</span>(<span>s"The line was </span><span>$</span>{<span>line</span>.get}<span>"</span>)<br/><span>if </span>(<span>line</span>.isFailure) <span>println</span>(<span>s"There was a failure"</span>)</pre>
+<p>Obviously, this approach suffers from the same issue that <kbd>Option</kbd> does <span>– </span>if we forget to check that the result is a <kbd>Success</kbd> before extracting it, calling <kbd>.get</kbd> will throw an exception:</p>
+<pre>scala&gt; Try { throw new Exception("No way") }.get<br/>java.lang.Exception: No way<br/> at .$anonfun$res34$1(&lt;console&gt;:1)<br/> at scala.util.Try$.apply(Try.scala:209)<br/> ... 40 elided</pre>
+<p>To avoid throwing an exception just after catching it, there is a version of <kbd>get</kbd> that allows us to provide a default argument for the case if <kbd>Try</kbd> is a <kbd>Failure</kbd>:</p>
+<pre>scala&gt; Try { throw new Exception("No way") }.getOrElse("There is a way")<br/>res35: String = There is a way</pre>
+<p>Unfortunately, there are no predicate-taking methods like there were for <kbd>Option</kbd>. The reason for this is that <kbd>Try</kbd> was adopted from Twitter's implementation and was first added to Scala's standard library in version 2.10. </p>
+<p><span>The <kbd>foreach</kbd> callback is still available, though, and allows us to define a function that will be executed on the value of the <kbd>Success</kbd>:</span></p>
+<pre>scala&gt; line.foreach(println)<br/>Hi, I'm the success!</pre>
+<p>The <kbd>foreach</kbd> method brings our discussion to the effect side of <kbd>Try</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Try as an effect</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Try</kbd> offers the same functionality as an <kbd>Option</kbd> in terms of filtering its results with a predicate. If the predicate does not hold, the result is represented as a <kbd>Failure[NoSuchElementException]</kbd>. Taking the <kbd>line</kbd> definition from our previous example, like so:</p>
+<pre>scala&gt; line.filter(_.nonEmpty)<br/>res38: scala.util.Try[String] = Success(Hi, I'm the success!)<br/>scala&gt; line.filter(_.isEmpty)<br/>res39: scala.util.Try[String] = Failure(java.util.NoSuchElementException: Predicate does not hold for Hi, I'm the success!)</pre>
+<p><kbd>collect</kbd> works in the same way, but it takes a partial function and allows us to filter and transform the contents of the <kbd>Try</kbd> at the same time:</p>
+<pre>scala&gt; line.collect { case s: String =&gt; s * 2 }<br/>res40: scala.util.Try[String] = Success(Hi, I'm the success!Hi, I'm the success!)<br/>scala&gt; line.collect { case s: "Other input" =&gt; s * 10 }<br/>res41: scala.util.Try[String] = Failure(java.util.NoSuchElementException: Predicate does not hold for Hi, I'm the success!)</pre>
+<p>The <kbd>filter</kbd> and <kbd>collect</kbd> functions are <kbd>Success</kbd> biased, and so are <kbd>map</kbd> and <kbd>flatMap</kbd>. Let's reimplement the fishing example in this situation, where our parameter is of type <kbd>Try[String]</kbd>, and the exceptions are replacing strings as the problem descriptions we had in our example of <kbd>Either</kbd>:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFishOrCurse: Try[<span>String</span>]): Try[<span>Fish</span>] =<br/>  bestBaitForFishOrCurse.map(buyBait).map(castLine).map(hookFish)</pre>
+<p>The operations are chained on the <kbd>Success</kbd>. Yet again, we have to fix the signatures of our functions so that they encode the possibility of an error in every step in the type of the <span>result</span>:</p>
+<pre><span>val </span>buyBait: <span>String </span>=&gt; Try[Bait]<br/><span>val </span>makeBait: <span>String </span>=&gt; Try[Bait]<br/><span>val </span>castLine: Bait<span> </span>=&gt; Try[<span>Line</span>]<br/><span>val </span>hookFish: <span>Line </span>=&gt; Try[<span>Fish</span>]</pre>
+<p>Now, we have to use <kbd>flatMap</kbd> instead of <kbd>map</kbd> to align the types. Again, it is more readable if represented as a <kbd>for</kbd> comprehension:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFishOrCurse: Try[<span>String</span>]): Try[<span>Fish</span>] = <span>for </span>{<br/>  baitName &lt;- bestBaitForFishOrCurse<br/>  bait &lt;- buyBait(baitName).fold(_ =&gt; makeBait(baitName)<span>, Success</span>(_))<br/>  line &lt;- castLine(bait)<br/>  fish &lt;- hookFish(line)<br/>} <span>yield </span>fish</pre>
+<p>This implementation is almost identical to the one we have for <kbd>Either</kbd>, with the exception that we now have to wrap successful calls into <kbd>Success</kbd> and not into <kbd>Right</kbd> (we have to use a different constructor for an effect).</p>
+<p>The <kbd>fold</kbd> is one of the methods that is unbiased for <kbd>Try</kbd>. It takes arguments to transfer both <kbd>Success</kbd> and <kbd>Failure</kbd>, as shown in the preceding code. Another unbiased method is <kbd>transform</kbd>, which is similar to <kbd>fold</kbd>, but takes functions for returning <kbd>Try</kbd> as parameters. In a sense, <kbd>transform</kbd> could be called <kbd>flatFold</kbd>:</p>
+<pre>scala&gt; line.transform((l: String) =&gt; Try(println(l)), (ex: Throwable) =&gt; Try(throw ex))<br/>Hi, I'm the success!<br/>res45: scala.util.Try[Unit] = Success(())</pre>
+<p>There are also a few functions that are <kbd>Failure</kbd> biased. </p>
+<p><kbd>recover</kbd> and <kbd>recoverWith</kbd> apply the given partial function to the <kbd>Failure</kbd>. They are basically duals of <kbd>map</kbd> and <kbd>flatMaps</kbd>, but for the exception side:</p>
+<pre><span>line</span>.recover {<br/>  <span>case </span>ex: <span>NumberFormatException </span>=&gt; Math.<span>PI<br/></span>}<br/><span>line</span>.recoverWith {<br/>  <span>case </span>ex: <span>NoSuchElementException </span>=&gt; <span>Try</span>(retryAfterDelay)<br/>}</pre>
+<p>The <kbd>orElse</kbd> method allows us to chain Failures in the same way we did with <kbd>None</kbd>:</p>
+<pre><span>val </span><span>result </span>= <span>firstTry </span>orElse <span>secondTry </span>orElse <span>failure </span>orElse <span>success</span></pre>
+<p>As we can see, <kbd>Try</kbd> is similar to <kbd>Option</kbd> and <kbd>Either</kbd>, and it should not come as a surprise that it can be converted to both <kbd>Option</kbd> and <kbd>Either[Throwable, _]</kbd>:</p>
+<pre>scala&gt; line.toOption<br/>res51: Option[String] = Some("Hi, I'm the success!")<br/>scala&gt; line.toEither<br/>res53: scala.util.Either[Throwable,String] = Right("Hi, I'm the success!")</pre>
+<p>There is one more effect in the standard library that is a bit different from the three we just looked at because it takes into account a more subtle aspect of calling a function <span>– </span>the time it is going to take to return the result.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Future</h1>
+                </header>
+            
+            <article>
+                
+<p>Sometimes, the functions we call take time to return results of the computation. Often, the cause is side-effects like reading from a disk or calling a slow remote API. At times, the operation itself just requires a lot of CPU time to finish. In both cases, the main flow of the program is stopped until the function returns the result. It might be acceptable in the latter case to wait for the result if it is required immediately after calculation (though even in this case it is suboptimal because it makes the system unresponsive), but it is undesirable in the former case because it means that our program consumes CPU while doing nothing (well, waiting for other subsystems of the computer to return the result, but still nothing related to the CPU). Often, such long-running operations are executed in a separate thread of execution.</p>
+<p>As a functional programmer, we would like to express these—two aspects, that is, the duration of the call and the fact that the code is executed in a separate thread, as an effect. This is what <kbd>Future</kbd> does. To be more specific, it does not represent the duration of the call explicitly, but encodes it in a binary form—an operation either takes long and possibly runs in a separate thread or it doesn't.</p>
+<p>The <kbd>Future</kbd> is a very interesting concept and deserves a full chapter on its own. Here, we'll just take a brief look at some of its aspects. We highly recommend referring to the official documentation for more details. Let's apply our ubiquitous three-step approach one more time, this time for <kbd>Future</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Creating a Future</h1>
+                </header>
+            
+            <article>
+                
+<p>The <kbd>Future</kbd> is not encoded as an ADT and thus we have to use a constructor that's provided by the companion object to construct it. Because the code we'll be providing will be executing in a separate thread, the <kbd>Future</kbd> has to have a way to obtain this <kbd>Thread</kbd>. This is done implicitly by having an <kbd>ExecutionContext</kbd> in scope, which we import in two steps. First, we'll import the whose <kbd>scala.concurrent</kbd> package in scope and the <kbd>ExecutionContext</kbd> from it:</p>
+<pre>scala&gt; import scala.concurrent._<br/>import scala.concurrent._<br/>scala&gt; import ExecutionContext.Implicits.global<br/>import ExecutionContext.Implicits.global</pre>
+<p>The <kbd>ExecutionContext</kbd> is basically a factory for <kbd>Threads</kbd>. It can be configured as needed for specific use cases. For demonstration purposes, we're using global context, but in general, this is not recommended. Please refer to the ScalaDocs under <a href="https://www.scala-lang.org/api/current/scala/concurrent/ExecutionContext.html">https://www.scala-lang.org/api/current/scala/concurrent/ExecutionContext.html</a> for further details.</p>
+<p>Having this context in scope, we can construct a <kbd>Future</kbd> by providing a by-name parameter to its constructor:</p>
+<pre><span>val </span><span>success </span>= <span>Future</span>(<span>"Well"</span>)<br/><span>val </span><span>runningForever </span>= <span>Future </span>{<br/>  <span>while </span>(<span>true</span>) Thread.<span>sleep</span>(<span>1000</span>)<br/>}</pre>
+<p>The <kbd>Future</kbd> starts executing immediately after it is created, with respect to the time needed to obtain a thread from the executor.</p>
+<p>Sometimes, we just want to wrap a value at hand into the <kbd>Future</kbd> for the code which expects some <kbd>Future</kbd> as a parameter. In this case, we don't need an execution context because we don't need to calculate anything. We can use one of the special constructors that help to create it successfully: <kbd>failed</kbd> and a <kbd>Future</kbd> from <kbd>Try</kbd>, respectively:</p>
+<pre>scala&gt; val success = Future.successful("Well")<br/>success: scala.concurrent.Future[String] = Future(Success(Well))<br/>scala&gt; val failure = Future.failed(new IllegalArgumentException)<br/>failure: scala.concurrent.Future[Nothing] = Future(Failure(java.lang.IllegalArgumentException))<br/>scala&gt; val fromTry = Future.fromTry(Try(10 / 0))<br/>fromTry: scala.concurrent.Future[Int] = Future(Failure(java.lang.ArithmeticException: / by zero))</pre>
+<p>There is also a predefined <kbd>Future[Unit]</kbd> that can be used as an indirect constructor by mapping over it:</p>
+<pre>scala&gt; val runningLong = Future.unit.map { _ =&gt;<br/> | while (math.random() &gt; 0.001) Thread.sleep(1000)<br/> | }<br/>runningLong: scala.concurrent.Future[Unit] = Future(&lt;not completed&gt;)</pre>
+<p class="mce-root">Now, since we have a value inside of the <kbd>Future</kbd>, let's take a look at the possible ways to get it out.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Reading values from a Future</h1>
+                </header>
+            
+            <article>
+                
+<p>As the <kbd>Future</kbd> is not implemented as an ADT, we can't directly pattern-match on it as we did with other the effects that we looked at in this chapter.</p>
+<p>Instead, we can use the null-checking style:</p>
+<pre>scala&gt; if (runningLong.isCompleted) runningLong.value<br/>res54: Any = Some(Success(()))</pre>
+<p>Luckily, the <kbd>value</kbd> method returns an <kbd>Option</kbd> that will be <kbd>None</kbd> until the future completes, so we can use this in a pattern match:</p>
+<pre>scala&gt; runningForever.value match {<br/> | case Some(Success(value)) =&gt; println(s"Finished successfully with $value")<br/> | case Some(Failure(exception)) =&gt; println(s"Failed with $exception")<br/> | case None =&gt; println("Still running")<br/> | }<br/>Still running</pre>
+<p>Of course, the most useful methods are defined not in relation to the value of the <kbd>Future</kbd>, but in terms of <kbd>Future</kbd> as an effect.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Future as an effect</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Future</kbd> has all of the usual suspects that have been made known to us from this chapter so far. <kbd>foreach</kbd> allows us to define a callback to execute after the <kbd>Future</kbd> successfully completes:</p>
+<pre>scala&gt; runningLong.foreach(_ =&gt; println("First callback"))<br/>scala&gt; runningLong.foreach(_ =&gt; println("Second callback"))<br/>scala&gt; Second callback<br/>First callback</pre>
+<p>The order of execution is not guaranteed, as shown in the previous example.</p>
+<p>There is another callback that is called for any completed feature, regardless of its success. It accepts a function, taking <kbd>Try</kbd> as a parameter:</p>
+<pre>scala&gt; runningLong.onComplete {<br/>     | case Success(value) =&gt; println(s"Success with $value")<br/>     | case Failure(ex) =&gt; println(s"Failure with $ex")<br/>     | }<br/>scala&gt; Success with ()</pre>
+<p>The <kbd>transform</kbd> method is also applied in both cases. There are two flavors of it. One takes two functions, for <kbd>Success</kbd> and <kbd>Failure</kbd>, accordingly, and another takes one function, <kbd>Try =&gt; Try</kbd>:</p>
+<pre><span>stringFuture</span>.transform(_.length, ex =&gt; <span>new </span>Exception(ex))<br/><span>stringFuture</span>.transform {<br/>  <span>case </span><span>Success</span>(value) =&gt; <span>Success</span>(value.length)<br/>  <span>case </span><span>Failure</span>(ex) =&gt; <span>Failure</span>(<span>new </span>Exception(ex))<br/>}</pre>
+<p>In both cases, we transform the string to its length in the case of success and wrap an exception in the case of failure. The second variant is more flexible, though, as it allows us to convert success to failure and vice versa. </p>
+<p>This filtering is also done in the same way as with other effects, that is, with the <kbd>filter</kbd> and <kbd>collect</kbd> methods:</p>
+<pre><span>stringFuture</span>.filter(_.length &gt; <span>10</span>)<br/><span>stringFuture</span>.collect {<br/>  <span>case </span>s <span>if </span>s.length &gt; <span>10 </span>=&gt; s.toUpperCase<br/>}</pre>
+<p>The former just converts a <kbd>Success</kbd> into <kbd>Failure(NoSuchElementException)</kbd> (or leaves the existing <kbd>Failure</kbd> in place) <span>if the predicate does not hold. T</span>he latter also modifies the contents to upper case for <kbd>Success</kbd>.</p>
+<p>And of course, <kbd>map</kbd> and <kbd>flatMap</kbd> are available. We'll let our user service use Futures as an effect <span>– </span>this time to denote that every action, including our research for the best bite name for the fish, takes some time to finish:</p>
+<pre>val buyBait: String =&gt; Future[Bait]<br/>val makeBait: String =&gt; Future[Bait]<br/>val castLine: Bait =&gt; Future[Line]<br/>val hookFish: Line =&gt; Future[Fish]</pre>
+<p>This brings us to the following, already familiar, implementation:</p>
+<pre><span>def </span><span>goFishing</span>(bestBaitForFish: Future[<span>String</span>]): Future[<span>Fish</span>] = <span>for </span>{<br/>  baitName &lt;- bestBaitForFish<br/>  bait &lt;- buyBait(baitName).fallbackTo(makeBait(baitName))<br/>  line &lt;- castLine(bait)<br/>  fish &lt;- hookFish(line)<br/>} <span>yield </span>fish</pre>
+<p>It is easy to see that besides changes in the effect type, the only difference to the previous implementations is the use of the fallback method to provide an alternative in the case of an unsuccessful call of the <kbd>buyBait</kbd> method.</p>
+<p>There is a lot more to cover about the <kbd>Future</kbd> and its dual <kbd>Promise</kbd>. We encourage you to take a look at the official documentation and related blog posts (for example  <a href="https://viktorklang.com/blog/Futures-in-Scala-2.12-part-9.html">https://viktorklang.com/blog/Futures-in-Scala-2.12-part-9.html</a>) for some examples of advanced usage.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p class="p1">In this chapter, we discussed the effects defined in the standard library. First, an <kbd>Option</kbd> which represents a case where it might be impossible for the function to return the result. Then the <kbd>Try</kbd><span> which extends the optionality with the possibility to return an error description in the failure case. Next was </span><kbd>Either</kbd> <span>which further extends the concept of</span> <kbd>Try</kbd> <span>by allowing it to provide an arbitrary type as a description of an</span> <em>unsuccessful</em><span> path. Finally, the </span><kbd>Future</kbd> <span>which stays a bit aside in this list and represents the notion of long and possibly executed in separate context computations</span></p>
+<p class="p1">We noticed that these effects have different constructors tailored to the situations that require the creation of the respective instances. In accordance, they offer slightly different ways to access values that are stored inside the container.</p>
+<p class="p1">We paid attention to the fact that having effects as a first-class concept allows us to define methods not only in terms of contained values but also in terms of the effect itself, which often leads to more expressive code.</p>
+<p class="p1">Most importantly, we realized that many methods such as <kbd>filter</kbd>, <kbd>collect</kbd>, <kbd>map</kbd>, <kbd>flatMap</kbd>, and so, are on identical from the user's perspective and induce identical, higher level implementations for different kinds of effects. We demonstrated this by implementing four uniform examples for catching a fish in a few steps, encoded in terms of different effects.</p>
+<p class="p1">Later in this book, we will identify the underlying concepts that lead to these kinds of similarities.</p>
+<p class="p1">We'll also approach the topic of combining different kinds of effects, which we left out of scope for now.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Questions</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>What would be the proper effect to represent getting the first element of a list, such as a list of tweets? What about a user's information from the database for a given <kbd>userId</kbd>? </li>
+<li>What are the range of possible values of the following <span>expression</span>: <kbd>Option(scala.util.Random.nextInt(10)).fold(9)(_-1)</kbd>?</li>
+<li class="mce-root">What will be the result of the following expression?</li>
+</ol>
+<pre><span>Try</span>[Int](<span>throw new </span>OutOfMemoryError()).filter(_ &gt; <span>10</span>).recover {<br/>  <span>case </span>_: OutOfMemoryError =&gt; <span>100<br/></span>}</pre>
+<ol start="4">
+<li>Describe the result of the following expression:</li>
+</ol>
+<pre><span>Future</span>[Int](<span>throw new </span>OutOfMemoryError()).filter(_ &gt; <span>10</span>).recover {<br/>  <span>case </span>_: OutOfMemoryError =&gt; <span>100<br/></span>}(20)</pre>
+<ol start="5">
+<li>Given the following function, what would be the result of the following call:<span> </span><kbd>either(1)</kbd><span>? </span></li>
+</ol>
+<pre><span>def </span>either(i: Int): Boolean = <br/><span>  Either</span>.<span>cond</span>(i &gt; <span>10</span>, i * <span>10</span>, <span>new </span>IllegalArgumentException(<span>"Give me more"</span>)).forall(_ &lt; <span>100</span>)</pre>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  </body></html>

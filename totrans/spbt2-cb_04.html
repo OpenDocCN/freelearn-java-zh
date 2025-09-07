@@ -1,0 +1,480 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Writing Custom Spring Boot Starters</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we will cover the following topics:</p>
+<ul>
+<li>Understanding Spring Boot autoconfiguration</li>
+<li>Creating a custom Spring Boot autoconfiguration starter</li>
+<li>Configuring custom conditional bean instantiations</li>
+<li>Using custom @Enable annotations to toggle configurations</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Introduction</h1>
+                </header>
+            
+            <article>
+                
+<p>In the previous chapters, we did a lot of configuration, and even more autoconfiguration, while developing our Spring Boot application. Now, it is time to take a look behind the scenes to find out the magic behind Spring Boot autoconfiguration and write some starters of our own as well.</p>
+<p>This is a very useful capability to possess, especially for large software enterprises where the presence of a proprietary code is inevitable. It is very helpful to be able to create internal custom starters that would automatically add some of the configuration or functionalities to the applications. Some likely candidates would be custom configuration systems, libraries, and configurations that deal with connecting to databases, using custom connection pools, HTTP clients, servers, and more. We will go through the internals of Spring Boot autoconfiguration, take a look at how new starters are created, explore conditional initialization and wiring of beans based on various rules, and see that annotations can be a powerful tool, providing the consumers of the starters with more control over dictating what configurations should be used and where.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Understanding Spring Boot autoconfiguration</h1>
+                </header>
+            
+            <article>
+                
+<p>Spring Boot has a lot of power when it comes to bootstrapping an application and configuring it with exactly the things that are needed, all without much of the glue code that is required of us, the developers. The secret behind this power actually comes from Spring itself, or rather from the Java Configuration functionality that it provides. As we add more starters as dependencies, more and more classes will appear in our classpath. Spring Boot detects the presence or absence of specific classes and based on this information, makes some decisions, which are fairly complicated at times, and automatically creates and wires the necessary beans to the application context.</p>
+<p>Sounds simple, right?</p>
+<p>In the previous recipes, we added a number of Spring Boot starters such as <kbd>spring-boot-starter-data-jpa</kbd>, <kbd>spring-boot-starter-web</kbd>, <kbd>spring-boot-starter-data-test</kbd>, and so on. We will use the same code that we finished in the previous chapter, in order to see what actually happens during the application startup and the decisions that Spring Boot will make while wiring our application together.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How to do it...</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>Conveniently, Spring Boot provides us with an ability to get the <kbd>CONDITIONS EVALUATION REPORT</kbd> by simply starting the application with the <kbd>debug</kbd> flag. This can be passed to the application either as an environment variable, <kbd>DEBUG</kbd>, as a system property, <kbd>-Ddebug</kbd>, or as an application property, <kbd>--debug</kbd>.</li>
+<li>Start the application by running <kbd>DEBUG=true ./gradlew clean bootRun</kbd>.</li>
+<li>Now, if you look at the console logs, you will see a lot more information printed there that is marked with the <kbd>DEBUG</kbd> level log. At the end of the startup log sequence, we will see the <kbd>CONDITIONS EVALUATION REPORT</kbd> as follows:</li>
+</ol>
+<pre style="padding-left: 30px">    <strong>=========================</strong>
+    <strong>CONDITIONS EVALUATION REPORT</strong>
+    <strong>=========================</strong>
+    
+    
+    <strong>Positive matches:</strong>
+    <strong>-----------------</strong>
+    <strong>...</strong>
+    <strong>DataSourceAutoConfiguration</strong>
+    <strong>      - @ConditionalOnClass classes found:    <br/>            javax.sql.DataSource,org.springframework.jdbc.<br/>            datasource.embedded.EmbeddedDatabaseType   <br/>            (OnClassCondition)</strong>
+            <strong>...</strong>
+    
+    
+    <strong>Negative matches:</strong>
+    <strong>-----------------</strong>
+    <strong>...</strong>
+    <strong>GsonAutoConfiguration</strong>
+    <strong>      - required @ConditionalOnClass classes not found:  <br/>          com.google.gson.Gson (OnClassCondition)</strong>
+          <strong>...</strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How it works...</h1>
+                </header>
+            
+            <article>
+                
+<p>As you can see, the amount of information that is printed in the debug mode can be somewhat overwhelming, so I've selected only one example of positive and negative matches each.</p>
+<p>For each line of the report, Spring Boot tells us why certain configurations have been selected to be included, what they have been positively matched on, or, for the negative matches, what was missing that prevented a particular configuration being included in the mix. Let's look at the positive match for <kbd>DataSourceAutoConfiguration</kbd>:</p>
+<ul>
+<li>The <kbd>@ConditionalOnClass</kbd> classes found tells us that Spring Boot has detected the presence of a particular class, specifically two classes in our case: <kbd>javax.sql.DataSource</kbd> and <kbd>org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType</kbd>.</li>
+<li>The <kbd>OnClassCondition</kbd> indicates the kind of matching that was used. This is supported by the <kbd>@ConditionalOnClass</kbd> and <kbd>@ConditionalOnMissingClass</kbd> annotations.</li>
+</ul>
+<p>While <kbd>OnClassCondition</kbd> is the most common kind of detection, Spring Boot also uses many other conditions. For example, <kbd>OnBeanCondition</kbd> is used to check the presence or absence of specific bean instances, <kbd>OnPropertyCondition</kbd> is used to check the presence, absence, or specific value of a property, as well as any number of the custom conditions that can be defined using the <kbd>@Conditional</kbd> annotation and <kbd>Condition</kbd> interface implementations.</p>
+<p>The negative matches show us a list of configurations that Spring Boot has evaluated, which means that they do exist in the classpath and were scanned by Spring Boot but didn't pass the conditions required for their inclusion. <kbd>GsonAutoConfiguration</kbd>, while available in the classpath as it is a part of the imported <kbd>spring-boot-autoconfigure</kbd> artifact, was not included because the required <kbd>com.google.gson.Gson</kbd> class was not detected as present in the classpath, thus failing the <kbd>OnClassCondition</kbd>.</p>
+<p>The implementation of the <kbd>GsonAutoConfiguration</kbd> file looks as follows:</p>
+<pre style="padding-left: 30px">@Configuration 
+@ConditionalOnClass(Gson.class) 
+public class GsonAutoConfiguration { 
+ 
+  @Bean 
+  @ConditionalOnMissingBean 
+  public Gson gson() { 
+    return new Gson(); 
+  } 
+ 
+} </pre>
+<p>After looking at the code, it is very easy to make the connection between the conditional annotations and report information that is provided by Spring Boot at the start time.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Creating a custom Spring Boot autoconfiguration starter</h1>
+                </header>
+            
+            <article>
+                
+<p>We have a high-level idea of the process by which Spring Boot decides which configurations to include in the formation of the application context. Now, let's take a stab at creating our own Spring Boot starter artifact, which we can include as an autoconfigurable dependency in our build.</p>
+<p>In <a href="bd85f38d-1b98-47d6-a98a-b22f4478f68e.xhtml" target="_blank"><span class="ChapterrefPACKT">Chapter 2</span></a>, <em>Configuring Web Applications</em>, you learned how to create database <kbd>Repository</kbd> objects. So, let's build a simple starter that will create another <kbd>CommandLineRunner</kbd> that will take the collection of all the <kbd>Repository</kbd> instances and print out the count of the total entries for each.</p>
+<p>We will start by adding a child Gradle project to our existing project that will house the codebase for the starter artifact. We will call it <kbd>db-count-starter</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How to do it...</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>We will start by creating a new directory named <kbd>db-count-starter</kbd> in the root of our project.</li>
+<li>As our project has now become what is known as a <kbd>multiproject</kbd> build, we will need to create a <kbd>settings.gradle</kbd> configuration file in the root of our project with the following content:</li>
+</ol>
+<pre style="padding-left: 60px">include 'db-count-starter' </pre>
+<ol start="3">
+<li>We should also create a separate <kbd>build.gradle</kbd> configuration file for our subproject in the <kbd>db-count-starter</kbd> directory in the root of our project, with the following content:</li>
+</ol>
+<pre style="padding-left: 60px">apply plugin: 'java' 
+ 
+repositories { 
+  mavenCentral() 
+  maven { url "https://repo.spring.io/snapshot" } 
+  maven { url "https://repo.spring.io/milestone" } 
+ 
+} 
+ 
+dependencies { 
+  compile("org.springframework.boot:spring-boot:2.0.0.BUILD-SNAPSHOT")  <br/>  compile("org.springframework.data:spring-data-commons:2.0.2.RELEASE") 
+} </pre>
+<ol start="4">
+<li>Now we are ready to start coding. So, the first thing is to create the directory structure, <kbd>src/main/java/com/example/bookpubstarter/dbcount</kbd>, in the <kbd>db-count-starter</kbd> directory in the root of our project.</li>
+<li>In the newly created directory, let's add our implementation of the <kbd>CommandLineRunner</kbd> file named <kbd>DbCountRunner.java</kbd> with the following content:</li>
+</ol>
+<pre style="padding-left: 60px">public class DbCountRunner implements CommandLineRunner { 
+    protected final Log logger = LogFactory.getLog(getClass()); 
+ 
+    private Collection&lt;CrudRepository&gt; repositories; 
+ 
+    public DbCountRunner(Collection&lt;CrudRepository&gt; repositories) { 
+        this.repositories = repositories; 
+    } 
+ 
+    @Override 
+    public void run(String... args) throws Exception { 
+        repositories.forEach(crudRepository -&gt; 
+            logger.info(String.format("%s has %s entries", 
+                getRepositoryName(crudRepository.getClass()), 
+                crudRepository.count()))); 
+ 
+    } 
+ 
+    private static String <br/>            getRepositoryName(Class crudRepositoryClass) { 
+        for(Class repositoryInterface : 
+                crudRepositoryClass.getInterfaces()) { 
+            if (repositoryInterface.getName(). 
+                    startsWith("com.example.bookpub.repository")) { 
+                return repositoryInterface.getSimpleName(); 
+            } 
+        } 
+        return "UnknownRepository"; 
+    } 
+} </pre>
+<ol start="6">
+<li>With the actual implementation of <kbd>DbCountRunner</kbd> in place, we will now need to create the configuration object that will declaratively create an instance during the configuration phase. So, let's create a new class file called <kbd>DbCountAutoConfiguration.java</kbd> with the following content:</li>
+</ol>
+<pre style="padding-left: 60px">@Configuration 
+public class DbCountAutoConfiguration { 
+    @Bean 
+    public DbCountRunner dbCountRunner<br/>               (Collection&lt;CrudRepository&gt; repositories) { 
+        return new DbCountRunner(repositories); 
+    } 
+}</pre>
+<ol start="7">
+<li>We will also need to tell Spring Boot that our newly created JAR artifact contains the autoconfiguration classes. For this, we will need to create a <kbd>resources/META-INF</kbd> directory in the <kbd>db-count-starter/src/main</kbd> directory in the root of our project.</li>
+<li>In this newly created directory, we will place the file named <kbd>spring.factories</kbd> with the following content:</li>
+</ol>
+<pre style="padding-left: 60px">org.springframework.boot.autoconfigure.EnableAutoConfiguration=\<br/>com.example.bookpubstarter.dbcount.DbCountAutoConfiguration </pre>
+<ol start="9">
+<li>For the purpose of our demo, we will add the dependency to our starter artifact in the main project's <kbd>build.gradle</kbd> by adding the following entry in the dependencies section:</li>
+</ol>
+<pre style="padding-left: 60px">compile project(':db-count-starter') </pre>
+<ol start="10">
+<li>Start the application by running <kbd>./gradlew clean bootRun</kbd>.</li>
+<li>Once the application is compiled and has started, we should see the following in the console logs:</li>
+</ol>
+<pre style="padding-left: 60px">    <strong>2017-12-16 INFO com.example.bookpub.StartupRunner        : Welcome to the Book Catalog System!</strong>
+    <strong>2017-12-16 INFO c.e.b.dbcount.DbCountRunner              : AuthorRepository has 1 entries</strong>
+    <strong>2017-12-16 INFO c.e.b.dbcount.DbCountRunner              : PublisherRepository has 1 entries</strong>
+    <strong>2017-12-16 INFO c.e.b.dbcount.DbCountRunner              : BookRepository has 1 entries</strong>
+    <strong>2017-12-16 INFO c.e.b.dbcount.DbCountRunner              : ReviewerRepository has 0 entries</strong>
+    <strong>2017-12-16 INFO com.example.bookpub.BookPubApplication   : Started BookPubApplication in 8.528 seconds (JVM running for 9.002)</strong>
+    <strong>2017-12-16 INFO com.example.bookpub.StartupRunner        : Number of books: 1</strong>
+  </pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How it works...</h1>
+                </header>
+            
+            <article>
+                
+<p>Congratulations! You have now built your very own Spring Boot autoconfiguration starter.</p>
+<p>First, let's quickly walk through the changes that we made to our Gradle build configuration and then we will examine the starter setup in detail.</p>
+<p>As the Spring Boot starter is a separate, independent artifact, just adding more classes to our existing project source tree would not really demonstrate much. To make this separate artifact, we have a couple of choices: making a separate Gradle configuration in our existing project, or creating a completely separate project altogether. The most ideal solution, however, was to just convert our build to Gradle Multi-Project Build by adding a nested project directory and subproject dependency to the <kbd>build.gradle</kbd> file of the root project. By doing this, Gradle actually creates a separate JAR artifact for us but we don't have to publish it anywhere, only include it as a compile <kbd>project(':db-count-starter')</kbd> dependency.</p>
+<div class="packt_infobox">For more information about Gradle multi-project builds, you can check out the manual at <a href="http://gradle.org/docs/current/userguide/multi_project_builds.html"><span class="URLPACKT">http://gradle.org/docs/current/userguide/multi_project_builds.html</span></a>.</div>
+<p>The Spring Boot Auto-Configuration starter is nothing more than a regular Spring Java Configuration class annotated with the <kbd>@Configuration</kbd> annotation and the presence of <kbd>spring.factories</kbd> in the classpath in the <kbd>META-INF</kbd> directory with the appropriate configuration entries.</p>
+<p>During the application startup, Spring Boot uses <kbd>SpringFactoriesLoader</kbd>, which is a part of Spring Core, in order to get a list of the Spring Java Configurations that are configured for the <kbd>org.springframework.boot.autoconfigure.EnableAutoConfiguration</kbd> property key. Under the hood, this call collects all the <kbd>spring.factories</kbd> files located in the <kbd>META-INF</kbd> directory from all the jars or other entries in the classpath, and builds a composite list to be added as application context configurations. In addition to the <kbd>EnableAutoConfiguration</kbd> key, we can declare the following automatically initializable startup implementations in a similar fashion:</p>
+<ul>
+<li><kbd>org.springframework.context.ApplicationContextInitializer</kbd></li>
+<li><kbd>org.springframework.context.ApplicationListener</kbd></li>
+<li><kbd>org.springframework.boot.autoconfigure.AutoConfigurationImportListener</kbd></li>
+<li><kbd>org.springframework.boot.autoconfigure.AutoConfigurationImportFilter</kbd></li>
+<li><kbd><kbd>org.springframework.boot.autoconfigure.template.TemplateAvailabilityProvider</kbd></kbd></li>
+<li><kbd>org.springframework.boot.SpringBootExceptionReporter</kbd></li>
+<li><kbd>org.springframework.boot.SpringApplicationRunListener</kbd></li>
+<li><kbd>org.springframework.boot.env.PropertySourceLoader</kbd></li>
+<li><kbd>org.springframework.boot.env.EnvironmentPostProcessor</kbd></li>
+<li><kbd>org.springframework.boot.diagnostics.FailureAnalyzer</kbd></li>
+<li><kbd>org.springframework.boot.diagnostics.FailureAnalysisReporter</kbd></li>
+<li><kbd>org.springframework.test.contex.TestExecutionListener</kbd></li>
+</ul>
+<p>Ironically enough, a Spring Boot Starter does not need to depend on the Spring Boot library as its compile time dependency. If we look at the list of class imports in the <kbd>DbCountAutoConfiguration</kbd> class, we will not see anything from the <kbd>org.springframework.boot</kbd> package. The only reason that we have a dependency declared on Spring Boot is because our implementation of <kbd>DbCountRunner</kbd> implements the <kbd>org.springframework.boot.CommandLineRunner</kbd> interface.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Configuring custom conditional bean instantiations</h1>
+                </header>
+            
+            <article>
+                
+<p>In the previous example, you learned how to get the basic Spring Boot Starter going. On the inclusion of the jar in the application classpath, the <kbd>DbCountRunner</kbd> bean will be created automatically and added to the application context. In the very first recipe of this chapter, we have also seen that Spring Boot has an ability to do conditional configurations depending on a few conditions, such as the presence of specific classes in the classpath, existence of a bean, and others.</p>
+<p>For this recipe, we will enhance our starter with a conditional check. This will create the instance of <kbd>DbCountRunner</kbd> only if no other bean instance of this class has already been created and added to the application context.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How to do it...</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>In the <kbd>DbCountAutoConfiguration</kbd> class, we will add an <kbd>@ConditionalOnMissingBean</kbd> annotation to the <kbd>dbCountRunner(...)</kbd> method, as follows:</li>
+</ol>
+<pre style="padding-left: 60px">@Bean 
+@ConditionalOnMissingBean 
+public DbCountRunner <br/>   dbCountRunner(Collection&lt;CrudRepository&gt; repositories) { 
+  return new DbCountRunner(repositories); 
+} </pre>
+<ol start="2">
+<li>We will also need to add a dependency on the <kbd>spring-boot-autoconfigure</kbd> artifact to the dependencies section of the <kbd>db-count-starter/build.gradle</kbd> file:</li>
+</ol>
+<pre style="padding-left: 60px">compile("org.springframework.boot:spring-boot-autoconfigure:2.0.0.BUILD-SNAPSHOT")</pre>
+<ol start="3">
+<li>Now, let's start the application by running <kbd>./gradlew clean bootRun</kbd> in order to verify that we will still see the same output in the console logs as we did in the previous recipe</li>
+<li>If we start the application with the <kbd>DEBUG</kbd> switch so as to see the Auto-Configuration Report, which we already learned in the first recipe of this chapter, we will see that our autoconfiguration is in the Positive Matches group, as follows:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>DbCountAutoConfiguration#dbCountRunner</strong>
+<strong>      - @ConditionalOnMissingBean (types: com.example.bookpubstarter.dbcount.DbCountRunner; SearchStrategy: all) found no beans (OnBeanCondition)</strong></pre>
+<ol start="5">
+<li>Let's explicitly/manually create an instance of <kbd>DbCountRunner</kbd> in our main <kbd>BookPubApplication</kbd> configuration class, and we will also override its <kbd>run(...)</kbd> method, just so we can see the difference in the logs:</li>
+</ol>
+<pre style="padding-left: 60px">protected final Log logger = LogFactory.getLog(getClass()); 
+@Bean 
+public DbCountRunner dbCountRunner<br/>                     (Collection&lt;CrudRepository&gt; repositories) { 
+  return new DbCountRunner(repositories) { 
+    @Override 
+    public void run(String... args) throws Exception { 
+      logger.info("Manually Declared DbCountRunner"); 
+    } 
+  }; 
+} </pre>
+<ol start="6">
+<li>Start the application by running <kbd>DEBUG=true ./gradlew clean bootRun</kbd>.</li>
+<li>If we look at the console logs, we will see two things: the Auto-Configuration Report will print our autoconfiguration in the Negative Matches group and, instead of the count output for each repository, we will see <kbd>Manually Declared DbCountRunner</kbd> text to appear:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>DbCountAutoConfiguration#dbCountRunner</strong>
+<strong>      - @ConditionalOnMissingBean (types: com.example.bookpubstarter.dbcount.DbCountRunner; SearchStrategy: all) found the following [dbCountRunner] (OnBeanCondition)</strong>
+    
+<strong>2017-12-16 INFO com.example.bookpub.BookPubApplication$1    : Manually Declared DbCountRunner</strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How it works...</h1>
+                </header>
+            
+            <article>
+                
+<p>As we learned from the previous recipe, Spring Boot will automatically process all the configuration class entries from <kbd>spring.factories</kbd> during the application context creation. Without any extra guidance, everything that is annotated with an <kbd>@Bean</kbd> annotation will be used to create a Spring Bean. This functionality is actually a part of the plain old Spring Framework Java Configuration. What Spring Boot adds on top is the ability to conditionally control the rules for when certain <kbd>@Configuration</kbd> or <kbd>@Bean</kbd> annotations should be executed and when it is best to ignore them.</p>
+<p>In our case, we used the <kbd>@ConditionalOnMissingBean</kbd> annotation to instruct Spring Boot to create our <kbd>DbCountRunner</kbd> bean only if there was no other bean matching either the class type or bean name already declared elsewhere. As we explicitly created an <kbd>@Bean</kbd> entry for <kbd>DbCountRunner</kbd> in the <kbd>BookPubApplication</kbd> configuration, this took precedence and caused <kbd>OnBeanCondition</kbd> to detect the existence of the bean; thus instructing Spring Boot not to use <kbd>DbCountAutoConfiguration</kbd> during the application context setup.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Using custom @Enable annotations to toggle configuration</h1>
+                </header>
+            
+            <article>
+                
+<p>Allowing Spring Boot to automatically evaluate the classpath and detected configurations that are found there makes it very quick and easy to get a simple application going. However, there are times when we want to provide the configuration classes but require consumers of the starter library to explicitly enable such a configuration, rather than relying on Spring Boot to decide automatically if it should be included or not.</p>
+<p>We will modify our previous recipe to make the starter be enabled via a meta-annotation rather than using the <kbd>spring.factories</kbd> route.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How to do it...</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>First, we will comment out the content of the <kbd>spring.factories</kbd> file located in <kbd>db-count-starter/src/main/resources</kbd> in the root of our project, as follows:</li>
+</ol>
+<pre style="padding-left: 60px">#org.springframework.boot.autoconfigure.EnableAutoConfiguration=\<br/>#com.example.bookpubstarter.dbcount.DbCountAutoConfiguration</pre>
+<ol start="2">
+<li>Next, we will need to create the meta-annotation. We will create a new file named <kbd>EnableDbCounting.java</kbd> in the <kbd>db-count-starter/src/main/java/com/example/bookpubstarter/dbcount</kbd> directory in the root of our project with the following content:</li>
+</ol>
+<pre style="padding-left: 90px">@Target(ElementType.TYPE) 
+@Retention(RetentionPolicy.RUNTIME) 
+@Import(DbCountAutoConfiguration.class) 
+@Documented 
+public @interface EnableDbCounting { 
+} </pre>
+<ol start="3">
+<li>We will now add the <kbd>@EnableDbCounting</kbd> annotation to our <kbd>BookPubApplication</kbd> class and also remove the <kbd>dbCountRunner(...)</kbd> method from it, as shown in the following snippet:</li>
+</ol>
+<pre style="padding-left: 90px">@SpringBootApplication 
+@EnableScheduling 
+@EnableDbCounting 
+public class BookPubApplication { 
+ 
+  public static void main(String[] args) { 
+    SpringApplication.run(BookPubApplication.class, args); 
+  } 
+ 
+  @Bean 
+  public StartupRunner schedulerRunner() { 
+    return new StartupRunner(); 
+  } 
+} </pre>
+<ol start="4">
+<li>Start the application by running <kbd>./gradlew clean bootRun</kbd>.</li>
+</ol>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">How it works...</h1>
+                </header>
+            
+            <article>
+                
+<p>After running the application, the first thing that you might have noticed is that the printed counts all showed <kbd>0</kbd>, even though <kbd>StartupRunner</kbd> had printed <kbd>Number of books: 1</kbd> to the console, as shown in the following output:</p>
+<pre><strong>c.e.b.dbcount.DbCountRunner         : AuthorRepository has 0 entries</strong>
+<strong>c.e.b.dbcount.DbCountRunner         : BookRepository has 0 entries</strong>
+<strong>c.e.b.dbcount.DbCountRunner         : PublisherRepository has 0 entries</strong>
+<strong>c.e.b.dbcount.DbCountRunner         : ReviewerRepository has 0 entries</strong>
+<strong>com.example.bookpub.StartupRunner   : Welcome to the Book Catalog System!</strong>
+<strong>com.example.bookpub.StartupRunner   : Number of books: 1</strong>  </pre>
+<p>This is because Spring Boot is randomly executing <kbd>CommandLineRunners</kbd> and, as we changed the configuration to use the <kbd>@EnableDbCounting</kbd> annotation, it gets processed before the configuration in the <kbd>BookPubApplication</kbd> class itself. As the database population is done by us in the <kbd>StartupRunner.run(...)</kbd> method and the execution of <kbd>DbCountRunner.run(...)</kbd> happens before this, the database tables have no data and so report the <kbd>0</kbd> count.</p>
+<p>If we want to enforce the order, Spring provides us with this ability using the <kbd>@Order</kbd> annotation. Let's annotate the <kbd>StartupRunner</kbd> class with <kbd>@Order(Ordered.LOWEST_PRECEDENCE - 15)</kbd>. As <kbd>LOWEST_PRECEDENCE</kbd> is the default order that is assigned, we will ensure that <kbd>StartupRunner</kbd> will be executed after <kbd>DbCountRunner</kbd> by slightly reducing the order number. Let's run the app again and now we will see that the counts are properly displayed.</p>
+<p>Now that this little ordering issue is behind us, let's examine what we did with the <kbd>@EnableDbCounting</kbd> annotation in a bit more detail.</p>
+<p>Without <kbd>spring.factories</kbd> containing the configuration, Spring Boot does not really know that the <kbd>DbCountAutoConfiguration</kbd> class should be included during the application context creation. By default, the configuration component scan will look only from the <kbd>BookPubApplication</kbd> package and below. As the packages are different—<kbd>com.example.bookpub</kbd> versus <kbd>com.example.bookpubstarter.dbcount</kbd>—the scanner won't pick it up.</p>
+<p>This is where our newly created meta-annotation comes into play. In the <kbd>@EnableDbCounting</kbd> annotation, there is a key-nested annotation, <kbd>@Import(DbCountAutoConfiguration.class)</kbd>, which makes things happen. This is an annotation that is provided by Spring, which can be used to annotate other annotations with declarations of which configuration classes should be imported in the process. By annotating our <kbd>BookPubApplication</kbd> class with <kbd>@EnableDbCounting</kbd>, we transitively tell Spring that it should include <kbd>DbCountAutoConfiguration</kbd> as a part of the application context as well.</p>
+<p>Using the convenience meta-annotations, <kbd>spring.factories</kbd>, and conditional bean annotations, we can now create sophisticated and elaborate custom autoconfiguration Spring Boot starters in order to solve the needs of our enterprises.</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

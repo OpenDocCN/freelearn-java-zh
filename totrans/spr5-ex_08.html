@@ -1,0 +1,603 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Circuit Breakers and Security</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">In the previous chapter, we configured the microservices that will act in our infrastructure, and we created a Eureka server to work as a service discovery for our solution. Also, we have created a Config Server application that will serve as the configurations for our microservices.</p>
+<p>In this chapter, we will create microservices to interact with our previous infrastructure. We will discover how to apply service discovery features for our business microservices and understand how the Circuit Breaker pattern can help us to bring resilience to our applications. </p>
+<p>During the chapter, we will understand how the microservices can communicate with other services through the HTTP asynchronous call powered by the Spring WebFlux client.</p>
+<p>By the end of this chapter, we will have learned how to:</p>
+<ul>
+<li>Connect microservices with service discovery</li>
+<li>Pull the configuration from the configuration server</li>
+<li>Understand how <kbd>Hystrix</kbd> brings resilience to microservices</li>
+<li>Show the Edge API strategy</li>
+<li>Present the Spring Boot Admin</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Understanding the service discovery power</h1>
+                </header>
+            
+            <article>
+                
+<p>We will create our first microservice with business requirements. We will create a <kbd>planes</kbd> microservice, which will maintain data about company planes, such as characteristics, model, and some other attributes.</p>
+<p>The <kbd>planes</kbd> microservice will be used to serve plane characteristics for our second microservice, the <kbd>flights</kbd> microservice. It needs to get some plane information to be able to create a flight, such as the number of seats.</p>
+<p>The <kbd>planes</kbd> microservice is an excellent candidate to start with <span>because there is no business-related dependency to be created</span>.</p>
+<p>Our <kbd>planes</kbd> microservice will be useful soon. Time to create it. Let's go.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Creating the planes microservice</h1>
+                </header>
+            
+            <article>
+                
+<p>As we have been doing in the previous chapters, we will use the Spring Initializr for that purpose. The following dependencies should be selected, as shown in the following screenshot:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/f843a799-fdab-4014-bfe5-b58fb1578a55.png"/></div>
+<p>There are some necessary dependencies. The <span class="packt_screen">Stream Binder Rabbit</span> and <span class="packt_screen">Sleuth Stream</span> dependencies are necessary to enable us to the send data spans, and to enable application trace, across to the RabbitMQ message broker. We will use MongoDB to act as a database for this specific application, so we need <span class="packt_screen">Reactive MongoDB</span> for that. <span class="packt_screen">Config Client</span> is mandatory for all microservices present in the solution. We will not have any application configuration on the classpath. The <span class="packt_screen">Actuator</span> provides production-ready metrics and information about the running application; it's an essential characteristic of the microservice's architectural style. Moreover, <span class="packt_screen">Zuul</span> will be essential to enable us to connect the application with our Edge API. We will learn more about it during the course of the chapter.</p>
+<p>We can now press the <span class="packt_screen">Generate Project</span> button to download the project. Open the project on the IDE.</p>
+<p>The <kbd>planes</kbd> microservice will be created using the Spring Boot 2 framework because we are interested in implementing the reactive foundation for our plane service.</p>
+<p>Also, we need to include one more dependency, and it can be done using the following snippet on our <kbd>pom.xml</kbd>:</p>
+<pre><span>&lt;dependency&gt;<br/></span><span>  &lt;groupId&gt;</span>org.springframework.cloud<span>&lt;/groupId&gt;<br/></span><span>  &lt;artifactId&gt;</span><strong>spring-cloud-starter-netflix-eureka-client</strong><span>&lt;/artifactId&gt;<br/></span><span>&lt;/dependency&gt;</span></pre>
+<p>The <kbd>spring-cloud-starter-netflix-eureka-client</kbd> enables the service discovery, powered by the Eureka server in our application.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Coding the planes microservice</h1>
+                </header>
+            
+            <article>
+                
+<p>We will add some features on the application. For this specific application, we will create CRUD functionalities with Spring Reactive WebFlux.</p>
+<p>The <kbd>Plane</kbd> class represents the plane model in our microservices and the class should be like this:</p>
+<pre><span>package </span>springfive.airline.airlineplanes.domain<span>;<br/></span><span><br/></span><span>import </span>com.fasterxml.jackson.annotation.<span>JsonInclude</span><span>;<br/></span><span>import </span>com.fasterxml.jackson.annotation.<span>JsonInclude</span>.Include<span>;<br/></span><span>import </span>java.util.Set<span>;<br/></span><span>import </span>lombok.<span>Builder</span><span>;<br/></span><span>import </span>lombok.<span>Data</span><span>;<br/></span><span>import </span>lombok.<span>NonNull</span><span>;<br/></span><span>import </span>org.springframework.data.annotation.<span>Id</span><span>;<br/></span><span>import </span>org.springframework.data.mongodb.core.mapping.<span>Document</span><span>;<br/></span><span>import </span>springfive.airline.airlineplanes.resource.data.PlaneRequest<span>;<br/></span><span><br/></span><span><strong>@Data</strong><br/></span><strong>@Document(collection = "planes")</strong><br/><span>@JsonInclude</span>(Include.<span>NON_NULL</span>)<br/><span>public class </span>Plane {<br/><br/>  <span>@Id<br/></span><span>  </span>String <span>id</span><span>;<br/></span><span><br/></span><span>  </span>String <span>owner</span><span>;<br/></span><span><br/></span><span>  </span>PlaneModel <span>model</span><span>;<br/></span><span><br/></span><span>  </span>Set&lt;Seat&gt; <span>seats</span><span>;<br/></span><span><br/></span><span>  </span>String <span>notes</span><span>;<br/></span><span><br/></span><span>  </span><span><strong>@Builder</strong><br/></span><span>  </span><span>public static </span>Plane <span>newPlane</span>(String owner<span>,</span>PlaneModel planeModel<span>,</span>Set&lt;Seat&gt; seats<span>,</span>String notes){<br/>    Plane plane = <span>new </span>Plane()<span>;<br/></span><span>    </span>plane.<span>owner </span>= owner<span>;<br/></span><span>    </span>plane.<span>model </span>= planeModel<span>;<br/></span><span>    </span>plane.<span>seats </span>= seats<span>;<br/></span><span>    </span>plane.<span>notes </span>= notes<span>;<br/></span><span>    return </span>plane<span>;<br/></span><span>  </span>}<br/><br/>  <span>public </span>Plane <span>fromPlaneRequest</span>(@NonNull PlaneRequest planeRequest){<br/>    <span>this</span>.<span>owner </span>= planeRequest.getOwner()<span>;<br/></span><span>    this</span>.<span>model </span>= planeRequest.getModel()<span>;<br/></span><span>    this</span>.<span>seats </span>= planeRequest.getSeats()<span>;<br/></span><span>    this</span>.<span>notes </span>= planeRequest.getNotes()<span>;<br/></span><span>    return this;<br/></span><span>  </span>}<br/><br/>}</pre>
+<p>The interesting point is the <kbd>@Document</kbd> annotation. It enables us to configure the name of  the MongoDB collection for our domain. The <kbd>@Builder</kbd> annotation creates an implementation of the Builder pattern using the annotated method. The <kbd><span>Project </span>Lombok</kbd> library provides this feature (<a href="https://projectlombok.org">https://projectlombok.org</a>). Also, the project has some exciting features, such as <kbd>@Data</kbd>, which creates <kbd>getters/setters</kbd>, <kbd>equals</kbd>, and <kbd>hashCode</kbd> implementation automatically for the annotated class.</p>
+<p>As we can see, there are some domain models in this class. These models do not need explanation here, and the full source code can be found in the GitHub project at <a href="https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter08/airline-planes">https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter08/airline-planes</a>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The reactive repository</h1>
+                </header>
+            
+            <article>
+                
+<p>Our <kbd>Plane</kbd> class needs a repository to persist the data to a database. We will use a reactive repository for MongoDB provided by the Spring Reactive MongoDB implementation. We will use the <kbd>ReactiveCrudRepository</kbd> as it makes our repositories reactive. Our repository should be like this:</p>
+<pre><span>package </span>springfive.airline.airlineplanes.repository<span>;<br/></span><span><br/></span><span>import </span>org.springframework.data.repository.reactive.ReactiveCrudRepository<span>;<br/></span><span>import </span>springfive.airline.airlineplanes.domain.Plane<span>;<br/></span><span><br/></span><span>public interface </span>PlaneRepository <span>extends </span>ReactiveCrudRepository&lt;Plane<span>,</span>String&gt;{<br/>}</pre>
+<p>The implementation is the same as it was in the previous Spring Data versions, except for the new reactive interface. Now, we can create our service layer in the next section.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Creating the Plane service</h1>
+                </header>
+            
+            <article>
+                
+<p>Our <kbd>PlaneService</kbd> will be responsible for creating a kind of glue between the <kbd>PlaneRepository</kbd> and <kbd>PlaneResource</kbd>; the latter one we will create in the next section. The implementation should be like this:</p>
+<pre><span>package </span>springfive.airline.airlineplanes.service<span>;<br/></span><span><br/></span><span>import </span>lombok.<span>NonNull</span><span>;<br/></span><span>import </span>org.springframework.stereotype.<span>Service</span><span>;<br/></span><span>import </span>reactor.core.publisher.Flux<span>;<br/></span><span>import </span>reactor.core.publisher.Mono<span>;<br/></span><span>import </span>springfive.airline.airlineplanes.domain.Plane<span>;<br/></span><span>import </span>springfive.airline.airlineplanes.repository.PlaneRepository<span>;<br/></span><span>import </span>springfive.airline.airlineplanes.resource.data.PlaneRequest<span>;<br/></span><span><br/></span><span>@Service<br/></span><span>public class </span>PlaneService {<br/><br/>  <span>private final </span>PlaneRepository <span>planeRepository</span><span>;<br/></span><span><br/></span><span>  public </span><span>PlaneService</span>(PlaneRepository planeRepository) {<br/>    <span>this</span>.<span>planeRepository </span>= planeRepository<span>;<br/></span><span>  </span>}<br/><br/>  <span>public </span>Flux&lt;Plane&gt; <span>planes</span>(){<br/>    <span>return this</span>.<span>planeRepository</span>.findAll()<span>;<br/></span><span>  </span>}<br/><br/>  <span>public </span>Mono&lt;Plane&gt; <span>plane</span>(<span>@NonNull </span>String id){<br/>    <span>return this</span>.<span>planeRepository</span>.findById(id)<span>;<br/></span><span>  </span>}<br/><br/>  <span>public </span>Mono&lt;Void&gt; <span>deletePlane</span>(<span>@NonNull </span>Plane plane){<br/>    <span>return this</span>.<span>planeRepository</span>.delete(plane)<span>;<br/></span><span>  </span>}<br/><br/>  <span>public </span>Mono&lt;Plane&gt; <span>create</span>(<span>@NonNull </span>PlaneRequest planeRequest){<br/>    <span>final </span>Plane plane = <strong>Plane.builder().owner(planeRequest.getOwner())</strong><br/><strong>        .planeModel(planeRequest.getModel()).seats(planeRequest.getSeats())</strong><br/><strong>        .notes(planeRequest.getNotes()).build()</strong><span>;<br/></span><span>    return this</span>.<span>planeRepository</span>.save(plane)<span>;<br/></span><span>  </span>}<br/><br/>  <span>public </span>Mono&lt;Plane&gt; <span>update</span>(<span>@NonNull </span>String id<span>,</span><span>@NonNull </span>PlaneRequest planeRequest){<br/>    <span>return this</span>.<span>planeRepository</span>.findById(id)<br/>        .flatMap(plane -&gt; Mono.<span>just</span>(plane.fromPlaneRequest(<span>planeRequest</span>)))<br/>        .flatMap(<span>this</span>.<span>planeRepository</span>::save)<span>;<br/></span><span>  </span>}<br/><br/>}</pre>
+<p>There is nothing special in this class, and the <kbd>PlaneService</kbd> will invoke the <kbd>PlaneRepository</kbd> to persist the <kbd>Plane</kbd> in a database. As we can see, we have used lambdas extensively. Java 8 is a requirement to run Spring Boot 2 applications.</p>
+<p>Take a look at how the Builder pattern enables us to write clean code. It is much easier to read this code; we did it using the <kbd>chaining</kbd><span> method</span> provided by Lombok.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">The REST layer</h1>
+                </header>
+            
+            <article>
+                
+<p>We will use Spring WebFlux to expose our REST endpoints, and then we need to return <kbd>Mono</kbd> or <kbd>Flux</kbd> in our methods. The REST implementation should be like this:</p>
+<pre><span>package </span>springfive.airline.airlineplanes.resource<span>;<br/></span><span><br/></span><span>import </span>java.net.URI<span>;<br/></span><span>import </span>javax.validation.<span>Valid</span><span>;<br/></span><span>import </span>org.springframework.http.HttpStatus<span>;<br/></span><span>import </span>org.springframework.http.ResponseEntity<span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>DeleteMapping</span><span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>GetMapping</span><span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>PathVariable</span><span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>PostMapping</span><span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>PutMapping</span><span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>RequestBody</span><span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>RequestMapping</span><span>;<br/></span><span>import </span>org.springframework.web.bind.annotation.<span>RestController</span><span>;<br/></span><span>import </span>org.springframework.web.util.UriComponentsBuilder<span>;<br/></span><span>import </span>reactor.core.publisher.Flux<span>;<br/></span><span>import </span>reactor.core.publisher.Mono<span>;<br/></span><span>import </span>springfive.airline.airlineplanes.domain.Plane<span>;<br/></span><span>import </span>springfive.airline.airlineplanes.resource.data.PlaneRequest<span>;<br/></span><span>import </span>springfive.airline.airlineplanes.service.PlaneService<span>;<br/></span><span><br/></span><span>@RestController<br/></span><span>@RequestMapping</span>(<span>"/planes"</span>)<br/><span>public class </span>PlaneResource {<br/><br/>  <span>private final </span>PlaneService <span>planeService</span><span>;<br/></span><span><br/></span><span>  public </span><span>PlaneResource</span>(PlaneService planeService) {<br/>    <span>this</span>.<span>planeService </span>= planeService<span>;<br/></span><span>  </span>}<br/><br/>  <span>@GetMapping<br/></span><span>  </span><span>public </span>Flux&lt;Plane&gt; <span>planes</span>() {<br/>    <span>return this</span>.<span>planeService</span>.planes()<span>;<br/></span><span>  </span>}<br/><br/>  <span>@GetMapping</span>(<span>"/{id}"</span>)<br/>  <span>public </span>Mono&lt;ResponseEntity&lt;Plane&gt;&gt; <span>plane</span>(<span>@PathVariable</span>(<span>"id"</span>) String id) {<br/>    <span>return <strong>this</strong></span><strong>.planeService.plane(id).map(ResponseEntity::ok)</strong><br/><strong>        .defaultIfEmpty(ResponseEntity.notFound().build())</strong><span><strong>;</strong><br/></span><span>  </span>}<br/><br/>  <span>@PostMapping<br/></span><span>  </span><span>public </span>Mono&lt;ResponseEntity&lt;Void&gt;&gt; <span>newPlane</span>(<br/>      <span>@Valid @RequestBody </span>PlaneRequest planeRequest<span>, </span>UriComponentsBuilder uriBuilder) {<br/>    <span>return this</span>.<span>planeService</span>.create(planeRequest).map(data -&gt; {<br/>      <strong>URI location = uriBuilder.path("/planes/{id}")</strong><br/><strong>          .buildAndExpand(data.getId())</strong><br/><strong>          .toUri()</strong><span><strong>;</strong><br/></span><span>      return </span>ResponseEntity.<span>created</span>(location).build()<span>;<br/></span><span>    </span>})<span>;<br/></span><span>  </span>}<br/><br/>  <span>@DeleteMapping</span>(<span>"/{id}"</span>)<br/>  <span>public </span>Mono&lt;ResponseEntity&lt;Object&gt;&gt; <span>deletePlane</span>(<span>@PathVariable</span>(<span>"id"</span>) String id) {<br/>    <span>return this</span>.<span>planeService</span>.plane(id).flatMap(data -&gt; <span>this</span>.<span>planeService</span>.deletePlane(data)<br/>        .then(Mono.<span>just</span>(ResponseEntity.<span>noContent</span>().build())))<br/>        .defaultIfEmpty(<span>new </span>ResponseEntity&lt;&gt;(HttpStatus.<span>NOT_FOUND</span>))<span>;<br/></span><span>  </span>}<br/><br/>  <span>@PutMapping</span>(<span>"/{id}"</span>)<br/>  <span>public </span>Mono&lt;ResponseEntity&lt;Object&gt;&gt; <span>updatePlane</span>(<span>@PathVariable</span>(<span>"id"</span>) String id<span>,</span><span>@Valid @RequestBody </span>PlaneRequest planeRequest) {<br/>    <span>return this</span>.<span>planeService</span>.update(id<span>,</span>planeRequest)<br/>        .then(Mono.<span>just</span>(ResponseEntity.<span>ok</span>().build()))<span>;<br/></span><span>  </span>}<br/><br/>}</pre>
+<p>Take a look at the <kbd>plane</kbd> method. When <kbd>planeService.plane(id)</kbd> returns the empty Mono, the REST endpoint will return <kbd>notFound</kbd> like this implementation: <kbd>ResponseEntity.notFound().build()</kbd>. It makes the code extremely easy to understand.</p>
+<p>On the <kbd>newPlane</kbd> method, we will return the <kbd>location</kbd> HTTP header with the new entity ID recently created.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the plane microservice</h1>
+                </header>
+            
+            <article>
+                
+<p>Before we run the plane microservice, we will create the <kbd>plane</kbd> microservice's <kbd>main</kbd> class. It will be responsible for starting the application. To do that, we need to include a couple of Spring Annotations. The class implementation can be like this:</p>
+<pre><span>package </span>springfive.airline.airlineplanes<span>;<br/></span><span><br/></span><span>import </span>org.springframework.boot.SpringApplication<span>;<br/></span><span>import </span>org.springframework.boot.autoconfigure.<span>SpringBootApplication</span><span>;<br/></span><span>import </span>org.springframework.cloud.netflix.eureka.<span>EnableEurekaClient</span><span>;<br/></span><span>import </span>org.springframework.cloud.netflix.zuul.<span>EnableZuulProxy</span><span>;<br/></span><strong><br/>@EnableZuulProxy<br/>@EnableEurekaClient<br/></strong><span><strong>@SpringBootApplication</strong><br/></span><span>public class </span>AirlinePlanesApplication {<br/><br/> <span>public static void </span><span>main</span>(String[] args) {<br/>  SpringApplication.<span>run</span>(AirlinePlanesApplication.<span>class, </span>args)<span>;<br/></span><span> </span>}<br/><br/>}</pre>
+<p>The Spring Annotations will be connected with the Zuul proxy. Also, we need to connect the application with the Eureka server and configure the application automatically. These behaviors can be done using <kbd>@EnableZuulProxy</kbd>, <kbd>@EnableEurekaClient</kbd>, and <kbd>@SpringBootApplication</kbd>.</p>
+<p>Now, we will create a <kbd>bootstrap.yaml</kbd> file to instruct the Spring Framework to search the configuration file on the Config Server, created in the previous chapter. The file should be like this:</p>
+<pre><span>spring:<br/></span><span>  application:<br/></span><span>    name: </span>planes<br/>  <span>cloud:<br/></span><span>    config:<br/></span><span>      uri: </span>http://localhost:5000<br/>      <span>label: </span>master</pre>
+<p>We have configured the Config Server address; it was a piece of cake.</p>
+<p>Now, we need to add the <kbd>application.yaml</kbd> file on the GitHub repository, because the Config Server will try to find the file in the repository.</p>
+<p>The file can be found on GitHub at <a href="https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/config-files/flights.yaml">https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/config-files/flights.yaml</a>.</p>
+<p>We can run the application on the IDE or via the command line; it is up to you. Check that the Config Server, Eureka, MongoDB, and RabbitMQ are up and running before trying to run it.</p>
+<div class="packt_tip">We can use the Docker compose file located on GitHub (<a href="https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/Chapter07/docker/docker-compose-infra-full.yaml">https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/Chapter07/docker/docker-compose-infra-full.yaml</a>). It contains RabbitMQ, Config Server, Eureka, MongoDB, MySQL, Redis, and Zipkin containers ready to use. If you are using it, run it using the following command: <kbd>docker-compose -f docker-compose-infra-full.yaml up -d</kbd>.</div>
+<p>Let's check the output. We can check it in different ways: on a console, and on the Eureka server. Let's do it.</p>
+<p>Check the console. Let's try to find a line about <kbd>DiscoveryClient</kbd>. The <kbd>planes</kbd> microservice is trying to connect to the Eureka server:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/e16ec109-87eb-440a-9e6d-18831ce17433.png"/></div>
+<p>There is some important information on the log files here. The first line indicates which application is trying to register with the Eureka server. The next four lines are about Sleuth. The Sleuth framework is registering the RabbitMQ queues and channels.</p>
+<p>We need to find the following line:</p>
+<pre>Started AirlinePlanesApplication in 17.153 seconds (JVM running for 18.25)</pre>
+<p>Also, we can check the Eureka server, and we can see the <span class="packt_screen">PLANES</span> application there, like this:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/d99adcbd-ebe3-4e58-a3bb-511982067efb.png"/></div>
+<p>Awesome, our plane microservice is operational.</p>
+<div class="packt_tip">We can try our microservices using Postman. This application enables us to call our APIs using the intuitive IDE to interact with our microservice. The application permits us to group some HTTP calls into collections. The planes collection can be found on GitHub at <a href="https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/postman/planes.postman_collection">https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/postman/planes.postman_collection</a>. </div>
+<p>We have finished our first microservices. In the next section, we will create our <kbd>flights</kbd> microservice, which will consume the plane's data.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Flights microservice</h1>
+                </header>
+            
+            <article>
+                
+<p>Our plane's microservices are up and running. It will be important for now because the flight's microservice needs to get the plane's data to create the flight's entities.</p>
+<p>We will introduce the Netflix Ribbon, which will act as a client load balancer for our applications, and we will consume the service discovery to look up the service's address from the service registry.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Cloning the Flight microservice project</h1>
+                </header>
+            
+            <article>
+                
+<p>We did this task many times in the previous chapter. We can download the project source code on GitHub at <a href="https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter08/airline-flights">https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter08/airline-flights</a>. In the next section, we will dive deep into Ribbon and how it can help us on distributed systems.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Netflix Ribbon</h1>
+                </header>
+            
+            <article>
+                
+<p>The Ribbon is an open source project created and maintained by the Netflix company. The project is licensed under Apache 2.0 and can be used for commercial purposes.</p>
+<p>The Ribbon provides a client-side software load balancing algorithm for the <strong>IPC</strong> (<strong>Inter-Process Communication</strong>). The project supports most popular protocols, such as TCP, UDP, and HTTP in an asynchronous manner.</p>
+<p>There are more interesting features, such as service discovery integration, which enables integration in dynamic and elastic environments such as the cloud. For this purpose, we will look at our Eureka server. Both projects are maintained by the Netflix team. It fits well for our use case.</p>
+<p>Another interesting feature is fault tolerance. The Ribbon client can find the live servers on the configured list and send the request. Also, the down servers will not receive any request.</p>
+<p>The following diagram explains how the Ribbon works:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="212" src="assets/820f3ed5-dfd1-4004-b1be-db2802b3ad48.png" width="493"/></div>
+<p>As we can see, the <strong>Ribbon Client</strong> can communicate with Eureka and then redirect the request for the desired microservice. In our case, the <kbd>flights</kbd> microservice will use the Ribbon client and get the service registry from Eureka and redirect the call to a live <kbd>planes</kbd> microservice instance. It sounds like an amazing solution.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Understanding the discovery client</h1>
+                </header>
+            
+            <article>
+                
+<p>Now, we will learn about service discovery and how it works in complex and dynamic environments. The basic idea of service discovery is to maintain the services repository and provide service addresses for the callers.</p>
+<p>It requires some complex tasks to achieve this goal. There are two main behaviors to understand:</p>
+<ul>
+<li>The first one is the register. As we know, the service discovery needs to store the services information, such as the address and name, and then during the service bootstrap, it needs to send the information to the service registry. </li>
+<li>In the the second operation, the service discovery clients need to query the service registry, asking for the desired service name, for instance. Then the service registry will send the service information to the client.</li>
+</ul>
+<p>Now we understand the basics, as illustrated in the following diagram:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="174" src="assets/d4083209-d7bd-4c6b-b3cd-40d9a729d7e6.png" width="371"/></div>
+<p class="mce-root">As you can see in the preceding diagram:</p>
+<ol>
+<li class="mce-root">The first part is the service registration.</li>
+<li class="mce-root">At the second stage, the service client will get the service address from the Eureka server.</li>
+<li class="mce-root">Then the client can call based on the service information. </li>
+</ol>
+<p>Let's do it in the code.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Service discovery and load balancing in practice</h1>
+                </header>
+            
+            <article>
+                
+<p>Now we will write some code to interact with our service discovery and load balance infrastructure. Now we know how it works, it will help us to understand the source code.</p>
+<p>We will create a <kbd>DiscoveryService</kbd> class which will discover the addresses from a requested service name. The class code should be like this:</p>
+<pre><span>package </span>springfive.airline.airlineflights.service<span>;<br/></span><span><br/></span><span>import </span>org.springframework.cloud.client.discovery.DiscoveryClient<span>;<br/></span><span>import </span>org.springframework.cloud.client.loadbalancer.LoadBalancerClient<span>;<br/></span><span>import </span>org.springframework.stereotype.<span>Service</span><span>;<br/></span><span>import </span>reactor.core.publisher.Flux<span>;<br/></span><span>import </span>reactor.core.publisher.Mono<span>;<br/></span><span><br/></span><span>@Service<br/></span><span>public class </span>DiscoveryService {<br/><br/>  <span>private final </span>LoadBalancerClient <span>lbClient</span><span>;<br/></span><span><br/></span><span>  private final </span>DiscoveryClient <span>dClient</span><span>;<br/></span><span><br/></span><span>  public </span><span>DiscoveryService</span>(LoadBalancerClient lbClient<span>, </span>DiscoveryClient dClient) {<br/>    <span>this</span>.<span>lbClient </span>= lbClient<span>;<br/></span><span>    this</span>.<span>dClient </span>= dClient<span>;<br/></span><span>  </span>}<br/><br/>  <span>public </span>Flux&lt;String&gt; <strong>serviceAddressFor</strong>(String service) {<br/>    <span>return </span>Flux.<span>defer</span>(() -&gt;  Flux.<span>just</span>(<span>this</span>.<span>dClient</span>.getInstances(<span>service</span>)).flatMap(srv -&gt;<br/>        Mono.<span>just</span>(<span>this</span>.<span>lbClient</span>.choose(<span>service</span>))<br/>    ).flatMap(serviceInstance -&gt;<br/>        Mono.<span>just</span>(serviceInstance.getUri().toString())<br/>    ))<span>;<br/></span><span>  </span>}<br/><br/>}</pre>
+<p>As we can see, we inject two objects: the <kbd>LoadBalanceClient</kbd>, which acts as a client load balancer, that is, Netflix Ribbon; and the <kbd>DiscoveryClient</kbd>, which will find the instance from a requested service.</p>
+<p>We use the lambda <kbd>Flux.defer()</kbd> to organize the flow, and then we will look up the service instances from Eureka server. We use <kbd>this.dClient.getInstances(service)</kbd> for that. It will return a list of service names after we look up the service URI from the load balancing. This will be done using <kbd>this.lbClient.choose(service).</kbd> Then we will return the <kbd>Flux</kbd> of service instances addresses.</p>
+<p>It is time to see how the client code can use the <kbd>DiscoveryService</kbd> object. The client code can be like this:</p>
+<pre><span>public </span>Mono&lt;Plane&gt; <span>plane</span>(String id) {<br/>  <span>return </span><strong>discoveryService.serviceAddressFor</strong>(<span>this</span>.<span>planesService</span>).<strong>next</strong>().flatMap(<br/>      address -&gt; <span>this</span>.<span>webClient</span>.mutate().baseUrl(address + <span>"/" </span>+ <span>this</span>.<span>planesServiceApiPath </span>+ <span>"/" </span>+ <span>id</span>).build().get().exchange()<br/>      .flatMap(clientResponse -&gt; clientResponse.bodyToMono(Plane.<span>class</span>)))<span>;<br/></span>}</pre>
+<p>This code can be found in the <kbd>PlaneService</kbd> class on the project. Remember the <kbd>serviceAddressFor()</kbd> method returns a <kbd>Flux</kbd> of service addresses. We will get the first one, using the <kbd>next()</kbd> method. Then we are able to transform the service address to a valid address to reach the plane microservice.</p>
+<p>Now, we will test the service connections. We need to do the following tasks:</p>
+<ol>
+<li><span>Run</span> the Config Server, Eureka, the <kbd>planes</kbd> microservice, and the <kbd>flights</kbd> microservice</li>
+<li>Create a <kbd>plane</kbd> entity on the <kbd>planes</kbd> microservice</li>
+<li>Create a <kbd>flight</kbd> entity on the <kbd>flights</kbd> microservice</li>
+</ol>
+<p>Check whether all services listed previously are up and running. Then we will create a <kbd>plane</kbd> entity using the following JSON:</p>
+<pre>{<br/>  "owner" : "Spring Framework Company",<br/>  "model" : {<br/>    "factory" : "Pivotal",<br/>    "model" : "5.0",<br/>    "name" : "Spring 5.0",<br/>    "reference_name" : "S5.0"<br/>  },<br/>  "seats" : [<br/>    {<br/>      "identity" : "1A",<br/>      "row" : "1",<br/>      "right_side" : { "seat_identity" : "2A"},<br/>      "category" : {<br/>        "id" : "A",<br/>        "name": "First Class"<br/>      }<br/>    },<br/>    {<br/>      "identity" : "2A",<br/>      "row" : "1",<br/>      "left_side" : { "seat_identity" : "1A"},<br/>      "category" : {<br/>        "id" : "A",<br/>        "name": "First Class"<br/>      }<br/>    },<br/>    {<br/>      "identity" : "3A",<br/>      "row" : "1",<br/>      "left_side" :{ "seat_identity" : "2A"},<br/>      "category" : {<br/>        "id" : "A",<br/>        "name": "First Class"<br/>      }<br/>    }<br/>    ],<br/>  "notes": "The best company airplane"<br/>}</pre>
+<p>We need to call the <kbd>planes</kbd> microservice in <kbd>http://localhost:50001/planes</kbd> using the HTTP <kbd>POST</kbd> method. We can find the request to create planes in the <kbd>Planes Collection</kbd> on Postman. When we have called the create plane API, we will get a new plane ID. It can be found in the HTTP response headers, as shown in the following image, on Postman:</p>
+<div class="packt_infobox">Postman is a tool that helps developers to test APIs. Postman provides a friendly <strong>GUI</strong> ( <strong>Graphic User Interface</strong> ) to make requests. Also, the tool supports environments and it can be helpful to test different environments, such as development, test, and production.</div>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/7b53de5d-bfbf-47e9-b94f-0b4546b704a9.png"/></div>
+<p>Take a look at the <kbd>location</kbd> HTTP response header. The HTTP status code is important as well. We will use the plane ID <kbd>5a6a6c636798a63817bed8b4</kbd>, created just now, to create a new flight.</p>
+<div class="packt_tip"><span>We can find the list of HTTP status code at </span><em>W3 Org</em> (<a href="https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html">https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html</a>).<span> Keep this in mind, as it is very important to follow the correct status code. It is considered a best practice when we are creating REST APIs.</span></div>
+<p><span>The Flight Collection can be found on </span>GitHub at <a href="https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/postman/flights.postman_collection">https://github.com/PacktPublishing/Spring-5.0-By-Example/blob/master/postman/flights.postman_collection.</a><span> There is a <span class="packt_screen">Create Flight</span> request we want to execute, but before </span>that<span>, we need to change our plane ID created previously. Take a look at the following screenshot:</span></p>
+<div class="CDPAlignCenter CDPAlign"><img height="333" src="assets/7cb4f809-352a-4159-87a4-3c27279de042.png" width="525"/></div>
+<p>The plane ID has changed to that of our plane previously created. Now we can execute the request. The <kbd>flights</kbd> microservices has the same behavior as a <kbd>planes</kbd> microservice. It will return the location response with the new flight ID. In my case, the new ID generated is like the following image:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="112" src="assets/4364b1a9-f2a6-4c11-b823-1804bb6ce2a7.png" width="328"/></div>
+<p>Now, we can find the flight by ID. The request can be found at Flight Collection<em>;</em> the name is Flight by Id. We can execute this request, and the result should be like this:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="286" src="assets/e8f8a66f-921b-49d8-9377-262e0007328f.png" width="446"/></div>
+<p>Take a look at the <kbd>plane</kbd> JSON node. We don't have any data about a plane in the <kbd>flight</kbd> microservice. This information came in from the <kbd>planes</kbd> microservice. We have used service discovery and client load balancing. Well done!</p>
+<p>Let's take a look at the debug provided by the IDE. We want to see the plane service address:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/bf33f5c5-78ea-4539-896a-37e3236509b2.png"/></div>
+<div>
+<p>On the <span class="packt_screen">Variables</span> panel, we can see the <span class="packt_screen">address</span> variable. The value came in from service discovery and client load balancing. It is the <strong>Service IP</strong> or <strong>Domain</strong> <strong>Name</strong>. Now we are able to call the requested service transforming the URL.</p>
+<p>Awesome, our infrastructure works very well, now we are able to find services using the infrastructure, but there is something important to pay attention to. We will discover it in the next section.</p>
+</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">When the services fail, hello Hystrix</h1>
+                </header>
+            
+            <article>
+                
+<p>Sometimes the infrastructure can fail, especially the network. It can cause some problems in microservices architecture because in general there are many connections between services. It means at runtime that the microservices depend on other microservices. Normally these connections are done using the REST APIs through the HTTP protocol.</p>
+<p>It can cause a behavior called <strong>cascade failure</strong>; that is, when one part of the microservices system fails, it can trigger the other microservices failure, because of the dependencies. Let's illustrate this:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="189" src="assets/f1e43b89-aee2-4e59-9731-eb74a060b52b.png" width="531"/></div>
+<p>If <strong>Service Y</strong> fails, <strong>Service A</strong> and <strong>Service M</strong> potentially can fail as well.</p>
+<p>We have a pattern to help us when this happens: the Circuit Breaker.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Hystrix in a nutshell</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Hystrix</kbd> is a library that helps developers to manage interactions between services. The project is open source, maintained by the community, and is under the Netflix GitHub.</p>
+<p>The Circuit Breaker pattern is a pattern that helps to control the system integrations. The idea is quite simple: we will wrap the remote call in a function or object, and we will monitor these calls to keep track of the failures. If the calls reach the limit, the circuit will open. The behavior is like that of an electrical circuit breaker, and the idea is the same—protect something to avoid breaking the electrical system:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="140" src="assets/26cfb6de-0d7d-4a13-8611-f9b5a2c373c5.png" width="354"/></div>
+<p><kbd>Hystrix</kbd> implements the Circuit Breaker pattern and has some interesting behaviors, such as fallback options. <kbd>Hystrix</kbd> provides resilience for our applications. We are able to provide a fallback, stop cascading failures, and give the operational control.</p>
+<p>The library provides high-level configurations and it can be configured through an annotation if we are using <kbd>Spring Cloud Hystrix</kbd>.</p>
+<div class="packt_infobox">The Circuit Breaker pattern was described by Martin Fowler. You can find more information about it on Martin Fowler's Page at <a href="https://martinfowler.com/bliki/CircuitBreaker.html">https://martinfowler.com/bliki/CircuitBreaker.html</a></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Spring Cloud Hystrix</h1>
+                </header>
+            
+            <article>
+                
+<p>As we expected, Spring Boot integrates with <kbd>Netflix Hystrix.</kbd> The integration can be done using a couple of annotations and by configuring the annotations with Hystrix properties. We will protect the <kbd>planes</kbd> microservice interactions we are coding in the <kbd>flight</kbd> service. We now have a method that tries to get the plane's data.</p>
+<p>Let's take a look at that method:</p>
+<pre><strong>@HystrixCommand(commandKey = "plane-by-id",groupKey = "airline-flights",fallbackMethod = "fallback",commandProperties = {</strong><br/><strong>      @HystrixProperty(name="circuitBreaker.requestVolumeThreshold",value="10"),</strong><br/><strong>      @HystrixProperty(name = "circuitBreaker.errorThresholdPercentage", value = "10"),</strong><br/><strong>      @HystrixProperty(name="circuitBreaker.sleepWindowInMilliseconds",value="10000"),</strong><br/><strong>      @HystrixProperty(name = "execution.isolation.thread.timeoutInMilliseconds", value = "800"),</strong><br/><strong>      @HystrixProperty(name = "metrics.rollingStats.timeInMilliseconds", value = "10000")</strong><br/><strong>  })</strong><br/><span>public </span>Mono&lt;Plane&gt; <span>plane</span>(String id) {<br/>  <span>return </span><span>discoveryService</span>.serviceAddressFor(<span>this</span>.<span>planesService</span>).next().flatMap(<br/>      address -&gt; <span>this</span>.<span>webClient</span>.mutate().baseUrl(address + <span>"/" </span>+ <span>this</span>.<span>planesServiceApiPath </span>+ <span>"/" </span>+ <span>id</span>).build().get().exchange()<br/>      .flatMap(clientResponse -&gt; clientResponse.bodyToMono(Plane.<span>class</span>)))<span>;<br/></span>}</pre>
+<p>There are some configurations for this command. The first configuration is <kbd>commandKey.</kbd> The basic idea here is to create a name for the command. It will be useful for panel control. The second one, <kbd>groupKey</kbd>, is the command used to group the commands. It also helps in grouping commands data together on dashboards. There is the concept of a rolling window. The idea is to group the request in a gap of time; it is used to enable metrics and statistics. </p>
+<p><kbd>circuitBreaker.requestVolumeThreshold</kbd> configures the number of requests in a rolling window that will trip at the circuit. For example, if we have a rolling window configured to be open for 10 seconds, if we have nine requests in a gap of 10 seconds, the circuit will not open because we have configured it to 10 in our command. Another configuration is <kbd>circuitBreaker.sleepWindowInMilliseconds</kbd>, where the basic idea is to give an amount of time, <span>after tripping the circuit,</span> to reject requests before trying again to allow attempts.</p>
+<p>The last one is <kbd>execution.isolation.thread.timeoutInMilliseconds.</kbd> This property configures the timeout for the command. It means that if the time configured is reached, the circuit breaker system will perform a fallback logic and mark the command as a timeout.</p>
+<div class="packt_tip">The <kbd>Hystrix</kbd> library is highly customizable, and there are a lot of properties to use. The full documentation can be found at <a href="https://github.com/Netflix/Hystrix/wiki/configuration">https://github.com/Netflix/Hystrix/wiki/configuration.</a> We can use these properties for different use cases.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Spring Boot Admin</h1>
+                </header>
+            
+            <article>
+                
+<p>The Spring Boot Admin project is a tool that helps developers in production environments. The tool shows Spring Boot application metrics in an organized dashboard, and it makes it extremely easy to see application metrics and much more information.</p>
+<p>The tool uses the data from the Spring Boot Actuator as an information source. The project is open source and has a lot of contributors and is an active project in the community as well.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running Spring Boot Admin</h1>
+                </header>
+            
+            <article>
+                
+<p><span>It is a piece of cake to set up the application. We will need a new Spring Boot application, and to connect this new application with our service discovery implementation. Let's do it right now.</span></p>
+<p>We can find the code on GitHub at <a href="https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter08/admin">https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter08/admin</a>. If you want to create a new application, go ahead; the process is similar to what we did in the previous chapters.</p>
+<p>The project is a Spring Boot regular application, with two new dependencies:</p>
+<pre><span>&lt;dependency&gt;<br/></span><span>  &lt;groupId&gt;</span>de.codecentric<span>&lt;/groupId&gt;<br/></span><span>  &lt;artifactId&gt;</span><strong>spring-boot-admin-server</strong><span>&lt;/artifactId&gt;<br/></span><span>  &lt;version&gt;</span>1.5.6<span>&lt;/version&gt;</span>v<br/><span>&lt;/dependency&gt;<br/></span><span><br/></span><span>&lt;dependency&gt;<br/></span><span>  &lt;groupId&gt;</span>de.codecentric<span>&lt;/groupId&gt;<br/></span><span>  &lt;artifactId&gt;</span><strong>spring-boot-admin-server-ui</strong><span>&lt;/artifactId&gt;<br/></span><span>  &lt;version&gt;</span>1.5.6<span>&lt;/version&gt;<br/></span><span>&lt;/dependency&gt;</span></pre>
+<p>These dependencies are about <kbd>admin-server</kbd> and <kbd>admin-server-ui</kbd>. The project does not support Spring Boot 2 yet, but this is not a problem as we do not need reactive stuff for this; it is a monitoring tool.</p>
+<p>We have configured our mandatory dependencies. We will need a service discovery because we have one in our infrastructure. We need it to provide the service discovery feature, and minimize the configurations for our Spring Boot Admin application. Let's add the Eureka client dependency:</p>
+<pre><span>&lt;dependency&gt;<br/></span><span>  &lt;groupId&gt;</span>org.springframework.cloud<span>&lt;/groupId&gt;<br/></span><span>  &lt;artifactId&gt;</span>spring-cloud-starter-netflix-eureka-client<span>&lt;/artifactId&gt;<br/></span><span>&lt;/dependency&gt;</span></pre>
+<p>Awesome, our dependencies are configured properly. Then we can create our main class. The main class should be like this:</p>
+<pre><span>package </span>springfive.airline.admin<span>;<br/></span><span><br/></span><span>import </span>de.codecentric.boot.admin.config.<span>EnableAdminServer</span><span>;<br/></span><span>import </span>org.springframework.boot.SpringApplication<span>;<br/></span><span>import </span>org.springframework.boot.autoconfigure.<span>SpringBootApplication</span><span>;<br/></span><span>import </span>org.springframework.cloud.netflix.eureka.<span>EnableEurekaClient</span><span>;<br/></span><span><br/></span><span>@EnableAdminServer<br/></span><span>@EnableEurekaClient<br/></span><span>@SpringBootApplication<br/></span><span>public class </span>AdminApplication {<br/><br/>  <span>public static void </span><span>main</span>(String[] args) {<br/>    SpringApplication.<span>run</span>(AdminApplication.<span>class, </span>args)<span>;<br/></span><span>  </span>}<br/><br/>}</pre>
+<p>The main difference here is that <kbd>@EnableAdminServer</kbd> will configure the Spring Boot Admin application and set up the server for us. As we expected, we will use the Config Server application to store our <kbd>application.yaml</kbd>. In order to achieve this, we need to create our <kbd>bootstrap.yaml</kbd>, which should be like this:</p>
+<pre><span>spring:<br/></span><span>  application:<br/></span><span>    name: </span><strong>admin</strong><br/>  <span>cloud:<br/></span><span>    config:<br/></span><span>      uri: </span>http://localhost:5000<br/>      <span>label: </span>master</pre>
+<p>No difference at all,  <kbd>bootstrap.yaml</kbd> is configured to look up the configuration file from the Config Server.</p>
+<p>Time to create our <kbd>application.yaml</kbd> file, to which we need to add some configuration to set the new health check URL, since the actuator on Spring Boot 2 was moved, prefixed by <em>actuator</em>. Our new health check URL should be <kbd>/actuator/health</kbd>.</p>
+<p>Our configuration file should be like this:</p>
+<pre>server:
+  port: 50015
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://localhost:8761/eureka/
+spring:
+  boot:
+    admin:
+      discovery:
+        converter:
+          health-endpoint-path: <strong>/actuator/health</strong></pre>
+<p>We have configured the Eureka server address and set the health check URL.</p>
+<p>Now we can run our main class called <kbd>AdminApplication.</kbd> We can use the Java command line or IDE; there is no difference at all.</p>
+<p>Run it!</p>
+<p>We should see the following line at the log file:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/1c8e76dd-dd5c-41f4-8180-52587573730b.png"/></div>
+<p>Awesome, our application is ready to use. Now we can go to the main page. Go to <kbd>http://localhost:50015/#/</kbd> (main page), then we can see the following page:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="332" src="assets/fe35b8f6-a74e-48e6-9d9c-389c824e2d8b.png" width="784"/></div>
+<p>Look how it is easier to see any outage or strange behaviors in our microservices. Remember the key point in microservices architecture is monitoring. It is really necessary in order to have a good environment.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Spring Cloud Zuul</h1>
+                </header>
+            
+            <article>
+                
+<p>The Spring Cloud Gateway is the natural choice when we adopt the microservices architecture, but nowadays the Spring Cloud Gateway does not have support enabled for service discovery features, such as the Eureka server. It means we will have to configure it route by route. This does not sound good.</p>
+<p>We have the Zuul proxy as a gateway for our microservices environment, but keep in mind the Spring Cloud Gateway is the best choice when the project has support for service discovery.</p>
+<p>Let's create the Zuul proxy project.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Understanding the EDGE service project</h1>
+                </header>
+            
+            <article>
+                
+<p>The EDGE service is a service that provides dynamic routing, monitoring, resiliency, and security. The basic idea here is to create a reverse proxy for our microservices. </p>
+<p>This service will act as a proxy for our microservices and will be exposed as a central access point. The Spring Cloud Zuul integrates with the Eureka server. It will increase our resiliency because we will use the service discovery feature provided by the Eureka server.</p>
+<p>The following image demonstrates how we will use the <strong>Edge Service</strong> in our architecture:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="247" src="assets/c3e92e86-ea33-4eaa-8516-b7c2bafbbd53.png" width="356"/></div>
+<p>As we can see, the <strong>Zuul Server</strong> will connect to the service discovery server, to get the list of available services. After that the Zuul service will redirect to the requested service. </p>
+<p>Look at the diagram. There is no interaction with the clients, that is, <strong>Mobile</strong> and <strong>Browser</strong>, and our microservices.</p>
+<p>Spring Cloud Zuul also supports interesting features, such as:</p>
+<ul>
+<li><strong>pre</strong>: This can be used to set some data in<kbd>RequestContext</kbd>; it is executed before the request is routed</li>
+<li><strong>route</strong>: This handles the request routing</li>
+<li><strong>post</strong>: This filters which one acts after the request is routed</li>
+<li><strong>error</strong>: When some errors happen, we can use the error feature to handle the request</li>
+</ul>
+<p>We will not use these features, but keep in mind that they can be very useful. Remember, our Zuul server is our gateway to the internet.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Creating the EDGE server</h1>
+                </header>
+            
+            <article>
+                
+<p>We will use the Zuul server to act as an API gateway for our applications. Now it's time to create our project. As there is no relevant difference involved in creating this project, we will take a look at specific Zuul parts.</p>
+<p>The dependency required is:</p>
+<pre><span>&lt;dependency&gt;<br/></span><span>  &lt;groupId&gt;</span>org.springframework.cloud<span>&lt;/groupId&gt;<br/></span><span>  &lt;artifactId&gt;</span><strong>spring-cloud-starter-netflix-zuul</strong><span>&lt;/artifactId&gt;<br/></span><span>&lt;/dependency&gt;</span></pre>
+<p>It will configure for us the Zuul server dependencies.</p>
+<p>Now we can add the project's main class. The class should be like this:</p>
+<pre><span>package </span>springfive.airline.edge<span>;<br/></span><span><br/></span><span>import </span>org.springframework.boot.SpringApplication<span>;<br/></span><span>import </span>org.springframework.boot.autoconfigure.<span>SpringBootApplication</span><span>;<br/></span><span>import </span>org.springframework.cloud.netflix.eureka.<span>EnableEurekaClient</span><span>;<br/></span><span>import </span>org.springframework.cloud.netflix.zuul.<span>EnableZuulProxy</span><span>;<br/></span><span>import </span>org.springframework.stereotype.<span>Controller</span><span>;<br/></span><span><br/></span><span>@Controller<br/></span><span><strong>@EnableZuulProxy</strong><br/></span><span>@EnableEurekaClient<br/></span><span>@SpringBootApplication<br/></span><span>public class </span>EdgeServerApplication {<br/><br/>  <span>public static void </span><span>main</span>(String[] args) {<br/>    SpringApplication.<span>run</span>(EdgeServerApplication.<span>class, </span>args)<span>;<br/></span><span>  </span>}<br/><br/>}</pre>
+<p>The new thing here is <kbd>@EnableZuulProxy</kbd>. It will set up a Zuul server endpoint and configure reverse proxy filters. Then we will be able to forward a request to microservices applications. Zuul integrates with the Eureka server, so we do not need to configure it manually. The auto-configuration will find the services at the time of the discovery client implementation.</p>
+<p>We can run the application via the command line or IDE, it is up to you.</p>
+<p>Then we can see the routes configured. Go to <kbd>http://localhost:8888/routes</kbd> and we will able to see the routes:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="173" src="assets/7d7729e9-8590-4edd-bb95-c73b78c437d7.png" width="485"/></div>
+<p>We have some routes configured. We did this using the <kbd>application.yaml</kbd> file. The file should be like this:</p>
+<pre>zuul:
+  routes:
+    planes:
+      path: /api/v1/planes/**
+      serviceId: planes
+    flights:
+      path: /api/v1/flights/**
+      serviceId: flights
+    fares:
+      path: /api/v1/fares/**
+      serviceId: fares
+    passengers:
+      path: /api/v1/passengers/**
+      serviceId: passengers</pre>
+<p>Let's understand this configuration. We have created a node called <kbd>planes</kbd>. This node configures a <kbd>path</kbd> (that is the URI) and configures the service name, by <kbd>serviceId</kbd>, registered in the Eureka server.</p>
+<p>Let's do a simple test. We will:</p>
+<ul>
+<li>Configure the new URL path for the planes service</li>
+<li>Test the request using the Zuul server</li>
+</ul>
+<p>Open the <kbd>PlaneResource</kbd> class located in the <kbd>planes</kbd> microservice project.</p>
+<p>The <kbd>RequestMapping</kbd> is configured like this:</p>
+<pre>@RequestMapping("/planes")</pre>
+<p>Change it to something like this:</p>
+<pre>@RequestMapping("/")</pre>
+<p>Remember we can use the Zuul server as a router, so <span>we do not need this information anymore</span>. With the URI path on the source code, we are able to use the configuration file.</p>
+<p>Run the <kbd>planes</kbd> microservice again. The following services need to be running:</p>
+<ul>
+<li>Config Server</li>
+<li>Eureka server</li>
+<li>Planes microservice</li>
+<li>API Edge</li>
+</ul>
+<p>Then we can call the <kbd>planes</kbd> microservices using the Zuul proxy. Let's do it using cURL:</p>
+<pre>curl http://localhost:8888/api/v1/planes</pre>
+<p>Let's understand this a little bit. The port <kbd>8888</kbd> points to the <strong>Zuul Server</strong>, and we have configured it in <kbd>application.yaml</kbd>. When the path is <kbd>/api/v1/planes/**</kbd>, the <strong>Zuul Server</strong> will redirect to the <kbd>planes</kbd> microservices. The basic flow is:</p>
+<div class="CDPAlignCenter CDPAlign"><img height="263" src="assets/39a82733-8ff4-48c2-8304-5a6551a105f9.png" width="134"/></div>
+<p>The request is coming to the <strong>Zuul Server</strong>, and then the <strong>Zuul Server</strong> will redirect it to the requested microservice. The result should be like this; in my case, I have some planes in the database:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/32018be4-666f-4285-afd8-a67409a980b1.png"/></div>
+<p>Awesome, our API Gateway is fully operational. We will use it for all services in the same port, and only the URI will be changed to point to the desired <kbd>serviceId</kbd>.</p>
+<div class="packt_tip">We can configure the port like in other Spring Boot applications. We chose the <kbd>8888</kbd> port in this case.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we have learned about some important microservice patterns and how they can help us to deliver a fault-tolerant, resilient, and error-prone application.</p>
+<p>We have practiced how to use the service discovery feature provided by the Spring Framework and how it works at the application runtime, and we made some debug tasks to help us to understand how it works under the hood.</p>
+<p>The Hystrix project, hosted by Netflix, can increase our application's resilience and fault tolerance. When working with remote calls, in this section, we made some Hystrix commands and understood how Hystrix<span> is a useful implementation of the Circuit Breaker pattern</span>.</p>
+<p>At the end of the chapter, we are able to understand the microservices drawbacks and how to solve the common problems in a distributed environment.</p>
+<p>Now we know how to solve the common problems of microservices architectural style using the Spring Framework.</p>
+<p>In the next chapter, we will finish our <em>Airline Ticket System</em>, using the configured tools to monitoring the microservices' health and look at how it helps developers during the operation time when the microservices are running in the production stage.</p>
+<p>See you there.</p>
+<p> </p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

@@ -1,0 +1,378 @@
+<html><head></head><body><div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Dealing with Effects</h1>
+                </header>
+            
+            <article>
+                
+<p class="p1">In the previous two chapters, we had quite a shift in perspective. In <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a>, <em>Exploring Built-In Effects</em>, we looked at a handful of implementations of the concrete effects available in the standard library. In <a href="c1798142-6829-479c-bb7b-d50ccd16e629.xhtml">Chapter 7</a>, <em>Understanding Algebraic Structures</em> we jumped from the real to the theoretical and played with abstract algebraic structures.</p>
+<p class="p1">Now that we are familiar with the process of working with abstractions defined by laws, we can finally deliver on the promise we gave in <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a><span>, </span><em>Exploring Built-In Effects</em><span>,</span> and identify abstractions lying beneath the standard implementations we touched on there.</p>
+<p class="p1">We'll define and implement a functor, an abstract concept that's useful in relation to any effect. Moreover, we’ll have three different flavors of them, so stay tuned!</p>
+<p class="p1">By the end of this chapter, you'll be able to identify and implement or use the existing implementation of one of the following structures:</p>
+<ul>
+<li class="p1">Functor</li>
+<li class="p1">Applicative functor</li>
+<li class="p1">Traversable functor</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Technical requirements</h1>
+                </header>
+            
+            <article>
+                
+<ul>
+<li>JDK 1.8+</li>
+<li class="mce-root"><span>SBT 1.2+</span></li>
+</ul>
+<p class="mce-root"><span>The source code for this chapter is available in our GitHub repository at <a href="https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter08"/></span><span><a href="https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter08">https://github.com/PacktPublishing/Learn-Scala-Programming/tree/master/Chapter08</a>.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Functor</h1>
+                </header>
+            
+            <article>
+                
+<p>In the previous chapter, we discussed the situation in which we wanted to combine elements inside of a container. We found out that <span>abstractions such as</span> <kbd>Reducible</kbd> and <kbd>Foldable</kbd> can help with that by taking a function of two arguments and bringing it <em>into</em> the container so that it can be applied on pairs of elements inside of it. As an example, we showed you how this approach makes it possible to implement different survival strategies for a bucket of fish.</p>
+<p>What we haven't covered is a case where we don't want to <em>combine</em> elements in the container but <em>do</em> something with all of them, a single element at a time. This is the bread and butter of functional programming—applying pure functions to arguments and getting the results back, then repeating this process with the result. Usually, the functions applied to the argument in succession can be combined into a single function, which in a sense is <em>fusing</em> all of the intermediate steps into one step.</p>
+<p>Back to our fish example. Let's imagine that we have a fish and that we'd like to eat it. We'd first check that the fish is healthy and still fresh, then we would cook it somehow, and finally, we'd consume it. We might represent this sequence with the following model, extending the original <kbd>Fish</kbd> definition from the previous chapter:</p>
+<pre><span>final case class </span>Fish(volume: Int, weight: Int, teeth: Int, poisonousness: Int)<br/><br/><span>sealed trait </span>Eatable<br/><br/><span>final case class </span>FreshFish(fish: Fish)<br/><span>final case class </span>FriedFish(weight: Int) <span>extends </span>Eatable<br/><span>final case class </span>CookedFish(goodTaste: Boolean) <span>extends </span>Eatable<br/><span>final case class </span>Sushi(freshness: Int) <span>extends </span>Eatable</pre>
+<p>And our possible actions would naturally be represented as functions:</p>
+<pre><span>import ch08.Model._<br/>import ch08.ModelCheck._<br/>val </span><span>check</span>: Fish =&gt; FreshFish = f =&gt; <span>FreshFish</span>(f)<br/><span>val </span><span>prepare</span>: FreshFish =&gt; FriedFish = f =&gt; <span>FriedFish</span>(f.fish.weight)<br/><span>val </span><span>eat</span>: Eatable =&gt; Unit = _ =&gt; <span>println</span>(<span>"Yum yum..."</span>)</pre>
+<p>Then, we might want to combine our actions so that they represent the whole process from fresh to eaten fish:</p>
+<pre><span>def </span>prepareAndEat: Fish =&gt; Unit = <span>check </span>andThen <span>prepare </span>andThen <span>eat<br/></span></pre>
+<p>Now, we can act on the fish as desired by applying the combined function to the fish:</p>
+<pre><span>val </span><span>fish</span>: Fish = <span>fishGen</span>.sample.get<br/><span>val </span><span>freshFish </span>= <span>check</span>(<span>fish</span>)</pre>
+<p>In this example, we're using the <kbd>Gen[Fish]</kbd> function we defined in the previous chapter. Please consult the GitHub repository if you need to refresh your understanding on how this was done.</p>
+<p>So far so good—we're satisfied and happy. But the situation will change if we have a bucket of fish. Suddenly, all of the functions we've defined are useless because we don't know how to apply them to the fish inside of the bucket! What do we do now?</p>
+<div class="packt_infobox">The requirement to work "inside" of the bucket might sound strange, but it is only because our example is disconnected from the implementation. In programming, most of the time, working with collections implies that we have the same collection (though with changed elements) after applying the operation. Moreover, if the <em>structure</em> of the collection is preserved, then the category theory we mentioned previously can provide some guarantees in regard to combining the operations as long as these obey a required set of laws. We've seen how this works with abstract algebraic structures, and the principle is the same for all abstractions derived from category theory. In practice, the requirement to preserve the structure of the collection means that the operation cannot change the type of the collection or the number of elements in it or throw an exception.</div>
+<p>It turns out that there is an abstraction that can help us in this situation.</p>
+<p>The <kbd>Functor</kbd> has a <kbd>map</kbd> method which takes a container and a function and applies this function to all of the elements in the container, and finally returning the container with the same structure but filled with new elements. This is how we can specify this in Scala:</p>
+<pre><span>import scala.language.higherKinds<br/>trait </span>Functor[<span>F</span>[_]] {<br/>  <span>def </span>map[<span>A</span>,<span>B</span>](in: <span>F</span>[<span>A</span>])(f: <span>A </span>=&gt; <span>B</span>): <span>F</span>[<span>B</span>]<br/>}</pre>
+<p><kbd>F[_]</kbd> is a type constructor for the container. The <kbd>map</kbd> itself takes a container and a function to apply and returns a container with new elements. We could also define the <kbd>map</kbd> slightly differently, in a curried form:</p>
+<pre><span>def </span>mapC[<span>A</span>,<span>B</span>](f: <span>A </span>=&gt; <span>B</span>): <span>F</span>[<span>A</span>] =&gt; <span>F</span>[<span>B</span>]</pre>
+<p>Here, <kbd>mapC</kbd> takes a function called <kbd>A =&gt; B</kbd> and returns a function called <kbd>F[A] =&gt; F[B]</kbd>, which can then be applied to the container. </p>
+<p>As this is an abstract definition, we would naturally expect some laws to be defined and satisfied—exactly like in the previous chapter. For functors, there are two of them:</p>
+<ul>
+<li>The <em>identity</em> law states that mapping over an  identity function should not change the original collection</li>
+<li>The <em>distributive</em> law requires that successive mapping over two functions should always produce the same result as mapping over the combination of these functions</li>
+</ul>
+<p>We will capture these requirements as properties in the same that way we did in the previous chapter.</p>
+<p>First, let's take a look at the identity law:</p>
+<pre><span>def </span><span>id</span>[<span>A</span><span>, </span><span>F</span>[_]](<span>implicit </span>F: Functor[<span>F</span>]<span>, </span>arbFA: Arbitrary[<span>F</span>[<span>A</span>]]): Prop =<br/>  <span>forAll </span>{ as: <span>F</span>[<span>A</span>] =&gt; F.map(as)(<span>identity</span>) == as }</pre>
+<p>In this property, we're using the <kbd>identity</kbd> function from <a href="9f67be8e-4fee-4050-ab96-8444bb795138.xhtml">Chapter 3</a>, <em>Deep Dive into Functions</em>, which just returns its argument. </p>
+<p>The associativity law is a bit more involved because we need to test it with random functions. This requires that a lot of implicits are available:</p>
+<pre>import org.scalacheck._<br/>import org.scalacheck.Prop._<br/><br/>def associativity[A, B, C, F[_]](implicit F: Functor[F],<br/>                                 arbFA: Arbitrary[F[A]],<br/>                                 arbB: Arbitrary[B],<br/>                                 arbC: Arbitrary[C],<br/>                                 cogenA: Cogen[A],<br/>                                 cogenB: Cogen[B]): Prop = {<br/>  forAll((as: F[A], f: A =&gt; B, g: B =&gt; C) =&gt; {<br/>    F.map(F.map(as)(f))(g) == F.map(as)(f andThen g)<br/>  })<br/>}</pre>
+<p>Here, we're creating the arbitrary functions <kbd>f: A =&gt; B</kbd> and <kbd>g: B =&gt; C</kbd>  and checking that the combined function has the same effect as applying both functions in succession.</p>
+<p>Now, we need some functors to apply our checks. We can implement a <kbd>Functor[Option]</kbd> by delegating to the map function defined on <kbd>Option</kbd>:</p>
+<pre><span>implicit val </span><span>optionFunctor</span>: Functor[Option] = <span>new </span>Functor[Option] {<br/>  <span>override def </span>map[<span>A</span>, <span>B</span>](in: Option[<span>A</span>])(f: <span>A </span>=&gt; <span>B</span>): Option[<span>B</span>] = in.map(f)<br/>  <span>def </span>mapC[<span>A</span>, <span>B</span>](f: <span>A </span>=&gt; <span>B</span>): Option[<span>A</span>] =&gt; Option[<span>B</span>] = (_: Option[<span>A</span>]).map(f)<br/>}</pre>
+<p>The instance is defined as <kbd>implicit</kbd>, the same way as in the previous chapter, so that represents a type class.</p>
+<p>Does this implementation obeys the necessary laws? Let's see. The properties in this chapter are defined in the test scope and can be run in SBT using the <kbd>test</kbd> command. They cannot be pasted into the REPL standalone, but only as a part of the <kbd>Properties</kbd> definition:</p>
+<pre><span>property</span>(<span>"Functor[Option] and Int =&gt; String, String =&gt; Long"</span>) = {<br/>  <span>import </span>Functor.<span>optionFunctor<br/></span><span>  </span><span>functor</span>[Int, <span>String</span>, Long, Option]<br/>}<br/>+ Functor.Functor[Option] and Int =&gt; String, String =&gt; Long: OK, passed 100 tests.<br/><br/><span>property</span>(<span>"Functor[Option] and String =&gt; Int, Int =&gt; Boolean"</span>) = {<br/>  <span>import </span>Functor.<span>optionFunctor<br/></span><span>  </span><span>functor</span>[<span>String</span>, Int, Boolean, Option]<br/>}<br/>+ Functor.Functor[Option] and String =&gt; Int, Int =&gt; Boolean: OK, passed 100 tests.</pre>
+<p>We can see that we need to specify types of the functor and functions to check the laws that make it impossible<span>—</span>in our case<span>—</span>to formulate the functor properties <em>in general</em>. The functional programming library, <span>cats,</span> solves this problem by <span>also </span>defining type classes for the types of arguments. We'll stick to the explicit definition—this is sufficient for our learning purposes.</p>
+<p>We can also implement functors for the other effects we saw in <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a><span>, </span><em>Exploring Built-In Effects</em> in the same way we did for <kbd>Option</kbd>. The functor for <kbd>Try</kbd> is identical with respect to the type of effect. We'll leave this implementation as an exercise for the reader.</p>
+<p>The case of <kbd>Either</kbd> is a bit more complicated, because we need to convert the two type arguments it takes to one type argument that's expected by a <kbd>Functor</kbd> type constructor. We do this by fixing a type of the left side to <kbd>L</kbd> and using the type lambda in the definition of the functor:</p>
+<pre><span>implicit def </span>eitherFunctor[<span>L</span>] = <span>new </span>Functor[({ <span>type </span><span>T</span>[<span>A</span>] = <span>Either</span>[<span>L</span>, <span>A</span>] })#<span>T</span>] {<br/>  <span>override def </span>map[<span>A</span>, <span>B</span>](in: <span>Either</span>[<span>L</span>, <span>A</span>])(f: <span>A </span>=&gt; <span>B</span>): <span>Either</span>[<span>L</span>, <span>B</span>] = in.map(f)<br/>  <span>def </span>mapC[<span>A</span>, <span>B</span>](f: <span>A </span>=&gt; <span>B</span>): <span>Either</span>[<span>L</span>, <span>A</span>] =&gt; <span>Either</span>[<span>L</span>, <span>B</span>] = (_: <span>Either</span>[<span>L</span>, <span>A</span>]).map(f)<br/>}</pre>
+<p>Interestingly, the implementation itself is the same again. It turns out that this is the abstraction we were looking for at the end of <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a>, <em>Exploring Built-In Effects</em>. All of the standard effects we discussed in <a href="8ccc5685-2fbb-4bd4-9d9e-4560b625b00e.xhtml">Chapter 6</a><span>, </span><em>Exploring Built-In Effects</em> are functors! The visible difference in the definition of the <kbd>map</kbd> method comes from the fact that, for the standard effects, it is defined using object-oriented polymorphism, and in our functor code, we're doing this by using ad-hoc polymorphism with type classes.</p>
+<p>Let's get back to our fish. As we have a bucket of them, which is represented by the <kbd>List</kbd> type, we'll need a <kbd>Functor[Bucket]</kbd> as well:</p>
+<pre><span>implicit val </span><span>bucketFunctor</span>: Functor[<span>List</span>] = <span>new </span>Functor[<span>List</span>] {<br/>  <span>override def </span>map[<span>A</span>, <span>B</span>](in: <span>List</span>[<span>A</span>])(f: <span>A </span>=&gt; <span>B</span>): <span>List</span>[<span>B</span>] = in.map(f)<br/>  <span>def </span>mapC[<span>A</span>, <span>B</span>](f: <span>A </span>=&gt; <span>B</span>): <span>List</span>[<span>A</span>] =&gt; <span>List</span>[<span>B</span>] = (_: <span>List</span>[<span>A</span>]).map(f)<br/>}</pre>
+<p>The definition is once again the same as before. However, we can perform actions on the fish in the bucket as desired now, reusing the <kbd>bucketOfFishGen</kbd>:</p>
+<pre><span>type </span><span>Bucket</span>[<span>S</span>] = <span>List</span>[<span>S</span>]<br/>val bucketOfFishGen: Gen[List[Fish]] = Gen.listOf(fishGen)<br/><br/><span>val </span><span>bucketOfFriedFish</span>: <span>Bucket</span>[FriedFish] = ch08.Functor.<span>bucketFunctor</span>.map(<span>bucketOfFishGen</span>.sample.get)(<span>check </span>andThen <span>prepare</span>)</pre>
+<p class="mce-root">Here, we're using our freshly defined functor to check and prepare the fish inside of the bucket. The nice thing about our implementation is that the bucket can be any type that has a functor. To demonstrate this, we need a helper function that will allow us to pass a functor as a third parameter, along with the two we have in the definition of the <kbd>Functor.map</kbd>:<span><br/></span></p>
+<pre class="mce-root"><span>def </span>mapFunc[<span>A</span>, <span>B</span>, <span>F</span>[_]](as: <span>F</span>[<span>A</span>])(f: <span>A </span>=&gt; <span>B</span>)(<span>implicit </span>functor: ch08.Functor[<span>F</span>]): <span>F</span>[<span>B</span>] = functor.map(as)(f)</pre>
+<p>This function takes an effect and a function and implicitly resolves the appropriate functor. The calling code does not make this distinction any more since we're mapping over three different types of effects in the same way by using different functions:</p>
+<pre>import ch08.Functor._<br/>import ch08.ModelCheck._<br/>{<br/> <span>type </span><span>Bucket</span>[<span>S</span>] = Option[<span>S</span>]<br/> <span>mapFunc</span>(<span>optionOfFishGen</span>.sample.get)(<span>check</span>)<br/>}<br/>{<br/> <span>type </span><span>Bucket</span>[<span>S</span>] = <span>Either</span>[<span>Exception</span>, <span>S</span>]<br/> <span>mapFunc</span>(eitherFishGen.sample.get)(check andThen prepare)<br/>}<br/>{<br/> <span>type </span><span>Bucket</span>[<span>S</span>] = <span>List</span>[<span>S</span>]<br/> <span>mapFunc</span>(<span>listOfFishGen</span>.sample.get)(<span>prepareAndEat</span>)<br/>}</pre>
+<p>Now, it is starting to look like a useful abstraction—<span>well,</span> as long as our desires are limited to the functions of one argument. We'll see why in the next section.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Applicative</h1>
+                </header>
+            
+            <article>
+                
+<p>With functor, we now have a convenient way to apply functions to the contents of an effect, regardless of the type of the effect itself. We were able to check the fish and cook it by applying the same logic we had for an effect-free fish. To get even more comfortable with functors, we will now make a fish pie with our new tool.</p>
+<p>First, we'll define a function to make a pie from a single fish:</p>
+<pre><span>final case class </span>FishPie(weight: Int)<br/>import ch08.Model._<br/><span>def </span>bakePie(fish: FreshFish, potatoes: Int, milk: Float): FishPie = <span>FishPie</span>(fish.fish.weight)</pre>
+<p>That was easy—one fish, one pie, with the size of the fish. Now, we are ready to bake every fish in the bucket:</p>
+<pre><span>mapFunc</span>(<span>listOfFishGen</span>.sample.get)(bakePie)</pre>
+<p>Oops! This won't compile because the functor only accepts the function of one argument, and we have three.</p>
+<p>What can we do? One of the possibilities would be to refactor and partially apply our function. We could also create a function that uses <kbd>mapC</kbd> to convert the bucket of fish in to a fresh fish bucket so that we can simplify further actions:</p>
+<pre><span>val freshFishMaker</span>: <span>List</span>[Fish] =&gt; <span>List</span>[FreshFish] = ch08.Functor.<span>bucketFunctor</span>.mapC(<span>check</span>)</pre>
+<p>And then we can implement the rest of the logic with the partially applied function:</p>
+<pre><span>def </span>bucketOfFish: <span>Bucket</span>[Fish] = <span>listOfFishGen</span>.sample.get<br/><br/><span>def bakeFishAtOnce</span>(potatoes: Int, milk: Float): FreshFish =&gt; FishPie = <br/><span>  bakePie</span>(_: FreshFish, potatoes, milk)<br/><br/><span>val </span>pie: <span>Seq</span>[FishPie] = <span>mapFunc</span>(freshFishMaker(<span>bucketOfFish</span>))(bakeFishAtOnce(<span>20</span>, <span>0.5f</span>))</pre>
+<p>This is a valid approach and would work, but this will use the same amount of ingredients for each and every fish. Some of the pies won't taste very good if this strategy. Can we do better?</p>
+<p>Well, we can make our original function curried. This will give us a function that accepts a single fish and then other arguments on top:</p>
+<pre><span>def </span>bakeFish: FreshFish =&gt; Int =&gt; Float =&gt; FishPie = (<span>bakePie </span>_).curried<br/><span>val pieInProgress</span>: <span>List</span>[Int =&gt; Float =&gt; FishPie] = <br/><span>  mapFunc</span>(freshFishMaker(<span>bucketOfFish</span>))(bakeFish)</pre>
+<p>Now, we would like to use the ingredients from another bucket so that we can add to the <kbd>pieInProgress</kbd>. Unfortunately, this is something that a functor can't help us with. If we try and nest, the map calls for a bucket of potatoes and a bucket of milk, so we would come up<span> with something like the following:</span></p>
+<pre><span>mapFunc</span>(pieInProgress) { (pieFactory: <span>Int </span>=&gt; <span>Float </span>=&gt; FishPie) =&gt;<br/>  <span>mapFunc</span>(bucketOfPotatoes) { potato =&gt;<br/>    <span>mapFunc</span>(bucketOfMilk) { milk =&gt;<br/>      pieFactory(potato)(milk)<br/>    }<br/>  }<br/>}</pre>
+<p>Unfortunately, each nested call will leave the result in the nested bucked so that even if this were able to compile at the end, we'd have three nested buckets. Our functors do not know how to extract nested buckets from each other.</p>
+<p>What can help us is the <em>Applicative Functor</em>. Sometimes just known as<span> </span><em>Applicative</em>, this structure extends the original functor with two more methods:</p>
+<pre><span>trait </span>Applicative[<span>F</span>[_]] <span>extends </span>Functor[<span>F</span>] {<br/>  <span>def </span><span>apply</span>[<span>A</span><span>,</span><span>B</span>](a: <span>F</span>[<span>A</span>])(f: <span>F</span>[<span>A </span>=&gt; <span>B</span>]): <span>F</span>[<span>B</span>]<br/>  <span>def </span><span>unit</span>[<span>A</span>](a: =&gt; <span>A</span>): <span>F</span>[<span>A</span>]<br/>}</pre>
+<p>The apply method takes an effect, <kbd>a</kbd>, and a function, <kbd>f</kbd>, defined in the context of the same effect and applies <kbd>f</kbd> to <kbd>a</kbd>, thus returning the result that's wrapped in the very same effect.</p>
+<p>The <kbd>unit</kbd> method allows us to wrap a plain value, <kbd>a</kbd>, into the effect. <span>This is often called </span><em>lifting</em><span>, especially if <kbd>a</kbd> is a function, as it "lifts" the original value (or function) into the context of the effect, </span><kbd>F</kbd><span>.</span></p>
+<p>An astute reader will expect some laws to pop up for the aforementioned functions. And you would be absolutely right! There are a few of them:</p>
+<ol>
+<li>Identity law states that an application of an identity function should return the argument unchanged, the same way the identity function does. This is similar to the identity law for the functor, but this time defined for the <kbd>apply</kbd> function.</li>
+<li>Homomorphism law states that applying a function to a value and then lifting the result is the same as first lifting this function and value and then applying them in the context of the applicative.</li>
+<li>Interchange law states that changing the order of the parameters for the apply method should not change the result.</li>
+<li>Composition law<span> states that function composition should be preserved.</span></li>
+</ol>
+<p>Now, this might start to sound abstract. Let's make these points clear by capturing them as properties.</p>
+<p><span>The identity property is the simplest one. The only caveat is that we can't use the <kbd>identity</kbd> function—we have to be explicit about the type of the argument for the <kbd>unit</kbd> method because there is no possibility for the compiler to infer it for us:</span></p>
+<pre><span>def </span><span>identityProp</span>[<span>A</span><span>, </span><span>F</span>[_]](<span>implicit </span>A: Applicative[<span>F</span>]<span>,<br/></span><span>                          </span>arbFA: Arbitrary[<span>F</span>[<span>A</span>]]): Prop =<br/>  <span>forAll </span>{ as: <span>F</span>[<span>A</span>] =&gt;<br/>    A(as)(A.unit((a: <span>A</span>) =&gt; a)) == as<br/>  }</pre>
+<p><span>Homomorphism is also not very spectacular—it literally encodes the rules we stated in prose. Similar to the case of </span><kbd>identityProp</kbd><span>, we're taking advantage of the </span><kbd>apply</kbd><span> syntax:</span></p>
+<pre><span>def </span><span>homomorphism</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>F</span>[_]](<span>implicit </span>A: Applicative[<span>F</span>]<span>,<br/></span><span>                             </span>arbA: Arbitrary[<span>A</span>]<span>,<br/></span><span>                             </span>arbB: Arbitrary[<span>B</span>]<span>,<br/></span><span>                             </span>cogenA: Cogen[<span>A</span>]): Prop = {<br/>  <span>forAll</span>((f: <span>A </span>=&gt; <span>B</span><span>, </span>a: <span>A</span>) =&gt; {<br/>    A(A.unit(a))(A.unit(f)) == A.unit(f(a))<br/>  })<br/>}</pre>
+<p class="mce-root">The interchange law is where it starts to become interesting. We'll define left and right sides separately to simplify the definition:</p>
+<pre><span>def </span><span>interchange</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>F</span>[_]](<span>implicit </span>A: Applicative[<span>F</span>]<span>,<br/></span><span>                            </span>arbFA: Arbitrary[<span>F</span>[<span>A</span>]]<span>,<br/></span><span>                            </span>arbA: Arbitrary[<span>A</span>]<span>,<br/></span><span>                            </span>arbB: Arbitrary[<span>B</span>]<span>,<br/></span><span>                            </span>cogenA: Cogen[<span>A</span>]): Prop = {<br/>  <span>forAll</span>((f: <span>A </span>=&gt; <span>B</span><span>, </span>a: <span>A</span>) =&gt; {<br/>    <span>val </span>leftSide = A(A.unit(a))(A.unit(f))<br/>    <span>val </span>func = (ff: <span>A </span>=&gt; <span>B</span>) =&gt; ff(a)<br/>    <span>val </span>rightSide = A(A.unit(f))(A.unit(func))<br/>    leftSide == rightSide<br/>  })<br/>}</pre>
+<p>The left side is identical to the homomorphism definition—we're lifting some random function and a value into the applicative. Now, we need to change the order of <kbd>f</kbd> and <kbd>a</kbd>. The <kbd>f</kbd> is a first-class value, so we're fine on this side, but <kbd>a</kbd> is not a function. Therefore, we're defining a helper <kbd>func</kbd> which takes something with the same type as <kbd>f</kbd> and returns type <kbd>B</kbd>. Given <kbd>a</kbd>, we have only one way to implement this. With this helper, the types will align. Finally, we are defining the <kbd>rightSide</kbd> with the changed order of arguments and finish with the property comparing them.</p>
+<p>The composition property is the most lengthy one because we have to define the functions that we are about to compose. First, let's define function composition as a function:</p>
+<pre><span>def </span><span>composeF</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>C</span>]: (<span>B </span>=&gt; <span>C</span>) =&gt; (<span>A </span>=&gt; <span>B</span>) =&gt; (<span>A </span>=&gt; <span>C</span>) = _.compose</pre>
+<p>Given two functions with matching types, <kbd>composeF</kbd> will return a function composition by delegating to the <kbd>compose</kbd> method of the first argument.</p>
+<p>We'll again define left and right sides of the property separately:</p>
+<pre><span>def </span><span>composition</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>C</span><span>, </span><span>F</span>[_]](<span>implicit </span>A: Applicative[<span>F</span>]<span>,<br/></span><span>                               </span>arbFA: Arbitrary[<span>F</span>[<span>A</span>]]<span>,<br/></span><span>                               </span>arbB: Arbitrary[<span>B</span>]<span>,<br/></span><span>                               </span>arbC: Arbitrary[<span>C</span>]<span>,<br/></span><span>                               </span>cogenA: Cogen[<span>A</span>]<span>,<br/></span><span>                               </span>cogenB: Cogen[<span>B</span>]): Prop = {<br/>  <span>forAll</span>((as: <span>F</span>[<span>A</span>]<span>, </span>f: <span>A </span>=&gt; <span>B</span><span>, </span>g: <span>B </span>=&gt; <span>C</span>) =&gt; {<br/>    <span>val </span>af: <span>F</span>[<span>A </span>=&gt; <span>B</span>] = A.unit(f)<br/>    <span>val </span>ag: <span>F</span>[<span>B </span>=&gt; <span>C</span>] = A.unit(g)<br/>    <span>val </span>ac: <span>F</span>[(<span>B </span>=&gt; <span>C</span>) =&gt; (<span>A </span>=&gt; <span>B</span>) =&gt; (<span>A </span>=&gt; <span>C</span>)] = A.unit(<span>composeF</span>)<br/>    <span>val </span>leftSide = A(as)(A(af)(A(ag)(ac)))<br/>    <span>val </span>rightSide = A(A(as)(af))(ag)<br/><br/>    leftSide == rightSide<br/>  })<br/>}</pre>
+<p>The right side is straightforward<span>—</span>we're applying lifted functions <kbd>f</kbd> and <kbd>g</kbd> in succession on some effect, <kbd>as</kbd>. As the composition law states, this must be preserved if we apply composition inside of an applicative. This is what the left side does. It is better to read it from right to left: we're lifting our function which composes functions into the applicative and than applying lifted <kbd>f</kbd> and <kbd>g</kbd> in succession, but this time inside of the <kbd>A</kbd>. This gives us a <kbd>compose</kbd> function that's built inside of the applicative, which we finally apply to <kbd>as</kbd>.</p>
+<p>For a valid applicative, all of these properties must hold, as well as the functor properties we defined earlier, as shown in the following snippet (not showing the implicit parameters):</p>
+<pre><span>identityProp</span>[<span>A</span><span>, </span><span>F</span>] &amp;&amp; <span>homomorphism</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>F</span>] &amp;&amp; <span>interchange</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>F</span>] &amp;&amp; <span>composition</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>C</span><span>, </span><span>F</span>] &amp;&amp; FunctorSpecification.<span>functor</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>C</span><span>, </span><span>F</span>]</pre>
+<p>Secured with properties, we can define a few instances of applicative for the standard effects, just like we did for functor. The <kbd>Option</kbd> is arguably the easiest one to implement. Unfortunately, we can't just delegate to the instance method as we did with <kbd>map</kbd>, so we have to get our hands dirty:</p>
+<pre><span>implicit val </span><span>optionApplicative</span>: Applicative[Option] = <span>new </span>Applicative[Option] {<br/>  ... // map and mapC are the same as in Functor<br/>  <span>override def </span><span>apply</span>[<span>A</span><span>, </span><span>B</span>](a: Option[<span>A</span>])(f: Option[<span>A </span>=&gt; <span>B</span>]): Option[<span>B</span>] = (a<span>,</span>f) <span>match </span>{<br/>    <span>case </span>(<span>Some</span>(a)<span>, </span><span>Some</span>(f)) =&gt; <span>Some</span>(f(a))<br/>    <span>case </span>_ =&gt; None<br/>  }<br/>  <span>override def </span><span>unit</span>[<span>A</span>](a: =&gt; <span>A</span>): Option[<span>A</span>] = <span>Some</span>(a)<br/>}</pre>
+<p>The type signatures dictate the implementation. We can't return <kbd>Option[B]</kbd> in any other way but by applying <kbd>f</kbd> to <kbd>a</kbd>. Similarly, we can't return <kbd>Option[A]</kbd> from the <kbd>unit</kbd> method. Please pay attention, though, to how we're using the <kbd>Some</kbd> constructor in both cases instead of the <kbd>Option</kbd> constructor. This is done in order to preserve structure in the case of <kbd>null</kbd> parameters or returned values.</p>
+<p>The implementation for <kbd>Either</kbd> and <kbd>Try</kbd> is very similar with respect to the effect type. Remarkably, our <kbd>Bucket</kbd> type, which is represented by <kbd>List</kbd>, is quite different:</p>
+<pre><span>implicit val </span><span>bucketApplicative</span>: Applicative[<span>List</span>] = <span>new </span>Applicative[<span>List</span>] {<br/>  ... // map and mapC are the same as in Functor<br/>  <span>override def </span><span>apply</span>[<span>A</span><span>, </span><span>B</span>](a: <span>List</span>[<span>A</span>])(f: <span>List</span>[<span>A </span>=&gt; <span>B</span>]): <span>List</span>[<span>B</span>] = (a<span>, </span>f) <span>match </span>{<br/>    <span>case </span>(<span>Nil</span><span>, </span>_) =&gt; <span>Nil<br/></span><span>    </span><span>case </span>(_<span>, </span><span>Nil</span>) =&gt; <span>Nil<br/></span><span>    </span><span>case </span>(aa <span>:: </span>as<span>, </span>ff <span>:: </span>fs) =&gt;<br/>      <span>val </span>fab: (<span>A </span>=&gt; <span>B</span>) =&gt; <span>B </span>= f =&gt; f(aa)<br/>      ff(aa) :: as.map(ff) ::: fs.map(fab) ::: apply(as)(fs)<br/>  }<br/>  <span>override def </span><span>unit</span>[<span>A</span>](a: =&gt; <span>A</span>): <span>List</span>[<span>A</span>] = <span>List</span>(a)<br/>}</pre>
+<p>Because we need to apply all functions to all arguments, we're doing this in a recursive way in our example (notice that it is not tail-recursive!) by splitting the process into four parts—dealing with both first elements, the first element and all of its functions, all of the elements and the first function, and the recursive call for all but the first elements from both lists. </p>
+<p>With <kbd>bucketApplicative</kbd> at hand, we can finally finish our curried <kbd>pieInProgress</kbd> function by first applying it to <kbd>potato</kbd> and then to <kbd>milk</kbd>:</p>
+<pre><span>def bakeFish: FreshFish =&gt; Int =&gt; Float =&gt; FishPie = (bakePie _).curried<br/><br/>val pieInProgress: List[Int =&gt; Float =&gt; FishPie] = <br/>  mapFunc(freshFishMaker(bucketOfFish))(bakeFish)<br/><br/>def </span><span>pie</span>(potato: <span>Bucket</span>[<span>Int</span>]<span>, </span>milk: <span>Bucket</span>[<span>Float</span>]) = <br/><span>  bucketApplicative</span>(milk)(<span>bucketApplicative</span>(potato)(<span>pieInProgress</span>))<br/><br/>scala&gt; pie(List(10), List(2f))<br/>res0: List[ch08.Model.FishPie] = List(FishPie(21), FishPie(11), FishPie(78))</pre>
+<p>This definition works and produces the expected result<span>—</span>nice. But the implementation does not show the intent to mix three ingredients, which is not so nice. Let's improve this.</p>
+<p>In fact, there are three different valid ways to define an applicative in terms of its basic functions:</p>
+<ol>
+<li>The one we just implemented, with <kbd>apply</kbd> and <kbd>unit</kbd>.</li>
+<li>To define it with the <kbd>unit</kbd> and <kbd>map2</kbd> methods so that <kbd>map2[A, B, C](fa: F[A], fb: F[B])(f: (A, B) =&gt; C): F[C]</kbd>.</li>
+<li>To define it with the <kbd>unit</kbd>, <kbd>map</kbd>, and <kbd>product</kbd> functions so that <kbd>product[A, B](fa: F[A], fb: F[B]): F[(A, B)]</kbd>.</li>
+</ol>
+<p>The <kbd>apply</kbd> and <kbd>map2</kbd> methods are equally powerful in the sense that it is possible to implement one in terms of another. The same applies to <kbd>product</kbd>, though it is weaker as it needs a <kbd>map</kbd> function to be defined.</p>
+<p>As these functions are equally powerful, we can implement them directly in the type class definition so that they are available on all type class instances. The <kbd>map2</kbd> method looks good to start with:</p>
+<pre><span>trait </span>Applicative[<span>F</span>[_]] <span>extends </span>Functor[<span>F</span>] {<br/>  // ...<br/>  <span>def </span><span>map2</span>[<span>A</span><span>,</span><span>B</span><span>,</span><span>C</span>](fa: <span>F</span>[<span>A</span>]<span>, </span>fb: <span>F</span>[<span>B</span>])(f: (<span>A</span><span>, </span><span>B</span>) =&gt; <span>C</span>): <span>F</span>[<span>C</span>] =<br/>    apply(fb)(map(fa)(f.curried))<br/>}</pre>
+<p>The implementation almost looks disappointing in its simplicity<span>—</span>we just apply <kbd>fa</kbd> and <kbd>fb</kbd> in succession to the given <kbd>f</kbd> we converted to the curried form so that we are able to apply them in two steps. </p>
+<p>It is interesting how the <kbd>map2</kbd> method is implemented in terms of <kbd>map</kbd>, which in a sense is a map of <em>lower power</em>. The curious readers out there could be asking if it is possible to implement a <kbd>map</kbd> with yet another function of <em>lower power</em>. It turns out we can do this! Here is the implementation:</p>
+<pre><span>override def </span><span>map</span>[<span>A</span><span>,</span><span>B</span>](fa: <span>F</span>[<span>A</span>])(f: <span>A </span>=&gt; <span>B</span>): <span>F</span>[<span>B</span>] = apply(fa)(unit(f))</pre>
+<p>All we need to do is lift the given function <kbd>f</kbd> into the context of applicative and use the <kbd>apply</kbd> function we already have.</p>
+<p>This way of defining functions in terms of other functions is common in functional programming. All the way down in the abstraction, there are methods that provide the basis for all other definitions and cannot be defined as a combination of other methods. These are called <em>primitive</em>. The tree flavors of applicative we are talking about are different by their choice of primitive functions. As it turns out, our initial choice was the first of them, that is, the <kbd>unit</kbd> and <kbd>apply</kbd> methods. Using these primitive functions, we were able to define the <kbd>Functor</kbd> in terms of <kbd>Applicative</kbd>! It makes sense to do the same and define a <kbd>Functor.mapC</kbd> in terms of <kbd>map</kbd>:</p>
+<pre><span>def </span><span>mapC</span>[<span>A</span><span>,</span><span>B</span>](f: <span>A </span>=&gt; <span>B</span>): <span>F</span>[<span>A</span>] =&gt; <span>F</span>[<span>B</span>] = fa =&gt; map(fa)(f)</pre>
+<p>The nice side-effect of deriving implementations this way is that as soon as primitive functions are implemented properly and obey the applicative (or functor) laws, the derived implementations should be lawful as well.</p>
+<p>Back to the flavors of applicative<span>—</span>we still need to implement the <kbd>product</kbd> method which creates an applicative of a product from two <span>applicatives</span>:</p>
+<pre><span>def </span><span>product</span>[<span>G</span>[_]](G: Applicative[<span>G</span>]): Applicative[({<span>type </span><span>f</span>[<span>x</span>] = (<span>F</span>[<span>x</span>]<span>, </span><span>G</span>[<span>x</span>])})#<span>f</span>] = {<br/>  <span>val </span>F = <span>this<br/></span><span>  new </span>Applicative[({<span>type </span><span>f</span>[<span>x</span>] = (<span>F</span>[<span>x</span>]<span>, </span><span>G</span>[<span>x</span>])})#<span>f</span>] {<br/>    <span>def </span><span>unit</span>[<span>A</span>](a: =&gt; <span>A</span>) = (F.unit(a)<span>, </span>G.unit(a))<br/>    <span>override def </span><span>apply</span>[<span>A</span><span>,</span><span>B</span>](p: (<span>F</span>[<span>A</span>]<span>, </span><span>G</span>[<span>A</span>]))(fs: (<span>F</span>[<span>A </span>=&gt; <span>B</span>]<span>, </span><span>G</span>[<span>A </span>=&gt; <span>B</span>])) =<br/>      (F.apply(p._1)(fs._1)<span>, </span>G.apply(p._2)(fs._2))<br/>  }<br/>}</pre>
+<p>This time, we had to use a type lambda again to represent a product of two types, <kbd>F</kbd> and <kbd>G</kbd>, as a single type. We also needed to store the reference to the current instance of the applicative as <kbd>F</kbd> so that we're able to call its methods later. The implementation itself is naturally expressed in terms of the <kbd>unit</kbd> and <kbd>apply</kbd> primitives. For the resulting applicative, the <kbd>unit</kbd> is defined as a product of units for <kbd>F</kbd> and <kbd>G</kbd>, and the <kbd>apply</kbd> is just a product of using an <kbd>apply</kbd> method on the given arguments.</p>
+<p>Unfortunately, we still can't define our <kbd>pie</kbd> function in a very readable way. If only we had <kbd>map3</kbd>, we could implement it as follows:</p>
+<pre><span>def </span><span>pie3</span>[<span>F</span>[_]: Applicative](fish: <span>F</span>[FreshFish]<span>, </span>potato: <span>F</span>[<span>Int</span>]<span>, </span>milk: <span>F</span>[<span>Float</span>]): <span>F</span>[FishPie] =<br/>  <span>implicitly</span>[Applicative[<span>F</span>]].map3(fish<span>, </span>potato<span>, </span>milk)(<span>bakePie</span>)</pre>
+<p>Obviously, this implementation expresses a very clear intent: take three containers full of ingredients, apply a function on these ingredients, and get a container with pies back. This works for any container for which an instance of an <kbd>Applicative</kbd> type class is available.</p>
+<p>Well, we already know how to derive functions from primitives defined for an abstraction. Why don't we do this again? Here goes:</p>
+<pre><span>def </span><span>map3</span>[<span>A</span><span>,</span><span>B</span><span>,</span><span>C</span><span>,</span><span>D</span>](fa: <span>F</span>[<span>A</span>]<span>,<br/></span><span>                  </span>fb: <span>F</span>[<span>B</span>]<span>,<br/></span><span>                  </span>fc: <span>F</span>[<span>C</span>])(f: (<span>A</span><span>, </span><span>B</span><span>, </span><span>C</span>) =&gt; <span>D</span>): <span>F</span>[<span>D</span>] =<br/>  apply(fc)(apply(fb)(apply(fa)(unit(f.curried))))</pre>
+<p>Hmm, it turned out to be a definition for the <kbd>map2</kbd> function, just extended with one more call for an <kbd>apply</kbd> for a third parameter! Needless to say, it is possible to implement the <kbd>mapN</kbd> method for any arity like this. We can also define it in an inductive way by calling a <kbd>map</kbd> of smaller arity:</p>
+<pre><span>def </span><span>map4</span>[<span>A</span><span>,</span><span>B</span><span>,</span><span>C</span><span>,</span><span>D</span><span>,</span><span>E</span>](fa: <span>F</span>[<span>A</span>]<span>,<br/></span><span>                    </span>fb: <span>F</span>[<span>B</span>]<span>,<br/></span><span>                    </span>fc: <span>F</span>[<span>C</span>]<span>,<br/></span><span>                    </span>fd: <span>F</span>[<span>D</span>])(f: (<span>A</span><span>, </span><span>B</span><span>, </span><span>C</span><span>, </span><span>D</span>) =&gt; <span>E</span>): <span>F</span>[<span>E</span>] = {<br/>  <span>val </span>ff: (<span>A</span><span>, </span><span>B</span><span>, </span><span>C</span>) =&gt; <span>D </span>=&gt; <span>E  </span>= (a<span>,</span>b<span>,</span>c) =&gt; d =&gt; f(a<span>,</span>b<span>,</span>c<span>,</span>d) <br/>  apply(fd)(map3(fa<span>, </span>fb<span>, </span>fc)(ff))<br/>}</pre>
+<p>We just needed to convert the provided function to the form where we can feed it with all but the last parameters and the last parameter separately.</p>
+<p>Now, as we have our <kbd>pie3</kbd> implementation, we must stop for a moment. We need to tell you something. Yes, we need to admit that we cheated a bit as we defined the <kbd>check</kbd> function. Surely, we can't just return <kbd>FreshFish</kbd> every time we have <kbd>Fish</kbd> as we did before:</p>
+<pre><span>lazy val </span><span>check</span>: Fish =&gt; FreshFish = f =&gt; <span>FreshFish</span>(f)</pre>
+<p>We did this on purpose so that we're able to focus on <kbd>Applicative</kbd>. Now, we are ready to improve on this. We are already familiar with the notion of optionality, so we could change this function to return an <kbd>Option</kbd>:</p>
+<pre><span>lazy val </span><span>check</span>: Fish =&gt; Option[FreshFish]</pre>
+<p>But let's decide which kind of effect it should be later. Let's call it <kbd>F</kbd> for now. We need two possibilities:</p>
+<ul>
+<li>To return an empty <kbd>F</kbd> in the case that the fish is not fresh</li>
+<li>To return an <kbd>F</kbd> with a fresh fish otherwise</li>
+</ul>
+<p>In terms of abstractions, we have <span>a way to lift a fish into <kbd>F</kbd> as soon as we have an applicative for it—the applicative gives this as a <kbd>unit</kbd>. All we need is an empty <kbd>F[FreshFish]</kbd></span>, <span>which we'll provide as an argument to the function. </span></p>
+<p>Hence, our new definition for the check will look as follows:</p>
+<pre><span>def </span><span>checkHonestly</span>[<span>F</span>[_] : Applicative](noFish: <span>F</span>[FreshFish])(fish: Fish): <span>F</span>[FreshFish] =<br/>  <span>if </span>(scala.util.Random.nextInt(<span>3</span>) == <span>0</span>) noFish <span>else </span><span>implicitly</span>[Applicative[<span>F</span>]].unit(<span>FreshFish</span>(fish))</pre>
+<p>Having empty <kbd>F</kbd> as a separate argument list will allow us to partially apply this function later. The preceding implementation returns an empty <kbd>F</kbd> in approximately 30% of cases. We're asking the compiler to check that the implicit <kbd>Applicative</kbd> is available for <kbd>F</kbd>, as discussed. If this is the case, our implementation will delegate to it to create a proper result.</p>
+<p>OK, we now have a way to separate fresh fish from the rest, but there is another problem. Our <kbd>pie3</kbd> function expects all of the ingredients to be wrapped in the same type of applicative. This is common in functional programming, and we'll deal with this impediment by lifting other parameters into the same container. We could introduce checks for freshness for potatoes and milk in the same way that we did for fish, but for simplicity, we'll assume they are always fresh (sorry, critical reader):</p>
+<pre><span>def </span><span>freshPotato</span>(count: <span>Int</span>) = <span>List</span>(<span>Some</span>(count))<br/><span>def </span><span>freshMilk</span>(gallons: <span>Float</span>) = <span>List</span>(<span>Some</span>(gallons))<br/><br/>val trueFreshFish: List[Option[FreshFish]] = <br/>  bucketOfFish.map(checkHonestly(Option.empty[FreshFish]))</pre>
+<p>With all of the ingredients checked for freshness, we can use our existing <kbd>pie3</kbd> function, almost like we did before:</p>
+<pre><span>import ch08.Applicative._<br/>def </span><span>freshPie </span>= <span>pie3</span>[({ <span>type </span><span>T</span>[<span>x</span>] = <span>Bucket</span>[Option[<span>x</span>]]})#<span>T</span>](<span>trueFreshFish</span><span>, </span><span>freshPotato</span>(<span>10</span>)<span>, </span><span>freshMilk</span>(<span>0.2f</span>))</pre>
+<p>The difference is that we need to help the compiler to recognize the proper type parameter. We do this by using the type lambda to define the type of the container explicitly. There is one missing piece of the puzzle, though. If we try to compile the preceding code, it will fail because we don't have an instance of <kbd>Applicative[Bucket[Option]]</kbd> yet.</p>
+<p>Ready to roll up your sleeves and implement it? Well, although there is nothing wrong with getting our hands dirty, we don't want to implement a new applicative each time we'd like to have a composition of them. What we'll do instead is define a generic combination of applicatives, which is itself an applicative. The fact that applicatives <em>compose</em> is their most admirable property. Let's see how this works. This is how we can implement it for our <kbd>Applicative[F]</kbd>:</p>
+<pre>  def compose[G[_]](G: Applicative[G]): Applicative[({type f[x] = F[G[x]]})#f] = {<br/>    val F = this<br/><br/>    def fab[A, B]: G[A =&gt; B] =&gt; G[A] =&gt; G[B] = (gf: G[A =&gt; B]) =&gt; (ga: G[A]) =&gt; G.apply(ga)(gf)<br/><br/>    def fg[B, A](f: F[G[A =&gt; B]]): F[G[A] =&gt; G[B]] = F.map(f)(fab)<br/><br/>    new Applicative[({type f[x] = F[G[x]]})#f] {<br/>      def unit[A](a: =&gt; A) = F.unit(G.unit(a))<br/>      override def apply[A, B](a: F[G[A]])(f: F[G[A =&gt; B]]): F[G[B]] =<br/>        F.apply(a)(fg(f))<br/>    }<br/>  }</pre>
+<p>Again, we had to use the type lambda to tell the compiler that this is actually just a single type parameter and not two. The implementation of the <kbd>unit</kbd> method is just wrapping one applicative into another. The <kbd>apply</kbd> method is more complex and we implemented it as a local function to make it clearer what is happening. The first thing we're doing is converting the internal function of type <kbd>G[A =&gt; B]</kbd> to the type <kbd>G[A] =&gt; G[B]</kbd>. We're doing this by applying the applicative <kbd>G</kbd> on the "internal" function wrapped inside of <kbd>f</kbd>. Now that we have this function, we can call the <kbd>map</kbd> function of the outer applicative to wrap the result into <kbd>F</kbd>. The last thing we're doing is applying this wrapped composed function on the original function and the resulting function, that is, to the original argument of the <kbd>apply</kbd> method.</p>
+<p>Now, we can compose these applicatives as we wish:</p>
+<pre><span>implicit val </span><span>bucketOfFresh</span>: ch08.Applicative[({ <span>type </span><span>T</span>[<span>x</span>] = <span>Bucket</span>[Option[<span>x</span>]]})#<span>T</span>] = <br/>  <span>bucketApplicative</span>.compose(<span>optionApplicative</span>)</pre>
+<p>And use this combination to call our original pie-making logic:</p>
+<pre><span>scala&gt; println</span>(<span>freshPie</span>)<br/>List(Some(FishPie(40)), None, Some(FishPie(36)))</pre>
+<p>The beauty of this approach is that it allows us to reuse existing logic with arbitrarily nested applicatives, just like in the following artificial example:</p>
+<pre><span>import scala.util._<br/>import ch08.Applicative<br/>def </span><span>deep</span>[<span>X</span>](x: <span>X</span>) = <span>Success</span>(<span>Right</span>(x))<br/><span>type </span><span>DEEP</span>[<span>x</span>] = <span>Bucket</span>[Try[<span>Either</span>[<span>Unit, </span>Option[<span>x</span>]]]]<br/><span><br/>implicit val </span><span>deepBucket</span>: Applicative[<span>DEEP</span>] =<br/> <span>bucketApplicative</span>.compose(<span>tryApplicative</span>.compose(<span>eitherApplicative</span>[<span>Unit</span>].compose(<span>optionApplicative</span>)))<br/><br/><span>val </span><span>deeplyPackaged </span>=<br/>  <span>pie3</span>[<span>DEEP</span>](<span>trueFreshFish</span>.map(<span>deep</span>)<span>, </span><span>freshPotato</span>(<span>10</span>).map(<span>deep</span>)<span>, </span><span>freshMilk</span>(<span>0.2f</span>).map(<span>deep</span>))</pre>
+<p>All that we need in the case that the structure of containers changes is to define a new composite applicative (and a few syntactic helpers like the type alias as a constructor, but these aren't essential). Then, we are able to use the existing logic as we did previously. This is what the result looks like in REPL:</p>
+<pre><span>scala&gt; println</span>(<span>deeplyPackaged</span>)<br/>List(Success(Right(Some(FishPie(46)))), Success(Right(Some(FishPie(54)))), Success(Right(None)))</pre>
+<p>We can easily change the structure of the result by rewiring the composite applicative:</p>
+<pre><span>type </span><span>DEEP</span>[<span>x</span>] = Try[<span>Either</span>[<span>Unit, </span><span>Bucket</span>[Option[<span>x</span>]]]]<br/><br/><span>implicit val </span><span>deepBucket</span>: Applicative[<span>DEEP</span>] = <br/><span> tryApplicative</span>.compose(<span>eitherApplicative</span>[<span>Unit</span>].compose(<span>bucketApplicative</span>.compose(<span>optionApplicative</span>)))<br/><br/><span>val </span><span>deeplyPackaged </span>=<br/>  <span>pie3</span>[<span>DEEP</span>](<span>deep</span>(<span>trueFreshFish</span>)<span>, </span><span>deep</span>(<span>freshPotato</span>(<span>10</span>))<span>, </span><span>deep</span>(<span>freshMilk</span>(<span>0.2f</span>)))</pre>
+<p>We changed the composition order and now the result looks different:</p>
+<pre><span>scala&gt; println</span>(<span>deeplyPackaged</span>)<br/>Success(Right(List(Some(FishPie(45)), Some(FishPie(66)), None)))</pre>
+<p>Does it feel like combining <span>applicatives </span>leaves no desires unfulfilled? Well, in a sense, it is, except for the case that we want to change the structure of the result at hand. To give you an example, let's recall the result of our baking endeavor for the fresh fish: <kbd>List(Some(FishPie(45)), Some(FishPie(66)), None)</kbd>. It is a bucket containing either a pie, if the fish was fresh, or nothing if it was not. But what if we hired a new cook and now every single fish in the bucket has to be fresh or the whole bucket is discarded? Our return type would be <kbd>Option[Bucket[FishPie]]</kbd> in this case<span>—</span>the bucket is full of pies if we have a bucket of fresh fish, or nothing. We want to keep our kitchen processes, though! This is the time for the <kbd>Traversable</kbd> functor to enter the scene.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Traversable</h1>
+                </header>
+            
+            <article>
+                
+<p>The <kbd>Traversable</kbd> functor is similar to <kbd>Reducible</kbd> and <kbd>Foldable</kbd>, which we talked about in the previous chapter. The difference is that methods defined on <kbd>Traversable</kbd> preserve the underlying structure while going over it, as opposed to the other abstractions which collapse it into the single result. The <kbd>Traversable</kbd> defines two methods:</p>
+<pre><span>import </span>scala.{ Traversable =&gt; _ }<br/><br/><span>trait </span>Traversable[<span>F</span>[_]] extends Functor[F] {<br/>  <span>def </span><span>sequence</span>[<span>A</span><span>,</span><span>G</span>[_]: Applicative](a: <span>F</span>[<span>G</span>[<span>A</span>]]): <span>G</span>[<span>F</span>[<span>A</span>]]<br/>  def traverse[A,B,G[_]: Applicative](a: F[A])(f: A =&gt; G[B]): G[F[B]]<br/>}</pre>
+<p>Unfortunately, Scala has a deprecated <kbd>Traversable</kbd> definition left over from previous versions, so we are getting rid of it by using import renaming. Our <kbd>Traversable</kbd> defines the <kbd>sequence</kbd> and <kbd>traverse</kbd> methods, which loosely correspond to the <kbd>reduce</kbd> and <kbd>fold</kbd> methods defined on monoids. Starting with the <kbd>sequence</kbd> method, we can see that it turns its argument <em>inside out</em>. This is exactly what we needed to make our new cook happy. Let's skip the implementation part for a moment and see how it works in practice:</p>
+<pre><span>scala&gt; println</span>(<span>freshPie</span>)<br/>List(None, None, Some(FishPie(38)))<br/><br/><span>scala&gt;println</span>(ch08.Traversable.<span>bucketTraversable</span>.sequence(<span>freshPie</span>))<br/>None</pre>
+<p>As soon as we have <kbd>None</kbd> in the list, we're getting <kbd>None</kbd> back as the result. Let's give it another try:</p>
+<pre><span>scala&gt; println</span>(<span>freshPie</span>)<br/>List(Some(FishPie(40)), Some(FishPie(27)), Some(FishPie(62)))<br/><br/><span>scala&gt; println</span>(ch08.Traversable.<span>bucketTraversable</span>.sequence(<span>freshPie</span>))<br/>Some(List(FishPie(40), FishPie(27), FishPie(62)))<br/><br/></pre>
+<p>If all of the fish are fresh, we get <kbd>Some</kbd> bucket of pies, as expected. But we're still not 100% satisfied with this approach. The reason for this is that we first bake all of the fresh pies we possibly can and then discard them in the case that not all of the fish was fresh. Instead, we would like to stop as soon as we encounter the first rotten fish. This is what the <kbd>traverse</kbd> method is for. Using it, we can implement our baking process like so:</p>
+<pre>ch08.Traversable.<span>bucketTraversable</span>.traverse(<span>bucketOfFish</span>) { a: Fish =&gt;<br/>  <span>checkHonestly</span>(Option.empty[FreshFish])(a).map(f =&gt; bakePie(f<span>, </span><span>10</span><span>, </span><span>0.2f</span>))<br/>}</pre>
+<p>Here, we're traversing over the <kbd>bucketOfFish</kbd>. We're using <kbd>bucketTraversable</kbd> for this. It expects a function called <kbd>Fish =&gt; G[?]</kbd> so that <kbd>G</kbd> is applicative. We can satisfy this requirement by providing a function called <kbd>Fish =&gt; Option[FishPie]</kbd>. We're using <kbd>checkHonestly</kbd> to lift a <kbd>Fish</kbd> into the <kbd>Option[FreshFish]</kbd>, and then we need to <kbd>map</kbd> over it with our original <kbd>bakePie</kbd> method.</p>
+<p>How is <kbd>traverse</kbd> implemented? Unfortunately, the implementation for this requires knowing the structure of the effect so that it can be preserved. Because of this, it needs to be implemented for each instance of the type class or delegated to another abstraction where this knowledge is preserved, like <kbd>Foldable</kbd>.</p>
+<p>This is how the <kbd>traverse</kbd> method can be implemented for <kbd>Traversable[List]</kbd>:</p>
+<pre><span>override def </span><span>traverse</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>G</span>[_] : Applicative](a: <span>Bucket</span>[<span>A</span>])(f: <span>A </span>=&gt; <span>G</span>[<span>B</span>]): <span>G</span>[<span>Bucket</span>[<span>B</span>]] = {<br/>  <span>val </span>G = <span>implicitly</span>[Applicative[<span>G</span>]]<br/>  a.foldRight(G.unit(<span>List</span>[<span>B</span>]()))((aa<span>, </span>fbs) =&gt; G.map2(f(aa)<span>, </span>fbs)(_ :: _))<br/>}</pre>
+<p>To preserve the structure of the list, we <kbd>foldRight</kbd> over it, starting by lifting an empty list into the context of <kbd>G</kbd>. We're using <kbd>map2</kbd> in each fold iteration to call the provided function on the next element of the original list, lift it into <kbd>G</kbd>, and append it to the result.</p>
+<p>For the <kbd>Option</kbd>, we could use an approach similar to what we used for <kbd>fold</kbd>, but as we only need to handle two cases, a pattern matching implementation reveals the intent much better:</p>
+<pre><span>implicit val </span><span>optionTraversable </span>= <span>new </span>Traversable[Option] {<br/>  <span>override def </span><span>map</span>[<span>A</span><span>, </span><span>B</span>](in: Option[<span>A</span>])(f: <span>A </span>=&gt; <span>B</span>): Option[<span>B</span>] =<br/>   Functor.<span>optionFunctor</span>.map(in)(f)<br/>  <span>override def </span><span>traverse</span>[<span>A</span><span>, </span><span>B</span><span>, </span><span>G</span>[_] : Applicative](a: Option[<span>A</span>])(f: <span>A </span>=&gt; <span>G</span>[<span>B</span>]): <span>G</span>[Option[<span>B</span>]] = {<br/>    <span>val </span>G = <span>implicitly</span>[Applicative[<span>G</span>]]<br/>    a <span>match </span>{<br/>      <span>case </span><span>Some</span>(s) =&gt; G.map(f(s))(Some.<span>apply</span>)<br/>      <span>case </span>None =&gt; G.unit(None)<br/>    }<br/>  }<br/>}</pre>
+<p>We're just lifting the <kbd>Option</kbd> into the context of <kbd>G</kbd> by using the appropriate methods for different states of an <kbd>Option</kbd>. It is worth noting that we're using <kbd>Some.apply</kbd> directly in the case of the non-empty <kbd>Option</kbd> to preserve the structure as required.</p>
+<p>The good news is that the second method, <kbd>sequence</kbd>, is less powerful than traverse. Because of this, it can be defined directly on <kbd>Traversable</kbd> in terms of <kbd>traverse</kbd>:</p>
+<pre><span>def </span><span>sequence</span>[<span>A</span><span>,</span><span>G</span>[_]: Applicative](a: <span>F</span>[<span>G</span>[<span>A</span>]]): <span>G</span>[<span>F</span>[<span>A</span>]] = traverse(a)(<span>identity</span>)</pre>
+<p>It just uses the <kbd>identity</kbd> function to return a proper value of <kbd>G[A]</kbd>, as expected by <kbd>traverse</kbd>. </p>
+<p>Being a functor, <kbd>Traversable</kbd>s also compose. The <kbd>compose</kbd> function will have the following signature:</p>
+<pre><span>trait </span>Traversable[<span>F</span>[_]] <span>extends </span>Functor[<span>F</span>] {<br/>  // ...<br/>  <span>def </span><span>compose</span>[<span>H</span>[_]](<span>implicit </span>H: Traversable[<span>H</span>]): Traversable[({<span>type </span><span>f</span>[<span>x</span>] = <span>F</span>[<span>H</span>[<span>x</span>]]})#<span>f</span>]<br/>}</pre>
+<p>We'll leave the task of implementing this to the reader.</p>
+<p>This is how composing <kbd>Traversable</kbd>s can make life easier. Remember our controversial <kbd>deeplyPackaged</kbd> example? This is, once again, what the type of the container looks like:</p>
+<pre><span>type </span><span>DEEP</span>[<span>x</span>] = scala.util.Try[<span>Either</span>[<span>Unit, </span><span>Bucket</span>[Option[<span>x</span>]]]]</pre>
+<p>Can you imagine iterating over it and applying some logic to the elements of it? With a composed <kbd>Traversable</kbd>, this is absolutely straightforward:</p>
+<pre><span>import ch08.</span>Traversable._<br/><span>val </span><span>deepTraverse </span>= <span>tryTraversable</span>.compose(<span>eitherTraversable</span>[<span>Unit</span>].compose(<span>bucketTraversable</span>))<br/><br/><span>val </span><span>deepYummi </span>= <span>deepTraverse</span>.traverse(<span>deeplyPackaged</span>) { pie: Option[FishPie] =&gt;<br/>  pie.foreach(p =&gt; <span>println</span>(<span>s"Yummi </span><span>$</span>p<span>"</span>))<br/>  pie<br/>}<br/>println(deepYummi)</pre>
+<p>We first compose the <kbd>Traversable</kbd> to match our nested types. Then, we traverse over it, as we did previously. Please note how we omitted the bottom <kbd>Option</kbd> type and have it as a wrapper type for the function parameter for traverse. This is the output of the preceding snippet:</p>
+<pre><strong>Yummi FishPie(71)</strong><br/><strong>Yummi FishPie(5)</strong><br/><strong>Yummi FishPie(82)</strong><br/><strong>Some(Success(Right(List(FishPie(82), FishPie(5), FishPie(71)))))</strong></pre>
+<p>Does it feel like you have superpowers yet? If you're still not feeling it, we have something more to offer in the next chapter!</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p class="p1">This was an intense chapter. We learned about the concept of working with effects in a way that the knowledge of the effects' structure is <em>outsourced</em> to another abstraction. We looked at three such abstractions.</p>
+<p class="p1">The <kbd>Functor</kbd> allows us to apply a function of one argument to each element stored in the container.</p>
+<p class="p1">The <kbd>Applicative</kbd> (or applicative functor) extends the <kbd>Functor</kbd> in a way that it is possible to apply a function of two arguments (and by induction, functions of any number of arguments). We’ve seen that it is possible to choose one of three equally valid sets of primitives that define applicative and derive all of the other methods from these primitives.</p>
+<p class="p1">We said that this approach of defining a minimal set of primitive functions and the rest of functionality in terms of these primitives is a common approach in functional programming.</p>
+<p class="p1">The last abstraction we saw was the <kbd>Traversable</kbd> (or traversable functor), which allows us to iterate over effects, thus changing their content, but preserving the underlying structure.</p>
+<p class="p1">We paid special attention to combining applications and later to combining traversable. Having implemented the general methods that allow us to build stacks of arbitrary functors and use these stacks to go straight to the <em>heart</em>, we were able to reuse existing functions that were defined in terms of plain effect-free types.</p>
+<p class="p1">What we haven't demonstrated, though, is the way that data from one applicative can influence functions that are called deeper in the stack—we just used constant parameters in our examples. The reason we did this is that applications do not support sequencing computations.</p>
+<p class="p1">In the next chapter, we'll learn about another abstraction that is capable of truly chaining computations—a monad.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Questions</h1>
+                </header>
+            
+            <article>
+                
+<ol>
+<li>Implement <kbd>Functor[Try]</kbd>. Check that your implementation passes the property check, just like it did in this chapter.</li>
+<li>Implement <kbd>Applicative[Try]</kbd><span>. Check that your implementation passes the property check, just like it did in this chapter.</span></li>
+<li>Implement <kbd>Applicative[Either]</kbd><span>. Check that your implementation passes the property check, just like it did in this chapter.</span></li>
+<li>Implement <kbd>Traversable[Try]</kbd>.</li>
+<li>Implement <kbd>Traversable[Either]</kbd>.</li>
+<li>Implement <kbd>Traversable.compose</kbd>, in the same way, that we discussed at the end of this chapter.</li>
+</ol>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  
+<div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Further reading</h1>
+                </header>
+            
+            <article>
+                
+<ul>
+<li><span>Atul S. Khot, <em>Scala Functional Programming Patterns</em>: </span><span>Grok and performing effective functional programming in Scala</span></li>
+<li><span>Ivan Nikolov, </span><em>Scala Design Patterns</em><span> </span>- Second Edition: Learn how to write efficient, clean, and reusable code with Scala</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+
+  </body></html>
