@@ -1,0 +1,1205 @@
+- en: Scale Up – Threading and Implications
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Scalability has always been a concern for Java and, thus, a thread-related API
+    was introduced in Java version 1.0\. The idea is to be able to benefit from the
+    most modern hardware updates in order to parallelize the processing of applications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Being able to handle multiple requests in parallel is crucial for a Java EE
+    server to scale, but in our modern Java world, you also need to be able to control
+    your own threads. Also, Java EE introduced the required API to do it in good conditions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will go through the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java EE threading model
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Data consistency across threads
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Java EE hidden thread usages
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to integrate reactive programming with the Java EE programming model
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Java EE threading model
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The Java EE philosophy has, for a long time, been able to give its users a well-defined
+    and safe programming model. This is why most of the Java EE defaults are about
+    being thread-safe, and that several specifications such as **Enterprise Java Beans**
+    (**EJB**) defaults were preventing custom thread usage. It does not mean Java
+    EE was ignoring threads at all, but explicitly using thread pools from an application
+    was not very natural. Also, most of the time, the adopted coding style was either
+    against Java EE's (strict) rules or were very verbose.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before detailing the new API added by Java EE to help you develop concurrent
+    applications, let's see the basic Java EE model and how it can already help you
+    to scale.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we take back the specifications included in Java EE 8 (full profile), we''ll
+    get a long list. Now, if we check which specifications use threads, the list will
+    be shorter and we can find some common points among them. Here is a table trying
+    to represent whether the specifications manage dedicated threads or not and whether
+    they explicitly interact with threads (handling cross-thread calls by using the
+    provided threads) or simply use the caller (contextual) thread:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Specification** | **Manage dedicated threads** | **Interacts with threads**
+    | **Comment** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| EJB 3.2 | Yes | Yes | `@Asynchronous` allows you to execute tasks in a dedicated
+    thread pool. `@Lock` used with `@Singleton` allows you to control the thread safety
+    of the bean. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Servlet 4.0 | Yes | Yes | Every request is executed in a single thread provided
+    by the container by default. When using `AsyncContext`, you can execute the task
+    in a custom thread and resume the request from another thread later. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JSP 2.3/JSP Debugging 1.0 | No | No | Inherits from the servlet model. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| EL 3.0 | No | No | Uses the caller context. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JMS 2.0 | Yes | No | By itself, JMS can be seen as a specific sort of connector
+    (as in *Connector 1.7*) but put a few specific words on this case. JMS has two
+    sorts of usages: on the server side and on the client side. The server side is
+    generally a network server expecting connection. This is where dedicated threads
+    will be used (such as any socket server). Then, the processing will be fully delegated
+    to the connector. On the client side, it generally inherits from the caller context
+    but also uses custom threads, as it is asynchronous by design. So, it needs its
+    own thread pools to handle this part of the JMS specification. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JTA 1.2 | No | Yes | JTA doesn''t manage threads but *binds* its context
+    to threads. Concretely, when a transaction starts, it is only valid for the initial
+    thread. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JavaMail 1.6 | Yes | No | JavaMail being the link between your Java code
+    and the way mails are sent/received, the implementation is, here again, linked
+    to a socket, and thus, it often relies on dedicated threads. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Connector 1.7 | Yes | Yes | Connector specification is the standard way to
+    interact with external systems (bi-directional ways even if connector implementations
+    often handle only one way). However, it generally uses dedicated threads in two
+    layers, the first one being related to the network interactions and the second
+    one being related to the container interaction that generally goes through `WorkManager`,
+    which is the ancestor of the *Concurrency Utilities for Java EE* specification.
+    Like JTA, it also uses context-related information that is often bound to the
+    thread. Finally, since it interacts with the JTA, a part of the interactions is,
+    by design, bound to threads. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Web Services 1.4 / JAX-RPC 1.1 | No | No | Web services generally just inherit
+    from the servlet contextual threading model. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JAX-RS 2.1 | Yes | Yes | JAX-RS inherits from the servlet contextual model,
+    but since JAX-RS 2.0, the server can asynchronously handle the requests, thanks
+    to Servlet 3.0 `AsyncContext`. In this case, the developer must notify the container
+    when a request is completed and interacts with threads, as it is generally done
+    from a different thread from the servlet one.On the client side, JAX-RS 2.1 now
+    has a reactive API, able to use custom threads to do the execution. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| WebSocket 1.1 | Yes/No | Yes/No | Normally, the WebSocket specification was
+    designed to be implemented on top of the servlet specification, which is really
+    the Java EE central transport. However, for several cases, it may be needed to
+    use some customization of the threading for WebSocket needs (long connections).
+    This part highly depends on the container. The last thing is that some custom
+    WebSocket threads may be needed to handle connection evictions and things like
+    that, but it has less impact on the end user and performance. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JSON-P 1.1 / JSON-B 1.0 | No | No | This specification (JSON low-level API
+    and JSON binding) does not have any thread-related operations and simply executes
+    in the caller context. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Concurrency Utilities for Java EE 1.0 | Yes | Yes | Concurrency utilities
+    mainly have the ability to define *Java EE thread pools* and, indeed, they manage
+    custom threads. It also transparently facilitates (through `ContextService`) the
+    propagation of some contexts, such as security, JNDI context, transaction, and
+    so on. Note that, however, the propagation is not standard and you may need to
+    check out your server documentation to know what it does precisely. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Batch 1.0 | Yes | No | JBatch is asynchronous by design. When you launch
+    a batch, the invocation returns before the batch is done, as it can be very long.
+    To handle such behavior JBatch has its own thread pools. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JAXR 1.0 | No | No | This specification is rarely used and has become old
+    (before Java introduced nio). Being a client, it doesn''t use custom threads.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Java EE Management 1.1 (or 1.2) | Yes/No | No | This specifications allows
+    you to interact with the server and its definitions (resources and applications).
+    It uses another transport technology, so it generally needs dedicated threads.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JACC 1.5 | No | No | This is a specification linking an authorization policy
+    with the Java EE container. It is contextually executed. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JASPIC 1.1 | No | No | This is a security specification, also contextually
+    executed. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Java EE Security API 1.0 | No | No | This is the last security API of Java
+    EE, making it pretty usable, but it stays contextual to the caller. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JSTL 1.2 | No | No | Inherits from the servlet model. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Web Service Metadata 2.1 | No | No | This mainly involves annotations for
+    web services, so there''s  no particular threading model. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JSF 2.3 | No | No | Inherits from the servlet threading model (this is a
+    simplification but good enough for this book''s context). |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Common annotations 1.3 | No | No | Just a set of APIs reused by other specifications,
+    no particular behavior directly bound here. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Java Persistence 2.2 (JPA) | No | No | Inherits from the caller context.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Bean Validation 2.0 | No | No | Inherits from the caller context. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Interceptors 1.2 | No | No | Inherits from the caller context. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Contexts and Dependency Injection for Java EE 2.0 (CDI) | Yes | Yes | CDI
+    2.0 supports asynchronous events, which rely on a dedicated thread pool. CDI being
+    about *contexts*, also binds contextual data to threads such as the `@RequestScoped`
+    context. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Dependency Injection for Java 1.0 (@Inject) | No | No | This is mainly a
+    set of annotations of CDI, so there''s no real thread-related behavior here. |'
+  prefs: []
+  type: TYPE_TB
+- en: 'If we review all the thread usages, we can distinguish between some categories:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Asynchronous usages: the specification using threads not to block the caller
+    execution (such as JAX-RS client, Batch API, CDI asynchronous events, and so on)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Network-related implementations that need threads for the selector (partly accepting
+    the connections) and request handling
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'In terms of code context, this is generally related to the outbound layers
+    of the code. Indeed, the network is an outbound of the application, but asynchronous
+    usages are also in the sense that they split the execution into two branches:
+    the caller context that continues and a new branch that is no more linked to the
+    caller.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What does it mean for you? When you take the lead on an application, at least
+    from a performance or configuration point of view, you need to be clear about
+    the thread execution path of the application (when the application uses a different
+    thread from the one it got affected by, when the request entered into the system).
+    This is also true for inter-system architectures, such as microservices, where
+    you need to track the execution context breakdowns.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Thread data and consistency
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Before getting Java EE-specific, it is important to step back a moment and understand
+    the implications of concurrency on the programming model.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent data access
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: When a single thread accesses data, then the access is always thread-safe, and
+    it is not possible for a thread to mutate data while another one is reading it.
+    When you increase the number of threads and multiple threads can access the same
+    data structure instances, it is possible for a thread to read the data that's
+    currently being modified, or for two concurrent modifications to happen, leading
+    to an inconsistent result.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is a schema representing this issue with two threads. Keep in mind that
+    a Java EE server often handles  around 100 to 1000 threads, so the effects are
+    more impacting:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/68e59b4f-1bb0-4fab-8e82-d359d7e6bb26.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: In this simple example, we have a thread (**Thread 1**) setting data that is
+    supposed to be a complex structure. In parallel, we have another thread (**Thread
+    2**) accessing the data. In the  preceding diagram, the very thin black line represents
+    the thread life, whereas the bold black line represents the method execution in
+    the thread's context. The blue box represents the data setter/getter execution
+    time and the red zone represents the overlap of both threads on the data usage.
+    In other words, you can consider that the vertical unit is time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To understand what can be the impact of such a code without any protection,
+    let''s materialize the data structure with this simple code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: This simple structure aims to store a `String` value and handle a state (`initialized`),
+    which allows the structure to prevent access to the data if uninitialized.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we apply this structure on our previous picture timeline, it is possible
+    that **Thread 2** calls `getData` and fails with `IllegalStateException`, whereas
+    the `setData` method is called and sets the `initialized` variable. In other words,
+    the structure (`getData`) was accessed while it was changing and, thus, the behavior
+    was not consistent with the complete state of the data. In this case, the error
+    is not dramatic, but if you take another example summing some values, you will
+    just get the wrong data:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: If the execution of `sum` is done and `value` is accessed at the same time,
+    then the account value will be wrong, the reporting will potentially be inconsistent,
+    and the validation (which likely considers *credit+debit=0*) will fail, making
+    this account erroneous.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you look one step further and integrate some EE features, you will quickly
+    understand that the situation is even worse. Let''s take the case of a JPA entity,
+    such as `Quote`, and assume that two threads are differently modifying the entity:
+    one thread modifies the price and the other one modifies the name. What will happen
+    when each thread updates the entity? The database can''t handle both the updates
+    at the same time, so if there is no failure, then the last update will win and
+    only one of the two updates will be taken into account.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: JPA provides optimistic and pessimistic locking to properly solve the aforementioned
+    problem. As a general rule, try to use optimistic locking until you really need
+    pessimistic locking. In fact, it will give you a better performance even if it
+    will require you to potentially handle a retry logic if relevant.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java and thread safety
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This section doesn't intend to explain all the solutions that Java provides
+    to ensure the thread safety of your code but just to give you some highlights
+    on Java Standalone API, you can reuse in Java EE application if needed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Synchronized
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Surely the oldest solution, but still available in Java, the `synchronized`
+    keyword allows you to ensure that methods are not concurrently executed. You just
+    need to add it in your method definition as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is the exact same structure as the one we just saw. But now, thanks to
+    the `synchronized` keyword added to each method, the call to a method would enforce
+    concurrent calls to other synchronized methods to wait for the first one to end
+    before being executed. Concretely, it will chain method execution like in a single
+    thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `synchronized` keyword is linked to an instance, so two different instances
+    that are synchronized will not lock each other. It is also possible to use `synchronized`
+    as a block and pass the instance to synchronize on. If you do so and pass a static
+    instance, then you will lock all the instances that can prevent the application
+    from scaling if on a common code path.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Locks
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java 1.5 introduces the `Lock` interface with its `java.util.concurrent` package,
+    which contains a lot of concurrency-related classes. It achieves the same goal
+    as that of `synchronized` but allows you to control manually the scope of the
+    synchronized code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The performance of `Lock` and `synchronized` differs between Java versions,
+    but recent versions have progressed a lot. And generally, if you don't optimize
+    a computing algorithm, choosing one or the other will lead to something close.
+    However, it is generally better to use `Lock` if the number of concurrent threads
+    accessing the instance is high.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As `Lock` is an interface, it needs an implementation. The JRE comes with a
+    default implementation called `ReentrantLock`. Replacing a `synchronized` block
+    is done in the following way:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: The lock instantiation is directly done through the `new` keyword. We will note
+    here that `ReentrantLock` can take a Boolean parameter to request it to respect
+    a fair order for the lock invocations (the default is `false` and generally good
+    enough in terms of performance). Once you have a locked instance, you can call
+    the `lock()` method to ensure that you are the only one executing the code. Once
+    you are done with your protected code, you can call `unlock()` to release the
+    current thread and let another one execute its code. Also, note that all this
+    locking logic assumes that the lock is shared across the thread. Thus, the instantiation
+    is generally done once per instance (in the constructor or in a `@PostConstruct`
+    method).
+  prefs: []
+  type: TYPE_NORMAL
+- en: It is vital to call the `unlock()` method; otherwise, other locked threads will
+    never be released.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A more common usage of the Lock API is to split the lock and unlock calls into
+    two. For instance, to take Java EE usage, you can lock an instance when a request
+    starts and unlock it when the request ends in order to ensure that a single request
+    is accessing it. This is feasible with Servlet 3 through a listener, even for
+    asynchronous requests. But you will not have a block that you can surround; instead,
+    you will have multiple callbacks, which you need to integrate with the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'With this listener added to `AsyncContext`, the lock will follow the request''s
+    life cycle. The usage will probably look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: Once `AsyncContext` is obtained, we add the lock listener onto it and execute
+    the request. The lock will be released when the request ends because of a timeout,
+    an exception, or, simply, a normal termination.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This sort of implementation with a synchronized block is quite hard and often
+    requires some workarounds. This is an example where the Lock API is more powerful.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will not detail it here, but the `ReadWriteLock` API gives you a holder
+    for two locks: one is used to protect read accesses, and the other one for write
+    accesses. The goal is to let read accesses be done in parallel and ensure that
+    write accesses are done only when a single thread accesses the data.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: java.util.concurrent
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Although a detailed coverage of the Java Standalone is beyond the context of
+    this book, it is important to know that Java 7 and Java 8 got a lot of enhancements
+    in this area. So don''t hesitate to go through its packages. Among the interesting
+    classes, we can note the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`CountDownLatch`: This is a simple and efficient way to ensure that N threads
+    are waiting a condition owned by another thread (a bit like a starter in a race).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Semaphore`: This allows you to represent and implement permission *buckets*.
+    The most interesting part is that you can increase and decrease the associated
+    counter. It can be a simple way to implement a bulkhead solution.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`CyclicBarrier`: This is a way to synchronize multiple threads in some points
+    of the code. Its API is interesting because it allows you to add shared logic
+    that can be executed on all the threads. It can be seen as the opposite of `CountDownLatch`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Phaser`: This is a more flexible barrier implementation than `CyclicBarrier`
+    and `CountDownlatch`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Atomic*`: This is a way to update a data instance atomically.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The volatile data
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Finally, to conclude this part of the Java Standalone concurrent programming,
+    it is necessary to keep in mind why the `volatile` keyword is important. This
+    keyword allows you to request the JVM to refresh the value it reads every time
+    it accesses the data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It is very simple to use; just add the `volatile` keyword on the field declaration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: To understand why this keyword changes everything, you need to keep in mind
+    that the JVM can have some thread-related *caching* of the field values (this
+    is very low-level caching and has nothing to do with what we'll see in the next
+    section). Adding this keyword as in the previous snippet forces us to bypass this
+    cache. It is supposed to be a bit slower. However, the usage is often fast by
+    itself, so it is generally worth it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java EE and threads
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As we saw at the beginning of the chapter, Java EE can silently use threads.
+    Any thread usage is important to identify even if it is good to rely on the Java
+    EE implementation, because it is code that you don't have to maintain. The issue
+    with not identifying the thread is that you can come across cases where your context
+    (`ThreadLocal`) will not be available or will be available with the wrong values.
+    The other pitfall of not identifying the thread is that you may end up abusing
+    the thread and consuming way more resources on the machine than you need. Let's
+    review a few representative cases of such usages.
+  prefs: []
+  type: TYPE_NORMAL
+- en: CDI asynchronous events
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'CDI 2.0 introduces the notion of asynchronous events. It is a manner of asynchronously
+    firing an event for the caller. Here is a sample usage:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: This code snippet sends an asynchronous event, thanks to `fireAsync`. The interesting
+    part of this API is that it returns `CompletionStage`, which enables you to chain
+    some logic after the event has notified all the asynchronous observers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Asynchronous events notify only asynchronous observers. It uses a new observer
+    marker: `@ObserverAsync`. Here is a signature sample:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`public void onEvent(@ObservesAsync MyEvent event);`'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The way the CDI handles the submission of this kind of events is by using `CompletionFuture.all`
+    or by chaining the asynchronous observers in a single asynchronous thread (this
+    is configurable in Weld; OpenWebBeans only supports the first solution). In any
+    case, it submits individual futures to a CDI thread pool. The pool configuration
+    is not yet completely standard, though it is important to know that it is feasible
+    in all the containers and is an important tuning configuration for your application
+    if you rely on it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Several containers will default to the common fork join pool of the JVM, which
+    doesn't scale a lot. So, you will probably want to provide a custom thread pool
+    dedicated to your application usage.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In terms of the user code, it is important to prefer the signature taking a `NotificationOptions` instance
+    to `fireAsync` (which generally falls back on the default container pool). Doing
+    so will allow you to give a custom pool:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: This signature enables you to pass a custom pool and to properly tune it (using
+    EE concurrency utilities for Java EE, for instance). It will also enable you to
+    specify the pool you are using by event and to avoid putting them all in the same
+    bucket. In fact, it can potentially lead to locking your application if there
+    are some dependencies between the usages!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Last tip on this API is to make sure that you synchronize the event if you mutate
+    it, to get a new state after through `CompletionStage`. You can use any of the
+    Java Standalone techniques we talked about previously.
+  prefs: []
+  type: TYPE_NORMAL
+- en: EJB @Asynchronous
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: EJB was one of the earliest Java EE specifications. At that time, it was the
+    specification getting the most attention and features. Now, it is slowly being
+    replaced by CDI and integrations, with other specifications such as JTA, JPA,
+    and so on. However, it still contains a set of useful features that you don't
+    find elsewhere in Java EE.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'EJB also has an asynchronous solution. It is more direct compared to CDI, since
+    you can mark a method as asynchronous:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`@Asynchronous` requests the server to execute the task in the EJB thread pool.
+    The method can return void, but if it needs to return a value, it must return
+    `Future`. With Java 8, it is easy to return `CompletionFuture`. However, since
+    this API was designed before that, the easiest way was to return `AsyncResult`,
+    which was provided by the specification, and pass it the actual value you want
+    to return. Note that the container will wrap the returned `Future` value to add
+    a particular specification handling, so you will not be able to cast it to `CompletionFuture`,
+    even if that is the implementation you choose in your code.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Here again, the pool configuration is highly dependent on the server, but it
+    is generally workable and important, depending on the usage of this API in the
+    application. If your application uses it a lot but the container provides only
+    two threads and a small pool queue, then you will not scale very far.
+  prefs: []
+  type: TYPE_NORMAL
+- en: EE concurrency utilities for Java EE
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java EE 7 introduces a new specification called EE concurrency utilities for
+    Java EE. The main target is not only to provide a way to work with threads from
+    your EE application, but also to handle EE context propagation, including security,
+    transaction, and so on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When using this API, remember that the propagated context highly depends on
+    the container. This API is, however, a very good choice compared to a custom thread
+    pool management because the configuration is outside the application and *standard* for
+    the container, and also because it gives you the ability to benefit from the API
+    that we will see in this section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is very clever to do at the specification level is to reuse the standard
+    APIs, such as `ExecutorService`, `ScheduledExecutorService`, and so on. This gives
+    the developers the ability to use them as a replacement for the SE API. In particular,
+    it enables you to integrate transparently with third-party libraries.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For example, you can integrate with RxJava ([https://github.com/ReactiveX/RxJava](https://github.com/ReactiveX/RxJava)), as
+    you would do with any thread pool:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: This code integrates the Java EE WebSocket API with the RxJava Flowable API.
+    The global idea is to let the consumers handle the WebSocket messages, without
+    knowing it comes from WebSocket. This makes it easier to test (replacing the WebSocket
+    layer by a mock) and it decouples the code from the WebSocket layer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In our service, we inject `ManagedExecutorService`, which is mainly `ExecutorService` managed
+    by the container, and we wrap it in the thread pool API of RxJava through the `Scheduler` API.
+    Then we are done; we can use any asynchronous operation of RxJava relying on the
+    Java EE threads and, therefore, the context. In the previous code snippet, it
+    allowed us to debounce the messages (limit the number of messages emitted per
+    unit of time) in one simple line.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Technically, we implement `Iterator<>` to integrate with RxJava, but we could
+    use `Future` or any other type supported by the Flowable API. The iterator is
+    the part integrating with RxJava. However, to integrate with the WebSocket API,
+    we can also implement `MessageHandler`, which allows us to see the incoming message
+    and register it at our endpoint in the previous snippet. Here is a potential handler
+    implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: Our publisher stacks the received messages and then serves them through the `Iterator<>`
+    API. It requires some synchronization, as we saw in the previous section, to make
+    sure we are able to correctly answer the iterator contract. Concretely, we cannot
+    return anything in `hasNext()` if the connection was not closed or if we did not
+    receive any message. Otherwise, it will stop the iterations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: ManagedExecutorService
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'As a quick reminder, `ExecutorService` is the standard Java Standalone abstraction
+    for a thread pool. `ManagedExecutorService` is the Java EE flavor. If you compare
+    both the APIs, you will notice that it inherits from all the features of its standalone
+    siblings, but it gets enriched with an auditing: a submitted task (`Runnable`)
+    can implement the ManagedTask API, which will associate a listener to the task,
+    which will be notified of the task''s phase (`Submitted`, `Starting`, `Aborted`,
+    and `Done`).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'ManagedTask globally gives the following to the container:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The listener that ManagedTask uses
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'A set of properties to customize the behavior of the execution. Three main
+    standard properties are defined and portably usable on all the containers:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`javax.enterprise.concurrent.LONGRUNNING_HINT`: This allows the container to
+    change the thread setup for a long time, taking the tasks to complete (using other
+    thread priorities or potentially using dedicated threads)'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`javax.enterprise.concurrent.TRANSACTION`: This can take the `SUSPEND` value that
+    will suspend the current transaction (if any) and resume it after the task is
+    completed'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`USE_TRANSACTION_OF_EXECUTION_THREAD`: This propagates the transaction of the
+    calling thread'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'If you cannot make your task implementing ManagedTask, then you also have *bridge*
+    adapters to link a normal task to a listener through the  `ManagedExecutors` factory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: This simple invocation will create `Runnable` and you can therefore submit to
+    `ManagedExecutorService`, which also implements `ManagedTask` with the `myListener` listener.
+    Indeed, there are wrapper factory methods for `Callable`, with the properties
+    we mentioned earlier, to ensure it covers all the `ManagedTask` API's features.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In terms of the overall platform consistency, it is important that this API
+    tends to make EJB `@Asynchronous` legacy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: ManagedScheduledExecutorService
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '`ManagedScheduledExecutorService` is `ScheduledExecutorService` Java EE API.
+    Like `ExecutorService`, it integrates with the ManagedTask API.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, this scheduling-related API goes a bit further, providing two new methods
+    to schedule a task—`Runnable` or `Callable` —based on a dedicated API (`Trigger`).
+    This API enables you to handle the scheduling programmatically and it avoids relying
+    on a constant time interval or delay.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Even if, theoretically, this scheduling API can be distributed and was designed
+    to support it, it is generally implemented with local support only. However, it
+    is a good alternative to EJB `@Schedule` or `TimerService` when clustering is
+    not mandatory, which is actually often the case in practice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java EE threads
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The EE concurrency utilities also provide a Java EE ThreadFactory, which creates `ManageableThread`
+    instead of a plain thread. The main difference is that they provide an `isShutdown()`
+    method, allowing you to know whether the current thread is shutting down and,
+    thereby, exit the process if it is indeed shutting down. `ManagedExecutors.isCurrentThreadShutdown()`
+    allows you to directly test this flag, handling the casting of the thread automatically.
+    This means that a long running task can be implemented as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: You may think that testing only the thread state would be enough, but you still
+    need an application state to ensure that you integrate with the application life
+    cycle. Don't forget that the thread can be bound to the container and not the
+    application deployment time. Also, depending on the strategy you define for the
+    threads, you can evict them at runtime, potentially through the administration
+    API of the container.
+  prefs: []
+  type: TYPE_NORMAL
+- en: ContextService
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The last interesting API of the EE concurrency utilities is `ContextService`.
+    It allows you to create proxies, based on interfaces, inheriting from the context
+    propagation of the `Managed*` API. You can see it as a way of using managed thread
+    pool features in the standalone thread pools that you don''t control:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we wrap our task in a contextual proxy and we submit the wrapped task
+    through a framework that we don't control. However, the execution will still be
+    done in the EE context of the caller (same JNDI context, for instance), and using
+    another framework is not much affecting.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This `ContextService` is limited to proxy interfaces and doesn't support subclass
+    proxying like CDI does for instance. Java EE understands that modern development
+    is composed of motley frameworks and stacks and that it can't control everything
+    and anything. This trend is traduced by the introduction of a new sort of API
+    to easily integrate with others and enable any use case, rather than introducing
+    a lot of new APIs, which will not evolve very well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It is important in terms of performance and monitoring—it not only allows you
+    to easily trace invocations and application behavior but also to optimize the
+    application with caching, as we will see in the next chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: EJB @Lock
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The previous part showed that EJB `@Asynchronous` and `@Schedule` can be replaced
+    with the new EE concurrency utilities in some measure. However, there are still
+    some EJB APIs that are not easy to replace without coding them yourself. The `@Lock`
+    API is one of them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The global idea is to ensure that the data owned by the EJB (`@Singleton`) is
+    accessed in a thread-safe context.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Indeed, this API is limited to the singleton EJB, since without a single instance
+    usable in a concurrent environment, it doesn't make sense to lock.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The usage is straightforward, as you just decorate a method or the bean with `@Lock`,
+    passing `READ` or `WRITE` in the parameter, depending on the kind of access:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: If you remember the part about Java Standalone, it is very close to the `synchronized`
+    usage, as we define a lock on a block. However, the semantic is closer to the `ReadWriteLock`
+    API.  This was a will of the API design as this is the way it is often implemented.
+    Now, why mix both the styles (block and read/write API)? It enables you to scale
+    on the read, keeping the API very simple (bound to blocks). However, it already
+    fits a lot of cases!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In terms of the performance, it is important to know that you can mix it with
+    a timeout through `@AccessTimeout`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we request the container to fail with the `ConcurrentAccessTimeout` exception
+    if the lock (read or write) is not acquired after 500 milliseconds.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For a reactive application, correctly configuring the timeouts is crucial and
+    important to ensure that the application doesn't start with a huge response time
+    because of all the threads waiting for a response. This means that you have to
+    define a fallback behavior in the case of a timeout. To say it differently, you
+    need to define a timeout to ensure you match your SLA, but you also need to define
+    what to do when you get a timeout in order to avoid 100% of errors in case the
+    server is overloaded.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The microprofile initiative has been created by most Java EE vendors and is
+    mainly based on the CDI. So, even if it is not part of the Java EE, it integrates
+    very well with it. Its primary targets are microservices, and, therefore, they
+    define a bulkhead API and other concurrent solutions. However, it is an interesting
+    solution if the `@Lock` is too simple for your needs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: HTTP threads
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: HTTP layers (server and client) are about network and connections. Therefore,
+    they require some threading to handle the client connections on the server side
+    and, potentially, the reactive processing on the client side. Let's go through
+    these particular settings, which directly impact the scalability of your application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Server side
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The entry point of any web request is the HTTP container. Here, the server configuration
+    is always server-dependent, but most of the vendors will share the same concepts.
+    It is important to tune that part to make sure that the outbound of your application
+    is not unintentionally throttling it too much; otherwise, you will limit the scalability
+    of your application for no reason.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, for GlassFish, you can configure the HTTP connector in the UI
+    administration or the corresponding configuration file. Here is what it looks
+    like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/d05f44a1-4cbe-429c-bfd0-36dfd19509f1.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'This page is really about the tuning of the HTTP connector (not the binding
+    address, port, or the supported SSL cipher algorithms). The corresponding configurations
+    are summarized in the following table:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Configuration name** | **Description** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Max connections | This is the maximum number of requests per client in the
+    keep-alive mode. This is not the maximum number of connections the server supports,
+    compared with the other Java EE servers. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Timeout | This is the timeout after which the connection can be dropped in
+    the keep-alive mode if still idle. Here again, it is a client-based configuration
+    and not a request timeout like in most of the other servers. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Request timeout | This is the duration after which the request will timeout
+    and fail from the client point of view. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Buffer size/length | Buffers are used to read the incoming data in the input
+    streams. Adjusting this size to avoid memory overflows will significantly increase
+    the performance, since the server will no longer have to create a new volatile
+    buffer to read the data. This tuning can be hard to do if the application does
+    lots of things. The trade-off is to not use too much memory and to avoid unexpected
+    allocations. Thus, the closer you are to the most common requests in terms of
+    size (a bit more than this value actually), the better you will behave.  |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Compression | Compression is mainly for browser-based clients (supporting
+    GZIP). It will automatically compress the content of the configure mime types
+    if the size of the resource is more than the minimum configuration size. Concretely,
+    it can, for instance, affect a JavaScript of 2MB (which is no longer rare today).
+    This will use some CPU resources to do the compression, but the space gain on
+    text-based resources (HTML, JavaScript, CSS, and so on) is generally worth it,
+    as the network duration will be reduced a lot. |'
+  prefs: []
+  type: TYPE_TB
+- en: 'These parameters are mainly about the network optimization but are crucial
+    to ensure that the application stays responsive. They are also influencing the
+    way the HTTP threads are used, because bad tuning can imply more work for the
+    server. Now, you also have an HTTP thread pool in GlassFish (as in most servers)
+    that you can configure. Here is the corresponding screen:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/0b6b61da-be49-4375-9305-9ea9e4cc52d5.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The configuration of GlassFish is very common for a thread pool—its sizes (maximum/minimum),
+    the queue size (the number of tasks that can be added even if the pool is full),
+    and the timeout (when a thread is removed from the pool if not used).
+  prefs: []
+  type: TYPE_NORMAL
+- en: When you are benchmarking your application, ensure that you monitor the CPU
+    usage of your application and the thread stacks (or profiling, depending on the
+    way you monitor your server/application) to identify bad configuration. For instance,
+    if you see a CPU usage of 50% and a few active threads, then you may need to increase
+    the pool size. The overall goal is to make the CPU usage very high (85-95%) and
+    the response time of the server almost constant. Note that it is not recommended
+    to go up to 100% for the CPU usage because, then, you'll reach the limitations
+    of the machine; the performance won't be relevant anymore and you will just see
+    the response time increasing boundlessly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is a general rule for any thread pool that can become very important when
+    going reactive. So, always try to name the threads of the application with a prefix
+    that corresponds to the role that they have in order to ensure that you can identify
+    them in the thread dumps.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Client side
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Since JAX-RS 2.1, the client has been made to be reactive. As a quick reminder,
+    here is what it can look like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is normal JAX-RS client API usage, except for the call to `rx()`, which
+    wraps the response into `CompletionStage`. The only interest is to become asynchronous;
+    otherwise, it will just be another layer with poor gain in terms of user experience.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The way the implementation handles asynchronous invocations is up to the implementation,
+    but with Jersey (the reference implementation) and in a Java EE container, you
+    will default to the managed executor service. Note that outside an EE container,
+    Jersey will create a very big thread pool.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This kind of configuration is the key to your application, since each client
+    is supposed to have a different pool to ensure that it doesn't affect the other
+    parts of the application, and also because thread usages can be different and
+    may need different constraints. However, it is not yet standardized and, thus,
+    you will need to check which implementation your server uses and how the configuration
+    can be used. In general, the client-side configuration is accessible through the
+    client's properties, so it is not that hard. However, sometimes, you may be limited
+    by container integration. In such a case, you can wrap the invocation into your
+    own pool and not use the `rx()` API to fully control it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To conclude this section, we can expect in some time (Java EE 8 and this new
+    JAX-RS 2 API) that this `rx()` method will be implemented directly using the NIO
+    API, and therefore, it becomes really reactive at the network level and not just
+    through another thread pool.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We just saw that Java EE brings solutions to handle your application threading
+    properly, but modern developments often require new paradigms. These modifications
+    require a small change in the way the application is developed. Let's go through
+    one of these new patterns.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reactive programming and Java EE
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Reactive programming lets your code be called instead of calling your code.
+    You can visualize it as being event-based instead of procedural. Here is an example
+    to compare both the styles:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is a very simple and common implementation of a business method where we
+    call two services: `validator` and `service`. The first one will validate the
+    data by checking whether it exists in the database, the values are in the expected
+    ranges, and so on, while the second one will actually process the updates (a database,
+    for instance).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The issue with this style is that the data validation and persistence are bound
+    in a single `processData` method, which defines the entire execution environment
+    (threading, context, and so on).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the reactive style, it can be rewritten to replace the synchronous calls
+    by a *chain*:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this example, we used the Java 8 stream API, but using a reactive library
+    such as RxJava generally makes more sense; you will understand why in the next
+    paragraph. This code does the same thing as the previous one, but it orchestrates
+    the calls through the definition of a chain, instead of making the calls directly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is interesting with this pattern is that you split your logic (`validator`, `service`)
+    from the way it is used (the stream in the previous example). It implies that
+    you can enrich the way the calls are orchestrated, and if you think about the
+    example of RxJava that we saw earlier, you can immediately think about executing
+    each method in different threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: One common use case of such a pattern is when the response time is more important
+    than the resources used. In other words, if you don't care about consuming more
+    CPU cycles if it helps reduce the time you need to respond to your client, then
+    you can put this pattern in place. If you are working with multiple concurrent
+    data providers, or if you need to contact multiple remote services to process
+    the data, then you will do the three invocations concurrently upfront. And once
+    you have all the responses, you will execute the actual processing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To illustrate this, you can assume that the data has a contract identifier,
+    a customer identifier, and an account identifier associated with the corresponding
+    entities through three different remote services. The synchronous implementation
+    of such a case will be something like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: This will work. However, assuming that a remote call is about 10 ms, your method
+    will then take more than 30 ms to process the data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You can optimize it a bit by doing the three requests concurrently:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this case, you will reduce the invocation duration to 10 ms, more or less.
+    However, you will block the thread for 10 ms (the three parallel invocations).
+    The `CompletableFuture.allOf(...).get()` line waits for all the three asynchronous
+    operations (`CompletableFutures`) to complete, keeping the thread unusable for
+    other requests/processing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The direct implication is that you will not scale and will not be able to process
+    many concurrent requests even if your CPU is probably doing nothing (that is,
+    you are waiting on I/O if you obtain a thread dump at that time).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The way to enhance this is to ensure that the main thread is not blocked and
+    that the processing is triggered only when all the data is received:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this case, we still execute our three remote invocations in parallel—potentially,
+    in a managed executor service if you need to access EE features—and, then, we
+    wait for all three results to be retrieved in order to do our processing. However,
+    we just register our processing to be done once the entire data is readable, and
+    we don't block the thread waiting for this *ready* state; thus, we will be able
+    to serve more requests simultaneously.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is important in going reactive is to try to avoid synchronizations as much
+    as possible in order to ensure any thread time is active processing. Of course,
+    it has limitations, like some JDBC drivers, which are still synchronous, it will
+    block a thread waiting for I/O operations. Yet, with microservices becoming common,
+    it is easy to add a lot of latency to your code and reduce the application scalability
+    if you don't take care of it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A way to represent this kind of programming mentally is to visualize the CPU
+    usage as a big queue and each element of the queue as some active computing time
+    consumer (that is, a task). Then, your program is just a big event loop polling
+    this task queue and executing the tasks. What is the result?—almost no passive
+    time, only active time!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Indeed, being asynchronous implies that all the work will become asynchronous
+    (thread handling, context switching, queue management, and synchronization). Even
+    if most of these tasks are hidden and done for you by the stack, it may make the
+    CPU busy and slow down the application, compared with the same code executed in
+    a single thread. This is true and means that you can't use this pattern for every
+    single invocation. You need to ensure that you use it when relevant and when there
+    is potentially a passive usage of the CPU (blocking time, sleep, and so on). Though,
+    if you respect this pattern, you should be able to work with concurrency better
+    than staying synchronous everywhere. Of course, this is a compromise because if
+    you have a background task (a scheduled task executed once a day, for instance),
+    you will not care about the waiting time since it concerns a single thread. This
+    type of programming will only pay when used in accurate places, but if you respect
+    this usage, you will really get a saner final behavior. However, don't forget
+    that it brings more complexity because tracking is no more natural in Java (stack
+    traces are almost no more useful since you don't have the full stack if you don't
+    use a thread-tracing solution).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Message passing and Java EE
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Message passing pattern refers to several theories, but in this part, we'll
+    mainly care about the asynchronous flavor. One illustration of this pattern is
+    the actor flavor. An actor is *something* that can receive messages, send messages
+    to other actors, create other actors, and designate the behavior for the next
+    received message.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It is important to understand the basis of the underlying concepts:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Global communication relies on an asynchronous bus
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: C*urrent* message processing of an actor is based on a state (a bit like an
+    internal state machine)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: An actor can create other actors to process a message
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: With such a pattern, it is highly recommended to have immutable messages to
+    avoid any concurrency issues and hard-to-debug behavior (or non-deterministic
+    behavior) going across the actor flow.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Java EE doesn''t allow you to handle everything of this pattern out of the
+    box, but most of it is already here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: CDI provides a bus
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: CDI (asynchronous) observers are beans, so you can have a state machine
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The delegation chain (new actors) can be handled through a CDI context bound
+    to the messages
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Of course, this stays a poor man's implementation, compared with real actor
+    systems, but it already gives you a solid pattern to avoid passive usage of threads,
+    and, by the way, you should think about it when creating an internal architecture
+    for your application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, you saw how Java EE ensures that you can parallelize the computing
+    of your applications, and make your applications scale better and process multiple
+    concurrent requests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using Java Standalone synchronization mechanisms, Java EE threading management
+    solutions and API will let you get the best out of your hardware and integrate
+    with third-party libraries very easily.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now that we have seen what is related to the CPU, we need to go through the
+    machine''s other main resource that you can exploit to make your application''s
+    behavior better: the memory. When processing can''t be optimized and is too impacting
+    on the application, the solution is often just to skip it as much as possible.
+    The most common—and probably, efficient—way of doing so is to make sure that the
+    data is computed once and reused while valid. This is where the caching enters
+    into the game and this is what our next chapter will be about.'
+  prefs: []
+  type: TYPE_NORMAL

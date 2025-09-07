@@ -1,0 +1,1452 @@
+- en: Be Lazy; Cache Your Data
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the previous chapter, we saw how to parallelize the processing of our requests
+    and reduce our response time using our processor more accurately.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, the best way to be efficient and fast is, obviously, not doing anything.
+    This is what caching tries to do, allowing you to use the memory to keep track
+    of the already processed results and read them fast when needed later on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will go through the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What caching is, how it works, and when it is interesting
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Which kind of cache to use: local versus remote caching'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JCache – a standard API for Java EE
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Caching challenges
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To ensure that we keep in mind the pattern we target when we put caching in
+    place, let''s use a simple example taken from our quote manager application. Our
+    goal will be to make our *find by symbol* endpoint go faster. The current logic
+    looks like this pseudo code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We only have two operations in this code snippet (find it in the database and
+    convert the database model into a JSON model). Wonder what you''re caching: the
+    database lookup result, the JSON conversion, or both?'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will come back to this part later, but to keep it simple, here, we will
+    just cache the database lookup. Therefore, our new pseudo code can look like the
+    following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is pretty much the same logic as before, except that we try to read the
+    data from the cache before reaching the database, and if we reach the database
+    and find the record, then we'll add it to the cache.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Indeed, you can also cache if you did not find the quote in the database, in
+    order to avoid issuing a query to the database which will not return anything.
+    It depends on your application whether it encounters these kind of requests often
+    or not.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'So, we now have a cache layer with the data from our database to consider in
+    our application. We can visualize this structural change with the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/b011d741-4d12-494e-af15-ce531fd0c867.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: This image represents the fact that the **Application** goes through the **Cache**
+    and **Database**. The fact that the connection (the arrow) to the **Cache** is
+    bolder than the one to the **Database** represents our assumption that **Cache**
+    access is faster than **Database** access. Therefore, it is cheaper to access
+    the **Cache** than the **Database**. This implies that we want to go more often
+    to the **Cache** than to the **Database** to find our quotes. Finally, this picture
+    represents the **Cache** and the **Database** in the same *layer*, since with
+    this kind of solution—and even if the **Cache**, access should be very fast—you
+    now have two data sources.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How does the cache work?
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: What is cache? The word *cache* is actually very generic and hides a lot of
+    different flavors, which don't target the same needs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, all cache implementations share a common basis in terms of principles:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The data is accessible by key
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The cache provides some eviction mechanisms representing the validity of the
+    stored values
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The cache relies on memory storage *first*
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The cache key
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Most cache APIs are very close to a map in terms of their behavior—you can put
+    some data with `put(key, value)` and retrieve it back with the same key through
+    a `get(key)` invocation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This means that a poor man''s cache can be implemented with `ConcurrentMap`
+    of the JRE:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this implementation, we wrapped the database access in a concurrent map access,
+    which triggers the database access only if the data is not already in the cache.
+    Note that we cached `Optional`, which also represents the fact that we do not
+    have the data in the database. Thus, we will bypass the SQL query, even if the
+    data is absent.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This kind of implementation works, but as it doesn't have any eviction policy,
+    you will keep the same data during the application's lifespan, which means that
+    updates in the database are completely bypassed. Don't use it in production if
+    your data is not constant.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The important part of the usage of such structures (let's call them *maps*)
+    is the choice of the key. Cache implementations will try to limit the locking
+    as much as possible. They can even be lock-free, depending on the implementation.
+    So, you can assume that caches will scale by themselves, but the key is yours
+    and you need to ensure that it is well implemented.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The usage of key by the cache generally has multiple strategies, but the most
+    known and used are the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**By reference**: The equality is tested using a reference equality, which
+    means that you need to use the same key instance to find the value. It is, by
+    design, limited to local caches.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**By contract**: This uses `equals` and `hashCode` of the key.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**By value**: This is the same as *by contract*, but it also copies the key
+    when putting it into the cache. It ensures that if the key is mutable and has
+    somehow been mutated after having put the data into the cache, it doesn''t affect
+    the cache, which will potentially be corrupted by a wrong `hashCode` affectation.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `hashCode` usage is generally needed to affect the key/value pair of a cell
+    in the cache storing structure. It enables the distribution of data in a structure,
+    which will then be faster to access. If the key's `hashCode` changes after the
+    key has been affected to a cell, then the data won't be found, even if `equals`
+    is correctly implemented.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Most of the time, you will use the *by contract* solution (or *by value*, depending
+    on the implementation), since the *by reference* rarely works in web applications
+    because the key's reference is often bound to the request and changes with each
+    request. This implies that you must define what the key of your data is and that
+    you must implement `equals` and `hashCode`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With such a constraint, you need to take care of two very important consequences:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: These methods must be fast to execute
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: These methods must be constant once the data is put into the cache
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To understand what this means, let''s put a computing result in our cache,
+    based on our `Quote` entity, as a natural key of the computation (we cache some
+    news related to the quote, for instance). As a reminder, here is our entity structure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If you use your IDE to generate the `equals` and `hashCode` methods, you will
+    probably get something like the following implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'It is a very common implementation, but it takes all the fields into account.
+    For a JPA entity, it is a disaster because of the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What happens if the identifier is not affected? If the entity is persisted after
+    the entity is put into the cache, you will lose the cache benefit or cache it
+    again (with another hash value).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: What happens when `customers` is accessed? This is a lazy relationship, so if
+    not touched before the `hashCode` or `equals`, then it will load the relationship,
+    which is surely something we do not want.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: What happens if `value`—any state of the entity unrelated to the identifier—changes?
+    The cache usage will also be missed.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'JPA is a case where the identifier is really important, even without caching.
+    But with caching, it is more obvious. All these observations lead to the fact
+    that each key of the cache must be based on a natural identifier, which should
+    be immutable, or you must ensure that you evict the cache entry if you receive
+    an event mutating the key hypothesis. In the case of JPA, the natural identifier
+    is the JPA identifier (`id` for `Quote`), but it must also be affected from the
+    first usage. This is why, most of the time, good technical identifiers are based
+    on UUID algorithms and affected when a newly created entity is instantiated. Corrected,
+    our `equals` and `hashCode` methods will look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: These implementations take into account the `id` value only, and assuming that
+    it is affected early, it is safe to use as the key in a cache.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Several databases rely on the key/value paradigm to ensure good performance
+    and efficient storage. However, the main difference from a cache will be the volatility
+    of the data that a cache is not intended to store, whereas a database will ensure
+    the persistence of the data, even if it is an eventually consistent database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Eviction policy
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The eviction policy is what makes the cache different from a database or `Map`.
+    It enables you to define how the data is automatically removed from the cache
+    storage. This is very important because if you cache some reference data taken
+    from a database, then the database storage can be bigger than the memory storage
+    you have available on the machine and, thus, without any eviction, you will end
+    up filling the memory and getting `OutOfMemoryException` instead of the performance
+    boost you were expecting from the cache addition.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are several kinds of eviction policies, but there are few mainstream
+    categories:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Least Recently Used** (**LRU**)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**First In First Out** (**FIFO**)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Random
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Least Frequently Used** (**LFU**)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Only LRU, FIFO, and *Expire* are really mainstream; the other ones highly depend
+    on your provider capabilities.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Least Recently Used (LRU)
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The LRU strategy is based on the usage of cache elements. Some statistics are
+    maintained to be able to *sort* elements by the last usage date, and when eviction
+    is needed, the cache just goes through the elements in order and evicts them in
+    the same order.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You can imagine it as the cache maintaining a map of data (storage) and a list
+    of the usage of the data (or keys). Here is a sequence to help you visualize it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Action** | **Cache storage (unsorted)** | **Eviction list (sorted)** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| - | [] | [] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| add key/value E1 | [E1] | [E1] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| add key/value E2 | [E1, E2] | [E1, E2] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| add key/value E3 | [E1, E2, E3] | [E1, E2, E3] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| read E2 | [E1, E2, E3] | [E1, E3, E2] |'
+  prefs: []
+  type: TYPE_TB
+- en: What is important to notice here is that each usage (*put*, *get*, and so on)
+    will first put the element in the eviction list. This means that when the eviction
+    is executed, it will remove this element last. In terms of behavior, LRU leads
+    to keeping the most used elements in the cache for the longest possible time,
+    which is exactly when a cache is the most efficient. However, this also means
+    that the cache has to maintain an eviction list state that can be done in several
+    manners (through a list, sorting at eviction time, dynamic matrix, and so on).
+    Since it has additional work to do, it will impact the performance or memory usage,
+    which will no longer be here for the application/cache.
+  prefs: []
+  type: TYPE_NORMAL
+- en: First In First Out (FIFO)
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The FIFO algorithm is a simplistic flavor of the LRU algorithm aiming to avoid
+    the drawback of the LRU algorithm at the cost of a little less accurate behavior.
+    Concretely, it will bypass the statistics on the usage and just rely on the time
+    of entry into the cache—a bit like when you are waiting in a supermarket line.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is an illustration similar to the one we used to depict the LRU algorithm:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Action** | **Cache storage (unsorted)** | **Eviction list (sorted)** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| - | [] | [] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| add key/value E1 | [E1] | [E1] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| add key/value E2 | [E1, E2] | [E1, E2] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| add key/value E3 | [E1, E2, E3] | [E1, E2, E3] |'
+  prefs: []
+  type: TYPE_TB
+- en: '| read E2 | [E1, E2, E3] | [E1, E2, E3] |'
+  prefs: []
+  type: TYPE_TB
+- en: The main difference here is the last entry, which doesn't impact the eviction
+    order between E2 and E3\. You can see it as *updates don't change the eviction
+    time*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Random
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As you can guess from its name, this eviction policy randomly selects entries
+    to remove. It looks inefficient because there's a higher probability of removing
+    most used entries and thereby decreasing the cache efficiency. However, there
+    are a few cases where it can be a good choice. The main advantage of this strategy
+    is that it doesn't rely on any eviction order maintenance and is, thus, fast to
+    execute.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Before using it, make sure that it is really less efficient than the others:
+    almost 20% less efficient than LRU, experimentally.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Least Frequently Used (LFU)
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The last common algorithm you can meet in caches is the LFU algorithm. Like
+    the LRU algorithm, this flavor also maintains statistics on the cache access.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The main difference with LRU is that, instead of using a time-based statistic,
+    it uses a frequency statistic. It means that if E1 is accessed 10 times and E2
+    is accessed 5 times, then E2 will be evicted before E1.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The issue with this algorithm is that if you have a fast access rate during
+    a small period of time, then you may evict a more regularly used element than
+    the one often used during a very short period of time. So, the final cache distribution
+    may not be that optimal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cache eviction trigger
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The previous algorithms define how to select the items to evict when the eviction
+    is triggered. It means that if the eviction is not triggered, they are pointless.
+    Eviction triggers can be of multiple types, but the main ones are the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Size**: The *size* of the cache can be of several types, such as the actual
+    number of objects of the cache or the memory size (in bits or bytes).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Expiration**: With each element, you can associate an *end of life*. When
+    the *end of life* is reached, then the element should be evicted (removed) from
+    the cache. Note that this parameter is not strict, and the element can stay in
+    memory and be removed during access if the cache doesn''t use a background thread
+    to evict the element fast enough. However, you shouldn''t notice it as a client
+    (cache user).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This is the high-level configuration. However, every cache implementation has
+    a lot of different flavors, mixing a bit of everything. For instance, you can
+    configure a cache to support keeping 1 million objects in memory with a cache
+    memory of the maximum size of 10 MB, and if the objects don't fit in memory, then
+    you can use 1 GB of disk space (overflow on disk strategy). This kind of advanced
+    configuration may affect a different *end of life* to each element, and the cache
+    can thus remove elements from the cache when this *end of life* is reached. Finally,
+    you can associate this *per-element end of life* with a global maximum *end of
+    life* policy of 10 minutes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you browse your cache implementation provider, you will identify a lot of
+    configuration options, and what is important is to not try to copy-paste a cache
+    configuration from an existing application without ensuring you are in a similar
+    scenario.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The idea is to start simple and complicate the configuration if your application
+    requires it, or if you get a performance benefit from it. For instance, activating
+    the disk overflow of the data can decrease your performance compared with going
+    to your backend, especially if your backend connection is pretty fast and the
+    disk is highly used already.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Starting from a simple LRU strategy with a max memory size or object size is
+    generally the most pragmatic choice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cache storage – memory or not
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The idea of caching is to keep the instances in order to serve them faster
+    than rebuilding them or fetching them from a *slow* backend. The first-citizen
+    storage is the heap because it is a fast-access solution. However, several cache
+    vendors allow other strategies. Most of the time, it will allow to be pluggable
+    through a **Service Provider Interface** (**SPI**), so you will often see a lot
+    of implementations. Here is a small list of the ones you can find:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Hard disk
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: RDBMS database (MySQL, Oracle, and so on)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: NoSQL database (MongoDB, Cassandra, a specific cache server kind of storage,
+    *network cache*, and so on)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Before discussing the usage of these extensions, don't forget that it is generally
+    a cache-specific way to use backends. For example, it is not rare for hard-disk
+    implementation to keep keys in memory, store the values on the disk to keep a
+    fast lookup of the data, and ensure that memory usage is respectful of the configuration.
+    This means that you will not always be able to use these *overflow* strategies
+    to persist cached data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The question is that if the overflow leads to using yet another backend, why
+    is it useful and not more efficient to just go to the main backend, where the
+    data is? This has several answers and they become more and more accurate with
+    the microservices trend that we see nowadays.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The two main reasons for going through this kind of caching are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Provide a more reliable access to the data, even if the main backend is not
+    reliable (and owned by another application you don't control).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Work around an access limitation (like a rate limit) without having to entirely
+    rewrite the application to take it into account. For example, if you access the
+    GitHub API, you will not be able to do more than 30 requests per minute on some
+    endpoints, so if your application requires to do 1,500 accesses per minute, you
+    will need to store the corresponding data on your side. Here, a cache can be fancy
+    because it allows to put an eviction adapted to the rate limit, time unit, and
+    your own application through output.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using a distributed solution (such as a centralized RDBMS or distributed database
+    such as NoSQL) will allow you to share the data between nodes and avoid doing
+    as many queries on the main backend as you have nodes. For instance, if you have
+    100 nodes of your application in your cluster and you cache the key, *myid*, then
+    you will request the backend 100 times for the *myid* data by using in-memory
+    storage. Whereas, using a distributed storage, you will cache it once from one
+    node, then just read it from this distributed storage, which is still faster than
+    the main backend.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Even though using the overflow can be very tempting, don't forget that it is
+    generally slower than in-memory caching (we often say that in-memory access time
+    is one, disk access time is 10, and network access time is 100). There are alternative
+    strategies that allow you to push data eagerly in memory instead of relying on
+    overflow (lazy) reads, which may pay off if your cluster load balancing doesn't
+    use any affinity.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Consistency of the data
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'We can now set up our caching on all our cluster nodes; the question, however,
+    is whether our application is still working. To answer this, we will take a very
+    simple case where two requests are executed in parallel:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Node 1** | **Node 2** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| put data1 in cache at time t1 | - |'
+  prefs: []
+  type: TYPE_TB
+- en: '|  | put data1 in cache at time t1 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| access data1 at time t3 | access data1 at time t3 |'
+  prefs: []
+  type: TYPE_TB
+- en: With this simple timeline, we can immediately see that using a local in-memory
+    cache can lead to inconsistencies, since nodes will likely not cache the data
+    at the same time (cache is generally lazy, so the cache is populated at the first
+    request or when the machine starts, if eager, which may lead to potentially inconsistent
+    data in both cases).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If the data is cached, it generally means it is okay to not have the most up-to-date
+    data. Is it really an issue?—It can be. In fact, if you load balance without affinity
+    (randomly in terms of business logic, which is the case with a *by load* or *round-robin* load
+    balancer), then you can fall into such a situation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Node 1** | **Node 2** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| put data1 in cache at time t1 |  |'
+  prefs: []
+  type: TYPE_TB
+- en: '|  | update data1 at time t2 |'
+  prefs: []
+  type: TYPE_TB
+- en: '|  | put data1 in cache at time t3 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| get and put data2 in cache at time t4 |  |'
+  prefs: []
+  type: TYPE_TB
+- en: '|  | put data2 in cache at time t5 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| access data1 at time t6 | access data1 at time t6 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| access data2 at time t7 | access data2 at time t7 |'
+  prefs: []
+  type: TYPE_TB
+- en: We are exactly in the same case as the previous one, but we can now use two
+    kinds data (data1 and data2) in our business logic and cache both. Then, to identify
+    the issue, we must consider that data1 and data2 are *logically* linked (for instance,
+    data1 is an invoice and data2 is a contract with a price). In this situation,
+    if you validate the data (data1 and data2), the processing may fail because the
+    data is cached at different times and in different nodes, which would give more
+    guarantees on the data consistency (since a single node will access a single cache
+    and, therefore, be consistent with its current state).
+  prefs: []
+  type: TYPE_NORMAL
+- en: In other words, it is very important to cache the data in a way that guarantees
+    whether your application still works even with the server's concurrency. The direct
+    implication of this statement is to resist putting the cache everywhere during
+    benchmarks, and adding it only when proven useful, while avoiding breaking the
+    application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The same thing exists in a worse manner with an overflow storage, since the
+    overflow can be local to a node (hard disk, for instance), leading you to use
+    three sources of truth for your data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Generally, *reference data* is the first type of data we cache. It is the data
+    that rarely changes, like a contract that is not supposed to change every day.
+    This helps the application to go faster, since part of the data will have fast
+    access. However, it will not break the application, since the *dynamic* data is
+    still looked up from the main source (a database, for instance). Globally, you
+    will end up with a hybrid lookup setup, where part of your data is read from the
+    cache and the other part is read from the main backend.
+  prefs: []
+  type: TYPE_NORMAL
+- en: HTTP and caching
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Implementing an HTTP server is one of the main purposes of Java EE. Using the
+    Servlet API, JAX-RS, or even JAX-WS, you can easily expose data over HTTP without
+    caring for the transport.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, HTTP defines a caching mechanism that is interesting to take into account
+    in order to optimize the client's behavior.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The common communication with your server will look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/137c99fd-c76e-4587-83b0-7e1e0d623329.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The server makes a request and the client sends back some data in headers and
+    a payload (which can be huge). On the previous schema, it is a JSON payload, but
+    don't forget that your web applications will probably also serve images and other
+    sorts of resources, which get big very quickly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To avoid having to do it each and every time, even when nothing is changed (a
+    picture will not change very often in general), the HTTP specification defines
+    a set of headers that help identify the resource that didn't change. Thus, the
+    client doesn't need to read the payload, but can just reuse the one it already
+    has.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Even if this way of caching the data is mainly intended to be used with resources
+    and browsers, nothing prevents you from reusing these same mechanisms in a JAX-RS
+    client to avoid fetching the data you access frequently, to ensure you are always
+    up-to-date.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cache-Control
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '`Cache-Control` is a header that helps to deal with the cache. It defines the
+    policy to use for the request/response. Used on a response, it defines how the
+    client should cache the data; on a request, it defines what the server can send
+    back in terms of policy.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This header supports multiple values, which can be concatenated when compatible,
+    separated by a comma. Here are the values you can use to define the way data is
+    cached on the client:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Value** | **Description** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| public/private | This defines whether the cache is public or private. A private
+    cache is dedicated to a single client whereas a public cache is shared by several
+    clients. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| no-cache | This defines the cached entry as outdated and enforces the loading
+    of data once again from the server. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| no-store | This prevents the not volatile storage—no disk or persistent storage.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| no-transform | This requests additional network layers, such as proxies,
+    to keep the payload *as it is* . |'
+  prefs: []
+  type: TYPE_TB
+- en: '| max-age=<duration in seconds> | This defines how long the data can be cached
+    (0 meaning never), for example, `max-age=600` for a 10-minute cache. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| max-stale=<duration in seconds> | This notifies the server that an outdated
+    response is acceptable while in this range. For instance, `max-stale=600` allows
+    the server to serve data from 9 minutes ago, even if the server policy is 5 minutes.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| min-fresh=<duration in seconds> | This requests a response that will be valid
+    during N seconds. Note that this is not always possible. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| min-vers=<value> | This specifies the HTTP protocol version to consider for
+    caching. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| must-revalidate | The cached data will contact the server back (associated
+    with an `If-Modified-Since` header) to validate the cached data. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| proxy-revalidate | This is same as `must-revalidate` but is used for proxies/gateways.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: 'Here is an example of the header value you can use to not cache the data:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is the type of configuration you can use for sensitive data to avoid keeping
+    them and reuse them transparently. A *login* endpoint often does it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: ETag
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `ETag` header presence is important for this header more than its value,
+    which is not supposed to be read by the browser. However, its value is often `W/<content
+    length>-<last modified>`, where `content length` is the size of the resource and
+    `last modified` is its last modified timestamp. This is mainly because it is easy
+    to generate and stateless for the server, but it can be anything, including a
+    random string.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This header value can be used as a strong validator. The presence of `W/` at
+    the beginning marks it as a weak validator, which means multiple resources can
+    have the same value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The value is used with other headers as an identifier, for instance, `Other-Header:
+    <etag>`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Used with `If-None-Match`, the header takes a list of `Etag` values, potentially
+    `*` for uploads as well, in a comma-separated fashion. If the server doesn't match
+    any resource (or already uploaded payload for *PUT*/*POST*), then the request
+    will be processed; otherwise, it will return an HTTP 304 response for the read
+    methods (*GET*, *HEAD*) and 412 (precondition failed) for others.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An interesting header linked to this kind of logic is `If-Modified-Since`. It
+    will allow you to do almost the same, but based on a date if you don't have `Etag`
+    for the resource. It is often associated with the `Last-Modified` value sent back
+    by the server.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Vary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `Vary` header defines how to decide whether a cached response can be used
+    or not. It contains a comma-separated list of headers, which must not change,
+    in order to decide whether the cache can be used.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s take these two HTTP responses, for example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Both the responses are the same, except the `App-Target` header. If you add
+    caching, a desktop or mobile request will lead to the same payload being served
+    if cached.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now, if the responses are modified, like in the following snippets, to add
+    the `Vary` header, each kind of `App-Target` will not reuse the cache of the other
+    one:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: This way, both *desktop* and *mobile* experiences can use different resources.
+    For instance, the server can use a different folder depending on the `App-Target`
+    value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: HTTP caching and the Java EE API
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java EE doesn't define a dedicated API (or specification) for HTTP caching,
+    but it provides a few helpers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The more direct (and low level) way to configure it is by using the Servlet
+    specification, which abstracts the HTTP layer:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'With this filter, the `Cache-Control` value will prevent the cached data from
+    being persistently stored. To activate it, just add it in your `web.xml` or in
+    the server if you don''t want to modify your application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Using this XML declaration, and not the `@WebFilter` one, allows you to reuse
+    the same filter on different mappings (URLs) without having to redeclare it or
+    modify the code. The previous declaration put this filter on all the web applications.
+    It can be good for an application that has secured only web services, for instance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you want a bit higher level API, you can use the JAX-RS API, which provides
+    a `CacheControl` API. But for some particular headers, you will still go to a
+    lower level, even while using JAX-RS `Response` instead of `HttpServletResponse`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This JAX-RS filter will do the same as the previous Servlet filter, but in
+    a JAX-RS way. Now, if you return a `Response` in your endpoint, you can directly
+    use the `CacheControl` API:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: This code associates a cache control strategy with the response, which will
+    be converted to headers in the actual HTTP response.
+  prefs: []
+  type: TYPE_NORMAL
+- en: HTTP 2 promise
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Servlet 4.0 specification brings HTTP/2 support, which is new for Java EE and
+    for a lot of applications. The idea is to be able to eagerly push some resources
+    to the client. Here is a basic example to give you a high-level picture in mind:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: This Servlet will start pushing the resource `images/packt.png` upfront. This
+    will enable the browser to rely on it in the response it serves after (likely
+    an HTML page), without having the client to load the image later on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This will enable the applications to be more reactive since it is all done in
+    a single connection. Thus, it is faster than opening multiple connections to get
+    multiple resources, but it doesn't mean you don't need caching. As you can see
+    in the preceding code snippet, the headers are supported per resource, so you
+    can still use what we previously saw per resource to make the resources load faster,
+    even on HTTP/2.
+  prefs: []
+  type: TYPE_NORMAL
+- en: JCache – the standard cache of Java EE
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'JCache was added to Java EE to enable the application and libraries to interact
+    in a standard manner with the caching. Therefore, it has two types of APIs and
+    features:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A programmatic Cache API to write/read data
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A CDI integration to automatically put data in the cache
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Setting up JCache
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To use JCache, you may need to add it to your application—or to your server,
+    depending on how you want to deploy it—since not all servers add it in their distribution(s).
+    To do it with maven, you can add this dependency:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then the only thing you will need to do is select an implementation and add
+    it as well. The most common ones are the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Apache Ignite
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JBoss Infinispan
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Apache JCS
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Ehcache
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Oracle Coherence
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Hazelcast
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'As often, the choice of the provider is a multicriteria choice and you will
+    probably want to take the following into account:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The performances
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The dependency stack the provider enforces you to adopt (it can conflict with
+    your other libraries for the biggest ones)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The extensions the provider has (some of them don't even support CDI)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The community and support you can get from it
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: However, using the JCache API, the provider implementation should not impact
+    your code. So, it doesn't impact you and you can start setting up JCache and change
+    the provider later.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If the provider you choose doesn't support CDI, JCS provides a *cdi* module,
+    which allows you to add CDI integration without using the JCS cache implementation,
+    but using the one you provide.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Programmatic API
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'A JCache cache can be very quickly accessed using the `Caching` factory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `getCache` method directly gives you back a `Cache` instance, which allows
+    you to write/read data. The API is then close to a plain `Map` semantic. However,
+    this only works if the cache already exists; otherwise, the `getCache` call will
+    fail.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To understand how JCache works, we need to look at how the instances are managed.
+    This design is pretty common in Java EE and is quite efficient in general:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A factory method gives you a provider instance (a link between the API and implementation)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The provider gives you a manager, which stores instances and avoids creating
+    them for every request
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The manager allows you to create and get cache instances
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Here is what it looks like in terms of code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: The caching factory will give a provider on line 2, but we passed a classloader
+    as a parameter to load the provider for potential future uses. We could use `Caching.getDefaultClassLoader()`,
+    but depending on the environment, you can get a classloader other than the one
+    in your application. So, it is generally saner to manually pass your own application's
+    classloader. Then, we'll create `CacheManager` from the provider we just retrieved.
+    The `getCacheManager` method takes three parameters, which are mainly about how
+    to configure the cache. The URI can default to the provider default value using
+    the provider `getDefaultURI()` method. It is the path (URI, actually) to the vendor-specific
+    configuration file. The loader is the classloader to use for the manager/caches
+    usages and the property is a list of key/values used to configure the cache in
+    a vendor-specific manner. Then, once we have a manager, `createCache()` allows
+    you to define a cache name and its configuration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Note that we have two types of configurations here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The implementation-specific configuration passed through the URI and properties
+    to the manager
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The JCache configuration passed through the `createCache()` method
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JCache configuration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The JCache configuration implements `javax.cache.configuration.Configuration`
+    or, more often, `javax.cache.configuration.CompleteConfiguration`. This specification
+    provides the `MutableConfiguration` implementation, which provides a fluent DSL
+    to configure the configuration. Here are the main entry points:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Configuration** | **Description** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| key type/value type | Allows to enforce the keys/values to respect a typing.
+    If a key or value doesn''t respect the configuration type then it will be rejected
+    (the `put` will fail). |'
+  prefs: []
+  type: TYPE_TB
+- en: '| store by value | If true, it will copy the values to prevent them from being
+    mutable (which is the case in store by reference mode). It is faster to store
+    by reference, but in such a case, it is recommended to ensure the key/value pair
+    is immutable in your application. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| cache entry configuration listeners | JCache provides several listeners for
+    all cache events (entry created, updated, deleted, expired) and registering a
+    configuration listener allows to register such a listener and define its behavior—which
+    entry to trigger the event for (the listener event filter), is the listener synchronous,
+    and should the listener provide the old value of the data if it exists. This last
+    parameter intends to avoid triggering a network communication if not needed for
+    distributed caches. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| cache loader/writer factory | JCache provides loader and writer mechanism.
+    The goal is to be able to populate the cache from an external source (like a database)
+    if the data is not in the cache yet, and to synchronize the cache with the same
+    - or another - external storage. In your application, it means you only access
+    the cache, but your data can be persisted. This is a paradigm change in terms
+    of code where the cache is the source of truth for your data. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| management enabled | Registers a JMX MBean for each cache exposing the cache
+    configuration. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| statistics enabled | Registers a JMX MBean for each cache exposing the cache
+    statistics (hits, misses, removals, and so on) and allows to reset the statistics.
+    This is very helpful to validate your cache is useful (if you only get misses
+    then the cache just adds an overhead and is never used as intended). |'
+  prefs: []
+  type: TYPE_TB
+- en: '| read/write through | Activates the reader/writer if configured. |'
+  prefs: []
+  type: TYPE_TB
+- en: CDI integration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The JCache specification (and, therefore, complete implementations) comes with
+    a CDI integration. The idea is to enable you to cache your data without having
+    to deal with all the glue of `Cache`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The CDI integration provides four operations usable with CDI:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`@CacheResult`: This is probably the most useful feature that will cache a
+    method result and serve it from the cache for later invocations.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`@CacheRemove`: This removes data from the cache.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`@CacheRemoveAll`: This removes all the data of the referenced cache.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`@CachePut`: This adds data to the cache. It relies on `@CacheValue`, which
+    marks a parameter to identify the value to cache.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'If we want to cache our quotes in our service, we can just decorate our finder
+    method with `@CacheResult`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: Adding the `@CacheResult` annotation will allow you to use the cache from the
+    second invocation of this method and bypass the JPA lookup we used to do.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note that here we are not caching an optional, as it was our original signature,
+    which will work but is not serializable. Being part of the JDK, we could have
+    trouble making it serializable if our cache needs that constraint to distribute
+    the values into the cache cluster. In practice, try not to cache optionals, and
+    never cache streams that are lazily evaluated and not reusable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cache configuration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: All these annotations share the same type of configuration where you can define
+    if the corresponding action is done before/after the method execution, how the
+    cache behaves in case of an exception (is the cache operation skipped?), what
+    the cache name is and how to resolve the cache and key to use.
+  prefs: []
+  type: TYPE_NORMAL
+- en: While the first set of parameters is simple to understand, let's focus on the
+    cache resolution, which is a bit peculiar with CDI, as you don't bootstrap the
+    cache yourself but simply reference it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the programmatic approach, we saw that the cache configuration is done through
+    a `CompleteConfiguration` instance. How do you provide it in a CDI context?
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'All these annotations take two important parameters:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`cacheName`: This represents the cache name to use for the operation. Note
+    that by default it is based on the qualified name of the method if not explicitly
+    set.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`cacheResolverFactory`: This is the way a cache instance will be retrieved.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A cache resolver factory provides access from the method metadata to the cache
+    resolver to do the operation associated with the annotation, or a cache resolver
+    for the exception if an exception is thrown and the configuration of the annotation
+    requires to cache it if `CacheResult#exceptionCacheName` is set.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The cache resolver is just a contextual factory of cache. Here is a simplistic
+    implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: This implementation is a CDI bean that allows you to reuse the CDI power and
+    tries to retrieve the existing cache from the contextual cache name; if it doesn't
+    exist, it creates a new instance. This is done in this order to avoid passing
+    in the catch block at runtime—it will happen only once.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Indeed, to make this implementation work, you need to produce the cache manager
+    somewhere:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is a plain CDI producer and the associated code can reuse the code we saw
+    in the programmatic API part.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The interesting thing using CDI and extracting the resolver is that you can
+    easily integrate with any configuration. For instance, to read a configuration
+    from `${app.home}/conf/quote-manager-cache.properties`, you can use this implementation
+    of the cache resolver factory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: With this skeleton, we can see that the cache resolver factory getting injections
+    as any CDI bean, that it read the configuration in a `@PostConstruct` method to
+    avoid reading it each time (but this is not mandatory, it just shows that it really
+    can leverage CDI features), and that when a cache needs to be provided, it is
+    created using the strategy we saw previously (see the simplistic implementation).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To be complete, we need to see how we read the configuration. It can be as
+    simple as reading a `properties` file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: The code is not very complicated and quite common, but the trick is to convert
+    `Properties` into `Map`, which avoids being synchronized at runtime and would
+    potentially slow down the runtime a little bit while different caches are getting
+    created for no reason.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The last missing thing for having a functional implementation is how to create
+    the cache configuration. It is mainly just a matter of converting the configuration
+    into a cache configuration instance. Here is a potential implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: To create the cache configuration, we rely on `MutableConfiguration` and just
+    read the values from the properties we loaded. The trick is to get instances like
+    the reader or writer. This can be done using CDI `Instance<Object>`, which can
+    be seen as a generic CDI lookup; you can also use `BeanManager` directly if you
+    prefer. In this implementation, we look up the reader/writer from their CDI name,
+    so we need to provide the `@Named("...")` literal. Since CDI 2.0, you can use
+    the `NamedLiteral` API, which will create the corresponding annotation instance
+    for you. Finally, readers/writers need to be passed to the JCache runtime through
+    a factory, but JCache provides a singleton factory implementation, preventing
+    you from creating your own.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '@CacheDefaults'
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '`@CacheDefaults` allows you to define at the cache level, the cache name, the
+    resolver factory, and the key generator to use. It prevents having to do it on
+    all the methods if they all share the same setup:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This class, which delegates the logic to a dedicated service, has two methods
+    using JCache CDI integration. Both are using the same shared configuration relying
+    on the `@CacheDefaults` setup done at the class-level. It prevents having to code
+    it this way:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: In a more simplistic flavor, cache configuration was duplicated by method, which
+    is less readable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cache key
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Now, we are able to control our cache and activate our cache operations on
+    our methods; what did we miss?—A way to control the key used for the cache. For
+    instance, let''s take the following method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here, the natural key is the symbol, so it would be nice if JCache could do
+    it automatically, right? It is the cache, but the rule is a bit more complicated
+    because if you apply the same reasoning for a `create` method, then it doesn''t
+    work:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we want the result to be cached, but if `findQuote()` must match the `create()`
+    method, then we must have a way to ask JCache to use only `symbol` in the key.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To do so, JCache relies on the `@CacheKey` API. The following are the rules:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: If there is no `@CacheKey`, then use all parameters
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If there is `@CacheValue` used on some parameter but no `@CacheKey`, then use
+    all the parameters except the one decorated with `@CacheValue`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If some parameters (*>= 1*) are decorated with `@CacheKey`, then use them
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'In other words, our `create` method should look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: This way, and due to the previous rules, the `findQuote` and `create` methods
+    use the same key, based on the symbol—*based* because the key of the cache is
+    not directly the value you pass as the parameter. This is mainly because it can
+    be a key composed of multiple parameters, so you need to wrap them in a single
+    object. The actual key type is `GeneratedCacheKey`, which just enforces the implementation
+    to be serializable and to implement `equals` and `hashCode` for the reason we
+    mentioned at the beginning of the chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The JCache implementation will, by default, provide an implementation respecting
+    these rules, but in some cases, you can optimize or want to customize the key.
+    In our case, a plain string key, we can optimize `GeneratedCacheKey` to fully
+    rely on the String specifics, which allows to cache `hashCode`. Here is the implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: Since a cache access is an access to a storage cell through the hash index,
+    optimizing the hash can be worthy if the delegate parameters' hash code computing
+    is long or needs to go through a complex graph. The same kind of logic can apply
+    to `equals`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now, we have an *optimized* flavor of our key; we need to enable it. This is
+    done through the cache annotation (`@CacheDefaults`) and the `cacheKeyGenerator()`
+    member. It allows us to reference a *key generator*. Here, again, it can be a
+    CDI bean, and it gives you the contextual information of the method, so you can
+    instantiate the key:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This a very simple implementation; directly extract the (assumed) single key
+    parameter of the method and cast it to a string to instantiate our optimized generated
+    cache key. Then, to use it, we just reference this class in the cache annotation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: It is very important to ensure that the generator implementation matches the
+    method signature. Typically, in this last snippet, if we change our `name` parameter
+    to `long`, then we need to change the key generator; otherwise, it will fail.
+    However, it is not rare to have generators assuming the type of key parameters,
+    since it is generally coupled to optimize their usage.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cache once
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'If we look back at our quote manager application, we have the following layers
+    through which a request goes:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Servlet
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JAX-RS
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Service layer (`@Transactional`)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JPA
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: You can add some caching (such as JCache, not HTTP, which is more a client data
+    management solution) to all the layers. On the Servlet side, you can cache the
+    responses using the requests as key. In JAX-RS, you can do the same, but in a
+    more business-oriented manner. In the service layer, you can use CDI JCache integration.
+    And in JPA, you can use level 2 caching, which can be implemented with JCache
+    or a provider-specific implementation—this generally just requires configuration
+    to be set up so that the API is not very crucial.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, if you configure the caching on all layers, it is likely that a part
+    of the cache will be useless, and since all the layers will not have access to
+    the same information, you will duplicate the caches for a poor gain or for nothing.
+    To use an extreme example, if you cache the response from the request in the Servlet
+    layer, the JAX-RS/service/JPA layer will never be called once the data is in the
+    cache and, therefore, setting up caching in these layers is useless. It doesn't
+    mean that the caching in these layers should be avoided because using some caching
+    in the service layer can benefit some background tasks as well (such as a batch
+    developed with JBatch using some reference data).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Nonetheless, caching the closest of the outbound of your application will give
+    you the best performance boost, as it will bypass more layers. For instance, caching
+    the response in the Servlet layer will bypass JAX-RS and, thereby, JAX-RS routing
+    and serialization steps, where caching the same data in the service layer will
+    keep executing these steps through the JAX-RS layer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There is no general rule here, since it is a trade-off between the memory it
+    takes (closer to the data you are). The less memory you use in general, the simpler
+    the key handling will be (since you don't accumulate other data such as HTTP headers
+    in Servlet layer). The best you should do is to think about your application and
+    how it uses data and then validate the cache setup by a comparative benchmark.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: At the end of this chapter, you have all the keys you need to enhance your application
+    performance. We saw how to send the right data to a browser to not have to load
+    cached data, how to set up a cache using Java EE API (JCache), and the caching
+    challenges you need to think about to not decrease the performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Being able to cache data in a distributed system is important, since any network
+    call is very impacting on performances. Now that we know how to cache, we can
+    go to the next level about distributed systems and see how to control the performance
+    in a wider system. This is what our next chapter will be about—how to be fault-tolerant
+    and avoid impacting all the applications of a system when one is starting to fail
+    or running slower than usual.
+  prefs: []
+  type: TYPE_NORMAL

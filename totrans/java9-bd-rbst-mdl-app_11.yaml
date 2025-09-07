@@ -1,0 +1,627 @@
+- en: Fine-Grained Stack Tracing
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java 9 comes with a new stack walker API that lets the program walk the calling
+    stack. This is a very special functionality that is rarely needed by ordinary
+    programs. The API can be useful for some very special cases--for functionality
+    that is delivered by framework. So, if you want an efficient means of stack walking
+    that gives you filterable access to stack trace information, you will enjoy this
+    new stack walker API.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The API gives fast and optimized access to the call stack, implementing lazy
+    access to the individual frames.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Overview of the Java Stack
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The importance of stack information
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using `StackWalker`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `StackFrame`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Performance
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Overview of the Java Stack
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Before we dive into the stack walker, let's start by covering the Java Stack.
+    This is basic stack information, not specific to the stack walker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Java runtime has a class named Stack, which can be used to store objects
+    using the **last-in-first-out** (**LIFO**) policy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When arithmetic expressions are calculated they are done using a stack. If we
+    add *A* and *B* in our code first *A* is pushed on the **Operand Stack**, then
+    *B* is pushed on the Operand Stack and finally the addition operation is executed,
+    which fetches the two topmost elements of the Operand Stack and pushes the result,
+    *A* + *B* there.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The JVM is written in C and executes calling C functions and returning from
+    there. This call-return sequence is maintained using the Native Method Stack just
+    like any other C program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, when the JVM creates a new thread it also allocates a call stack containing
+    frames that in turn contain the local variables, reference to the previous frame,
+    and reference to the class that contains the executing method. When a method is
+    invoked a new frame is created. The frame is destroyed when a method finishes
+    its execution, in other words, returns or throws an exception. This stack, the
+    Java Virtual Machine Stack, is the one that the stack walker API manages.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The importance of stack information
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Generally speaking we need the stack information when we want to develop caller
+    dependent code. Having information about the caller allows our code to make decisions
+    based on that information. In general practice, it is not a good idea to make
+    functionality dependent on the caller. Information that affects the behavior of
+    a method should be available via parameters. Caller dependent code development
+    should be fairly limited.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The JDK accesses stack information with native methods that are not available
+    to Java applications. The `SecurityManager` is a class that defines an application's
+    security policy. This class checks that the caller of a reflection API is allowed
+    to access the non-public members of another class. To do that it has to have access
+    to the caller class and it does that through a protected native method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This is an example of implementing some security measures without having to
+    walk through a stack. We open our code for external developers to use it as a
+    library. We also call methods of classes provided by the library user and they
+    may call back to our code. There is some code that we want to allow library users
+    to call but only if they were not called from our code. If we did not want to
+    allow some of the code to be accessed directly by the library using code we could
+    use Java 9''s modular structure not exporting the package containing the classes
+    not to be invoked. This is the reason we set the extra condition that the code
+    is available for the callers from outside, except if they were called by our code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/84dd9c87-8562-487d-acbc-5f7e5da41927.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Another example is when we want to get access to a logger. Java applications
+    use many different loggers and the logging system is usually very flexible so
+    that the output of the different loggers can be switched on and off based on the
+    actual need to introspect into the code. The most common practice is to use a
+    different logger for each class and the name of the logger is usually the name
+    of the class. The practice is so common that the logging framework even provides
+    logger access methods that accept the reference to the class itself instead of
+    the name. It essentially means that the call to get the handle of a logger looks
+    something like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: A problem can arise when we create new classes from existing classes if we forget
+    to alter the name of the class name in the call for getting a new logger. This
+    is not a serious problem, but it is common. In that case our code will use the
+    logger of the other class and it will actually work, but may create confusion
+    when we analyze the log files. It would be much nicer if we had a method that
+    returns the logger that is named as the class of the caller.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's continue our exploration of stack information in the next two sections
+    with code snippet examples.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Example - Restricting callers
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In this section we develop a sample library with two methods. The `hello()`
+    method prints `hello` to the standard output. The `callMe()` method accepts a
+    `Runnable` as an argument and runs it. The first method however is restricted.
+    It executes only if the caller is purely outside of the library. It throws an
+    `IllegalCallerException` if the caller obtained the control in a way that the
+    library was calling out, presumably via the second method invoking the passed
+    `Runnable`. The implementation of the API is simple:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The code that performs the eligibility checking is implemented in a separate
+    class to keep things simple. We will examine that code shortly, but before that
+    we look at the main code we use to start the demonstration. The main program code
+    we use to demonstrate the functionality is the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: This code creates an instance of our API class and then directly invokes the
+    `hello()` method. It should work and should print the characters `hello` on screen.
+    The next code line asks the `callMe()` method to call back the `Runnable` provided
+    in form of a lambda expression. In this case the call will fail, because the caller
+    is outside but was called from inside the library.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s now look at how the eligibility check is implemented:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `itIsNotCallBack()` method is the one called from the `hello()` method.
+    This method creates a stack walker and invokes the `walk()` method. The argument
+    of the `walk()` method is a `Function` that converts a `Stream` of `StackFrame`
+    objects to some other value that the `walk()` method will return.
+  prefs: []
+  type: TYPE_NORMAL
+- en: At first this argument setting might seem complex and difficult to understand.
+    It would be more logical to return a `Stream` that provides the `StackFrame` objects
+    instead of forcing the caller to define a `Function` that will get this as an
+    argument.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The sample code uses a lambda expression to define the `Function` as an argument
+    to the `walk()` method. The argument to the lambda expression `s` is the stream.
+    Since the first element of this stream is the actual call we drop it. Because
+    these calls should also be refused if the caller is not eligible even though the
+    call to method `hello()` was through some other class and method that is already
+    inside the library, we drop all elements from the frame that belong to classes
+    inside the package of the class `CheckEligibility`. This package is `packt.java9.deep.stackwalker.myrestrictivelibrary`
+    and in the code this string is stored in the field `packageName`. The resulting
+    stream contains only the `StackFrame` objects that are from outside of the library.
+    We drop these also until the stream exhausts or until we find a `StackFrame` that
+    again belongs to the library. If all elements were dropped we are good. In this
+    case the result of `count()` is zero. If we find some class in the `StackFrame`
+    that belongs to the library it means that the outside code was called from the
+    library and in this case we have to refuse working. In this case the variable
+    eligible will be `false` and we throw an exception, as can be seen in the following
+    screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/8360d154-c762-4f2e-82c1-06d9d7d1bb18.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Example - Getting logger for caller
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: To get a logger, Java 9 has a new API. Using this API a module can provide an
+    implementation for the service `LoggerFinder`, which in turn can return a `Logger`
+    implementing the `getLogger()` method. This eliminates the dependency of libraries
+    on specific loggers or logger facades, which is a huge advantage. The smaller
+    but still annoying issue requiring us to write the name of the class again as
+    the parameter to the method `getLogger()` is still there.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To avoid this cumbersome task, we create a helper class that looks up the caller
+    class and retrieves the logger that is suitable for the caller class and module.
+    Because in this case there is no need for all the classes referenced in the stack
+    trace we will call the `getCallerClass()` method of the `StackWalker` class. We
+    create a class named `Labrador` in the package `packt.java9.deep.stackwalker.logretriever`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: Before Java 9 the solution for this issue was getting the `StackTrace` array
+    from the `Thread` class and looking up the name of the caller class from there.
+    Another approach was extending the `SecurityManager` that has a protected method
+    `getClassContext()` that returns an array of all the classes on the stack. Both
+    solutions walk through the stack and compose an array although we only need one
+    element from the array. In case of logger retrieval it may not be a significant
+    performance penalty since loggers are usually stored in `private static final`
+    fields and thus are initialized once per class during class initialization. In
+    other use cases the performance penalty may be significant.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After we have seen two examples we will look at the details of `StackWalker`
+    inner working.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Working with StackWalker
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In this section you will become more familiar with how to work with `StackWalker`.
+    We will explore the following topics in this section:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting an instance of `StackWalker`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Stack walking options
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Getting an instance of StackWalker
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To perform the walking over the stack elements we need an instance of the stack
+    walker. To do that, we invoke the `getInstance()` method. As shown here, there
+    are four overloaded versions of this method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`static StackWalker getInstance()`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`static StackWalker getInstance(StackWalker.Option option)`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`static StackWalker getInstance(Set<StackWalker.Option> options)`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`static StackWalker getInstance(Set<StackWalker.Option> options, int estimateDepth)`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The first version does not take any arguments and returns a `StackWalker` instance
+    that will let us walk through normal stack frames. This is usually what we would
+    be interested in. The other versions of the method accept a `StackWalker.Option`
+    value or values. The enum `StackWalker.Option,` as the name suggests, is inside
+    the class `StackWalker` and has three values:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`RETAIN_CLASS_REFERENCE`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`SHOW_REFLECT_FRAMES`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`SHOW_HIDDEN_FRAMES`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: These `enum` options have self-descriptive names and are explained in the next
+    sections.
+  prefs: []
+  type: TYPE_NORMAL
+- en: RETAIN_CLASS_REFERENCE
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: If we specify the first option `enum` constant, `RETAIN_CLASS_REFERENCE,` as
+    an argument to the `getInstance()` method then the returned instance grants us
+    access to the classes that the individual stack frames reference during the walking.
+  prefs: []
+  type: TYPE_NORMAL
+- en: SHOW_REFLECT_FRAMES
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `SHOW_REFLECT_FRAMES enum` constant will generate a walker that includes
+    the frames that source from some reflective calling.
+  prefs: []
+  type: TYPE_NORMAL
+- en: SHOW_HIDDEN_FRAMES
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Finally the `enum` constant option, `SHOW_HIDDEN_FRAMES` will include all the
+    hidden frames, which contain reflective calls as well as call frames that are
+    generated for lambda function calls.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is a simple demonstration of reflective and hidden frames:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The main method allowing us to execute this code directly calls the method
+    `simpleCall()`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The method `simpleCall()` simply calls on as the name suggests:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The next method in the chain is a bit more complex. Although this also only
+    calls the next one, it does so using reflection:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In this next example, we have a method that calls using a lambda:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The last method before the actual walking is called `walk()`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The preceding `walk()` method calls three methods, one after the other. These
+    methods are very similar to each other and provided here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The preceding three methods print out the frames to the standard output. They
+    use the `forEach()` method of the stack walker. Here is the output of the stack
+    walking program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This output only contains the frames that belong to calls that are in our code.
+    The `main()` method calls `simpleCall()`, which calls `reflectCall()`, that in
+    turn calls `lambdaCall()`, which calls a lambda expression, that calls `walk()`
+    and so on. The fact that we did not specify any option does not delete the lambda
+    call from the stack. We performed that call, thus it must be there. What it deletes
+    are the extra stack frames that are needed by the JVM to implement the lambda.
+    We can see on the next output, when the option was `SHOW_REFLECT_FRAMES,` that
+    the reflective frames are already there:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this case the difference is that we can see that the call from the `reflectCall()`
+    method to `lambdaCall()` method is not direct. The `reflectCall()` method calls
+    the `invoke()` method that calls another method of the same name defined in a
+    different class that in turn calls the `invoke0()` method, which is a native method
+    provided by the JVM. After that we finally get to the `lambdaCall()` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the output we can also see that these reflective calls belong to the module
+    `java.base` and not our `stackwalker` module.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we include the hidden frames in addition to the reflective frames, specifying
+    the option `SHOW_HIDDEN_FRAMES`, then we will see the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: This includes an extra hidden frame that the JVM is using to execute the lambda
+    call. In addition, the reflective frames are also included.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Final thoughts on enum constants
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We can also specify more than one option giving a set of the options. The simplest
+    way of doing that is to use the static `of()` method of the `java.util.Set` interface.
+    This way the `RETAIN_CLASS_REFERENCE` option can be combined with either the `SHOW_REFLECT_FRAMES`
+    option or the `SHOW_HIDDEN_FRAMES` option.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Although it is technically possible to combine `SHOW_REFLECT_FRAMES` and `SHOW_HIDDEN_FRAMES`
+    as an option set, there is really no advantage in doing that. The latter includes
+    the first, so the combination of the two is exactly same as the second.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Accessing classes
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: When we want to access the class objects during a stack walk, we have to specify
+    the `RETAIN_CLASS_REFERENCE` option. Although the `StackFrame` interface defines
+    the `getClassName()` method, that could be used to access a class of the name
+    using the `Class.forName()` method, doing so would not guarantee that the class
+    the `StackFrame` object refers to was loaded by the same class loader as the code
+    calling `Class.forName()`. In some special cases, we could end up with two different
+    classes of the same name loaded by two different class loaders.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When the option is not used during the creation of the `StackWalker` instance
+    then the methods that otherwise return a class object will throw an `UnsupportedOperationException`
+    exception. That way `getDeclaringClass()` cannot be used on the `StackFrame` and
+    `getCallerClass()` on the `StackWalker`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Walking methods
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `StackWalker` defines the `forEach()` method that expects a `Consumer` (preferably
+    in the form of a lambda expression) that is invoked for each element of the stack
+    trace walking up the stack. The argument to the `Consumer` method is a `StackFrame`
+    object.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Although a method named `forEach` is also defined by the `Stream` interface
+    and the method `walk()` passes a `Stream` object to the `Function` it gets as
+    argument, we should not confuse the two. The `forEach()` method of `StackWalker`
+    is a simpler, and most of the time less effective way to get through all the elements
+    of the stack trace.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It is less effective, in most cases, because it forces the `StackWalker` instance
+    to get all the elements of the stack trace so that the `forEach()` method can
+    traverse through each element to the end. If we know that we will not traverse
+    through the stack trace to the end we should use the `walk()` method that is accessing
+    the stack the lazy way and thus leave more room for performance optimization.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `StackWalker` class has the `walk()` method, which is the defining method
+    that makes it a walker. The method accepts a `Function` that is called by the
+    `StackWalker`. The return value of the `walk()` method will be the object returned
+    by the `Function`. The argument to the `Function` is a `Stream<StackFrame>` that
+    delivers the stack frames. The first frame is the one that contains the `walk()`
+    method call, the next is the one that was calling method that contains the call
+    to `walk()`, and so on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `Function` can be used to calculate some value based on the `StackFrame`
+    objects that come from the stream and decide if a caller is eligible calling our
+    code or not.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You might ponder, after reviewing the `walk()` method that needs a `Function`
+    that in turn gets a `Stream<StackFrame>` as argument, why it is so complicated.
+    We might wish we could get a `Stream<StackFrame>` from the `StackWalter` instance
+    directly. The simplest approach would be to pass the stream back from the `Function`.
+    Consider the following example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: What we were doing is simply returning the stream directly from the walker call
+    and walking through it afterwards doing the same calculation. Our results are
+    an `IllegalStateException` exception instead of the eligibility check.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The reason for that is that the implementation of the `StackWalker` is highly
+    optimized. It does not copy the whole stack to provide source information for
+    the stream. It works from the actual, living stack. To do that it has to be sure
+    that the stack is not modified while the stream is in use. This is something very
+    similar to the `ConcurrentModificationException` that we might get if we alter
+    a collection while we iterate over it. If we passed the stream up in the call
+    stack and then wanted to get the `StackFrame` out of it, the stream would try
+    to get the information from the stack frame that is long gone, since we returned
+    from the method that it belonged to. That way the `StackWalker` does not make
+    a snapshot of the whole stack but rather it works from the actual one and it must
+    ensure that the part of the stack it needs does not change. We may call methods
+    from the `Function` and that way we can dig deeper in the call chain but we cannot
+    get higher while the stream is in use.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Also do not try to play other tricks, like extending the `StackWalker` class.
+    You cannot. It is a `final` class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: StackFrame
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In previous sections, we iterated through the `StackFrame` elements, and provided
+    sample code snippets, but did not take the time to examine it more closely. `StackFrame`
+    is an interface defined inside the `StackWalker` class. It defines accessors,
+    and a converter that can be used to convert the information to `StackTraceElement`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The accessors the interface defines are the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`getClassName()` will return the binary name of the class of the method represented
+    by the `StackFrame`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`getMethodName()` will return the name of the method represented by the `StackFrame`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`getDeclaringClass()` will return the class of the method represented by the
+    `StackFrame`. If the `Option.RETAIN_CLASS_REFERENCE` was not used during the creation
+    of the `StackWalker` instance then the method will throw `UnsupportedOperationException`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`getByteCodeIndex()` gets the index to the code array containing the execution
+    point of the method represented by the `StackFrame`. The use of this value can
+    be helpful during bug hunting when looking at the disassembled Java code that
+    the command line tool `javap` can give us. The programmatic use of this value
+    can only be valuable for applications that have direct access to the byte code
+    of the code, java agents or libraries that generate byte code during run-time.
+    The method will return a negative number in case the method is native.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`getFileName()` returns the name of the source file the method represented
+    by the `StackFrame` was defined.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`getLineNumber()` returns the line number of the source code.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`isNativeMethod()` returns `true` if the method represented by the `StackFrame`
+    is native and `false` otherwise.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `StackFrame` does not provide any means to access the object that the method
+    belongs to. You cannot access the arguments and the local variables of the method
+    represented by the `StackFrame` and there is no other way you can accomplish that.
+    This is important. Such access would be too invasive and is not possible.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Performance
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Our coverage of `StackWalker` would not be complete without a look at performance
+    considerations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`StackWalker` is highly optimized and does not create huge memory structures
+    that go unused. That is the reason why we have to use that `Function` passed to
+    the method `walker()` as an argument. This is also the reason why a `StackTrace`
+    is not automatically converted to a `StackTraceElement` when created. This only
+    happens if we query the method name, the line number of the specific `StackTraceElement`.
+    It is important to understand that this conversion takes a significant amount
+    of time and if it was used for some debug purpose in the code it should not be
+    left there.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: To make the `StackWalker` even faster we can provide an estimate about the number
+    of `StackFrame` elements that we will work with in the stream. If we do not provide
+    such an estimate, the current implementation in the JDK will use eight `StackFrame`
+    objects pre-allocated and when that is exhausted, the JDK will allocate more.
+    The JDK will allocate the number of elements based on our estimate unless we estimate
+    a value larger than 256\. In that case, the JDK will use 256.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we learned how to use the `StackWalker` and provided example
+    code. Our detailed review of the API included different usage scenarios, options,
+    and information. We explained the API's complexity and shared how and how not
+    to use the class. We closed with some related performance issues that the user
+    has to be aware of.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In our next chapter, we will cover over a dozen Java Enhancement Proposals that
+    were incorporated in the Java 9 platform. The featured changes will cover a wide
+    range of tools and updates to APIs that are aimed at making developing with Java
+    easier and the ability to create optimized Java applications. We will look at
+    the new HTTP client, changes to the Javadoc and Doclet API, the new JavaScript
+    parser, JAR and JRE changes, the new Java-level JVM compiler interface, support
+    for TIFF images, platform logging, XML catalog support, collections, new platform-specific
+    desktop features, and enhancements to method handling and the depreciation annotation.
+  prefs: []
+  type: TYPE_NORMAL

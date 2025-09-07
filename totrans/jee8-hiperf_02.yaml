@@ -1,0 +1,1515 @@
+- en: Looking Under the Cover – What is This EE Thing?
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java EE can appear as a magic tool for deployment. However, it is actually just
+    Java code. This chapter intends to look under the cover of the server and ensure
+    that you understand what implications you should expect from the performance of
+    your application. Since covering the entire Java EE space is quite impossible,
+    this chapter will deal with the most common patterns and main specifications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will go through some commonly used specifications, and
+    check out what their role is and what you should expect in terms of the impact
+    on your runtime. In the end, you should be able to do the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Know the services that you can expect from your container and the high-level associated overhead
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Evaluate whether a code pattern can impact the performance
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Judge whether your runtime (Java EE) overhead is normal
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Context and Dependency Injection – what did you do to my beans?
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '**Context and Dependency Injection** (**CDI**) is the central specification
+    of Java EE. Its role is to *manage* the beans you define. It is directly linked
+    to the pattern called **Inversion of Control** (**IoC**), which provides a way
+    to obtain loose coupling between your classes. The goal is to be flexible on the
+    way so that the current instances are linked together. It also controls the life
+    cycle and the instantiation of instances.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: IoC – a pretty simple example
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Before exploring the CDI, let's use a very simple example (I would say, a *handmade
+    example*) to illustrate what a bean container is.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will use an application that has `TimeService`, which simply provides a `now()`
+    method returning the current `LocalDateTime`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is what it can look like in terms of code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'A trivial implementation will rely on the native `now()` implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'But you may also need to be able to switch to a mock (for tests or another
+    customer, for instance):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In terms of code, you will likely implement the switch with a plain old factory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then, you need to use the factory everywhere in the callers, which is quite
+    impacting, especially when you need to add a parameter to the `create()` method. To
+    solve this issue, you can put all your application instances in a single place,
+    which we will call `Container`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This is a very minimal and trivial implementation. But once it is done, you
+    can just register all your application beans in your bootstrap class, and all
+    the code will rely on `Container` to retrieve the instance. In other words, the
+    lookup of the classes is centralized. This also means that the updates are simpler:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As the last thing before starting to deal with the CDI itself, you can add
+    services on top of the container, since the instances are created by `Container`.
+    For instance, if you want to log any call to the method of a registered API, you
+    can change the `get(Class<?>)` method in the following way:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The entire logic will be implemented in `LoggingHandler`, which will fully
+    decorate the registered instance logic with logging invocations. In other words,
+    each method invocation on the proxy instance will be forwarded to the handler:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now, if you call `TimeService.now()`, you will be able to observe the corresponding
+    output. With the default logging setup, it looks something like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: By itself, it is not that useful, but if you add some metrics (timing), parameter
+    logging, and so on, it can become really neat. Also, keep in mind that you can
+    chain the handlers you add on top of the proxy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What does this mean, regarding the performance? Well, it means that a simple
+    call to a method we fully control (user method) can do really different things
+    from the user code; it will be slow due to the `Container` class and not due to
+    the user code. If you doubt it, take a case where the user method implementation
+    is empty and the handler pauses for some minutes. Of course, the EE implementation
+    doesn't do it, but it adds some complexity on top of the end user code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The main features of CDI
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: CDI is quite a complete specification with a lot of features compared with our
+    small container. However, the CDI works in a manner similar to the container,
+    except that it scans the `classloader` application to find beans at startup instead
+    of requiring a manual registration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To understand how the CDI can impact the performance of your application, we
+    will detail a few major features of the CDI, explaining the work the server has
+    to do to provide them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Injections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'If you take a look at our quote manager application, you may have noticed that
+    `QuoteService` was injected in `QuoteResource` or `DirectQuoteSocket`. We are
+    exactly in the IoC area of the CDI container. Here, the algorithm globally looks
+    as follows (in pseudo-code):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To fulfill its role, the CDI will need to instantiate an instance and initialize
+    it. To do so, it proceeds with the following steps which leads to provide you
+    a ready to use instance:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The CDI allows injections from the constructor parameters, through field injections,
+    or through setter injections. Therefore, before instantiating an instance, the
+    CDI needs to resolve the required parameters and get one instance for each of
+    them.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Now, the container can provide constructor parameters; it just creates a current
+    instance from the bean constructor.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Now that the container has an instance, it populates its field/setter injections.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: If needed, the instance is wrapped in a proxy, adding the required services/handlers
+    (interceptors/decorators in CDI semantic).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'In terms of the performance, this kind of logic has some consequences for us
+    and the way we can rely on the CDI in high-performance environments and applications. 
+    A simple bean instantiation now requires operations which look simple but can
+    be expensive to execute all the time due to the actual work they have to do, like
+    allocating memory or using meta programmation, or because of the complexity they
+    hide:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Most of the steps imply some reflection (that is, Java reflection) and, therefore,
+    the container must cache all it can to avoid wasting time in retrieving the reflection
+    data again and again.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '*Step 1* and *step 3* can imply calling back `createInstance()` for other instances,
+    which means that if the complexity to create an instance without any injection
+    is 1, the complexity to create an instance with N injections will be *1+N*. It
+    will be *1+NxM* if the N injections have M injections.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Scopes
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: A very neat feature of the CDI is to handle the scope life cycle for you. Concretely,
+    you decorate your beans with `@ApplicationScoped` and `@RequestScoped`, and the
+    life of the bean is either bound to the application (it is a singleton) or the
+    request duration (which means you can have as many different instances as you
+    have concurrent requests).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The scope implementation is called *context*, and the context is mainly responsible
+    for looking up in the right contextual instance or creating it. An application
+    scoped instance will be looked up in a single map shared by the entire application.
+    However, a request scoped instance will also be looked up in `ThreadLocal` associated
+    with the request life cycle through `ServletRequestListener`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The implications on the performance are quite immediate:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The context setup can be pricey (depending on the scope) and can add some overhead
+    that you may not require. In fact, if you have no `@RequestScoped` bean, you don't
+    need the `ServletRequestListener` instance (even if not very expensive).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Recreating your bean every time the context needs it will trigger the process
+    we saw in the previous part and the life cycle hooks of the bean (`@PostConstruct`
+    and `@PreDestroy`).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Interceptors/decorators
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Interceptors are the CDI way of adding custom handlers on top of a bean. For
+    instance, our logging handler will be this interceptor in CDI:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: Decorators do the same job but they are applied automatically based on the interface(s)
+    they implement and get the current implementation injected. They don't require
+    a binding (such as `@Log` to put on a method to activate `LoggingInterceptor`),
+    but they are more specific to a set of types.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In terms of the performance, an interceptor/decorator will obviously add some
+    logic and, therefore, some execution time. But it also adds a more vicious overhead:
+    the context creation. This part depends on the implementation of the CDI your
+    server uses (Weld, OpenWebBeans, CanDI, and so on). However, if you don''t have
+    any interceptor, the container doesn''t need to create a context and, therefore,
+    to populate it. Most of the context creation is cheap but the `getParameter()`
+    method, which represents the parameters of the method, can be expensive, since
+    it requires converting a stack call into an array.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'CDI implementations have multiple choices here and we will not go through all
+    of them. What is important to keep in mind here is the following equation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: If you only have interceptors that don't do much, you can often assume that
+    the container makes it as right as possible. If you compare this with a framework
+    where you do it all manually, you will probably see this overhead.
+  prefs: []
+  type: TYPE_NORMAL
+- en: By itself, the associated overhead is still acceptable, not big enough to not
+    use interceptors in your code regarding the maintenance/complexity versus the
+    performance trade-off. However, when you start adding a lot of interceptors, you
+    need to ensure that they are well implemented too. What does this mean? To understand,
+    we need to step back and see how interceptors are used.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To link an interceptor and an implementation, you need to use what we call an interceptor
+    binding, which is the marker annotation of your interceptor (decorated with `@InterceptorBinding`).
+    No big issues until here, but this binding often holds some configuration, making
+    the interceptor behavior configurable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we use back our logging interceptor, the logger name is configurable:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now, `LoggingInterceptor` needs to get back the value, which will be passed
+    to the logger factory to get the logger instance that our interceptor will use
+    to decorate the actual bean invocation. This means that we can just modify our
+    previous implementation, as shown in the following snippet, to respect the logger
+    configuration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'All the tricky part is in `getLoggerName()`. A bad and fragile - because it
+    relies on plain reflection and not CDI metamodel - but common implementation is
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: Why is it fragile? Because there is no guarantee that the class handling works,
+    as you can get a proxy instance and ignore the stereotype usage. It is bad because
+    it utilizes reflection at every invocation and the JVM is not really optimized
+    for such usage. The implementer should call `getAnnotation` only once.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Regarding the performances, a better implementation will be to ensure that
+    we don''t use reflection every time there is an invocation call, but only once,
+    since the Java model (the `Class` metadata) doesn''t change at runtime in general.
+    To do it, we can use `ConcurrentMap` which will hold the already computed names
+    in memory and avoid to do it again and again when the same method is called:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: It simply caches the logger name per method and computes it once. This way,
+    no reflection after the first call is involved; instead, we rely on the cache.
+    `ConcurrentHashMap` is a good candidate for it and its overhead is negligible
+    compared to a *synchronized* structure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To be fast, do we just need to ensure that the interceptors are caching metadata?
+    Actually, it is not enough. Remember that the interceptors are beans with an enforced
+    scope: `@Dependent`. This scope means *create every time you need*. In the context
+    of an interceptor, it means *create an instance of the interceptor every time
+    you create an intercepted bean*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you think of a `@RequestScoped` bean, then its interceptors will be created
+    for every request and the cache, which totally defeats the purpose.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To solve it, do not cache in the interceptor but in an `@ApplicationScoped`
+    bean, which is injected into the interceptor:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: This simple trick ensures that our cache is `@ApplicationScoped` itself and,
+    therefore, computed only once per application. If you want to make sure you don't
+    compute it at runtime at all, you can even enforce it to be initialized through
+    a CDI extension in an observer of the `AfterDeploymentValidation` event (but this
+    is less impacting on the performance).
+  prefs: []
+  type: TYPE_NORMAL
+- en: To conclude this part, note that the specifications now rely on interceptors
+    to provide their features and integrate together (Security API, JTA, JSF, JAX-RS,
+    and so on). The EJB specification was providing the JTA integration until Java
+    EE 7 (replaced by `@Transactional`) and the security API until Java EE 8 (replaced
+    by Security API). It was an ad-hoc implementation of these integrations (such
+    as our `Container` at the beginning of this chapter), but it is strictly equivalent
+    to the interceptor functional use. And in terms of the performance, both implementations
+    (EJB and CDI based) are often very close.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Events
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'CDI events globally provide an event BUS inside the application. They can be
+    synchronous or asynchronous. To let you have an idea, here is what the code can
+    look like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: As both types of invocations are exclusive, what we can note here is that these
+    snippets call `fire()` and `fireAsync()`*.* To be able to target all the observers,
+    you need to invoke both. This means that the associated logic will be twice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Without entering into the details that do not impact our performance, both
+    cases share the same resolution mechanism:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Resolve the observers based on the event type.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Remove the observers not matching the fire type (asynchronous or synchronous).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Sort the observers by priority.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Handle the invocations.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The difference between synchronous and asynchronous cases is *point 4*. In the
+    synchronous case, it just means, *invoke the observers*, whereas in the asynchronous
+    case, it means, *call asynchronously and return* `CompletionStage` *representing
+    all the invocation results*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The parts impacting the performance are the resolution of the observers and
+    the invocation, which can require some bean resolution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We already saw bean resolution, so let's dig into the observer resolution here.
+    Indeed, the implementation is specific to the vendor you are using. But, as it
+    is impossible to use static analysis to implement this part, the resolution is
+    done at runtime with a cache per event type. Note that the caching depends a lot
+    on the implementation. Most will only cache raw type events.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This concretely means that the invocation without generics, as shown in the
+    following code, will be way faster than the invocation that implements generics
+    and enforces the CDI container to do some more resolution:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In terms of the code, and to let you compare it with the previous example,
+    the code with generics would be exactly the same except the event would be parameterized:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: Then, once you have the potential set of observers, you need to reduce the set
+    based on the qualifiers that the caller configures for the event. This also implies
+    some reflection, more or less cached, depending on the implementation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, some runtime checks are enforced by the set of tests that the vendors
+    have to pass so that we can claim to be compliant with the specifications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: All these steps are more or less optimized by vendors depending on the cases
+    they may have received complaints about. But in all of them, you can end up on
+    code paths where everything is done at runtime for the firing of each event, which
+    can be a pain in terms of the performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Dynamic lookups
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Another great feature of the CDI is to be able to control a lazy instantiation
+    or resolution of a bean. This is done with the `Provider<?>` and `Instance<?>`
+    APIs. *Instance* is a *Provider* allowing you to resolve a bean at runtime. *Provider*
+    is an instance wrapper allowing you to decide when to instantiate the underlying
+    instance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Take a look at the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s look at the underlying mechanism of the preceding code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Calling `Provider.get()` will trigger the creation of an underlying instance
+    (`MyService` here). It delays the instantiation of the injection or makes the
+    instantiation conditional. Note that it depends on the scope of the bean and that
+    a normal scoped bean won't benefit much from this use.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Calling `Instance.select(...)` will make the bean definition more specific based
+    on the injection point. In this case, we start from a bean type (`MyService`*)*
+    with the implicit `@Default` qualifier and replace the implicit qualifier with
+    the one passed as the parameter. Then, we resolve the bean and get its instance.
+    This is useful for switching the implementation dynamically and conditionally.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Since an *Instance* is a *Provider*, the implementations share the same code
+    for both. This means their performances will be the same.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now the question is, what is the cost of using a programmatic lookup versus
+    a plain injection? Is it more expensive or not? In terms of implementation, the
+    code is quite comparable, it has to resolve the bean to instantiate and then instantiate
+    it so that we are very close to an injection. We will ignore the small differences
+    that do not impact the performance much. One issue here is its use: if you get
+    a *Provider* injected and resolve it for each use, you will then increase a lot
+    of the time spent on *resolving and instantiating* versus *just using an already
+    resolved and created instance*.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: JAX-RS – the servlet router
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Even if JAX-RS is not fully bound to HTTP and is usable over JMS, WebSockets,
+    and so on, we will just consider the HTTP case here and, more particularly, the
+    case it runs on top of the servlet specification (which is the most common one).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The goal of JAX-RS is to provide a command pattern based on the API to implement
+    the HTTP communications. In other words, it abstracts the I/O with Java modeling.
+    You can see it as a HTTP Java object binding solution. This is what `QuoteResource`
+    uses.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The role of JAX-RS is to provide all the necessary tooling to make servlet
+    abstraction directly usable for most cases. For this purpose, it provides the
+    following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A routing layer letting developers directly map the request based on its path
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A serialization layer allowing the conversion of Java objects into HTTP models
+    and streams
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: An exception handling layer enabling the mapping of an exception to an HTTP
+    response
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The router
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'JAX-RS is command-oriented. It means that a request must be bound to a Java
+    method. To do so, the matching takes multiple parameters of the request into account:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The patch
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The Accept header
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The Content-Type header
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Here is the simplified algorithm for routing:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Find the class matching the request based on the path (this is a regex-like
+    logic).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: From the class found in *step 1*, find the method matching the request based
+    on the path. (This is close to *step 1* but applied to methods with subresource
+    handling.)
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: From the methods found in *step 2*, find the one that will handle the request
+    based on mime types (Accept/Content-Type headers). This level parses the media
+    types to handle the quality of service options (q, qs, and so on) of the header.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This is not a complicated algorithm, but it is quite dynamic and depends on
+    the incoming requests. So most of the time, it is done at runtime by the providers
+    and can add a small overhead, which you can notice during benchmarks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Marshalling
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: (Un)Marshalling is what will (read/)write a Java object to a communication format.
+    It is commonly the part converting an object to a XML or JSON payload but can
+    really be any format, including binary formats.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This conversion is normally synchronous in the implementation and can be costly
+    depending on the model you use and the serializer that is activated. Compared
+    with the servlet API, where you yourself serialize the payload you want to read/return,
+    here, the task is done by the framework and is, therefore, a bit hidden.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A crucial point at this stage is to make sure that the manipulated object has
+    almost no logic and is fast to initialize/read. If you don't respect this point,
+    you may end up holding the HTTP stream for too long which would badly impact your
+    scalability and on a more general practice, you would risk to have some lazy loading
+    of data with JPA which can fail or imply an unexpected connection usage depending
+    the JPA provider and configuration. Another bad case would be to start writing
+    and, then, compute some costly value before continuing to write and therefore
+    force the marshalling process to pause and delay the write after having started
+    it. This not only has a direct impact on the request thread pool but also on the
+    HTTP I/O.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the same spirit as the algorithm used to match a method to invoke (see the
+    previous part), the JAX-RS runtime must resolve the provider to use (`MessageBodyReader`
+    or `MessageBodyWriter` depending on whether you read or write) in order to make
+    the link with the Java model. Here again, this resolution depends on the incoming
+    request (or the response being built) and media type headers and is not as flat
+    as expected even if it is cacheable and generally fast.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Filter and interceptors
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: JAX-RS 2.0 added `ContainerRequestFilter` and`ContainerResponseFilter` to modify
+    the request context. It is executed around the method invocation but has already
+    passed the method resolution. On a high level, it can be seen as a CDI interceptor
+    but only at the HTTP layer. These filters do not impact significantly the performance
+    until they do a lot of logic, and there are a few cases where it is a good place
+    to put some logic. One very common example is to validate a security token or
+    log in a user based on the HTTP headers. Don't be surprised to see this kind of
+    component while investigating what your application is doing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the same spirit, `ReaderInterceptor` and `WriterInterceptor` intercept `MessageBodyReader` or `MessageBodyWriter`*.*
+    They are intended to wrap the input/output streams to add some support such as
+    GZIP compression. However, since we are close to the current I/O, we need to take
+    care to not add too much logic here if the payloads are huge or if the algorithm
+    is complex. In fact, since the stream operations are called very often, a badly
+    implemented wrapper can affect the performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '@Suspended or asynchronous operation'
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'JAX-RS 2.1 got a brand new reactive API to integrate with Java 8 CompletionStage
+    but the server also has a nice integration to be reactive: `@Suspended`. For instance,
+    the `findAll`method of `QuoteResource`could look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the synchronous flavor of a JAX-RS method, the returned instance is the
+    response payload. However, when going asynchronous, the returned instance is no
+    more used as the payload in JAX-RS 2.0; the only option is to use the `AsyncResponse`
+    JAX-RS API to let the container be notified of the state of processing of the
+    request. Since JAX-RS 2.1 (Java EE 8), you can also return a Java 8 CompletionStage
+    instance, which gives you the same hooks, and the server can integrate with it
+    to be notified of the success or failure of the invocation. In any case, both
+    kinds of APIs imply the same kind of logic:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `@Suspended` annotation marks a parameter of the `AsyncResponse` type to
+    be injected. This is the callback holder you use to notify JAX-RS that you have
+    finished the execution and have made JAX-RS resume the HTTP request. If you use
+    the `CompletionStage` API flavor, you don't need this parameter and can directly
+    use your `CompletionStage` instance almost the same way.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: This  asynchronous API makes sense when the computation of the response is asynchronous.
+    So, we need to submit the task in a thread pool. In EE 8 the best way to do it
+    correctly is to rely on the EE concurrency utility API and, therefore, `ManagedExecutorService`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Once the computation is finished, `resume()` is used to send back the response
+    (normal payload or `throwable`), which will use `ExceptionMappers` to be translated
+    in payload.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: With this pattern, you need to take into account the fact that there is another
+    thread pool apart from the HTTP one. It will impact at different levels, which
+    we will deal with later, but an important point is that increasing the number
+    of threads doesn't mean improving the performance in all cases, and for fast execution,
+    you can even decrease your performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: JPA – the database link
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The **Java Persistence API** (**JPA**) is the link to the database (MySQL for
+    our quote application we created in chapter 1). Its goal is to enable an application
+    to map the database model to Java objects. The gain is that we can use the database
+    as any object.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, consider the following table, which matches our quote representation
+    in the database:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/6326f8c9-058d-4daa-9bed-16f9bc5d2a25.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The preceding table can be converted into the following object in Java, thanks
+    to JPA annotations:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/7a04b4ed-93e3-4530-8c26-d5d8d01c843a.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'While the tables are *flat*, mapping them in JPA is pretty straightforward,
+    but the more the model complexity will increase, the more you will realize the
+    two opposed worlds: building a great Java model can lead to an awful database
+    model or the opposite. Why? Because both don''t share exactly the same philosophy
+    and can lead to some anti-patterns.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, in our model, we linked our *Quote* to *Customer* mapping. Since
+    a customer can have multiple quotes (and the opposite as well), we used a `@ManyToMany`
+    relationship. If you check the database generated by JPA, you will be surprised
+    to see one table that is not modelized:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/a15a59f1-1b14-4e20-9ea1-376376ec403a.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The **QUOTE_CUSTOMER** table model is pretty simple if you open it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/8f11dc14-5cdd-45fd-a643-0810c69e08a7.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: As you can see, it just makes a link between the **QUOTE** and **CUSTOMER**
+    tables. This is what we would manually do on the database side, except that we
+    would modelize this table (it wouldn't be implicit) and potentially add some attributes
+    owned by the relationship (something we can't do with our current Java model).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Of course, you can always modelize this join table and link it to *Quote* and *Customer *with `@ManyToOne`
+    relationships if you need more flexibility or want to be closer to the database
+    model.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This example is interesting at two levels:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What will the JPA provider do to fetch the quotes of a customer, since there
+    is this join table in the middle?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The model is symmetric: a customer can get the quotes he can access, and we
+    can access the allowed customers from a quote. In Java, it will just be translated
+    by `quote.getCustomers()` and `customer.getQuotes()`. Are both doing the same
+    thing? Are they similar in terms of performance? In Java, they really look the
+    same, right?'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: To dig into the role of the provider, we must start by checking how by using
+    some object-related code and query language the provider can actually make it
+    work on the database-side, which uses a different paradigm. To do so, we will
+    first investigate how our Java code is converted to native SQL and, then, check
+    how the modeling can impact the performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: From JPA to the database
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: JPA let's you represent your database in plain Java. Said otherwise it let's
+    you represent the relational model as an object model. It is very common for the
+    development and maintenance but at some point, and in particular when you will
+    validate your performances, you will need to check what the mapper (JPA implementation)
+    is doing and how it does translate your object code/model to the relational one
+    (SQL).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'When you check the JPA caller code, you often have something like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'For more complex queries, it is like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: I will not deal with named queries versus this kind of query in this part, but
+    what is important here is that the model is object/Java-based. Even the JPQL query
+    is related to an object and not plain SQL.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This leads to the main role of the JPA provider: translating all the code from
+    the object/Java model to the relational/SQL model.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To understand this, we will configure the JPA provider of our server to log
+    what it does. Since we are using GlassFish, we need to configure EclipseLink,
+    which is the JPA provider. To do so, we just add the following properties in the
+    persistence unit:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This configuration will activate Eclipselink to log at `FINEST` level of the
+    logger a lot of information. To see these information, we need to ensure the `FINEST` log
+    level is written somewhere and not skipped as it is done by default. To do that,
+    you need to configure the EclipseLink logger level to `FINEST` as well. This way
+    Eclipselink would log with a level the logger would output. You can do it in GlassFish
+    add this line to your `logging.properties`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note that if we use the maven plugin that we set up in [Chapter 1](f8931396-0636-41a9-8bf7-2b67bb424b76.xhtml),
+    *Money – The Quote Manager Application* to run GlassFish, it will fallback on
+    JVM `logging.properties` and you will need to either modify it from `$JAVA_HOME/jre/lib/logging.properties`
+    or set another one when launching the server. Here is the potential content to
+    activate logging in the console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Finally, to use this file when launching the server, simply set the system
+    property, `java.util.logging.config.file` (assuming you put the file in `src/main/glassfish/conf/logging.properties`),
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The logger name uses this pattern:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now, if you start the server, you have a few more lines:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: These lines are generated by our JPA provider (EclipseLink here) every time
+    a query is issued to the database. The queries use bound parameters. This is interesting
+    at two levels. The first one is about the security and intends to prevent SQL
+    injections - note that for security reasons as well, the values are not logged
+    by default `eclipselink.logging.parameters` can be set to true in your persistence
+    unit properties if you want to see them instead of the number of bound parameters
+    only. The second interesting consequence is directly linked to the performance
+    and the fact that the provider can use prepared statements instead of creating
+    a statement every time it creates a query. Combined with a datasource pool which
+    can most of the time cache these prepared statements, it makes pretty cheap to
+    execute statement compared to an implementation which would create them each time
+    it is needed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Depending on your JPA provider, you need to change the properties to activate
+    the query logging. Hibernate and OpenJPA use other properties and logger names,
+    for instance. Alternatively, some containers or JDBC drivers will let you configure
+    it at another level. For instance, in Apache TomEE you can set `LogSQL=true` in
+    your `DataSource` resource directly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is interesting to see is the effect of what we write in Java on the SQL
+    side.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `INSERT` case is straightforward and directly converts the JPA model to
+    the corresponding SQL statement to insert all the values into the corresponding
+    database:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`SELECT` is a direct binding too, which selects all the columns with a clause
+    on the idenfitier of the entity:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here, the role of the JPA provider is quite obvious; it makes the link to SQL,
+    which means the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Convert the JPA API and JPQL to the current SQL. Note that in all the JPA providers,
+    there is a notion of database SQL language so that they can handle the database
+    specifics (such as the column types or the pagination). EclipseLink calls it *platform*,
+    Hibernate, *dialect *and OpenJPA, *dictionary*.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Handle Java to database mapping: database column names are converted to field
+    names, table names to class names, and so on.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'However, if you look closer to the logs when you query a quote through the
+    JAX-RS endpoint, you may be surprised:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Where does it come from? If you investigate a bit, you will quickly identify
+    this line in the JAX-RS layer:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'What does it do? It just sets the number of customers linked to *Quote*. Which
+    part triggers this additional query? A simple call on the relationship collection
+    triggers it. In our case, it is `size()`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: Since the relationship between *Quote* and *Customer* is lazy, this simple line
+    will trigger an additional query with EclipseLink. What is interesting is that
+    if you check the JAX-RS resource, it is not `@Transactional` and this query may
+    fail depending on the JPA provider, as lazy handling must be done in a transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The provider is clever enough to not trigger any query and just call `getCustomers()`*.* But
+    it will do when calling any method of the returned collection such as `size()` here.
+    Depending on the provider, null may or may not be possible, which is why the original
+    code assumes it can be null.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will discuss about modelling in another chapter but the obvious solution
+    to make the relationship eager is not a real solution, since you will slowly load
+    all your object graphs everywhere, doing which can lead to performance issues
+    and even memory issues. So try to resist this temptation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'While you are playing with the JPA and SQL, I recommend that you disable EclipseLink''s
+    default shared cache, which easily hides queries (later on, we will discuss why
+    to disable it even in production). This can be done with the following property
+    added to your persistence unit:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: Model and implications
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This section does not intend to go through all the cases; other books centered
+    on JPA do it very well. In order to avoid doing things that can have a negative
+    impact on the performances, this part will show you that the abstraction JPA does
+    need some attention.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To illustrate this statement, we will reuse the **Customer***/***Quote** relationship.
+    As it is *@ManyToMany,* it relies on a join table. Here is a representation of
+    the model:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/5b51832e-7f3f-457e-80f0-6ea74effb9b2.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The use case is when you want to access the other side of the relationship: *Quotes*
+    from a *Customer* (`getQuotes()`) or the opposite (`getCustomers().size()`)*.*
+  prefs: []
+  type: TYPE_NORMAL
+- en: Here, the provider will find all the entities that have the current entity identifier
+    in the join table.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This sounds perfectly fine but how can it affect the performance? If you check
+    the structure of the join table in MySQL, you will immediately see a minor difference:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/15b333a4-70b2-420b-86b3-b3a8c8aded64.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The `quotes_ID` column has an index, whereas the `customers_ID` column does
+    not. Do not be fooled by the picture and the fact that both the columns have a
+    yellow key. The primary key is the composed key of both the columns, so the index
+    is not useless and allows us to select fast rows from `quotes_ID`. Why does `quotes_ID`
+    have an index and `customers_ID`hasn't? Because the *Quote* entity is the owner
+    of the relationship. However, it will always be faster to select columns by the *Quote*
+    identifier rather than by the *Customer* identifier.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now the interesting part is to compare both the calls:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: The first call will load the customers from an already loaded quote whereas
+    the second call will load the quotes related to an already loaded customer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now let''s see what the corresponding generated SQL will be. The first invocation
+    will be converted to the following statement:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The second invocation (`customer.getQuotes()`) will be converted to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'A join is done with the known sides of the relationship, which means the entity
+    containing the relationship (set of entities). Yet, we saw that only one of the
+    two columns of the join table has an index. This means that one side will be slower
+    than the other side. If you use bi-directional relationships, you should ensure
+    that you make the owner of the relationship either of the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The one that is way more used than the other one (if there is a huge difference)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The one that will bring back a smaller set of entities than the other one
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This is just an example of how a very fast model can impact the performance.
+    This is a general statement that is valid for any modeling. Anyway, since JPA
+    makes modeling very easy and not as much database-related, it is easier to make
+    it wrong.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Java Transaction API
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The **Java Transaction API** (**JTA**) is the element responsible for providing
+    the API responsible for ensuring the consistency of your data in the widest sense.
+    In our quote manager, it is only applied to the database data but it can be applied
+    to JMS messages, potentially files if you use connectors, and so on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Without going through the details and protocol, the idea is to ensure, across
+    multiple systems, that either all commits or all rollbacks but not something in
+    between are done ensuring the consistency of the system (which is one common issue
+    mixing NoSQL systems).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To do that, JTA uses what we call a *two phases commit protocol*:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Ask all systems to prepare the commit which means the system must verify and
+    ensure it will be able to commit in next phase
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Ask all systems to actually do the commit
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A lot of transaction manager or servers are optimized for the case of a single
+    resource to limit all the associated overhead.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In our quote manager application we only have a database, so we should benefit
+    from these optimizations in most servers. Nonetheless, we still use JTA backbone
+    and don't fallback on JPA transaction management (*RESOURCE_LOCAL*) which is faster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is important to know with JTA is that a transaction is bound to a thread.
+    Each resource has its representation and identifier, a complete lifecycle (see
+    *XAResource*). There is a transaction bound registry to store the data (a bit
+    like a *@TransactionScoped* bean) and the listeners to integrate with the transaction
+    lifecycle.
+  prefs: []
+  type: TYPE_NORMAL
+- en: All of that is not true in terms of memory and CPU cycles but can be justified
+    if you need it, either because you have multiple systems or because you use your
+    server JTA monitoring (you rarely have monitoring with *RESOURCE_LOCAL i*n administration
+    UI).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Server resources
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'At several layers, the server provides your application with some resources.
+    In our quote manager we have our datasource injected into the persistence unit
+    through its JNDI name:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This datasource can also be injected anywhere else in the code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: But the server manages way more resources. Resources are important because they
+    are provided and handled by the server but used from the application. In other
+    words it is a way to control how the application behaves from the outside of it.
+    It enables you to develop without having to care about the configuration and to
+    tune it later or to adapt it depending on the environment you deploy your application
+    to. The next table lists a subset of the most useful JavaEE resource types which
+    can impact your performances and you can need to watch out if your application
+    uses some of them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Resource Type** | **Description** | **Example** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `ManagedExecutorService` | An EE *ExecutorService* which is used to ensure
+    you inherit the EE context in custom asynchronous tasks. Very useful to link to
+    JAX-RS *@Suspended* or third party libraries for instance. |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| `ManagedScheduledExecutorService` | Close to the `ManagedExecutorService`,
+    it reuses the `ScheduledExecutorService` API adding the EE integration. |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| `DataSource` | As seen before it allows to connect to a database providing
+    a `DataSource` instance. |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| `XADataSource` | Same as `DataSource` but supporting two phases commit. |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| `Queue` | JMS *Queue*, it defines a destination of type queue. In term of
+    configuration, its name can be interesting to distinguish the logical name (application)
+    and real name (deployment). |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| `Topic` | Same as `Queue` but for a destination of type `topic`. |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| `ConnectionFactory` | Defines the way to integrate with JMS and get *Connections*
+    (or *JMSContext* since Java EE 7). |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are other types of resources, but those are the main ones linked to the
+    outside of the application and with performance related configuration, like pooling
+    configuration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: DataSource configuration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To illustrate the configuration let''s use the one we rely on in the quote
+    manager: the datasource. As shown in [Chapter 1](f8931396-0636-41a9-8bf7-2b67bb424b76.xhtml), *Money
+    – The Quote Manager Application* you can define the datasource this way:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This XML configuration defines the datasource our JPA provider will use thanks
+    to two declarations allowing the container to create the datasource instance and
+    allowing the JPA provider to find this datasource:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The pool definition which defines how the database connections will be created,
+    cached and validated
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The link between the pool and the application through its JNDI name to let the
+    application use it - this is how JPA will look up the instance
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The properties are the datasource instance (based on the configured class) configuration
+    but the `jdbc-connection-pool` attributes are mostly the pool configuration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It is very important to note that the configuration depends on the server.
+    As an example, in Wildly, you would use this kind of declaration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here again we find a property part and a pool part. Still, it is no more in
+    attributes but with plain tags.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In Apache TomEE the same resource declaration looks like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here the configuration is not fully XML but it is mixed with properties (as
+    `java.util.Properties`) that contains the pool configuration and connection information
+    which will be passed either to tomcat-jdbc or commons-dbcp2 pooling library.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'What is interesting to note is the overall idea. Most of the servers share
+    the same kind of configuration and here are the crucial configuration entries
+    you need to care about:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Configuration type** | **Description** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Max pool size | How many connections can be created by the pool. This is
+    a key configuration which must be set consistently with the scalability you need
+    across your deployments and the database max connection configuration. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Max wait | The time a caller can wait before getting a timeout from the pool.
+    For performances it is not bad to deactivate it (0) to ensure you identify a too
+    small pool. If you set 10 seconds for instance, the benchmark can be slow because
+    all callers are waiting for a connection. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Idle timeout | How many times a connection is kept if idle. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Validation | How connections are validated, this is very important to ensure
+    connections are valid when kept in the pool and not corrupted. For instance MySQL
+    will close each connection after 8h by default and therefore if your pool doesn''t
+    renew the connection you will get errors. The validation type is important because
+    it can generally be done by a background thread from time to time or actively
+    when borrowing or releasing a connection. All have impacts on consistency and/or
+    performances so it is a trade off choice and if you can rely on your database
+    it is generally better to have a background evictor than an active one. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Min (or steady) pool size | The size the pool should enforce as a minimum.
+    The goal is to ensure that when the application is idle and get a new request
+    it doesn''t have to create a connection at that moment and can just reuse an existing
+    one because creating a connection is an expensive operation. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Initial (or steady) pool size | The number of connections to create when
+    creating the resource (at startup generally). In GlassFish this is merged with
+    the minimum pool size (*steady-pool-size*). |'
+  prefs: []
+  type: TYPE_TB
+- en: 'Last note about resources is that most servers allow multiple ways to configure
+    them:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Plain configuration files (often XML based).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: A command line interface.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: A REST API.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'A UI. For instance, here is a screenshot of Glassfish JDBC pool configuration
+    where you will find all the parameters we talked about:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![](img/50962771-bbca-430e-bb43-60238d85dfd6.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Java EE and performances
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As a reminder, this book is not about Java EE role, so we can't go through all
+    the specifications and detail them all but it is important to understand what
+    Java EE is and what its role is to be able to start working on Java EE performances
+    serenely.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Very often, a small annotation or line of code can hide a lot of logic. The
+    entity manager is a good example: most of the methods are hiding some SQL generation
+    and execution which is not a trivial operation.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With the standardization of CDI in applications, a simple call to a method
+    with a simple complexity can imply to:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Validate the call (BeanValidation) which can be impacting if the object graph
+    is huge
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Validate the logged in user and its permissions (Security API) which can sometimes
+    contact external systems depending on the configuration and implementations
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: An integration of multiple external systems (JTA), and so on
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: All these features can be done with CDI interceptors and are additional logic
+    virtually added to a method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Ensure you know the server
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: When you will start to investigate your application performances, before or
+    during profiling, it is therefore important to understand what the server does
+    to know what you should expect in terms of performances. At runtime, the server
+    is part of your application. This means that if the server has a bug (it is still
+    a software like anyone, so it can have bugs or issues even if widely tested),
+    or a performance bottleneck, you will directly be impacted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Some servers can be embedded with your application, and some can't. Yet, in
+    any case, you will need to ensure you validate your application as well (as your
+    server) to fully understand your runtime and be able to have an impact on it if
+    needed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here the choice of your server will be very impacting. You may need to ask
+    yourself what to do in case the server has a bug or a performance bottleneck.
+    In the following, you will find some criteria you can investigate before the benchmark
+    or when starting the development:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Criteria** | **Comment** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Is the server Open Source? | If the server is Open Source, you will be able
+    to check issues you identify against the source code and validate them. You will
+    also be able to recompile it with patches and potentially don''t wait for the
+    server team to fix the issue but fix it yourself, which can be very interesting
+    during benchmarks if it has some associated cost (like locating servers or dedicated
+    locals). |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Is the server supported? | Having a company you pay for fixing performance
+    issues (or bugs) can be important too. However, mind that some servers will answer
+    quite slowly if you don''t pay enough, and this doesn''t help a lot during benchmarks.
+    If you go with this solution, make sure to have appropriated SLA or go rather
+    for the Open Source solution. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Is the application portable? | If the application is portable, you would
+    be able to compare servers and use the fastest one. This is not a trivial work
+    to do even if since Java EE 6 it is easier and you will need to ensure it is the
+    case during development. But this can be worthy if one version of a server has
+    a performance issue. |'
+  prefs: []
+  type: TYPE_TB
+- en: Until recently, Java EE philosophy was to host applications. This is where was
+    coming the *application server* name. The intent, which is still valid today,
+    was to ensure the server is managed by another team than the application (typically,
+    operation team and development team).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Yet, with Docker and embeddable containers (Apache TomEE, Wildfly Swarm, Payara
+    micro, and so on), the operation responsability started being reconsidered and
+    developers have more and more control over the server. This means that you will
+    then ask yourself the same question (how can I easily patch my server?), but also
+    that you will need an expert developer either from your development team or from
+    a computer support company.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Ensure you know your application
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In case it was not explicit enough before, it is crucial to know what the server
+    does for your application. It is already key in development, but when you start
+    working on performances, it is a must. This means that you need to know the application
+    good enough to know which part of the server it will use and which implication
+    it will have on your performances.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In other words, you will need to fully understand the use case of your application
+    but also what technology was used to implement it. A simple example is if your
+    application used *RESOURCE_LOCAL* mode for JPA but you see a lot of JTA use, then
+    you will need to identify why. If you don't have this kind of insight, you will
+    just think the application uses JTA and that it is ok. Yet, this kind of fact
+    can mean *something is not well configured*, which can not only impact the application's
+    behavior, but also its raw performances and even its scalability.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It is also very important to know what part of the specifications is used.
+    To illustrate it we''ll use JPA again here. JPA is integrated with Bean Validation.
+    This means that each time you will persist/merge an entity, the entity will be
+    validated to ensure it passes the model constraints. This is a great feature but
+    if you validate your model on the outbounds of your application (JAX-RS for instance)
+    then you rarely (never in theory, if the application is done correctly) need to
+    revalidate it internally (JPA). This means that the Bean Validation layer is useless
+    here and can be disabled. This particular example is done by updating the `persistence.xml`
+    and adding the `validation-mode` tag in the right persistence unit:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: Ensure you know your resources
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'It is crucial to properly tune the resources (databases, thread pools, and
+    so on). Since Java EE 6, some resources can be defined in the application. For
+    instance, a `DataSource` can be defined with:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is often a bad idea since you can't externally configure it (it is hardcoded).
+    Thus, you often end up configuring the resources in server specific files or UI.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This is a good practise to avoid in the application. But outside the application,
+    Java EE doesn''t define any way or standard to configure the server. Everything
+    is vendor specific. However, you will need to tune it! For that reason, it is
+    crucial to ensure you know:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What kind of resources your application needs
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to create them and configure them in your server
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This is a great start for the application side but resources are generally linked
+    to an *external* side like a database. Here again, it will be very important to
+    know the resource itself, how it is configured and potentially how to tune it
+    if needed. A very simple example is the number of connections you can use on a
+    database. If you can only use 20 connections, no need to configure 100 in the
+    application, this would generate a lot of errors and slow down the application,
+    or just make it fail depending on how the pool is configured.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, you understood that the Java EE server's role is to make the
+    development of the application easier and faster, providing out-of-the-box services
+    and implementations. We browsed through some common examples, detailed their implications
+    in terms of the code, and, therefore, the performance. We saw that the JPA handles
+    statement creation automatically, securely, and correctly and that your code can
+    imply some unoptimized queries if not designed close enough of the data. This
+    is a good example showing that Java EE is here to enable you to build the best
+    application as easily as possible even though you need to take care of some points
+    (often related to design) in order to ensure you meet your performance requirements.
+  prefs: []
+  type: TYPE_NORMAL
+- en: At this point, we have an application ([Chapter 1](f8931396-0636-41a9-8bf7-2b67bb424b76.xhtml),
+    *Money – The Quote Manager Application*), we know what it does, and how the Java
+    EE server helps it (this chapter). So, before working on the performance, we need
+    to be able to measure it. This is what our next chapter will be about.
+  prefs: []
+  type: TYPE_NORMAL

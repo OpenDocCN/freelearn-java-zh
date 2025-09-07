@@ -1,0 +1,1320 @@
+- en: Be Fault-Tolerant
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: For years, Java EE has been about putting the maximum number of applications
+    inside a single application server, but it has been changing for a few years now.
+    It has become more common to deploy a single application in a container instance
+    and to reduce the application size to handle a single responsibility. The direct
+    implication of such a paradigm change is that a system, as a whole, is now composed
+    of far more applications than before, and we rely more and more on remote communications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In such a context, the performance of one application directly depends on another
+    application, and it is important to be able to limit the side effects between
+    applications. To ensure that your applications identified the impact of its environment and
+    can work with such constraints, we will cover the following topics in this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Load balancing on clients and servers
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Fail-overs
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Circuit breaker
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Bulkhead usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Timeout handling
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It will fail, no doubt!
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: When developing an application, we often spend most of the time on the *passing* code
+    path, as the code path gives the application its actual feature. However, it is
+    important to not forget all the unexpected cases. It can sound weird to try to
+    solve something we don't control but, here, the idea is to follow the Murphy's
+    law which is often summarized as follows: *anything that can go wrong, will go
+    wrong*. It doesn't mean that the system will never work, but it means that if
+    there is a potential issue, it will become your reality one day or another.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In terms of a modern system and, more particularly, Java EE deployment, the
+    typical consequence is that you can lose the connectivity to a related resource
+    or application. Another common failure case you can desire to address is about
+    the JVM failing (no more memory, OS issue, and so on), but this is linked to the
+    infrastructure (potentially Kubernetes), and it is beyond the scope of this book.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will illustrate this with a very simple system where three Java EE applications
+    are chained:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/a2530673-657f-4fdb-94fd-111c3f6500e5.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: With such an architecture, we can assume that a front layer exposes some customer
+    features or API. Then, the front application delegates the actual logic to an
+    internal system owned by another team. Finally, the internal system relies on
+    a data system which is again owned and developed by another team.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It is not rare to use the same sort of architecture, but with external systems.
+    In such a case, you often have a support phone number, but it is rarely as efficient
+    as calling a colleague, which makes you even more dependent on this system/company
+    in the case of a failure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is important with such systems is that if the data fails (because the data
+    engineers did an upgrade that didn't work as expected), then all the internal
+    systems will start failing because the data doesn't answer anymore. Transitively,
+    the front system will fail because the internal system fails.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You may think that this will just make the system inefficient and that there
+    is no link with the performance. This is not really the case. In the previous
+    schema, the data system looks quite central. If the company adds a second internal
+    system (let's call it *internal2*), then we can assume that the load on the data
+    store will be multiplied by two. Nonetheless, if the data is not sized for the
+    load increase, it will be slower to answer and will potentially return more errors.
+    Here again, all consumer services, including transitive services, will start being
+    slower, as they depend on the data system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is not something you can actually avoid. You can limit the effect of an
+    unexpected failure, but it is almost impossible to guarantee that it will not
+    happen. If you are in a big company with an operation team in charge of all the
+    applications, this kind of issue will likely be sorted by priority and performance
+    degradation will be less important than a failing system. When a distributed system
+    like this starts to fail, each brick often fails slowly, just because of the relationships.
+    Thus, all the applications will be seen in *red* by the monitoring team, which
+    doesn't help them to solve the issue, when only one part of the whole system is
+    failing (our data system in this example). This is why ensuring that your system
+    is ready to fail will make sure that your system is fixed faster if there is an
+    issue, and that the performance impact on the other parts of the system will be
+    reduced if some related application go uncontrolled.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Load balancing – pick the best one
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Load balancing is about defining how to select the backend node that will process
+    the request. It can be done on the server or client side, but strategies are globally
+    the same. The fact that it is **Client** or **Server** is mainly a deployment
+    concern because when the **Load Balancer** is an instance (software), then you
+    actually add a **Client** in the chain between the final clients and your middlewares.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'At very high level, a **Load Balancer** can be schematized as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/55bfe10b-d8e7-4760-ba44-e58315df4fb4.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The global idea is to add a layer in between the **Client** and the **Server**,
+    which will orchestrate the way the requests are distributed to the servers depending
+    on different strategies. This picture represents four clients calling the same
+    application through a **Load Balancer**, which will delegate the request processing
+    to three servers (one server will process two of the four client requests).
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is a common representation of server-side load balancing, but it can also
+    be applied on the client side. The only difference is that the **Load Balancer**
+    will be *deployed* inside the JVM of the client and, instead of taking the incoming
+    requests through a network protocol (websocket, HTTP, and so on), it will take
+    it from the inside of the JVM (normal method invocation).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transparent load balancing – client versus server
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The main advantage of using a server load balancer is that the clients don't
+    really care about a load balancer. Concretely, all the clients will use the same
+    endpoint (let's say, *quote-manager.demo.packt.com*) and the load balancer will
+    distribute the requests without requiring any knowledge of the clients. This is
+    very important in terms of the infrastructure, since you can update your infrastructure
+    without notifying or updating the clients (which can be impossible if not owned
+    by your own system).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, if you start with two machines and decide to add a third one
+    a month later because you get more load or to support the *black friday* additional
+    load, then you will just register this third machine against the load balancer
+    and it will distribute the work load against the three machines instead of only
+    two. It is also true for the opposite way: if you need to do some maintenance
+    on a machine, you can remove it from the cluster behind the load balancer, assuming
+    that removing one machine still supports the load, but it should be taken into
+    account during the sizing phase of the infrastructure. Then, do your maintenance
+    offline, and once done, just add back the machine into the cluster.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: So, this analysis makes it sound like server load balancing is the best solution
+    and the one to choose. However, modern systems have efficient client-side load
+    balancers if you own the clients (which is often the case for microservice-oriented
+    systems). What makes server load balancing strategy better than client load balancing?—The
+    fact that the server can be updated without notifying the clients. This means
+    that if the clients are autoupdated from the server/backend changes, then we achieve
+    the same on the server side. In practice, this is done using a service registry
+    that can enumerate the list of URLs that you can use to contact a service. In
+    practice, the client load balancer will contact this registry service to get the
+    list of endpoints it can use for a particular service and update this list from
+    time to time with a configuration policy close to the pool ones that we saw in
+    the previous chapter. It sill means that this *registry* service must be reliable
+    and should likely use a server load balancer solution, but then, all other services
+    can use point-to-point connection (without an intermediate load balancer instance).
+    In terms of application impact, it means that adding (or removing) a server must
+    imply (de)registration against the registry instead of the load balancer, but
+    it is the same sort of work in both the cases.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'At this point, we see that both the client and server load balancing can achieve
+    the same sort of features, so what can be differentiating? There are two main
+    criteria you can use to choose between both:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Who is responsible for the infrastructure and load balancing? If it is the dev(ops)
+    team, both the solutions will work well. However, if you are working in a company
+    that splits development and operations into teams, you will likely prefer to delegate
+    the part to the operations team and, thus, use a server load balancer, which they
+    will fully control without impacting the application development.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: What kind of logic do you want to put in place inside the load balancer? Server-side
+    load balancers have the most common strategies already implemented and, often,
+    a small scripting language that you can use to customize. However, if you have
+    a very custom strategy (potentially depending on your application state), then
+    you will want to code the load balancing strategy inside the client.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: To summarize, client-side load balancing is more impacting in terms of development
+    because you need to handle it on the client side, which means in all the clients
+    instead of a single instance for the server side, but it gives you really more
+    power for very advanced needs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Common strategies
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: How to distribute the request is the central piece of a load balancer. In this
+    section, we will go through the most common solutions that you will encounter
+    while configuring a load balancer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The round-robin algorithm
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The round-robin algorithm is certainly the most known of all the strategies.
+    It considers the list of available members of the cluster (the *servers*) as a
+    ring and continuously iterates over this ring each time a request comes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, if you have three servers (`server1.company.com`, `server2.company.com`, `server3.company.com`),
+    here is how the first requests will be served:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Request number** | **Selected server** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 1 | `server1.company.com` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 2 | `server2.company.com` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 3 | `server3.company.com` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 4 | `server1.company.com` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 5 | `server2.company.com` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 6 | `server3.company.com` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 7 | `server1.company.com` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| ... | ... |'
+  prefs: []
+  type: TYPE_TB
+- en: You will note that to have a *fair* distribution, the load-balancer strategy
+    must lock or synchronize the list every time it selects a server. There are other
+    flavors of this algorithm where the implementation is lock-free but the fairness
+    of the distribution is not fully guaranteed. However, keep in mind that it is
+    rarely something you'd really care about, as you want to have something that looks
+    like being fair.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Random load balancing
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Random load balancing also takes a list of servers to target but every time
+    a request comes, it picks one randomly. If random implementation is equally distributed,
+    it leads to a distribution close to the round-robin solution. However, it can
+    potentially scale better, since it doesn't need to synchronize the list to pick
+    the *current* server to use.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Link to failover
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'We will talk more about failover in the next section, but it is important here
+    to mention that load balancing can be used to implement a failover strategy. Here,
+    the goal will be to try the request against another machine if the *current* one
+    fails. This can be sort of seen as round-robin, but instead of using each request
+    as a trigger for the iteration over the hosts (to change targeted instance), a
+    failure would be the trigger. Here is an example sequence using the failover strategy,
+    considering that we have the same three hosts as in the round-robin part:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Request number** | **Selected server** | **Status** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 1 | `server1.company.com` | OK |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 2 | `server1.company.com` | OK |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 3 | `server1.company.com` | OK |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 4 | `server1.company.com` | OK |'
+  prefs: []
+  type: TYPE_TB
+- en: '| *5* | `server1.company.com` | *OK* |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 6 | `server2.company.com` | OK |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 7 | `server2.company.com` | OK |'
+  prefs: []
+  type: TYPE_TB
+- en: '| ... | ... |  |'
+  prefs: []
+  type: TYPE_TB
+- en: 'As you can see in the preceding table, each request is using the same host
+    (`server1.company.com`) until a request fails (request #5), in which case, the
+    algorithm iterates over the host list and starts using `server2.company.com`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Indeed, there are some variants to this algorithm. For instance, the failed
+    request can be retried (or not) with the *next* host in the list, or you can configure
+    a number of failures to wait before switching the host or even configure what
+    failure means (the default is generally a 5xx HTTP status, but you can also configure
+    it to be any HTTP status > 399, or base this choice on a header or any other part
+    of the response).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Sticky session
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Sticky session routing is generally used because of a business use case. The
+    idea is to always route a client to the same backend server if a session is started.
+    Java EE defines three session modes through `SessionTrackingMode`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**COOKIE**: The session is tracked through its identifier (`JSESSIONID`) inside
+    cookies, so it hits the browser (client) and is sent with each request in the
+    cookies.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**URL**: The `JSESSIONID` is sent to the client through the URL. Example:  `http://sample.packt.com/quote-manager/index.html;jessionid=1234`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**SSL**: This uses the HTTPS native mechanism to identify sessions.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Each time, the tracking works by passing a shared *identifier* between the
+    client and the server. If you add a load balancer in between, the communication
+    can be broken if you don''t target the same host. Here is a diagram representing
+    this statement:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/4b60f497-449b-4f73-a2e9-b2294897c114.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: This diagram represents a **Client** serving two requests. The first request
+    (**1**) will hit the **Load Balancer**, which will redirect the request to **Server
+    1** (**1'**) and the request processing will create a session on **Server 1**.
+    It implies that the response of this first request will create a `JSESSIONID` (or
+    its SSL replacement). Now, the client issues a second request (**2**) and, here,
+    the **Load Balancer** redirects the request, respecting the stickiness of the
+    strategy, to the second server (**2'**). During the processing on **Server 2**,
+    the application tries to access back the session information created during the
+    first request (the identified user for instance), but since we switched the node,
+    the session is not here. So, the request processing fails (red cross).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To ensure that this workflow works, there are two main solutions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Ensure that the session state is distributed and shared across all the nodes.
+    This solution sets up a kind of distributed storage space between the servers.
+    It generally either implies a lot of latency (if synchronously done), or some
+    potential miss (failure) if asynchronously done, which can lead to the same issue
+    as the previous schema. It also implies to configure a solution other than the
+    server's default session handling, which is local only out of the box.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Ensure that the load balancer always hits the same backend node once a session
+    is created. This is what we call the *sticky session* mode. The load balancer
+    will check if a `JSESSIONID` (or an SSL connection) exists and, if so, will store
+    which node created it. If it sees again this identifier in a request, it will
+    redirect the request to the same node ignoring any distribution strategy.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This means that the sticky session mode is often coupled with another strategy,
+    which will define the distribution, since the sticky session only applies once
+    a request has already been served for a client.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The scheduling algorithm
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The scheduling algorithm is a wide category of strategies based on some statistical
+    criteria. The idea here is to be more accurate about the way load distribution
+    is done regarding the available resources in the backend servers. The most common
+    criteria are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**By request**: The distribution is based on the number of requests served
+    by the node. Note that each server node can have a weight associated with this
+    distribution to bias the distribution if a machine is less powerful than the other.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**By traffic**: This is the same sort of distribution as the previous one,
+    but instead of counting the requests, it uses the transmitted bytes.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**By busyness**: This is also based on the number of requests, but only the
+    live number. The least *busy* node is selected.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Heartbeat**: This is not a distribution solution per se but is more of an
+    alternate evaluation solution. It uses a heartbeat or *agent* to evaluate the
+    load a node has and, based on this information, it distributes to the node that
+    can handle the most load. It is generally a time statistics, which is, therefore,
+    dynamic and autoadaptive.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Load balancing or proxy – additional features
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Even if you set up a load balancing to distribute the load with one of the
+    previous strategies, a load balancer solution is often a full proxy and, therefore,
+    also provides additional features. It generally concerns the server middlewares
+    more than the client ones, but it remains very interesting. Part of the features
+    that you can get from the backend (servers) point of view are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Compression:** Your backend server can serve plain text and the load balancer/proxy
+    layer will automatically add GZIP compression on text resources (HTML, JavaScript,
+    CSS, and so on). Since the client (browser) to load balancer communication is
+    generally slower than the load balancer to server/backend communication, it will
+    allow you to save precious time for these requests.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**TCP buffering:** Here, the idea is to buffer the response sent by the backend
+    server in the load balancer layer to free the backend from this load and let it
+    serve other requests. This is useful for slow clients that would hold a connection
+    on the backend but not imply any processing/computing work.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**HTTP caching:** We saw, in the previous section, that HTTP defines some caching.
+    The proxy layer can handle it for you for free without having to request the backend
+    server. This generally concerns only static resources that are moved to the proxy
+    layer in this condition.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Encryption:** The proxy layer can encrypt a part of the request to prevent
+    the end users from knowing enough about the backend to understand how it works
+    or even access some sensitive data.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'When the load balancer layer adds features more business-oriented than communication/network-oriented,
+    we often call it a *gateway.* However, technically, it is pretty much the same
+    sort of middleware. Here are the features you can find in gateways:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Security handling**: The load balancer layer can authenticate and validate
+    the permissions from the request (generally from a header).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Version handling:** Depending on the incoming request, the route (requested
+    endpoint of the backend) can change, allowing us to automatically handle the versioning
+    of the backend points.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Rate limiting:** This limits the access to the backend with a particular
+    rate, either by application or per user, if the authentication is associated with
+    the rate limiting. It is generally expressed as the number of allowed requests
+    per unit time, for example, 1,000 requests per minute.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Concurrent limiting:** This controls the number of requests that can be sent
+    in parallel/concurrently. As for rate limiting, it can be done for the entire
+    application or per user (or other units if relevant). For example, 512 requests.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: As you can see there are several features and all are not related to the performance.
+    However, most of them will have performance impacts depending on your final environment.
+    HTTP caching, for instance, will allow your backend server to handle more actual
+    load and, therefore, will scale more easily. The rate/concurrent limiting features
+    can enable you to control the performances and ensure that they are not degraded
+    under unexpected load circumstances, but other features such as the security ones
+    can have a very strong impact on your performance if the gateway layer can use
+    a hardware encryption solution instead of a software encryption, like you would
+    generally do in a Java EE application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is important to keep in mind here is to think of the application as a system
+    solution and not to try to put everything inside the application just because
+    it is easier or more portable. Relying on well-optimized hardware solutions will
+    yield good performance compared with optimizing a software solution, which can
+    lead you to use native integration, particularly, when it comes to security and
+    cryptography,  and will affect the portability of your application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Failover
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In a distributed system, it is very important to ensure that you know how to
+    handle failures. Java EE applications being more and more connected to other systems,
+    they face this challenge more and more, so it is important to know how you will
+    deal with failover when it happens.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The first meaning of failover is, indeed, to fail over. It can be rephrased
+    as *the capability to switch to a backup system when the primary system fails*. In
+    Java EE applications, there are lots of places where this can be set up, but they
+    are all related to external systems:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Databases**: If a database connection fails, how to still handle the requests?'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**JMS**: If a broker fails, what to do?'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Other network API (such as SOAP or REST API)**: If the remote server is down,
+    what to do?'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**WebSocket**: If the target server closes the connection or fails, what to
+    do?'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In general, each time your application relies on something it doesn't control
+    (a.k.a. external systems), it can need a plan B to still be functional if the
+    primary solution is no more responding or working.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are several ways to handle the failovers, which either rely on selecting
+    another system or are based on some default/caching implementation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Switching to another system
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The easiest implementation of a failover is switching to another system when
+    an error occurs. This is what we saw in the previous section with load balancing.
+    The only condition for us to be able to implement a failover is to be able to
+    identify the error encountered by the system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is an example using the JAX-RS client API of Java EE to illustrate this
+    logic:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This snippet replaces the direct call to the remote API with `Stream`. The
+    usage of `Stream` is fancy here compared with the usage of `Collection`, since
+    the leaf of the stream will trigger the flow to be executed (but by element) and
+    will enable us to stop the *iteration* if we encounter a final condition early.
+    Concretely, it prevents us from iterating over all the elements if irrelevant,
+    which is exactly what we want for failover. In terms of implementation, here is
+    the flow:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: From a server, we invoke the endpoint we want.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We process the response of the server. If it requires a failover, we return
+    `null`; otherwise, we keep the default behavior of the invocation.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We remove the `null` response from the flow, since the previous step defines
+    `null` as a failover condition.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We use the first available response as being valid, which will avoid doing the
+    invocation for all servers.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If all the servers fail, then we throw `IllegalStateException`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'What is missing in the previous snippet is the way to evaluate that we want
+    a failover. In the previous code, we are basing this decision on `WebApplicationExceptinon`,
+    so the client can throw in the case of an error. A default implementation of `supportsFailover()`
+    will just be to return `true`, but we can be more fancy:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is still a simple implementation but we use the HTTP status code to retry
+    only if its value is more than 412, which means we will not retry if we get HTTP
+    404 (not found) or HTTP 412 (precondition failed), since both the cases will lead
+    to sending the same request to another server and getting the same response.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Of course, you can customize a lot of this logic (and this can even be service-dependent),
+    but luckily, Java EE provides you with all you need to do.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Local fallback
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The previous failover implementation was considering that there is an alternative
+    system to contact if the primary one fails. This is not always the case and you
+    may desire to replace a remote invocation by a local default in the case of an
+    error. This sort of solution is available in the hystrix framework, which can
+    be integrated with Java EE using the concurrency utilities that we saw earlier.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The high-level logic of defaulting is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This is actually a generalization of the previous implementation. Instead of
+    seeing a list of hosts to contact, you need to consider the remote invocations
+    that you can do as a list of tasks. Concretely, we can rewrite this as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we just moved the client invocation to a method and we replaced our stream
+    of hosts by a stream of invocations. The stream logic is exactly the same—that
+    is, it will take the first working result of the list.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The direct gain of such a solution is that, since you are passing tasks to
+    the failover logic and not hosts, you can implement every task as you wish. For
+    instance, if you want to default to a hardcoded value, you can do this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: With this definition, we will first try to contact `http://server1.company.com`,
+    and if it fails, we will just create a `Data` instance locally.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before seeing what type of strategy can be used for these fallbacks, let's just
+    take a moment to see what it can mean in terms of code organization.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Fallback code structure
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'When you were just handling a failover across servers, it was not very complicated,
+    as you would probably have the list of hosts in the `Client` class, and iterating
+    over them was almost natural. Now that we iterate over different implementations,
+    it is less natural and we need an *orchestrator* bean. Concretely, for the previous
+    example, which first calls a remote service and then falls back on a local hardcoded
+    instantiation, we would need the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A remote client
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A local *mock* implementation
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A facade (orchestration) service, which is used everywhere, so we can leverage
+    this failover logic
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: When you start integrating lots of services, it is not very convenient.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Microprofile to the rescue
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Microprofile includes in its scope a specification helping you to handle your
+    fallback logic in a "standard" way. The specification allows to define a fallback
+    method reference or handler on a method in case this last one fails. Here what
+    it can look like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, you will call `getData` from all the consumers of the enclosing service,
+    and if the method fails, the microprofile fallback handling will automatically
+    call `getDataFallback`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This implementation also supports `@Retry`, which allows you to define how many
+    times you execute the primary method (`getData` in the previous example) before
+    falling back on the fallback handling/method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This API is nice and straightforward but couples the different implementations
+    together, since the primary and secondary methods are linked with the `@Fallback`
+    API.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Failover extension
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'With CDI, you can define a small extension, which will automatically handle
+    the failover, exactly as we did with streams previously, without much effort.
+    The extension will be composed of two main parts:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: It will identify all the implementations of a particular logic
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It will register a bean for chaining the implementations in the right order
+    with the failover logic
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To do so, we need a few API elements:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: To find a service implementation, we will mark an interface method with `@Failoverable`
+    to identify that we need to create a failover implementation for this interface;
+    we will also use this annotation to mark the implementations.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: To sort the services, we will use `@Priority`. We will just use the priority
+    value as a sorting order for the sake of simplicity.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'In terms of what it will look like from a user''s point of view, here is the
+    previous example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The interface defines the methods that we want to support failover. Then, we
+    have two different implementations with their priority. Such an organization will
+    allow us to add another strategy and insert it into the chain, easily and automatically,
+    without having to modify all other implementations and respecting CDI loose coupling.
+    Now, any user can just inject the `GetData` bean into any service and call `fetch()`
+    with automatic failover.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This example doesn't define any parameter to the method, but this is not a limitation
+    and you can use this strategy with any method, even very complex ones.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In terms of caller code, it really looks like any CDI bean invocation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: And that's it! No need to implement the `GetData` failover for the end user;
+    it is done by the extension.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now that we saw how the API looks, let's see how the CDI allows us to do it
+    easily.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The first step is to define our API; the only API that is not in Java EE is `@Failoverable`.
+    It is a plain annotation without anything special, except that it must be usable
+    on an interface:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then, we just need an extension identifying the implementations of the interfaces
+    decorated with this annotation, sorting them, and defining a bean for each interface:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This extension has four main entry points:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`captureFailoverable`: This will ensure that any `@Failoverable` interface
+    is registered and will automatically get a default implementation even if there
+    is no service implementing it. It avoids having a `bean not found` error at the
+    time of deployment and will instead throw our failover implementation exception
+    to ensure a consistent exception handling for all our beans. Note that it only
+    works if the scanning mode of the module containing the interface includes interfaces
+    (that is, not `annotated` ). If not, we may get `UnsatisfiedResolutionException`
+    or equivalent during deployment.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`findService`: This captures all the implementations of a `@Failoverable` interface.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`addFailoverableImplementations`: This adds a bean with the `@Default` qualifier
+    implementing the `@Failoverable` interface.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`addQualifier`: This just adds our `@Failoverable` API as a qualifier to avoid
+    ambiguous resolutions, since all the services (implementations) will implement
+    the same API and we want to use the `@Default` qualifier (implicit qualifier)
+    for our facade. Note that we could have added `@Qualifier` on the annotation as
+    well.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Also, to register this extension, don't forget to create a `META-INF/services/javax.enterprise.inject.spi.Extension`
+    file containing the fully qualified name of the class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The implementation of the facade bean is done with a proxy. All the failover
+    logic will be passed to the handler, which takes, as input, a list of delegates
+    that are actually the implementations we identified in `findService`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This implementation is probably the most straightforward:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The list of delegates is already sorted (see the previous extension).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It iterates over the delegate and tries to do the invocation for each of them;
+    the first one to succeed provides the returned value.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If no invocation succeeds, then `FailoverException` is thrown, which includes
+    the case where no implementation was provided (that is, the `delegates` list is
+    empty).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If an exception is thrown, it is tested to see if the failover should occur
+    and the next delegate should be used. In this implementation, it is done by ensuring
+    that the exception has `@Failoverable` on it, but it could also test some well-known
+    exceptions such as `WebApplicationException` or `IllegalStateException`, for instance.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Fallback handling – caching, an alternative solution
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the previous subsection, we saw how to handle a fallback using another strategy,
+    which can be a hardcoded default value, or can be an alternative way to compute
+    the service, including how to contact another service from another provider potentially.
+    This is the straightforward implementation of a failover.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, if you step back and think about why you set up some failover mechanisms,
+    you'll realize that it was to ensure your service can run even if an external
+    system is down. Therefore, there is another solution, which is not a failover,
+    strictly speaking, but fulfills the same goal, that is, caching. We saw in a previous
+    section how JCache can help your application go faster, enabling you to bypass
+    computation. Caching data from external systems also allows you to be more resilient
+    and can potentially prevent you from implementing a failover mechanism for them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's take a very simple case to illustrate this. In our quote application ([Chapter
+    1](f8931396-0636-41a9-8bf7-2b67bb424b76.xhtml), *Money – The Quote Manager Application*),
+    we grab the list of symbols to use from CBOE and query Yahoo!Finance to get the
+    price of each quote. If one of the two services is down, then we don't get any
+    price update. However, if we've already executed this logic once, then the price
+    and the list of symbols will be in our database, which is a sort of *persistent
+    caching*. This means that our application, which serves the price of quotes through
+    our JAX-RS endpoint, will still work for clients even if the background update
+    process fails. If we want to go one step further, we can update this logic to
+    fall back on selecting all the symbols of the database if the CBOE service is
+    no more available, which will allow the application to at least get price updates
+    and still be more accurate than if we fail the whole update process because CBOE
+    is down but not Yahoo!Finance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: More generally, if a remote system is not fully reliable and data can be cached,
+    which implies that the data is regularly (re)used and can be a bit outdated for
+    your business, then caching is a very good alternative to failover.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In terms of implementation, you have two main options:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Manually handle the cache and the fallback (not recommended)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Use the cache as a data source and fall back on the external system if the data
+    is outdated or missing
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The first option is plain failover handling but the fallback implementation
+    is based on cache access. This solution, indeed, considers that you'll fill the
+    cache when the primary source works; otherwise, the fallback will just return
+    `null`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The second option can be implemented through the solutions we saw in the previous
+    part, either using JCache CDI integration or the `Cache` API as the primary source
+    manually in your application. You will note that this reverses the failover paradigm,
+    as the primary source (remote system) becomes secondary because the cache is checked
+    first. But that's how caching works and if the remote system supports caching,
+    you will, most of the time, get more benefit from it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To provision the cache, you can use the `@CacheResult` API but don''t forget
+    to add `skipGet=true` to just provision the cache and not bypass the logic. For
+    instance, here is what it can look like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Enforcing JCache to skip the get phase of the interceptor associated with `@CacheResult`
+    enables you to put the result in the cache when the method succeeds, but to not
+    use the cached data if it is already in the cache. Therefore, if this service
+    is chained with a fallback service reading the data from the cache, it will correctly
+    implement the failover based on the cached data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, note that there is a trick here—you need to use the right cache name
+    and key. To do so, don''t hesitate to just use another method relying on JCache
+    as well:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: The implementation is quite straightforward; it returns `null` to represent
+    it doesn't have any data if it is not already in the cache. An alternative implementation
+    could be to throw an exception, depending on the caller behavior you want to provide.
+    Then, to ensure that we use the same cache as the previous primary service, we
+    name the cache with the previous method's name. Here, we used the default name
+    for the primary service and set this name to the secondary service but you can
+    also use a more business-oriented cache name through the `cacheName` configuration
+    that we saw in the [Chapter 6](8db12a5f-dba9-449b-af38-4963ac0adec0.xhtml), *Be
+    Lazy; Cache Your Data*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now, if we go back to the caching-first solution, reversing the primary and
+    secondary sources, we can implement it a bit differently. If the cache is the
+    source, we can still use the CDI integration, but the provisioning of the cache
+    (which is the secondary source now) can be done through a native JCache mechanism.
+    Concretely, our service can look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This is the standard way of using it, but there is an alternative way to do
+    it that would also work better with manual cache handling—that is, without CDI
+    integration. Instead of using the method as a fallback and cache its result, we
+    programmatically set the way the cache is lazily provisioned when configuring
+    the cache. In this case, our service can become the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Yes, you saw it correctly: we don''t even implement the loading logic into
+    the service! So where does it go? This service will trigger `cache.get(...)`,
+    so we need to inject our data when `get()` is called if the data is not already
+    available. To do so, we can use the `CacheLoader` API, which is initialized on
+    the cache itself.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To configure the cache, you can use a custom `CacheResolver` (see the previous
+    chapter for more details), which will set `CacheLoader` into the cache configuration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The loader implementation can now be the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `loadAll` method just delegates to the `load` method, so it is not very
+    interesting, but in some cases you can bulk-load multiple values at once and it
+    makes sense to have a different implementation. The `load` method delegates the
+    loading to a CDI bean. We can consider that we call the remote service here without
+    any failover.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The important point for this solution is to have a custom `GeneratedKey` key
+    to be able to unwrap it and extract the business key (`extractSymbol()` in the
+    previous example) to be able to execute the actual business. As a quick reminder
+    of the previous chapter, `GeneratedKey` is the key deduced from the method signature
+    in JCache CDI integration, so you need to ensure you can work with such a key using `@CacheResult`.
+    As we saw in [Chapter 6](8db12a5f-dba9-449b-af38-4963ac0adec0.xhtml), *Be Lazy;
+    Cache Your Data*, using a custom `CacheKeyGenerator` allows you to fulfill this
+    requirement for this solution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In terms of usage, when should you use `CacheLoader` instead of a method implementation
+    that behaves as an implicit cache loader after all? The cache loader makes more
+    sense when you don''t use the CDI integration because, in such a case, you manipulate
+    a more natural key (such as a string for symbols) and get the same behavior:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: If the cache is set up to load the data from a remote service if not already
+    present in the cache, then the second line of this snippet will call the remote
+    service and transparently initialize the cache with the data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This kind of caching usage also works in the case of a remote service, which
+    is rate-limited. It will allow you to rely on its data more than you would be
+    allowed to without a cache. For instance, if the service accepts only 1,000 requests
+    per minute with your credentials, you can, with the cache, call it 10,000 times
+    per minute.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Circuit breaker
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The circuit breaker involves allowing the application to disable a code path
+    if it is known or estimated as failing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, if you call a remote service and this service has failed 10 times
+    already, then you can say: *don''t call this service anymore for 5 minutes*. The
+    main idea is to bypass errors when possible.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A circuit breaker generally has three states:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**CLOSED**: The system is considered to be working, so use it (default case).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**OPEN**: The system is considered not working, so bypass it.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**HALF-OPEN**: The system must be reevaluated. Try an invocation: if it fails,
+    go back to the OPEN state; otherwise, go to the CLOSED state.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Then, all the conditions to go from a state to the other are configurable. For
+    instance, what triggers a CLOSED state depends on the way you configure it (it
+    can be an exception, an HTTP status, a timeout, and so on). The same applies for
+    when the system enters into the HALF-OPEN state—it can be a timeout, a number
+    of requests, and so on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are multiple available implementations of circuit breaks but the most
+    known ones for Java EE are in these projects:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Hystrix
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Failsafe
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Microprofile fault-tolerant specification
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: commons-lang3 project.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Using a circuit breaker is important for the system health to ensure that your
+    system is always healthy even if one functionality is not. However, it can also
+    be used for performance because it will keep them under control if the system
+    starts failing and avoid a domino effect where each connection between a failing
+    system and another system implies the other system to fail too. To ensure that
+    the impact of the circuit breaker is as expected, you need to associate two solutions
+    with it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A failover solution to ensure that your system behaves correctly (as much as
+    possible, since it is not always feasible)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A monitoring solution to ensure that you properly report that you are no more
+    fully functional to let the support/operation team efficiently work and enable
+    your circuit breaker to automatically recover once the failing system is fixed
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Bulk head
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Bulk head is a pattern designed to ensure that no part of the system deeply
+    impacts other system areas. The name comes from a common solution used in ships
+    to ensure that if there is a hole in the hull, it doesn't lead to the boat sinking.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/c266fe64-4177-4da8-961b-1552fcdb04ce.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Here, for instance, the second area has a hole and the water is coming into
+    the section but the boat will not sink, as the other sections are isolated.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Titanic used this technique but the isolation was not fully done from down
+    to top for passengers and crew members comfort. And we all know the outcome of
+    that choice. That is why, if you go with isolation, it is important to make sure
+    that it is complete; otherwise better not do anything.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What does it mean for an application? It means that each service that can sink
+    your application should be isolated from the other ones. This isolation is mainly
+    about the execution and, therefore, the execution environment of the service invocation.
+    Concretely, it is generally about which pool (thread, connection, and so on) and
+    which context to load. To be able to isolate services, you need to be able to
+    identify which service you are calling. If we take our quote manager application,
+    we can identify the *quote finder* service, which can be isolated from the *quote
+    update* service, for instance. This is a business criteria for the isolation,
+    but in practice, you will often want to go further to isolate the execution of
+    your services, including the use of the tenants. It is not rare to want to use
+    a different pool for different tenants. This is actually often even related to
+    different contracts clauses.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To illustrate this concept in a Java EE application, we will update our `QuoteResource#findId`
+    method to apply this pattern. The first step will be to isolate the invocation
+    from the servlet container context/threads. To do so, we will make the method
+    asynchronous, using the JAX-RS `@Suspended` API and a Java EE concurrency utilities
+    thread pool:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we created and configured, into the container, a dedicated pool for a
+    part of the application called `threads/quote-manager/quote/findById`. The `findById`
+    method executes its original logic in a task submitted to this dedicated pool.
+    Using the JAX-RS asynchronous API, we manually `resume` the request response,
+    since the container doesn't handle the execution of the logic anymore, but we
+    do it ourselves.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This implementation works only if the thread pool has a maximum size to ensure
+    that the execution is controlled. If you use an unbounded thread pool, this will
+    not help control your application at all.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are other ways to implement a bulkhead not relying on different threads,
+    such as using `Semaphore` as we saw in the threading chapter, but they don't allow
+    you to isolate the application logic from the container threads. Thus, it can
+    have side-effects on the overall application (or even cross-applications if you
+    use the same HTTP container thread pool). The main advantage of using a no thread-related
+    implementation is that it is generally faster even if it doesn't isolate the executions
+    as well as the thread-based implementation. Here again, make sure to benchmark
+    your application to know which implementation best fits your case.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Timeouts
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The last and very important criteria to ensure control over the performance
+    and to ensure that the performance is bounded (your application doesn't start
+    being very slow) is related to timeouts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'An application has timeouts everywhere even if you don''t always see them:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The HTTP connector, or any network connector in general, has timeouts to force
+    the release of clients connected for too long.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Databases generally have timeouts as well. It can be a client-side (network)
+    timeout or a server-side setting. For instance, MySQL will cut any connection
+    that lasts for more than 8 hours by default.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Thread pools can handle timeouts if an execution is too long.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The JAX-RS client supports vendor-specific timeout configuration to avoid blocking
+    the network later.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Configuring timeouts enables you to ensure that if something starts being wrong
+    in your system, including a remote system being slow or unresponsive, you will
+    be able to respond in a correct (or, at least, bounded) duration. Of course, you
+    will cumulate all the timeouts in the worst case, considering you use them synchronously
+    and not concurrently, but at least, you will know the maximum duration a request
+    can take in your system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Timeouts for code without timeouts
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'A trick for adding timeouts to methods that weren''t designed to handle timeouts
+    is to use a thread pool. A thread pool allows you to execute tasks and wait for
+    them for a certain duration. Of course, it means that you will block the calling
+    thread, but you will block it for a certain amount of time:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This code will compute some value or throw `TimeoutException` if it lasts for
+    more than 10 seconds. Wrapping any code inside such a block will allow you to
+    handle a timeout for any sort of code. However, this doesn''t mean that the wrapped
+    code ends after 10 seconds; it just means that the caller doesn''t wait for it
+    anymore. The task, however, is still submitted and can last forever taking a thread.
+    To stop you from needing to keep a reference on `Future`, the `submit` method
+    will return and cancel the task, allowing you to interrupt the execution thread:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: Now, if we get a timeout, we can cancel the running task, so as to not leak
+    tasks, and potentially fill the thread pool even if we have timeouts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you want to handle some failover on a timeout, you can add it in a block
+    that catches `TimeoutException`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we saw that properly handling faults in an application is the
+    key to ensuring that you can still control the response time of your system and
+    keep it under control in any circumstance. This is true for any system but with
+    the spreading of microservices, it is even more true for systems using this architecture.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Well, defining how your Java EE application is deployed and what is needed to
+    ensure you control all the potential failures of your system is a full time job;
+    we often forget to work on the *main* codepath of our applications, but doing
+    so ensures that the production deployment and behavior are sane.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This chapter showed you some common patterns used to handle fault tolerance
+    more or less transparently and reliably.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Logging is another important factor when issues start popping up in a system.
+    It will allow you to investigate what happened and identify the issue to fix it.
+    However, logging too much or without reflection can be very costly. This is what
+    our next chapter will be about: ensure that you are correctly leveraging your
+    logging regarding the performance factor.'
+  prefs: []
+  type: TYPE_NORMAL

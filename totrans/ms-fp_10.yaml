@@ -1,0 +1,1636 @@
+- en: Patterns of Advanced Functional Programming
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We are probably already familiar with the concept of patterns from object-oriented
+    programming. Patterns are common solutions to common problems. Whenever you have
+    a problem that repeats from project to project, solutions also tend to repeat.
+    Similar problems are solved similarly. And hence, such solutions become patterns
+    that are widely accepted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Functional programming also has its own patterns. Since it has certain problems
+    and challenges unique to it, it will also have unique solutions. In this chapter,
+    we will discuss solutions to common functional programming problems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Monad Transformers
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Tagless Final
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Type-level programming
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Monad Transformers
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Monad Transformers is an important pattern of purely functional programming
+    that allows us to combine effect types. Let's now discuss it in detail.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The specialization of effect types
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We've discussed how effect types are ubiquitous in purely functional programming
+    and are used in order to abstract away side effects. You may have also noticed
+    that these types are highly specialized, which means we have almost one-to-one
+    mapping between side effects and effect types. For example, the ability of an
+    application to return null is represented by an `Option` side effect type. `Option`
+    is good for such null situations. However, it does not perform well when tasked
+    with modeling errors and exceptions. This is because it does not preserve the
+    information of the nature of the failure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A data type that is good for modeling erroneous computation that can fail is
+    `Either`. However, if you try to model a computation that returns null with `Either`,
+    you will find that this data type is redundant for these purposes. This is because
+    whenever you have a computation that does not return a value, you will still need
+    to return something from it. In the erroneous scenario, we could have done the
+    following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'However, what do you return in the same scenario with `Either`? If the correct
+    result is to be modeled by `Right`, we should model an empty result with `Left`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'However, `Left` is also supposed to contain a value. What do we return in `Left`?
+    Our best bet would be to return a string that explicitly says that the computation
+    did not produce any result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, this usage of `Either` is rather contrived in this example.
+    This means we have a situation where side effects are fine-grained, and every
+    side effect has its own representing effect type. This is a natural situation
+    for Scala, as for any strongly-typed language. The finer your type system matches
+    the side effects, the more side effects you can model out of the box.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This also means that when we have more than one side effect, we need to think
+    about how are we going to present and combine them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An application with multiple side effects
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Modern applications aim for asynchrony. This means that whenever you need to
+    compute anything, and it may take a long time, you do not compute it in a synchronous
+    manner. That is, you do not wait for the computation to produce a result. Instead,
+    you program in a non-blocking style. This means that you schedule computations
+    to run at some point in the future and wait for the result.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Asynchrony
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Consider an example of a web server tasked with handling incoming HTTP requests
+    in a setting of a web application that manages an online forum. Consider that
+    the requests in question are to be responded to with the data about all of the
+    forum posts present in the database. This means that in order to reply to any
+    given HTTP request, we first need to obtain the required data from the database.
+    The solution may look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the preceding example, the types and methods are declared as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: However, this is not the only task that our application needs to do. Consider
+    also that our forum is private, which means we need to authenticate a user prior
+    to giving them access to the forum.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Nowadays, a popular way to authenticate is to use a cloud solution for authentication.
+    This means that people do not implement the authentication mechanism themselves
+    on the server side, but outsource it to some  provider. Such a mechanism is known
+    as **Authentication as a Service** (**AaaS**). A number of companies provide out-of-the-box
+    services that you can use in your application to authenticate. There are many
+    benefits to the approach since you do not need to waste your time implementing
+    authentication logic, and it can include not only password authentication, but
+    also social authentications and fancy security mechanisms such as two-factor authentication.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, if we are using a cloud-based solution for our authentication, this
+    means that we most likely need to contact the cloud every time a user tries to
+    log in. Modern authentication methods, such as JWT, imply a stateless authentication.
+    It is possible to produce a JSON tag that the user can pass to a server, and the
+    server can verify its authenticity using a cryptography mechanism. So you do not
+    need to keep a state to authenticate a person. However, even in this scenario,
+    you are most likely going to need to contact your cloud-based authentication platform
+    to obtain keys that you are using as well as to verify that the user is indeed
+    present in their databases.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'How is all of the this relevant to our functional programming example? The
+    thing to notice here is that we need to contact the web. The operation of contacting
+    the cloud is a long-running one. For the time being, let''s assume this operation
+    is done in a synchronous manner, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The following declarations were added to our environment:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code snippet, we ask the cloud-based authentication service
+    whether the user is authorized to perform the action, and if they are, we reply
+    with the forum post.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Imagine the preceding server under a high load. Immediately, questions arise
+    about the number of threads that can be used in handling the `HTTP` request. Also,
+    a question arises about how fast a web server can handle any given request. Imagine
+    we have four threads on the task. Imagine also that it takes roughly one second
+    to handle a given request as there is latency involved in contacting the database
+    and the cloud-based authentication service. How much of a load can a server tolerate?
+  prefs: []
+  type: TYPE_NORMAL
+- en: If the load is more than four requests per second, the server will start running
+    out of threads. Imagine the server handles four requests simultaneously. This
+    means that all of its four threads that are allocated for handling HTTP requests
+    will be busy for one second. Consequently, the server will not be able to handle
+    further requests until it handles those four requests. This means that if, for
+    example, five requests arrive at the same time, the first four of them will be
+    handled in one second, and the fifth one will take two seconds to handle. This
+    is because it will not be started until the first four requests are handled.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The threads that handle this request do not really do anything the majority
+    of the time. During the first call to the cloud authentication solution, the majority
+    of the handling time is waiting to receive a reply from the server. And when it
+    subsequently calls a database, that majority of the time it waits for the database
+    to reply. If the thread spends the majority of its time waiting for the replies,
+    this means that the processor does not do anything useful, that it has some free
+    power and free capacity to work on some other tasks, such as maybe handling the
+    other incoming requests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This reasoning is precisely why the synchronous way of handling is not desirable
+    in applications that are designed for high loads. An alternative is an asynchronous
+    approach. In the asynchronous approach, whenever you have a long-running computation,
+    you dispatch it to a thread pool using an asynchronous primitive, for example,
+    a `Future`. And then, you specify what to do once the task is completed. The trick
+    in an asynchronous application is to build it from asynchronous primitives that
+    do not block. So, for example, the act of requesting information from the database
+    should not involve blocking or waiting for a response, even on a thread within
+    a future. The point is that the thread that makes a request is free to do other
+    tasks once the request is made and it has nothing else to do.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The point is to utilize a non-blocking API to perform HTTP requests and requests
+    to the database so that your threads, which are quite heavyweight primitives in
+    the Java world, do not block and do not wait for responses and are not wasted,
+    rather, they should do something useful.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'An application handler in an asynchronous style would look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: It still takes about one second for a single request to get handled, because
+    the delay that you experience once requesting external resources still exists.
+    However, now the server will perform much better under high loads. This is because
+    the threads themselves do not wait this entire one second on a single request.
+    Instead, for them, the only time that counts is the time when they actually do
+    the job, and not the time they wait on the external resource to reply to them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So, for example, if the real processing time of a given request, meaning the
+    time the thread is actually doing the work and not waiting for a reply, constitutes
+    10 milliseconds, then a single thread is capable of accepting and handling 100
+    requests per second.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The preceding discussion describes why you might need the side effect of asynchrony
+    and programming with callbacks in practice. And asynchrony is a side effect that
+    you might want to hide behind some primitives, such as a future.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, asynchrony is not the only side effect that you might want to abstract
+    away in the case of writing an HTTP handler. Another side effect that you might
+    want to abstract is the side effect of an error. Now, let's discuss this side
+    effect in detail.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The side effect of errors
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the preceding example, we saw that thing do not always go smoothly. Things
+    can go wrong on multiple levels. So when we connect to the cloud authentication
+    service, the connection itself may go wrong. For example, the server reply times
+    out. Or, your application credentials are wrong and you do not end up accessing
+    the feature of the cloud authentication service that you would like to access.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When contacting the database, things can also go wrong. For example, you may
+    fail to establish a connection with the database. Or, for some reason, the data
+    is not present in the database or is not in the correct format.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Finally, the business logic of the application allows for an error. This one
+    happens when the person making the request to the server is not authorized to
+    view the data they request. In such a situation, we will need to reply with an
+    error message instead of the data they requested:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: All of the cases discussed here are a clear evidence that we have a side effect
+    of an error here as a potential. Normally, we would abstract away this side effect
+    into an effect type. Then, we'd use the `flatMap` function in order to combine
+    these computations. However, we already have one effect type, `Future`, that abstracts
+    away the asynchronous nature of request-handling. How do we introduce another
+    side effect here?
+  prefs: []
+  type: TYPE_NORMAL
+- en: First of all, a note should be made that `Future` itself provides a capability
+    for error reporting. However, this is a detail specific to the Future's implementation.
+    It is perfectly possible to imagine asynchronous primitives that provide you with
+    the abstraction of asynchrony but do not catch the errors that happen inside them.
+    So here, we will be viewing the situation as if the Future does not provide the
+    capability of error-handling.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A naive way to handle that scenario would be to make the computation return
+    a `Future` of an `Either` of a result. So, for example, the query to the database
+    and the cloud service would look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code, we stack the side effects one on top of another. Will
+    that work in practice? In principle, it is possible to imagine a computation that
+    returns an `Either` under a `Future`. Let's have a look at how we will be using
+    it in combination with other complications. Previously, we used the `flatMap`
+    function to combine the computations sequentially. How would such a combination
+    look in the case of nested side effects?
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The preceding code does not compile. The error is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/304daf7c-6009-442c-b238-bb47c4118f40.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: As you can see, the compiler says that we are using `Either` in position where
+    `Boolean` is expected. So `authenticated` variable in the snippet above is `Either` 
+    instead of `Boolean`. However, why would we be working on `Either` under the Monadic
+    flow? Is that not a purpose of Monadic flow to abstract away the effect types
+    so that we are able to deal with the computed values directly without having to
+    worry about the effect types?
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Actually, we can rewrite the preceding example in terms of `flatMap` for better
+    readability:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s now check the signatures and types of all the values involved. First,
+    let''s check the type that we are calling `flatMap` on, `Future[Either[/*...*/]]`.
+    After, we are working with the result as if it were the user object retrieved
+    from the cloud authentication service. However, let''s take another look at the
+    signature of `flatMap` as defined by `Future`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/8811b158-4d18-4dc4-b28e-0a3b6524fb6c.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: So the function already has a familiar signature: `A => Future[B]`. What is
+    `A`? It is the type parameter of `Future`. What is the type parameter of our particular
+    `Future`? This type parameter is `Either[String, User]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'That means that `flatMap` does not give us the user object, but `Either`. Using
+    this information, we can alter the example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we manually extract the result value from `Either`. Immediately, we can
+    say that something is very wrong and needs to be corrected. The feeling of something
+    wrong arises because previously we have discussed that the very point of having
+    Monadic flows and the `flatMap` function is to abstract away effect types. Yet
+    here, we need to work with them explicitly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Monad Transformers
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The problem here is that the `flatMap` function is defined on the Future. It
+    knows nothing about the type parameter of Future. This can be anything you can
+    imagine. Implementation does not place any constraints on the type parameter.
+    It also means that it knows nothing about this type signature and its properties.
+    Hence, neither the Monad nor the Future default implementation of `flatMap` for
+    Future is aware of the possibility that the type parameter to Future will be another
+    effect type. So, when you stack our effect types in the manner discussed earlier,
+    only the topmost effect type gets abstracted when we are using the `flatMap` function.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This behavior is unnatural. We didn't get what we expected. What did we expect
+    to get? We expected that not only would the side effect be unwrapped, but its
+    inner side effect would also be unwrapped.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When we have nested effect types, and when we expect them to be treated as one
+    effect, we need Monad Transformers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Monad Transformers is actually a pattern that can be used to define stackable
+    versions of already-existing effect types. For example, let''s have a look at
+    how such a Monad Transformer is defined for the `Either` type in the `cats` library:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/dc4d33d9-d278-4e58-9eea-5715e0042fb0.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Let's have a look at the signature of this Monad Transformer to understand what
+    it is. First of all, notice the type parameters of this case class. Instead of
+    the usual two type parameters of an ordinary `Either`, we have three type parameters.
+    The first parameter is an `F[_]` effect type, and the last two parameters are
+    ordinary left and right types. That effect type is precisely what gives this Monad
+    Transformer its stackability. So, we can stack it with other effect types by pumping
+    these effect types into the type variable. Notice also the argument to the constructor
+    of `EitherT`. The argument in question has the `F[Either[A, B]]` type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's imagine that the variable effect type in the preceding example is `Future`.
+    Then, the value of `EitherT` will be `Future[Either[A, B]]`. This is precisely
+    the signature that we had in our preceding examples when we were trying to stack
+    these two effects types.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So the pattern essentially builds up on top of the naive stacking of effect
+    types. However, here we have a case class defined specifically for stacking. How
+    does it work, and how does it allow us to combine effect types?
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First of all, let''s have a look at how the `flatMap` function is defined by
+    this data type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/131e54f2-1857-4d05-891d-f87760099a3b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: As we can see in the preceding screenshot, the method takes the continuation
+    function as an argument, which is something we already know. However, pay attention
+    to the first argument of the continuation function. It is `B` here. `B` is the
+    type of the `Right` value of `Either`. `Either` is wrapped under the `F` type.
+    So, if we are going to use `EitherT` instead of a naive combination of `Future`
+    and `Either`, we are going to end up with a `flatMap` function that does exactly
+    what we are looking for.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, also notice that this function implicitly depends on a Monad for the
+    side effect type. Which means that in order to extract the result from `EitherT`,
+    we need to know how to extract the result from the effect type you are combining
+    it with:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'So, arming ourselves with `EitherT`, let''s rewrite the previous example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, we now have all of our computations defined in terms of the
+    combined effects types. Also, we are able to leave our Monadic flow unchanged,
+    meaning that we do not need to worry about extracting the results of our side
+    effecting computations manually.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you have a look at the `EitherT` documentation, you will see that it also
+    provides you with a bunch of other convenience methods that you can use in the
+    setting of nested effect types.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Generalizing the pattern
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Obviously, the pattern we discussed previously is not specific to `EitherT`.
+    It is something we are frequently going to encounter when dealing with effect
+    types. It is not about `Future` and `Either`, but about combining two independent
+    types.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Since this task repeats from effect type to effect type, it was generalized
+    into a pattern. The pattern goes as follows. First, you pick up an effect type
+    that you would like to be combinable with other arbitrary effect types. Then,
+    you define the alternative combinable version of this type. This way, for `Either`,
+    we have defined a combinable version of it, `EitherT`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After that, you define all of the necessary type classes of the given effect
+    type, optionally depending on whatever you need to make it work, including the
+    type classes for the effect type you are going to combine this effect with.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you have a look at the data package of the cats library, you will find that
+    it has a number of other effects ending with the letter `T`. These are implementations
+    of Monad Transformers for the respective effect types.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The significance of having Monad Transformers in your toolbox is that now you
+    are able to construct effect types from existing effect types like you would from
+    Lego blocks. This greatly increases your flexibility; now you do not need to define
+    dedicated effect types that would express the side effects you would like to capture.
+    If these side effects are expressible as a combination of several other side effects,
+    you can use Transformers to create a combined effect type and use it in your applications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We were observing the combination of two effect types. But, you are not limited
+    to the combination of only two effects. In fact, the pattern is sufficient to
+    combine any number of effect types into one. For example, this is how such a combination
+    might look:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Since `ReaderT` expects an effect type, `F[_]`, as its first argument, we manually
+    make a **hole** in `EitherT` by the means of the question mark—`EitherT[Future,
+    String, ?]`. The syntax is not standard to Scala and comes from the Kind Projector
+    plugin that is imported in the project''s `build.sbt`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `?` in the type signature creates an unbound type variable in a type signature,
+    which can be used to give the type the shape of `F[_]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`ReaderT[EitherT[Future, String, ?], Config, A]` is a Transformer way to express
+    the following type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: So, when talking about the Monad Transformers pattern, first and foremost we
+    are talking about flexibility. However, this is not the only pattern that can
+    provide you with extra flexibility when writing your programs in a purely functional
+    manner. Next, we will have a look at the Tagless Final.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tagless Final
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Tagless Final is a popular pattern of advanced functional programming that can
+    be used to abstract away capabilities and side effects you do not know ahead of
+    time and cannot predict. As usual, the best way to see how it works and why it
+    is useful is to look at some examples.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Programming to capabilities
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Imagine you are writing an application that is to be executed against more than
+    one environment. Such scenarios are common in the real world. A good example is
+    mobile applications. You can have multiple mobile platforms. However, you would
+    like to publish your applications to all of them. The platforms that exist are
+    quite different from each another. And usually, it is pretty tedious to reimplement
+    your application for every platform separately. So, you would like to write our
+    application once, and somehow make it run against all of the platforms that currently
+    exist.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another example is programming server-side software that should work against
+    a wide variety of configurations. For example, the same server-side software is
+    executed against different databases. Relational databases are different, and
+    procedures that are applicable to one database may not be applicable to another
+    database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In all of the preceding scenarios, you wanted your application's business logic
+    not to be affected by the peculiarities of the system you are running your code
+    on. In object-oriented programming, a standard way to tackle such an issue is
+    to apply a Facade pattern. You declare an interface that lists all of the capabilities
+    that you need from the underlying system your application is supposed to be run
+    against. After that, for every specific system, you are going to provide an implementation
+    of the interface.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The key points to notice from this discussion are the capabilities. Your application
+    depends on some capabilities. It is built in terms of the methods exposed by the
+    interface that specifies the capabilities in question. This idea also reiterates
+    in the Tagless Final pattern.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To make it easier to understand the pattern, let's come up with a simple example
+    of an application depending on some capabilities. The first one would be to read
+    a resource from the data storage of a system. A resource is a wide notion that
+    may include files on one filesystem, access to data over the network on other
+    environments, or access to data that is stored in a database and other environments.
+    Another capability will be the notification capability, which means the application
+    is able to notify the end user of whatever job it is doing with the data retrieved
+    from the storage.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Given these two capabilities, it is possible to write a wide range of processing
+    applications. Once we have abstracted away the effects of reading and notifying,
+    we can build a processing application in terms of these effects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'How would we define such capabilities in a functional manner? What would make
+    the most sense? Previously, we discussed the idea of a type class. We have also
+    noted that a type class is very similar to a toolbox, which means it provides
+    you with a set of tools that you can use for a certain purpose. That analogy is
+    ideal for our case of storing capabilities. Capabilities are also, in a sense,
+    tools, and tools can be united into toolboxes. So, it is conceivable to define
+    a type class with the capabilities we need as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: Notice that we define the type class for an `f` effect type. Since we are working
+    in the functional paradigm, and the capabilities are likely to produce side effects,
+    we are going to describe these side effects by some effect type that we may not
+    know ahead of time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Next, we can define an application in terms of these capabilities provided
+    by the type class. Imagine the resources that we are going to retrieve with the
+    help of our capabilities are reports of the sales of some online shopping:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Consider that this document is updated every day, and the objective of our
+    application is to calculate the amount of money the business has made over the
+    day and to notify the owner about the income. We can implement it as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: Notice how the preceding method is defined in terms of the `F` effect type and
+    its subclasses. Notice how we do not know ahead of time which effect type we are
+    going to use here. However, we know exactly which capabilities this effect type
+    must have—the capabilities that we defined earlier, but we also need a Monad.
+    This is because we need to sequentially combine capabilities defined in our custom
+    type class. Then, we define our application in terms of our capabilities.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An important thing to notice here is how our capabilities become defined in
+    the same language as the other type classes. This means that, potentially, we
+    have the entire power of the `cats` library or any other libraries for functional
+    programming.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is what makes the Tagless Final pattern different from the Facade pattern.
+    In Facade, you have the interfaces that hide the complex functionality that is
+    platform-specific and that you do not care about. However, this is it. Whenever
+    we call such a capability, we get the result you are requesting and nothing else.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the Tagless Final pattern, whenever you are calling a capability method,
+    you are getting a result under an effect type. An effect type is a data structure
+    that has certain properties. You may not have control over exactly what result
+    the capability returns because it is system-specific. However, you have control
+    over the data structure in which this result is returned. The data structure in question
+    is specified by the type parameter. Different data structures have different capabilities.
+    In other functions, when we specified that we implicitly needed a Monad, we stated
+    something about the structure we are going to work under. We can state that our
+    effect type is to be sequentially composable. In the same way, by specifying implicit
+    dependencies on other cats type classes, we can state other requirements of our
+    data structure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This control over the data structure we are working under gives us control over
+    how we can compose our computation. So, in the Facade pattern, only the platform-specific
+    capabilities themselves get abstracted away, and that's it. However, in the Tagless
+    Final pattern, not only do the computations get abstracted away, but the way we
+    compose our program gets abstracted away under the `f` effect type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now, once we have the abstract program composed, a reasonable question to ask
+    would be how do we actually run it against different environments?
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementations
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In order to run this application against a given environment, we need to specify
+    the effect type we are going to be working under. Besides the target effect type,
+    we need to find the implementation for all of the implicit dependencies that our
+    function requires. The beauty of the Tagless Final pattern is that we can run
+    the function against any environment, as long as we can provide the implementation
+    of our implicit dependencies for this environment and for the effect type of our
+    choice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The first step is to specify the effect type. A good choice would be Future,
+    since it is a concurrency primitive, and capable of representing a wide range
+    of computations. So, with the effect type set to Future, we will have our method
+    called as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: However, the preceding code will not compile since we do not yet have an implementation
+    of the  `Capabilities` type class for Future.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now when we are talking about the capabilities we need, we need to ask ourselves
+    against which environment we are working in. Remember that the capabilities abstract
+    the operations that are different from environment to environment. First, let''s
+    imagine we are working against an ordinary desktop environment and a command-line
+    application scenario. In this case, our retrieve resource capability would be
+    simply reading a file with a given name from a standard directory. Our notification
+    capability will print the output to the command line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: We are using an Apache Commons IO library to read a file, conveniently. We are
+    doing everything under the concurrency primitive future because this is the requirement
+    of our application. Notice how all the technical details of notifying and reading
+    the file are concentrated in that type class only, to the point where we can import
+    the `File` and `FileUtils` classes only in the scope of this type class and not
+    the scope of the entire file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Once we run the preceding application against the given file, we are going
+    to receive the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'What if we now need to run the application against an environment that uses
+    a database to store the data? What if that notification is done via email and
+    not via the command line? No problem, we still can use the same application. However,
+    we will need to provide a custom implementation of the capabilities for this environment:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code, we have implemented a type class in terms of stubs, because
+    implementing the database query logic and an email notification logic can be pretty
+    tedious. However, our application now compiles. So, if you substitute the implementation
+    of the database query and email dispatch in the preceding type class, you will
+    also be able to run the application successfully. Since this implementation is
+    outside the scope of this book and does not bring any value to the discussion
+    of the Tagless Final pattern, we will not provide the implementation here.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In a similar manner, we are able to provide the implementation for almost any
+    platform that you can imagine.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can also do the preceding really well with the Facade pattern. So how is
+    Tagless Final more powerful than the Facade pattern? Why would you use it instead
+    of the object-oriented pattern? The crucial detail in discussing the power of
+    the Tagless Final pattern is to notice that our application depends not only on
+    the capabilities type class but also on the Monad type class. So how does that
+    bring more power than a Facade pattern? Let's have a look at it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Execution semantics abstraction
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The capabilities type class is on equal ground with the `Monad` type class.
+    The `Monad` type class defines how you would compose the computation sequentially.
+    There is a saying that Monad is the semicolon of functional programming. Why would
+    people say that? What is the role of a semicolon in object-oriented programming? In
+    ordinary imperative programming, a semicolon is a symbol that separates one statement
+    from another. The meaning of a semicolon is that one statement should be executed
+    after another statement. In a sense, you can treat a semicolon as an operator
+    of the sequential combination of two computation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `flatMap` function does exactly that for the functional programming world.
+    `flatMap` defines how to sequentially composed two computations. So, this makes
+    it a semicolon of functional programming. Also, earlier in the book, we looked
+    at the Monadic flow pattern. We know that Monadic flow relies on `flatMap` under
+    the hood to represent the functional code that is composed sequentially. In this
+    way, it is very similar to the imperative semicolons.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How is that important for our discussion of the advantage of the Tagless Final
+    pattern? The point is that an application that depends on Facade does not usually
+    depend on any anything similar to a Monad.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This means that you may substitute a different Facade in your application for
+    different environments. However, you will never be able to change the semantics
+    of the sequential execution of your statements.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s see how it works on an example. Let''s say that we need to perform logging
+    while executing the preceding application. What do we do to make it possible?
+    We can provide a custom implementation of Monad with its `flatMap` function, the
+    sequential composition operator, been overloaded to log everything we need:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can run the application by pointing the `income` method explicitly to which
+    type classes to use:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'And the output will be as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/a0228057-b872-4f7f-bca7-a3e59eae04b8.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Here, we are able to overload the very semantics of sequential composition.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Can a similar effect be achieved in the imperative world? Let''s have a look
+    at how the preceding example could be implemented with the Facade pattern:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code, we have an interface, and the method `income` depends
+    on the type class that performs the computation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We are not able to override sequential composition, because the only point of
+    control is the interface. We do not have control over how the computations are
+    executed and combined with one another.
+  prefs: []
+  type: TYPE_NORMAL
+- en: But why is that possible in the functional world and not in the imperative world?
+    What makes the functional approach so special that we are able to do this kind
+    of abstraction of combinational semantics?
+  prefs: []
+  type: TYPE_NORMAL
+- en: Computation as a value
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: When discussing side effects and abstraction, we argued that functional programming
+    aims for purity. And whenever we have some computation that has a side effect,
+    we are reifying this computation into some value. Here, the value is `Future`.
+    All our computations are reified into Future. And we are able to combine `Future`
+    using the operators defined for it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the imperative world, we are not able to perform the similar combination
+    of computations, since the computations are not reified to values. We are not
+    able to play around with computations in the imperative world because computations
+    are not a thing there. There is no way for us to refer to a computation. At least
+    no obvious way. Of course, in Java, we can stuff the computation under the Runnable
+    interface. However, it will be quite cumbersome. In the functional world, Monads
+    are ubiquitous in sequential composition. Everything is composed using `flatMap`.
+    In Java, wrapping everything in Runnable would introduce too much architectural
+    overhead, so it is not worth it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, one might argue that Futures are not pure. Whenever we instantiate
+    Future, we give an instruction for a computation to start. Is there an even stronger
+    version of the Tagless Final pattern that provides us with some more expressive
+    power?
+  prefs: []
+  type: TYPE_NORMAL
+- en: Free Monad
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The Free Monad  pattern is a stronger version of the Tagless Final pattern.
+    Actually, the free object is a structure from abstract algebra. Hence the name
+    comes from this domain.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application of the pattern is rather limited, and most likely we will not
+    encounter any real necessity for the pattern while only starting purely functional
+    programming. So we will not go in depth about the Free Monad here. However, we
+    will describe in general how it works.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Basically, the idea behind the Free Monad is that all of our computations become
+    a value. The idea is that whenever we define our application, it does not really
+    execute itself, but constructs an abstract syntax tree that describes the application
+    that we can run later. And it is our responsibility to execute it afterward.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The pattern is quite heavyweight, so the preceding example offers only the gist
+    of it. Another thing to notice is that whenever we need to apply the Free Monad
+    pattern, we can still leverage the Tagless Final pattern. Here, we saw how defining
+    a custom implementation for the Monad can be helpful to inject custom functionality,
+    such as logging. The same idea can be used to construct a tree out of our application.
+    Ordinarily, the meaning of the sequential composition is to run one statement
+    after another. It is easy to imagine an implementation of the sequential composition
+    where the statements are not executed one after another but are reified into tree
+    nodes and get injected into a tree that represents your application. Remember
+    that `flatMap` has full control over how it continues the computation. So it is
+    perfectly normal to imagine a `flatMap` function that does not run statements
+    but uses them to construct a tree.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Why might we want to use the Free Monad pattern? The idea here is to be able
+    to run the computation against more than one interpreter. A concrete example comes
+    from the `doobie` library for working with SQL. In Doobie, a SQL statement can
+    be written as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we are using string interpolation, a feature of Scala that allows us to
+    generate objects from strings on compile-time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After executing this statement, we will perform several calls on the object
+    specifying what we want to do with the SQL statement, such as whether we want
+    to query or update the database. For example, if we want to query the database,
+    we can do the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: One common task when working with SQL from programming languages is to provide
+    as much safety as possible while calling the database. For example, we might want
+    to answer the question of whether our query is formed correctly. We might want
+    to have an entire test suite where we have all of our queries that we are using,
+    and we test them to check whether they are formed correctly and whether their
+    return types are the ones that we expect.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Internally, Doobie represents its SQL queries with free objects, which means
+    that they are just data structures that specify the computation to be performed
+    against a database. Since it is just a description of the computation and not
+    the computation itself, we can either run it or do anything else with it. One
+    of the things that we might want to do is to check whether it is correct against
+    certain rules. This is done in Doobie. Here, we can either run our queries against
+    an interpreter that will query the database, or that will check their correctness.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So basically, in such situation when we have a computation that we might want
+    to run against different interpreters, or we might want to pass around and modify
+    by other computational, we might want to use a Free Monad.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A word of caution should be said as the pattern is heavyweight, it should not
+    be used without a good reason, or else the overhead in terms of architecture will
+    be pretty high.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Speaking of the safety of your application, you can achieve a high grade of
+    safety and stability if you perform as many computations as possible at compile-time.
+    The very basics of programming to type classes is having a strong compiler with
+    a strong type system that is capable of injecting proper type classes for you.
+    Can such a strong compiler be harnessed to perform more than just injecting capabilities
+    and type classes into your computations? Let's step into the world of type-level
+    programming in the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Type-level programming
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The job of the compiler is to translate your program from one set of instructions
+    into another. In high-level languages, you translate higher-level instructions
+    that are easy to read and write for people to lower-level instructions that are
+    easy for machines to execute.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Since the compiler needs to perform a conversion of one set of symbols into
+    another set of symbols, it builds some internal model of the program that you
+    are writing. In a sense, we can say that the compiler understands the program,
+    for some definition of **understands**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If the compiler builds an internal model or understands your program in some
+    other way, we can also harness the power of compiler to make the compiler check
+    for the correctness of the program. We can make the compiler impose and enforce
+    certain styles or guarantees that your program must obey. We have already seen
+    an example of `annotation.tailrec`. The job of the annotation was to instruct
+    the compiler to check the annotated function to have certain guarantees about
+    it. Concretely, the compiler checked the function to be tail-recursive.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To ensure correctness of your program, we may well use a strongly typed language,
+    and encode the guarantees and the semantics of your program in types. The types
+    are known to the compilers, and hence, it can perform certain checks on these
+    types. For example, it can make sure that you supplied an argument of the correct
+    type to a function because it knows the input type of the function. So, in a strongly-typed
+    language, no longer can you make the mistake of passing an argument of the wrong
+    type to a function.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The advantage of having strong compilers that check the program for mistakes
+    is that you are able to catch more errors at compile-time. In general, errors
+    that are caught at compile-time are much easier to debug and fix. If an error
+    happens at runtime, it means that it is not discovered right away. You may release
+    your application to the end user, and for particularly tricky bugs, months and
+    even years can pass before they are discovered. Once they are discovered, you
+    need to investigate the erroneous behavior yourself throughout the codebase and
+    try to reproduce it so that you can fix it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Compile-time errors are manifested right away. When you compile the code, you
+    see exactly how and where you went wrong. So there is an obvious advantage to
+    making sure the compiler can catch as many errors as possible.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Can we push our compiler even further? Let's have a look at an example of the
+    type-level programming in Scala. It is called type-level because we aim to encode
+    as many guarantees about our program as possible in the types. This way, these
+    guarantees are checked at compile-time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A naive implementation of the heterogeneous list
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Consider that we have the following list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'So, in the preceding list, we have elements of different types, and hence we
+    are forced to declare this list as `List[Any]`. `Fraction` is defined for the
+    purpose of our example as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Notice that in the preceding list, each element can be represented as a floating-point
+    number. They have different types, but it is possible to define certain common
+    behavior on all of these types. Since the elements are very similar to each other,
+    we might want to perform a common operation on them. For example, we may want
+    to find the sum of all the numbers in the list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: Notice that we are not able to sum all elements right away because the type
+    of the list is `List[Any]`. We can only add up a list composed of numbers. Hence,
+    we map our list so that it becomes `List[Double]`. After that, we call the same
+    method on this list, which is a standard method defined for all numeric collections
+    defined by the Scala collections framework.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the screenshot below, we can see the output of the program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/01ddaf44-f7b8-42fb-b81a-8321149931b6.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'However, notice the body of the `map` method. The body of the `map` method
+    is actually a partial function. A partial function is a function that is not guaranteed
+    to be able to handle an entire domain on which it is defined. Let''s look at the
+    signature of the `map` function, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/6dd64495-778e-488a-9d1a-24c83f9df650.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: In the preceding screenshot, you can see that it expects a function from the
+    type of the elements of the list to some other type, `B`. The type of our elements
+    is any. However, the function that we have passed to our function is a partial
+    function, meaning that it is only capable of handling a subset of all possible
+    object in Scala.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'That problem with partial functions is that they are computed at runtime. This
+    means, if you forget to specify a certain clause in the partial function, you
+    will not find out about that until the runtime when the application will throw
+    a match error signifying that the partial function was not able to handle its
+    input. Let''s simulate this situation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We have commented out one of the `case` clauses of our partial function that
+    we used to map the list. What happens if we run this application? See the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/c3d10b5a-4c72-42c1-9299-09e167e6b7f5.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: As you can see, an exception was thrown. The program was compiled successfully,
+    however, when we tried to run it, we had an exception. This means something went
+    wrong at runtime. Is there a way to make the compiler track these kinds of errors,
+    and handle them at compile-time?
+  prefs: []
+  type: TYPE_NORMAL
+- en: Type-level solution to the heterogeneous list problem
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The strategy for solving this problem is to encode the guarantees that we want
+    to have in types. We will leverage the highly-developed mechanism of implicit
+    resolution to enforce that guarantee on a certain type. The general idea is to
+    have a guarantee presented by an implicit value. And if we need a certain guarantee
+    about our program, we make our program implicitly depend on the value that represents
+    this guarantee.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The catch is that the application will not compile if the compiler does not
+    find any of the implicits the program depends on. So, by making the program depend
+    on the implicits that represent our guarantees, and making sure these values are
+    present in scope only if the guarantee is satisfied, we can make sure is that
+    the compiler will not compile a program that does not satisfy this guarantees.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, first of all, we need types. The preceding solution of a `List[Any]` is
+    not good for our application because the compiler does not have the information
+    about the precise types of the elements of the list. Instead, we can define a
+    data structure called a heterogeneous list. The code for this new list is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: Above, `jvm` is a package under which the JVM examples of this book are implemented.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A heterogeneous list is a recursive data structure. If you have a look at the
+    `:::` value, this `case` class is composed of a head and a tail. The head can
+    be anything you like, and the tail must be another instance of the heterogeneous
+    list. The terminal case of the recursive data type is `HNil`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is how we can define such a list in your application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Notice how this list is aware of the types of each of its arguments. Also,
+    notice how in Scala, we can leverage the infix notation that allows us to use
+    names of types as operators. Take a look at the following type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'It is equivalent to the following standard notation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is syntactic sugar to facilitate so-called algebraic data types. Algebraic
+    data types are data types that are composed of other data types in a type-safe
+    manner.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Next, how would we define an application that will compute a sum on a heterogeneous
+    list? Previously, in a partial function example, we saw that another problem was
+    compile-time safety. And here, we would like to include certain guarantees into
+    our code. We want the compiler to check these guarantees. What guarantees would
+    you like to impose? First of all, we need to make sure that our list can be mapped
+    to a list where everything is a double. Previously, we did it using a partial
+    function that is only run on the runtime. Here, we have agreed to use implicit
+    to specify the guarantees about our application. Hence, we can have our summation
+    method as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`MapToDouble` is a type class that we have just come up with. The job of the
+    type class is to convert a heterogeneous list so that all of its elements are
+    doubles. Notice that we pass a type parameter to this type class. It is the `L` type,
+    which extends the heterogeneous list. `L` extends the heterogeneous list and is
+    an algebraic data type, which means it is a composite data type that is composed
+    of the types of all of the elements of this list. This means that at compile-time,
+    the type class will be aware of the types of all the elements present in this
+    heterogeneous list, which means it is possible to define the type class so that
+    we will not be able to resolve it if the members of the list are not convertible
+    to double.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Are those all the guarantees we need? In principle, once we have a guarantee
+    and a way to convert our heterogeneous list to a list of doubles, it may not be
+    difficult to traverse the data structure recursively and sum up all of its values.
+    So, the summation method using the `MapToDouble` type class only can be implemented
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: Notice that we again are using a partial function to abstract the values from
+    the recursive data structure of the heterogeneous list. We terminate our or question
+    once we reach `HNil`. However, we have argued previously that partial functions
+    are bad because they can fail at runtime. Therefore, it can be instructive to
+    see how we can avoid usage of a partial function here.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'So, let''s introduce a new type class responsible for computing a sum on a
+    heterogeneous list. We can do so as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: So, we make our mapping capability and summation capability outsourced to the
+    type classes we have just discussed. However, what is `Aux` at the end of the
+    `MapToDouble` type class all about? Also, what is that new `LR` type parameter
+    added to the type of the sum function?
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Basically,  `LR` is the type of this list mapped to by `MapToDouble`. So, for
+    our list of the following type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This type will be as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code, you can see the auxiliary pattern. The entire point of
+    it is that we do not know the `LR` type variable and rely on the Scala compiler
+    to compute it. Compiler  computes the `LR` type is by means of implicitly resolving
+    the `MapToDouble` type class. The big picture is that the Scala compiler is able
+    to leverage the implicit mechanism to compute entire types and store the result
+    in a type argument variable, and then, we can reuse it in the implicit resolution
+    of other type classes. So, we are using this type computed by the auxiliary mechanism
+    to resolve the `Sum` type class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Why do we need to compute the `HList` type if we know ahead of time that all
+    of its elements are doubles? We may know the type of the elements, but we still
+    need the compiler's help to know how many doubles to stack into the resulting `HList`.
+    Remember that `HList` stores the type of every element, so if we say that all
+    of the elements are doubles, we still need to know the length of the list to construct
+    it. Here, the compiler is able to help us with this task.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'So how exactly does the auxiliary pattern work and how exactly is the compiler
+    capable of computing new types? To answer this question, let''s proceed to the
+    definition of our type classes. Let''s start with the `MapToDouble` type class:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: Notice that the type class has two members. The first is the `Result` type,
+    which represents the result type of mapping a given heterogeneous list so that
+    all of its members are doubles. Then, we have the method that performs `map` in
+    itself. Notice also that `MapToDouble` has only one type parameter, `L`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `Result` type is an abstract type, which means it is up to implementations
+    of the type class to define it. We'll see in a moment how to leverage this ability
+    to compute the result type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The catch is that, technically, the result type is not reflected in the type
+    of the type class. Which means, whenever we need this type class, for some `L` type,
+    we can resolve it as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the preceding code, the implicit method is defined as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/2a36e255-bccf-4b15-8c45-3361e27af4e8.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: So basically, the method is a utility to resolve an implicit value of a certain
+    type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Notice that when we request the implicit dependency on this type class, we
+    do not specify the result type, which means we are not required to know this type
+    when we resolve their implicit dependency. Now, imagine that you had your type
+    class defined as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now, with the preceding type class defined, we are no longer able to resolve
+    it without knowing the result it is going to compute. Indeed, we have no other
+    way to refer to this type class but as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: Since the type class has two type arguments, we must to provide it with both
+    of them. We might know the first type argument, however, because it is present
+    in our program, in the type of our `HList`. The type of our heterogeneous list
+    is constructed for us by the compiler when we construct the list itself. However,
+    the result of the conversion of this list to a list of doubles is not currently
+    known to the compiler. And we must provide it to resolve the implicit dependency.
+    Hence, we are forced to compute it ourselves.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Is there a way to make the compiler compute that, similarly to how it computes
+    the type of the list when you construct it? For this, we have the Aux pattern.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The auxiliary pattern looks as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: So, it is nothing more than a type definition inside the companion object of
+    our type class. Notice that here we are using structural types to define our auxiliary
+    type. The preceding program says that the Aux type of is `MapToDouble`, whose
+    body will contain a type member of `Result` set to a certain type variable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The catch is that we still are able to capture both of the type variables that
+    are significant to us, the input and output types, in a single `Aux` type. However,
+    when we are trying to resolve the type class implicitly, we are no longer obliged
+    to know both of the types.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'And so, we can implicitly depend on the `Aux` type, and the compiler resolves
+    this type without the knowledge of the second type parameter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Instead, the resolution will go as follows in this case:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The compiler will infer the first type parameter, `L`. It will infer it by looking
+    at the input argument. So, you do not need to provide it explicitly.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: It will start the implicit resolution. First, we need `MapToDouble.Aux`. This
+    type expands to the `MapToDouble[L] { type Result = LR }` type.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The compiler will interpret this as a command to resolve the `MapToDouble` type,
+    whose first type argument must be `L`. The second type parameter of the `Aux`
+    type is unknown, but it is not a problem, because, as we have discussed previously,
+    the compiler does not need it to resolve the type class. However, this second
+    type parameter has a name and is bound to a certain type, which is a member of
+    the type class we are about to resolve. The compiler will, therefore, infer this
+    second type parameter from the `Result` type of `MapToDouble`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: After this type class is resolved, we now have the `LR` type parameter. We can
+    now use it as an input to the next implicit resolution—that of `Sum[LR]`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The reason the preceding logic works, and that the compiler does not need the
+    second type parameter, `LR`, of `MapToDouble.Aux` is as follows. The type of the
+    type `MapToDouble` does not include the second type parameter `LR`, and `MapToDouble.Aux`
+    is an alias for `MapToDouble`. The type `L`, which is a type parameter to `MapToDouble`, is
+    all that the compiler needs to resolve the type class. If you think about it,
+    when resolving something implicitly, or specifying a type of some variable, you
+    do not need to explicitly specify the members of this variable. Since the second
+    type parameter is a member of an object to be resolved, we do not need to know
+    it when resolving our type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Aux pattern is used to capture the types that are structural members of
+    type classes into type arguments that can be referred to from the implicit group
+    of a method signature.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So basically, it is all about having the types that we do not know on call-time
+    as structural members of the type classes, not the type parameters of these type
+    classes. This way, the types that we will not know ourselves and will need to
+    be computed will not be members of the signature the type signature of the type
+    class. And hence, we can resolve these type classes without knowing their member
+    types. So, we can compute these types on implicit-resolution time, leveraging
+    algebraic data types principle. We will see how exactly we can compute these types
+    using the mechanism of implicit resolution in the following code snippet.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This is how the function that we have just defined can be applied to a heterogeneous
+    list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output of running the program is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: Next, let's have a look at how the implicit mechanism resolves all of the dependencies
+    we need.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reclusive implicit resolution
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Let''s get a big picture understanding of what the members of the `MapToDouble`
+    companion object look like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: So as you can see, we have an Aux type, and `apply` function definitions, which
+    are common for the type class pattern. Also, we have two implicit members, which
+    define implementations for the `MapToDouble` type class for `hlist`. Since there
+    are two possible instances of `hlist`, we have two possible implementations of
+    MapToDouble, both for ` :::` and `HNil`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Notice the implicit dependencies that these two implicit values have. First
+    of all, `hnil` does not depend on anything. Let''s have a look at its body:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs: []
+  type: TYPE_PRE
+- en: The result of mapping an empty heterogeneous list is just another empty heterogeneous
+    list. This is because we do not have anything to map.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`hcons`, however, has implicit dependencies. As you can see in the preceding
+    example, it implicitly depends on two other type classes: `ToDouble` and `MapToDouble`.
+    As you can see, `ToDouble` is parametrized by the `H` type. The `H` type is the
+    head type of our heterogeneous list. Any heterogeneous list is defined in terms
+    of its head type and its tail type only.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The meaning of all these implicit dependencies is that we are able to convert
+    any heterogeneous list that is not empty to a list of doubles if we are able to
+    convert its head to double, and if we are able to map its tail to a list of doubles.
+    The definition of the `ToDouble` type class is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs: []
+  type: TYPE_PRE
+- en: One critical thing to notice about these implicit dependencies is that they
+    are recursive. `hcons` itself is of the `MapToDouble.Aux` type. But in order to
+    generate this `MapToDouble`, we need to also have `MapToDouble` for the tail of
+    the heterogeneous list in question.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Since the Scala compiler is capable of resolving implicit dependencies recursively,
+    we are able to make an implicit dependency of one type depend recursively on the
+    implicit dependency of the same type. The only thing to watch out for here, as
+    with any other recursion, is for it to be able to terminate. This means, on every
+    step of recursion, we must get closer, in some defined sense, to the terminal
+    case of this recursion. That terminal case of recursion in our case is `HNil`.
+    And with every step, we resolve the `MapToDouble` type class for a heterogeneous
+    list that is one element shorter than the previous list because we take only the
+    tail without the head. This guarantees that recursion will terminate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now, let''s have a look at the implementation of `hcons`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs: []
+  type: TYPE_PRE
+- en: The body of the `map` function is defined in terms of the `ToDouble` type class
+    that converts the head to double, and then uses the `MapToDouble` type class in
+    order to convert the tail to double.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In a similar fashion, we can define the `Sum` type class that we will be using
+    in order to compute the sum of the heterogeneous list with all doubles:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the companion object, we also have two cases of recursive implicit resolution—one
+    terminal and one non-terminal case. The terminal case is `hnil`, and the non-terminal
+    case is `hcons`. The terminal case is simple because if we take an empty list,
+    its sum is always `0` because there are no elements in this list. However, if
+    we have a non-empty list, our ability to compute its sum depends on our ability
+    to compute the sum of its tail. If we are able to compute the sum of its tail,
+    as notified by its implicit dependency, we can compute the sum of the tail, and
+    add the value of the head to it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Finally, the last piece that we have not yet discussed is the implementation
+    of the `ToDouble` type class:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE57]'
+  prefs: []
+  type: TYPE_PRE
+- en: As we can see, the `ToDouble` type class is implemented for every type that
+    we are going to use in practice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What are the benefits of using the type class approach and the type-level computations
+    instead of simply doing a recursive pattern-matching using a recursive function?
+    The answer is compile-time safety. Remember how at the beginning of this chapter,
+    we argued that in case of recursive pattern-matching when we forgot to perform
+    a pattern match on a single instance, we only found out about our mistake on runtime?
+    Let's have a look at what happens if we fail to specify one case in the situation
+    of type-level computations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The equivalent of pattern-matching for the type-level computation scenario
+    are the `ToDouble` type class implementations. If you have a look at them, they
+    specify how exactly to convert every type. Let''s have a look at what happens
+    if you comment out one of the implementations that we need:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE58]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now let''s have a look at what happens when we run the program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/a942029e-2622-44d5-b9ff-ca39f59d7548.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The error is a compile-time error this time, so the application did not even
+    compile. However, notice also that the error message is rather cryptic and hard
+    to read. Next, we will have a look at how you can debug this kind of compile-time
+    message. Type-level computations give rise to an entirely new style of programming
+    in advanced languages such as Scala, so it is imperative that you know how to
+    work with the compile-time errors in this setting.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Debugging type-level computations
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Currently, type-level computations represent the leading edge of modern programming
+    technology. The technology is rather experimental, and hence, it still does not
+    have much support in terms of comprehensive error messages and tools for debugging.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So, the preceding error message can be debugged step by step by leveraging algebraic
+    data types. This means that you trace every step of recursion, and make sure that
+    every implicit during every step is resolved correctly. At some point, you come
+    to the place where the resolution produces errors, and then you can see which
+    case produces an error.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'These checks can be done with `implicitly` keyword in Scala. The process of
+    debugging with the `implicitly` function may look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE59]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output of the preceding program''s compilation will be as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/20a2629f-10e4-46cb-98cd-e313ebb74fbe.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: So, the error is caused because the compiler is not able to find the implicit
+    `ToDouble` type class for Fraction. Notice how with each statement, we gradually
+    shrink the search space by reducing the size of our `HList` algebraic type. At
+    each step, we are looking at whether the error will manifest itself. Finally,
+    we arrive at `implicitly[ToDouble[Fraction]]`, and realize there is no such implicit
+    type-class implementation in scope. Notice also that all the preceding errors
+    happen at compile-time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The current state of affairs for the type-level computations may be not as good
+    as you might want in Scala. However, you should keep in mind that the technology
+    is still experimental. Scala itself is a language that is a playground for experimenting
+    with new technologies. So, the main catch is the power of this new technology
+    to bring the runtime errors in the scope of compile-time by leveraging the power
+    of the type system and implicit resolution to specify certain guarantees about
+    your program in terms of types. In Future, it is reasonable to expect that such
+    kinds of technologies will get better tooling as they become more widely adopted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Libraries for type-level programming
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As in the case of cats being a library for purely functional programming in
+    Scala, there exist libraries that facilitate type-level programming in Scala.
+    One such library is `Shapeless`. In fact, `Shapeless` is a part of the same ecosystem
+    of libraries as `cats`. It provides a set of classes and types, including the
+    heterogeneous list type, that facilitate some advanced purely functional programming
+    on the type level.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This approach deserves its own book, so we will not be going much deeper into
+    it in this chapter. If you would like to learn more about this approach, please consult
+    the official documentation and learning resources on `Shapeless`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we learned about the patterns of advanced functional programming.
+  prefs: []
+  type: TYPE_NORMAL
+- en: First, we looked at Monad Transformers. These are used to construct compound
+    effect types. Given two independent effect types that describe their own side
+    effects, you can stack them one on top of another to get a combined type from
+    them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After that, we explored the Tagless Final pattern. The main benefit is inversion
+    of control when you can have a single implementation of your business logic run
+    against different effects systems to gain different semantics.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, we learned about a pattern of type-level computations in functional
+    programming. The main benefit of these is that they allow you to impose guarantees
+    on your program encoded in terms of types, and have these guarantees checked at
+    compile-time. This checking can be achieved with the mechanism of type-level computational,
+    such as Scala implicit-conversion resolution, or any similar mechanisms that allows
+    for type-level programming.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The techniques for purely functional programming covered so far are powerful
+    and promising, but are not yet widely accepted in the industry. The current de
+    facto standard for concurrent programming is the actor model. In the next chapters,
+    we will look at it. We will start with introduction of the model in the next chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Questions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Explain the benefits of Monad Transformers.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Explain the benefits of the Tagless Final pattern.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Explain the benefits of type-level computations.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL

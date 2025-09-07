@@ -1,0 +1,961 @@
+- en: Playing with Server-Sent Events
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In [Chapter 4](4286f9d7-1fe5-49c7-9201-49f9c9bdddf6.xhtml), Kotlin Basics and
+    Spring Data Redis and [Chapter 5](eb1d7de5-c93b-49c2-a1a5-2c5e8b65cddc.xhtml),
+    *Reactive Web Clients*, we created two microservices. The first one is responsible
+    for keeping tracked data on Redis and triggering the second microservice which
+    one will consume the Twitter stream. This process happens asynchronously.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will create another microservice which will consume the
+    data produced by Twitter Gathering and expose it via a REST API. It will be possible
+    to filter Tweets by text content.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have consumed the Twitter stream using the **Server-Sent Events** (**SSE**);
+    we created a reactive REST client to consume that. Now, it is time to create our
+    implementation for SSE. We will consume the RabbitMQ queue and push the data to
+    our connected clients.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will take a look at the SSE and understand why this solution fits well for
+    our couple of microservices.
+  prefs: []
+  type: TYPE_NORMAL
+- en: At the end of the chapter, we will be confident about using SSE in the Spring
+    ecosystem.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will learn the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementation of SSE endpoints with the Spring Framework
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Consuming RabbitMQ using the Reactor Rabbit client
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating the Tweet Dispatcher project
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Now, we will create our last microservice. It will push the Tweets filtered
+    by Twitter Gathering for our connected clients, in this case, consumers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will use the Spring Initializr page to help us create our
+    pretty new project. Let's create.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using Spring Initializr once again
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'As you can see, the Spring Initializr page is a kind of partner for creating
+    Spring projects. Let''s use it one more time and create a project:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Go to [https://start.spring.io](https://start.spring.io) and fill in the data
+    using the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/57bc2578-b33b-401b-8b6d-aa0e113e2c8e.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: We have selected the Reactive Web dependencies; we will also keep using Kotlin
+    as a programming language. Finally, click on the Generate Project button. Good,
+    it is enough for us.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are some missing dependencies which are not displayed in the Spring Initializr.
+    We need to set these dependencies manually. We will do that task in the next section.
+    Let's go there.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Additional dependencies
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We need to use the Jackson Kotlin Module as a dependency to handle JSON properly
+    in our new microservice. Also, we will use the Reactor RabbitMQ dependency, which
+    allows us to interact in the reactive paradigm with the RabbitMQ Broker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To add these dependencies, we need to add the following snippet to `pom.xml`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: Awesome. Our dependencies are configured. Our project is ready to start.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before we start, we need to understand, in depth, the concept of SSE. We will
+    learn this in the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Server-Sent Events
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Server-Sent Events (SSE) is a standard way to send data streams from a server
+    to clients. In this next section, we will learn how to implement it using the
+    Spring Framework.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Also, we will understand the main differences between SSE and WebSockets.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A few words about the HTTP protocol
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: HTTP is an application layer protocol in the OSI model. The application layer
+    is the last layer represented in the OSI model. It means this layer is closer
+    to the user interface. The main purpose of this layer is to send and receive the
+    data input by the user. In general, it happens by the user interface, also known
+    as applications, such as file transfer and sending an email.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are several protocols on the application layer such as Domain Name Service (DNS), which
+    translates the domain names to IP address, or SMTP, whose main purpose is to deliver
+    an email to a mail manager application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The application layer interacts directly with software such as email clients,
+    for instance; there are no interactions with the hardware parts. It is the last
+    layer of the OSI model and the closest to the end user as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: All these layers deal with software, which means there are no concerns about
+    the physical parts represented in the OSI model.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A more detailed explanation of the OSI model can be found at: [https://support.microsoft.com/en-us/help/103884/the-osi-model-s-seven-layers-defined-and-functions-explained](https://support.microsoft.com/en-us/help/103884/the-osi-model-s-seven-layers-defined-and-functions-explained).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following is an OSI model representation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ea0ff23f-16c7-4bd9-835f-e196d6d8487d.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The HTTP protocol uses the TCP protocol as a transportation channel. Then, it
+    will establish a connection and start to flow the data on the channel.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The TCP protocol is a stream protocol and a full duplex channel. This means
+    the server and clients can send data across the connection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: HTTP and persistent connections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The HTTP protocol is a request-response model, where the client submits the
+    message (HTTP Request) and the server processes this message and sends the response
+    (HTTP Response) to the client. The connection will be closed after the response
+    is sent.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Look at the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/677329f9-078d-4ff4-b3d4-fc042251f6aa.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: It's pretty simple to understand. The client will send the request, and in this
+    case, the connection will be opened. After that, the server will receive the request
+    to process something and it will send the answer to the client. The connection
+    will be closed after the whole process. If the client needs to send a new request,
+    the connection should be opened again and the flow happens in the same order.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There is a perceived drawback here, the clients need to open the new connection
+    per-request. From the server's eyes, the server needs to process a lot of new
+    connections simultaneously. This consumes a lot of CPU and memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'On HTTP''s 1.0 version, the connections are not persistent. To enable it, the
+    `keep-alive` header should be included on the request. The header should look
+    like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is the only way to make an HTTP connection persistent on the 1.0 version,
+    as described previously; when it happens, the connection will not be dropped by
+    the server and the client is able to reuse the opened connection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: On HTTP 1.1, the connections are persistent by default; in this case, as opposed
+    to the first version, the connection is kept opened and the client can use it
+    normally.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There is a perceived improvement here and it can bring some advantages. The
+    server needs to manage fewer connections, and it reduces a lot of CPU time. The
+    HTTP Requests and Responses can be pipelined in the same connection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we know, *there is no such thing as a free lunch*. There are some disadvantages
+    to this as well; the server needs to keep the connection opened and the server
+    will reserve the required connection for the client. This may cause server unavailability
+    in some scenarios.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Persistent connections can be useful to maintain a stream between the server
+    and clients.
+  prefs: []
+  type: TYPE_NORMAL
+- en: WebSockets
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the HTTP protocol, the communication supports full-duplex, which means the
+    client and server can send data through the channel. The standard way to support
+    this kind of communication is WebSockets. In this specification, both client and
+    server can send data to each other in the persistent connection. Look at the following
+    diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/1d3d89ff-2d73-426b-ad8d-95d5bfb0448a.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: As we can see, the data can be sent and received by the two actors, client,
+    and server—this is how WebSockets works.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In our case, we do not need to send any data to the server during the connection.
+    Because of this characteristic, we will choose SSE. We will learn about them in
+    the following section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Server-Sent Events
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As opposed to the full-duplex communication implemented by WebSockets, the SSE
+    uses a half-duplex communication.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The client sends a request to the server, and when necessary, the server will
+    push the data to the client. Remember the active actor here is the server; the
+    data can be sent only by the server. This is a half-duplex behavior. Look at the
+    following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/92b99972-42e9-4a44-9346-60df700f5518.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: A piece of cake. It is the base of the SSE technology. SSE is self-explanatory.
+    We will use it with the Spring Framework. However, before we do that, let's look
+    at a Reactor RabbitMQ project.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reactor RabbitMQ
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Our solution is fully reactive, so we need to use Reactor RabbitMQ, which allows us
+    to interact with the RabbitMQ broker using the reactive paradigm.
+  prefs: []
+  type: TYPE_NORMAL
+- en: On this new microservice, we do not need to send messages through the message
+    broker. Our solution will listen to the RabbitMQ queues and push the received
+    Tweets for the connected clients.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding the Reactor RabbitMQ
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The Reactor RabbitMQ tries to provide a reactive library to interact with the
+    RabbitMQ rboker. It enables developers to create non-blocking applications based
+    on the reactive stream, using RabbitMQ as a message-broker solution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we learned before, this kind of solution, in general, does not use a lot
+    of memory. The project was based on the RabbitMQ Java client and has similar functionalities,
+    if we compare it to the blocking solution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We are not using the `spring-amqp-starter`, so the magic will not happen. We
+    will need to code the beans declarations for the Spring context and we will do
+    that in the following section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Configuring RabbitMQ Reactor beans
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this section, we will configure the RabbitMQ infrastructure classes in the
+    Spring context. We will use a `@Configuration` class to declare it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The configuration class should look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: There are two important things here. The first one is that we configured the
+    Jackson support for Kotlin. It allows us to inject the `ObjectMapper` into our
+    Spring beans. The next important thing is related to the RabbitMQ connections'
+    configuration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have declared a `ConnectionFactory` bean for the Spring Context. We injected
+    the configurations with `@Value` annotations and received the values on the constructor.
+    We can set the value directly in the attributes, in the Kotlin language; look
+    at the `ConnectionFactory` attributes assignments.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After the `ConnectionFactory` configuration, we are able to declare a receiver,
+    which is a `Reactive` abstraction to consume the queues, using reactive programming.
+    We receive the `ConnectionFactory` previously created and set it as the `ReceiverOptions`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: That is all for the Reactor RabbitMQ configuration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Consuming the RabbitMQ queues reactively
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Now, we will consume the RabbitMQ queues. The implementation is quite similar
+    to what we have seen in the blocking implementation, and the names of the functions
+    are similar as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have consumed some RabbitMQ messages in the previous chapters, but this solution
+    is quite different. Now, we will use the Reactive RabbitMQ implementation. The
+    main idea here is to consume the stream of events; these events represent the
+    messages that have arrived in the broker. These messages arrive and the Reactor
+    RabbitMQ converts these messages to Flux, to enable us to consume in the reactive
+    paradigm.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the reactive paradigm, the representation of a stream of events (we can think
+    of messages in the queue), is the `Flux`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Then our function, which is listening to the RabbitMQ, should return `Flux`,
+    an infinite representation of events. The Receiver implementation returns the
+    `Flux` of messages, which is enough for us and fits well with our needs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our implementation should look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Let's understand a little bit more. We received the `Receiver` as an injection
+    in our constructor. When someone invokes the `dispatch()` function, the `Receiver`
+    will start to consume the queue, which was injected in the constructor as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `Receiver` produces `Flux<Delivery>`. Now, we need to convert the instance
+    of `Flux<Delivery>`, which represents a message abstraction,  to our domain model
+    Tweet. The `flatMap()` function can do it for us, but first, we will convert the
+    `message.body` to string and then we have used Jackson to read JSON and convert
+    to our Tweet domain model.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Take a look at how simple the code is to read; the API is fluent and really
+    readable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The consumer will not terminate until the connected client disconnects. We will
+    be able to see this behavior soon.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Filtering streams
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We are receiving the messages from RabbitMQ. Now, we need to return the messages
+    to the connected customer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For that, we will use SSE with Spring WebFlux. The solution is a good fit for
+    us because we will produce a `Flux<Tweet>` and start to push the Tweets for our
+    clients. The clients will send a query to filter the desired Tweets.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The application will be fully reactive. Let''s take a look at our code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: Pretty easy and simple to understand. We have declared the `tweets()` function;
+    this function is mapped to a GET HTTP Request and produces a `MediaType.TEXT_EVENT_STREAM_VALUE`.
+    When the client connects to the endpoint, the server will start to send Tweets
+    accordingly with the desired argument.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When the client disconnects, the Reactor RabbitMQ will close the requested RabbitMQ
+    connection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Dockerizing the whole solution
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Now, it is time to wrap the whole solution and create a Docker image for all
+    projects. It is useful to run the projects anywhere we want.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will configure all the projects step by step and then run the solution in
+    Docker containers. As a challenge, we can use `docker-compose` to orchestrate
+    the whole solution in a single `yaml` file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For the Tracked Hashtag Service, we have created the docker image. Then, we
+    will start to configure the Tweet Gathering, and the last one is Tweet Dispatcher.
+    Let's do that right now.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can find more `docker-compose` project details at: [https://docs.docker.com/compose/](https://docs.docker.com/compose/).
+    Also, in the new versions, `docker-compose` supports Docker Swarm to orchestrate
+    the stack between cluster nodes. It can be really useful to deploy Docker containers
+    in production.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tweet Gathering
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Let's configure our `pom.xml` for the Tweet Gathering project.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The build node should look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Take a look at the port configuration; it should be the same as what we have
+    configured in the `application.yaml`. The configuration is done, so let''s create
+    our Docker image:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The command output should look like the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/066d006d-c69c-43aa-a631-fca3b0b82cdc.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: There is an image recently created and tagged as a latest; the image is ready
+    to run. Let's do the same thing for our Tweet Dispatcher project.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tweet Dispatcher
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Our new plugin entry should look like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Take a look at the port configuration, one more time. It will be used by Docker
+    to expose the correct port. Now, we can run the image creation command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then, we can see the command''s output, as shown in the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/8e56bd22-6248-48d4-8e60-d489613bec65.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Awesome, all images are ready. Let's run it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We need to create Docker images for all the projects. The process is the same;
+    configure the maven Docker plugin and then use `mvn clean install docker:build`
+    on the project. The full source code can be found at GitHub. The Tracked Hashtag
+    Service can be found here ([https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter04](https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter04)),
+    the Tweet Gathering can be found here ([https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter05](https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter05))
+    and finally, the Tweet Dispatcher can be found here ([https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter06](https://github.com/PacktPublishing/Spring-5.0-By-Example/tree/master/Chapter06)).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the containerized solution
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We are ready to run the solution in Docker containers. We have been running
+    the solution with the IDE or command line, but now we will spin up some container
+    and test the solution and Spring profiles as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Before that, let''s do a quick recap of the solution:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/149f2c98-e8b7-409e-89db-dd70f590dd30.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The first operation, the **Tracked Hashtag Service**, will persist the hashtag
+    in the **Redis** database.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: After that, the **Tracked Hashtag Service** will send the newly tracked hashtag
+    to a queue in the **RabbitMQ** Broker.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '**Tweet Gathering** is listening to the queue to track Tweets and trigger the
+    event and starts by listening to the **Twitter stream**.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '**Tweet Gathering** starts to get Tweets from the **Twitter stream.**'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '**Tweet Gathering** publishes Tweets to a queue in the **RabbitMQ broker**.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '**Tweet Dispatcher** consumes the message.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '**Tweet Dispatcher** sends the message to the **Client** using SSE.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Now that we have understood the solution, let's starts the containers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the Tracked Hashtag Service container
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The image has been created in the previous section, so now we are able to spin
+    up the container. The command to start the container should look like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: Let's explain the instruction. `-d` tells the Docker engine to run the container
+    in background mode or detached.  The other important parameter is `--net`, which
+    attaches the container to the desired network.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can use the following command to tail the container logs at runtime:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: This command is like the `tail -f` command on Linux, which looks at the last
+    part of the log stream. We can remove the flag `-f` to see the last lines of the
+    log.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The output of docker logs should look like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/4bb29b84-2014-4993-8b77-d956cc33554b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Look at the profile selected, in the logs:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Remember, we have parameterized it in the `pom.xml` file from the Tracked Hash
+    Tag Service. Let''s look at the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Awesome job. Our first service is running properly. Let's run Tweet Gathering;
+    there is some interesting configuration here.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have created the Twitter network in [chapter 4](4286f9d7-1fe5-49c7-9201-49f9c9bdddf6.xhtml), *Kotlin
+    Basics and Spring Data Redis*, and we need to use this network to enable the containers
+    to see each other by container name in our custom network.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the Tweet Gathering container
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To run the **Tweet Gathering** application is slightly different. This container
+    needs environment variables which are used to interact with the Twitter API. We
+    can use the `-e` argument on the `docker run` command. Let''s do that:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Take a look at the environment variables we have configured in the `application.yaml`
+    file. The Docker run command will inject these variables into the system and then
+    we can use them in our Java application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s inspect our container logs. We can do that using the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/95db63ca-5835-4b1b-abf9-15be39543f26.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Awesome, our application is up and running. As you can see, the application
+    is connected to the RabbitMQ Broker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**RabbitMQ** and **Redis** should be running to enable you to run Tweet Gathering.
+    We can check it using the `docker ps` command; it will list the running containers,
+    RabbitMQ and Redis need to be on this list.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now, we can run the Dispatcher application to complete the whole solution. Let's
+    do that.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the Tweet Dispatcher container
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'There is no secret to running the Tweet Dispatcher container. We can use the
+    following command to run it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'It will spin up the container, it is a good idea to name the container during
+    the run. It can help us manage the container with command-line tools, such as `docker
+    container ls` or `docker ps`, because it shows the container name in the last
+    column. Then, let''s check if our container is running, so type the following
+    command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Or, you can run the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We should be able to see the Gathering container running, like in the following
+    output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/b4171847-c894-4bc1-a929-c35cbd234983.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: There are five containers, three applications, and two infrastructure services, **RabbitMQ**
+    and **Redis**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'At any time, we can stop the desired container using the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `docker stop` will only stop the container; the information will be kept
+    in the container volume. We can use the container name or container ID as well,
+    we named it before. It is easy for us. If we use the `docker ps` command, the
+    image recently stopped will never appear on the list. To show all the containers,
+    we can use `docker ps -a` or `docker container ls -a`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now, we will start the container again; the command is self-explanatory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: The container is running again. We have practiced more with Docker.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Awesome job, guys. The whole application is containerized. Well done.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can use the Linux instruction and execute some batch instructions. For instance,
+    we can use `docker stop $(docker ps -q)` — it will stop all containers running.
+    The `docker ps -q` command will bring only the container's IDs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The docker-compose tool
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the microservices architectural style, the whole solution is decoupled in
+    small and well-defined services. Usually, when we adopt these styles, we have
+    more than one artifact to deploy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's analyze our solution; we have three components to deploy. We have used
+    the Docker containers and we have run these containers using the `docker run`
+    command. One by one, we have used `docker run` three times. It is quite complex
+    and very hard to do in the development routine.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`docker-compose` can help us in this scenario. It is a tool which helps to
+    orchestrate Docker containers in complex scenarios like ours.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's imagine our application is growing fast and we need to build four more
+    microservices to achieve the desired business case, it will implicate on four
+    more `docker run` commands and will probably be painful to maintain, especially
+    during the development life cycle. Sometimes, we need to promote the artifacts
+    to test the environment and we probably need to modify our command line to achieve
+    this.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`docker-compose` enables us to deploy multiple containers with a single `yaml`
+    file. This `yaml` file has a defined structure which allows us to define and configure
+    several containers in the same file. Moreover, we can run the solution configured
+    in this `yaml` file with a single command, it makes development life easy.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The tool can work on the local machine or we can integrate it with the Docker
+    Swarm tool which can manage clusters of Docker hosts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Docker Swarm is a native tool to manage docker clusters. It makes it easy to
+    deploy a container on the Docker cluster. In the new version, `docker-compose`
+    is fully integrated with Docker Swarm. We can define it from Docker Swarm properties
+    in `docker-compose.yaml`. The Docker Swarm documentation can be found at: [https://docs.docker.com/engine/swarm/](https://docs.docker.com/engine/swarm/).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `docker-compose` `yaml` has a defined structure to follow; the documentation
+    can be found here: [https://docs.docker.com/compose/compose-file/#compose-and-docker-compatibility-matrix.](https://docs.docker.com/compose/compose-file/#compose-and-docker-compatibility-matrix) We
+    will create a simple file to understand the `docker-compose` behaviors. Let''s
+    create our simple `yaml`— the `yaml` should look like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `yaml` in the preceding code will create the structure detailed in the
+    following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/6aaa3300-e91e-4e0e-b96a-00849ed0f940.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: It simplifies the development time. Now, we will learn how to install `docker-compose`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Installing docker-compose
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `docker-compose` installation is pretty simple and well-documented. We are
+    using Linux, so we will use the Linux instructions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Open the terminal and use the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Wait for the download and then we can execute the following instructions to
+    give executable permissions for the program. Let''s do this by executing the following
+    command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As you may know, you may be asked for the administrator password. Our `docker-compose`
+    is now installed. Let''s check it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The prompt will display the installed version, like the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/777e6b4a-0f3e-400b-9859-eb04c5b5172b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: '`docker-compose` is up and running, so let''s jump to the next section and
+    start to create our `yaml` file and deploy the whole stack with one single command.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: For different operating systems, the instructions can be found here: [https://docs.docker.com/compose/install/#install-compose](https://docs.docker.com/compose/install/#install-compose).
+    Then, you can navigate around the instructions and click on the desired operating
+    system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating a docker-compose file
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Now, we have `docker-compose` installed and we can try to work with the tool.
+    We want to run the whole stack with a single command. We will create the `yaml`
+    file to represent the stack. Our `yaml` file should have the Redis container,
+    the RabbitMQ container, the Tracked Hashtag application, the Gathering application,
+    and finally, the Dispatcher application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can create a `docker-compose.yaml` file wherever we want, there is no restriction
+    for that.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our `docker-compose.yaml` file should look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, we have defined the whole stack in the `yaml`. Something to
+    note is that we can find some similarities with the `docker run` command, in fact,
+    it will use the Docker engine to run. The `environment` node in yaml has the same
+    behavior as `-e` in the Docker run command.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have defined the application ports, docker images, and have also connected
+    the containers to the same network. This is really important because when we use
+    the `docker-compose` file name on the network, it can find that the container
+    name has a kind of DNS behavior.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For instance, inside the defined network `solution`, the container can find
+    the Redis container instance by the name `redis`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the solution
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '`docker-compose` simplifies the process to run the whole stack. Our `yaml`
+    file was configured and defined properly.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s start the solution. Run the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: The command is pretty simple, the `-d` parameter instructs Docker to run the
+    command in the background. As we did on the Docker run command.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The output of this command should be the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/c8203e6b-2c71-488d-973b-8a4117d43d28.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Take a look, `docker-compose` has created a network for our stack. In our case,
+    the network driver is a bridge, after the network creation, the containers are
+    started.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing the network
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Let's test it, find the Gathering container – the container name in `docker-compose`
+    is prefixed by the folder name, where `docker-compose` was started.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For instance, I have started my `docker-compose` stack in the compose folder.
+    My container name will be `compose_gathering_1` because of the folder name.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Then, we will connect the Gathering container. It can be achieved using the
+    following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `docker exec` command allows us to execute something inside the container.
+    In our case, we will execute the `/bin/bash` program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The command structure is like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Awesome, pay attention to the command line. It should be changed because now
+    we are in the container command line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/f34083e9-fde1-47af-af2a-945b3d067aa3.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: We are not connected as a root on our host, but now we are a root on the container.
+    This container is on the same network as the Redis container instance, which is
+    called `redis`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s test with the `ping` command; we should be able to find the `redis`
+    container by the name `redis`, let''s do it. Type the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The command output should be the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/150fa99d-cf12-40d7-9162-a7eb0e640f09.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Awesome, our container can find the Redis container by the name. The `yaml`
+    file is fully working.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we completed our second solution. We were introduced to the
+    RabbitMQ Reactor library, which enables us to connect to RabbitMQ, using the reactive
+    paradigm.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have prepared the whole solution in Docker containers and connected it to
+    the same network to enable the applications to talk to each other.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We also learned the important pattern for pushing data from server to client
+    through the HTTP persistent connection, and we learned the difference between
+    WebSockets and Server-Sent Events, as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, we learned how `docker-compose` helps us to create the stack and run
+    the whole solution with a couple of commands.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the following chapters, we will build a fully microservice solution, using
+    some important patterns such as Service Discovery, API Gateway, Circuit Breakers,
+    and much more.
+  prefs: []
+  type: TYPE_NORMAL

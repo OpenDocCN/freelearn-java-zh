@@ -1,0 +1,1180 @@
+- en: Application Optimization – Memory Management and Server Configuration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We now know how to get information about the performance of our application.
+    From high-level execution time to deep container internals, we can determine which
+    part of the code is slowing us down.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, this is mainly about our code or stack (the Java EE container). There
+    are other criteria that can influence the performance of the same machine (considering
+    that the CPU and the memory are fixed).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will investigate the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: How JVM manages the memory and automatically releases unused objects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Compare different options to release the memory that JVM offers
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: See how the server configuration can also impact the performance
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Java and the memory
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java is a high-level language, which means that it is doing a lot of work for
+    you. Nowadays, most languages do that (such as Scala, Go, and even recent C++
+    updates), but to understand the memory challenge, we need to go back to the early
+    programming days and compare two simple code segments.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The first one is a simplified version of our provisioning service, directly
+    taken from our quote manager application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: The variable usage is interesting to observe. With respect to the Java variable
+    scope, `client` is available to the complete `refresh` method, the `symbols` array
+    is available in the `try` block. Therefore, the `for` loop and `data` are only
+    for one iteration of the loop. However, we never really allocate any object memory
+    explicitly; we can call `new` to reference a constructor but we do not have the
+    memory vision, the pointer, or the size.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we compare the same code block to a version where you need to manage the
+    memory, it will look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: The code gets way more complex even if this example assumes that `client.close()`
+    handles the releasing, which cannot be true. In fact, each allocated object needs
+    to call the `releaseMemory()` function to release the allocated structure. It
+    also implies that we should not miss any call. Otherwise, we would be leaking
+    memory. The previous code example uses a lot of nested `try`/`finally` to guarantee
+    this.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What should we learn from this simple example? We should learn that Java allows
+    the developer not to care about memory management in most cases. If you use some
+    native integration through JNI, for instance, you may still need to handle it.
+    To ensure that the application behaves well and does not leak—which is important
+    for a server that is not supposed to be restarted—the JVM provides several solutions
+    for memory management. This is transparently done but directly impacts the performance,
+    since memory allocation is sensitive for a process and memory deallocation has
+    some challenges.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Garbage collector
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Garbage collector is the name of the part of the JVM that handles the memory.
+    To make it very simple, it is the part releasing the memory held by some unused
+    objects and reallocating this memory space to new objects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This part is dependent on the JVM you are using, but all the algorithms use
+    the same sort of logic. So, it is important to understand how it works in the
+    high level, and then you can investigate the specifics of your particular JVM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the context of this book, we will limit ourselves to the HotSpot JVM (the
+    Oracle one).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The heap memory is divided into two main spaces: the young generation and the
+    old one. The young generation is itself divided into multiple spaces: the Eden
+    and the survivors (there are two survivors). Both the generations also have a *virtual*
+    space that is mainly there to support either garbage collection operations or
+    generation resizing.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Since Java 8, the permanent space (used until Java 7) has been dropped and replaced
+    by metaspace. Its role is to hold the metadata of the application in memory, such
+    as the classes (name, annotations, fields, and so on). If you remember the previous
+    chapter on how to monitor your applications, you will probably be thinking about
+    the `jcmd GC.class_stats` command that gives you information about this space
+    of memory. In terms of the performance, it is important to ensure that this space
+    is constant once the JVM is *hot*. Concretely, it means that once we have executed
+    all the possible code paths of our application, we should not see many changes
+    on the memory allocated to that space. If you still see it moving significantly
+    after that time, you may have a leak or a classloader issue that you'll need to
+    investigate before you continue working on the performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'From now on, we will just deal with the heap. It is the part of the memory
+    that you need to start with when you start tuning an application for production
+    deployment or benchmark. To summarize what we have just talked about, you can
+    visualize the way the memory is split with the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/6f100ec7-b72d-4507-a89a-7cec663e56db.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The global idea is to start filling the *first* zone (the **Eden** zone of the
+    young generation) with *dynamic* objects—you can visualize it as request-related
+    objects with a mental model—and once it is full, the garbage collector will move
+    objects still used to the next zone (**Survivor 1**, **Survivor 2**, and, finally,
+    the **Tenured** zone). This is a very high-level understanding of the generations.
+    The point behind splitting the memory this way is that the garbage collector works
+    on zones smaller than the full memory when it needs to run, and it can apply different
+    algorithms to each zone and be more efficient. Keep in mind that the more you
+    go to the old generation, the more objects survive the garbage collection cycles
+    and stay in the memory in terms of the application runtime.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The main difference between the young and old generations is the way the garbage
+    collector impacts the application. While working on the young generation and running,
+    it will execute what is called a *minor collection*. This browses through the
+    corresponding zone, is generally fast, and has low impact in terms of the application's
+    performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, when a collection is executed in the old generation, it is called a *major
+    collection* and generally blocks the application. This means that your application
+    may not be responding during the collection time, which highly affects the performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now there are several more detailed ways to delve into the ways the JVM garbage
+    collection works, and each of them has an impact on the performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Garbage collector algorithms
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Over the years, the garbage collector algorithms have been enhanced and there
+    are multiple algorithms available now. They match several sorts of applications
+    and are more or less adapted, depending on the product:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Serial collector**: This is a mono-threaded implementation and the default
+    algorithm for client-side machines (32 bit or single processor).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Parallel collector**: The serial collector algorithm adapts to server resources
+    (fast CPU and big memory sizes). The parallel collector is the default one for
+    server machines (>= 2 processors).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Parallel compacting collector**: This allows to paralellize the tenured generation
+    processing.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Concurrent Mark Sweep (CMS) collector**: With this collector, the tenured
+    generation is processed in parallel with the application.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Garbage first collector (G1)**: This collection is concurrently performed
+    with the application that targets the server application we are dealing with in
+    the context of this book. This will be the default collector with Java 9 but is
+    already available with Java 8.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The serial collector
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To force using the serial collector, you will need to add the following option to
+    your JVM:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: Once this option is added to the JVM, you will have a garbage collector using
+    a single thread and potentially lock the application for collection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The first collection will move the still used objects from eden to the first
+    empty survivor space. If the used objects are too big, they are directly moved
+    to the tenured space. Younger objects of the *survivor 1* (also known as *survivor
+    from*) space are then moved to the *survivor 2* (also known as *survivor to*)
+    space if there is space; otherwise, they are moved directly to the tenured space.
+    Older objects are moved to the tenured space.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Once all these moves are done, the eden and survivor spaces (which were full)
+    can be freed. Note that the survivor space is then reversed in terms of its role,
+    which means that the survivor space is always empty.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is a way to represent the algorithm:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/7aa913cc-38a3-4fa5-a5fa-cd6361a3718b.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'We start from a state where the eden becomes full and the first survivor has
+    some objects:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/8644e415-ee19-42a0-8f12-19f454940308.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'In the first phase, the used objects are moved from eden to the second survivor
+    if they fit (the two small green blocks) or directly to the tenured space if too
+    big (the large block in the end):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/7f7d9996-e6ca-4a9b-b963-eb5badeb0f1d.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Now, the same logic is applied to the first survivor space, so we have the
+    small used objects moving to the other survivor and the big ones to the tenured
+    space. At this stage, you can still have unused objects in the first survivor:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/f9fd35ad-2702-410b-bae7-5e4b64f14668.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Finally, the last step is to free the unused memory: the eden and first survivor
+    in our example. In the next cycle, exactly the same logic will be followed, but
+    the two survivor spaces will be reversed.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: This algorithm mainly concerns how the young generation is managed, but it is
+    not sufficient in itself, since it will fill the old one pretty quickly. For this
+    reason, a complete cycle requires a second algorithm called the Mark-Sweep-Compact,
+    which is applied on the tenured space.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As you can guess from its name, the algorithm has three phases:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Mark**: In this phase, the collector identifies the still used instances
+    and marks the associated memory space'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '**Sweep**: The unmarked memory in the previous step is freed'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '**Compact**: The previous step may have created holes in the memory space,
+    so the collector compacts it, ensuring that all the objects are placed side by
+    side for faster access'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'You can visualize it—for a single memory zone—with the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/22b758bc-46b0-432f-895c-1e2e7b88e075.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Let''s assume that our initial state is the previous diagram. We have five
+    objects filling the space. The first step is then to *Mark* the still used objects
+    to be able to remove the remaining ones (no more used). It can be illustrated
+    with the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/8d42ee2c-77a6-446b-8d4b-2f81d5e42b1d.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The darker blocks are the no-more-used ones in this illustration, and the lighter
+    ones are the still-used ones. Now that we have proceeded from the *Mark* phase,
+    we will execute the *Sweep* phase and remove the unused blocks:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/711d8745-6257-45f3-8a03-abc8284c5713.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: At this point, we are fine in terms of the memory volume. This means that we've
+    freed all the memory we can and we could almost stop the collection here. However,
+    as you can see in this diagram, there are some holes in the free space.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'One issue is that if we need to allocate a big object, then it can be split
+    into multiple memory zones and the memory access may become slower. To optimize
+    this, we have the last step, that is, *Compact*:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/bd0e64a1-1b15-4336-abbe-9f407bf2f574.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: After this last step, the memory is optimized (compacted); all the objects are
+    side by side and we have the biggest possible available memory zone vacant at
+    the end.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For a server (don't forget that we're talking about Java EE in this book), this
+    is rarely the fastest garbage collector mode, but the concepts are quite important
+    to understand and if you write a Java EE client (using the JAX-RS client API,
+    for instance) it can still apply to your final delivery, which will not require
+    a lot of memory allocation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Parallel and parallel compacting collectors
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The parallel collector is close to the serial collector (which is why it is
+    important to understand the serial algorithm). The main difference will be how
+    it sets up the collection. We saw that, in a serial collection, a single thread
+    is responsible for the collection, but with the parallel collector, multiple threads
+    adopt the role. This means that you can hope to reduce the *stop the world* duration
+    (when the garbage collector enforces the application to stop responding and do
+    its job) by the number of threads (theoretically).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This can be activated/enforced (this is supposed to be the default for a server
+    machine) by adding this option on the JVM: `-XX:+UseParallelGC`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The parallel collector can be tuned with several JVM options, but here are
+    some you may want to customize:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`-XX:MaxGCPauseMillis=N`: You configure the value (`N`) to the maximum duration
+    you desire for the pauses of the garbage collector. Note that this is just a hint
+    and there is no guarantee that you will obtain the desired result, but it can
+    be interesting as a first attempt. Also keep in mind that it will optimize the
+    garbage collector pause duration (and, maybe, not the throughput of the application,
+    which can be an issue for the server). In the end, you may manually tune the heap
+    size and ratio, but starting to test this JVM option can give you some hints about
+    the way to go.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:GCTimeRatio=N`: This is also a hint, allowing you to request that no more
+    than *1/(1+N)* of the application time is spent in garbage collection. This is
+    intended to optimize the throughput of the application—which is generally the
+    case for a server. This is not the easiest configuration to understand, so let''s
+    use a small example. If you set *N* to 19, then 1/20 of the application time (5%)
+    will be allocated to garbage collection. The default is 99 so only 1% of the application
+    time is allocated to garbage collection.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:ParallelGCThreads=N`: This allows you to configure the number of threads
+    allocated to parallel garbage collection.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: There are no magic values for these flags, but once you have identified the
+    memory needs of your application, it is very interesting to tune them a bit to
+    be aligned with the application requirements.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is interesting to know is that the garbage collector can adjust the generation
+    sizes, depending on the configured ratio to try to respect it. This is done by
+    increasing the generation sizes to decrease the collection times. By default,
+    a generation size is increased by 20% and decreased by 8%. Here again, you can
+    customize this adjustment with some JVM flags.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are lots of flags, and their name and supported values can depend on
+    the JVM you use. Since they are not portable flags, you may need to check them
+    against your JVM documentation. With the Hotspot, you can do it with the following
+    command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This command prints the Java version (just to avoid any error) and also prints
+    the JVM flags, allowing you to list them all, which is the part we care about.
+    Once you have the output, you just need to filter the flags you want. In our case,
+    we want to customize the way the generation sizes are increased/decreased, so
+    we can filter the flags with the `grep` command (on Unix) using the `Generation`
+    keyword:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`+PrintFlagsFinal` allows you to list the options, their value (after the equal
+    sign), their type (first string), and the flag type (in braces).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you add other options to the JVM (such as `-client` or `-server`), it will
+    adjust the values to reflect these flags.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As you can see in the previous capture, you can use `-XX:YoungGenerationSizeIncrement`
+    to customize the increase percentage of the young generation when needed to respect
+    the configured ratio. `YoungGenerationSizeSupplement` is a supplement for the
+    young generation size increment used at startup, and the decay flag is the decay
+    factor to the supplement value. Indeed, the tenured generation has the same sort
+    of configuration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: These configurations are very advanced and you must ensure that you can explain
+    why you tune them before doing it; otherwise, you can just mess up your JVM configuration
+    and make your application behave badly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, parallel GC still uses a single thread for the tenured generation collection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now, there is also a compacting parallel collector. It is the same as the parallel
+    collector in the young generation, but in the tenured one, the algorithm differs
+    a bit. It is close to the *Mark*/*Sweep*/*Compact* algorithm, except it divides
+    the space in more zones to let the collector work in parallel on them. Then, the
+    sweep phase is replaced by a *summary* phase, where the density is verified to
+    request a compaction. Finally, the compaction is done in parallel. To use this
+    option, you need to activate another JVM flag: `-XX:+UseParallelOldGC`. This option
+    is supposed to be good for applications with large heaps, which is the case with
+    applications handling a lot of concurrent requests and using some caching mechanism.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent Mark Sweep (CMS)
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The goal of the CMS is to reduce GC pauses, enabling you to execute the GC while
+    the application is running. For this, it uses multiple threads. The main idea
+    is to be able to free some memory before the tenured generation is full, and the
+    GC needs to pause the application threads. If it happens too frequently, you will
+    need to adjust the application tuning (CMS configuration) to avoid it as much
+    as possible and to keep it behaving correctly. You can identify this type of issue
+    checking `verbose:gc` output and `Concurrent Mode Failure` messages.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Compared to the standard *Mark* phase, the one of the *CMS* algorithm will
+    pause the application twice: first pause to mark objects directly reachable from
+    the root of the memory graph and the second pause to identify the objects missed
+    in the concurrent tracing phase. This concurrent tracing phase will take resources
+    that the application will not be able to use anymore, and the throughput will
+    potentially decrease a bit.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A collection mainly has two triggers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A kind of timeout based on the historical statistics of the memory, with a safety
+    bound added to avoid a concurrent mode failure, which is very costly. This safety
+    bound can be controlled based on a percentage, customizable with the `-XX:CMSIncrementalSafetyFactory=N` flag.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Based on the remaining size on the tenured space. This trigger can be controlled
+    with `-XX:CMSInitiatingOccupancyFaction=N`, *N* being the percentage of the tenured
+    space that should trigger a collection if it is full. By default, it is 92% (N=92).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: When investigating long GC pauses, you may need to tune the safety factor and,
+    potentially, the occupancy fraction options to see if triggering the GC earlier
+    (or later) can help.
+  prefs: []
+  type: TYPE_NORMAL
+- en: One last thing to note about this algorithm is that there is no compaction,
+    so the memory access can become slower with time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Garbage First (G1)
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The Garbage First collector is the most recent implementation. It is a server-side
+    implementation that tends to decrease the pauses and concurrently works with the
+    application. It introduces a new way of visualizing the heap.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The heap is divided into constant-sized regions. The G1 starts to mark the regions
+    concurrently. After this phase, it knows which regions are almost empty and then
+    starts collecting the memory from these regions, allowing the G1 to get a lot
+    of memory pretty  quickly and without much effort. This is where the name of this
+    algorithm comes from. Then, in the compact phase, G1 can copy objects from multiple
+    regions to a single region to ensure that it stays efficient.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An important thing to know about the G1 implementation is that it is based on
+    statistics and can have a few glitches in the execution, even if the model is
+    quite accurate in practice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The fact that G1 splits the heap in regions also means that it is intended
+    for applications using a lot of memory (Oracle claims more than 6 GB) and requiring
+    small pause times (less than 0.5 seconds). This implies that switching from the
+    CMS to the G1 is not always worth it; you should ensure that you meet one of these
+    criteria before switching to the G1:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: ~50% of the heap is used by live data
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The statistics are not that accurate with the CMS algorithm (if the allocation
+    rate varies a lot)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: You have identified long GC pauses
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The G1 also has several JVM flags that you can use to customize the behavior
+    the garbage collector should take. For instance, `-XX:MaxGCPauseMillis` sets the
+    pause duration that you accept in milliseconds (statistically once again) and `-XX:ConcGCThreads=N` defines
+    the concurrent number of threads used to mark the regions (recommended setting
+    is about 25% of the parallel GC thread count). Default settings are intended for
+    the most common use cases but you may need to refine the configuration to adapt
+    it to your application and the way it uses (or reuses) memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Here again, activating the G1 collector needs its own JVM flag: `-XX:UseG1GC`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Common memory settings
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'We saw how the memory was collected and that there are a lot of tuning options
+    (once again, don''t forget to check your particular JVM options). However, there
+    are some very common memory settings that you will want to customize before finely
+    tuning the collector. Here is a small table with these memory settings:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Option** | **Description** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-Xmx<size>` | The maximum memory size allocated to the heap, for example, `-Xmx1g` to
+    allow the heap to grow until 1GB |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-Xms<size>` | The starting memory size allocated to the heap, for example,
+    `-Xms512m` to allocate 512 MB to the heap |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-Xss<size>` | The stack size (can avoid `StackOverflowError`) |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-XX:SurvivorRatio=N` | Ration between eden and survivor spaces |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-XX:MinHeapFreeRatio=N` and `-XX:MaxHeapFreeRatio=N` | The ratio to trigger
+    a heap resize, the min flag will trigger a heap increase, and the max flag will
+    trigger a heap size decreasing |'
+  prefs: []
+  type: TYPE_TB
+- en: 'With all that we saw previously, it means that tuning the JVM memory can lead
+    to a big set of options/flags, but don''t be afraid, it is just a matter of taking
+    control over its application. Here is a complete flag set example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This command is a common server memory configuration for a server with a lot
+    of available memory for the application(s) you deploy:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Allocate 24 Gigabytes for the heap (fixed since the min and max memory size
+    are set to the same size).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Enforce the JVM to use the G1 collector (accurate, as we use more than 6 GB
+    of heap) and customizes G1 configuration. It defines a targeted max GC pause of
+    150 ms and requests G1 to use 16 parallel threads for the memory collection and
+    four threads to mark regions once collected.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Finally, the collection cycles will start if the heap is occupied at 70%.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This is not a bad setting to start with for a server (you can increase the number
+    of threads a bit, but not too much, as they can be used at the same time your
+    application is running); increase the max GC pause if you can accept it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The parameter you will probably tune the most is the heap size (24 GB in the
+    previous example), depending on the requirements of your application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Debugging GC behavior
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Now that we know how to tune the memory quite finely, we need to know what our
+    application does, to be able to adjust the configuration. To do so, the JVM provides
+    several ad hoc tools.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The most common and, probably, the most useful tool for the memory is the `-verbose:gc`
+    option that you can pass launching your JVM. It will output memory information.
+    If we activate it on our quote application, you will quickly see these sorts of
+    lines:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can distinguish two kinds of lines corresponding to different generation
+    zone collection:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**GC**: This is a young generation collection'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Full GC**: This is a tenured generation collection'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Each collection is associated with a reason:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Allocation failure**: The GC is asked to run because no more memory is available'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Metadata GC threshold**: The metaspace threshold is reached'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Then, you can see the resizing of the memory; for instance, `41320K->14967K(153600K)`
+    means that the used memory is resized from ~41M to ~15M. The number in the parentheses
+    is the available space (~150 MB here).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Don't be afraid to see the GC running often and even the full GC lines. While
+    their executions are fast and you see that the memory size is acceptable, it is
+    not an issue at all. However, if the execution is long and the memory stays high
+    even after the collection, then you will need to tune the GC or update the application
+    to ensure it comes back to something fast and reliable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can activate this output at runtime through JMX if you go on the `java.lang:type=Memory`
+    MBean and set the `Verbose` attribute to `true`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you want even more details about the GC, you can add the `-XX:+PrintGCDetails` option
+    and the lines will be more verbose:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can recognize the previous information but there is new data as well:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`PSYoungGen`: This is the collector type; this value means minor GC'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The resizing after (`X->Y(Z)`) shows the young generation size
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The last resizing is the full heap one
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Finally, the duration is expressed in terms of user time, system time, and real
+    time
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'If you want to save all this information (log lines) in a file, you can add
+    a flag with a file path and the JVM will dump this output in the file instead
+    of the console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This will allow you to analyze the GC behavior *offline*. There are some tools
+    able to parse this output and let you visualize it directly. One of them is *GCViewer*,
+    which you can find at [https://github.com/chewiebug/GCViewer/wiki/Changelog](https://github.com/chewiebug/GCViewer/wiki/Changelog).
+    Once the JAR is downloaded, you can run it with Java directly:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then, just open the `output.log` file in the interface and you should visualize
+    your GC as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/78dc1415-597d-4a0f-a1a4-9ccb6022da73.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'This tool has two main interesting features:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The temporal graph deduced from the log output
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The statistics tabs (on the right) showing the statistic summary of the GC,
+    and the number and duration of the pauses
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This last information can let you validate the behavior of your application
+    once you add some caching or some background task parallelly executed with the
+    main application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It will let you ensure the impact of one part of the application on the other
+    in terms of memory and potentially find a performance issue if the memory is too
+    impacted by this new feature.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is the legend associated with the colors of the graph:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/7c9c01cd-e77b-49df-966c-336bdf0f583d.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: We find most of the information we talked about in the previous part and, particularly,
+    the collections, generations, and so on. Note that the *Y* axis can be read with
+    two units (time and memory size) depending on which graph you are looking at.
+    You will likely filter the printed graphs to see it clearly, but you will find
+    all the information you need to see when your GC is running.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Heap dump
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Sometimes, you will need to get a heap dump to investigate what is in memory
+    and why the GC runs so often or for so long. To do so, the JDK provides a tool
+    called `jmap` that allows you to take a dump from the Java PID:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: This command will stop the application (a bit like a *stop the world* pause)
+    and write all the instances into the configured file. Opening the output with
+    `jvisualvm` will enable you to investigate the instances, and, in particular, the
+    number of instances and the corresponding allocating size.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is what it can look like:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/831907f8-7b00-40d1-a064-641beb3e487a.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Normally, you should mainly see JVM classes such as `char[]`, `String`, `Map`, and
+    so on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you double-click on a type, you will see the instances. For example, on `String`
+    for our quote manager dump, we will have a view like this one:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ac3cc129-cce2-4737-a950-d6539a5ca24c.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Here, we visualize the `String` instances related to the request (the request
+    URL or a subpart of it, such as the protocol, the host, or the port). So we can
+    deduce that the instances are related to the request and its parsing. This is
+    perfectly normal, but if you start seeing a lot of your own classes in the classes,
+    view, and/or a few classes but with a huge allocation size, you can double-click
+    on these types and get the instance details to identify why it happened.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we double-click on `JsonQuotePage`, we will see something like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/2c887942-c264-422b-8209-8072abd044ce.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The reference of the instance on the left side (in the list of instances) doesn't
+    help us much, but the detailed view (on the right side) of a single instance shows
+    the actual data structure with its values.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As a reminder, our POJO page model is the following one:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Our structure (class) has two fields: `total` and `items`, and we can find
+    these two entries in the detailed view of the instance we obtained from the dump.
+    As shown in the screenshot, we can even browse the `items` values. This will let
+    you identify whether there is something particular with the values and whether
+    you will need to customize the query you use to retrieve the data.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java EE and the resources
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: With Java EE, you will likely have a lot of volatile objects (with a short lifespan) that
+    are bound to a request. If we take `QuoteResource`, we will first allocate our
+    JSON model, then our entity model, and so on. All these instances will be needed
+    for the request only and nothing more. Thus, the garbage collector will quickly
+    collect them. The garbage collector is quite good for such dynamic applications.
+    However, it doesn't mean that we do not have long living instances. Even without
+    an application cache, the server caches a lot of metadata to ensure that it works
+    and runs fast. One example is the CDI container, which will keep the metadata
+    of all the beans in the memory to make sure that it can create them when requested
+    by the application. This takes memory and will never be released until the application
+    is not deployed. This means that by tuning the memory of your application, you
+    will also need to ensure that you tune the memory of the server. As already explained
+    earlier, in performance tuning, the application is not only composed of your code
+    but also the server code; otherwise, you will miss most of the logic and you can't
+    be accurate tuning your application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In general, the server adds some long live instances to ensure that the server
+    layer does not slow your application down. However, there is a particular kind
+    of logic that the server implements for you that directly impacts the performance
+    of your application, and that you will need to watch out for: the resources.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What we call resources in an application server is generally what is managed
+    by the server. It is often something you want to be able to configure outside
+    the application even if Java EE 6 introduced some `@XXXDefinition` annotations
+    to be able to do it from the application itself. The goal is to inject a preconfigured—and
+    adapted to the current environment—instance. It is also often connected to something
+    external or directly related to the machine resources. Since the next chapter
+    will be about threading, here, we will focus on the external resources.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'On top of the list of the most used resources, we find `DataSource`. This represents
+    a connection to a database such as MySQL in our quote application. To cite a few
+    other well-known resources before digging into the `DataSource` case, you can
+    encounter the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent resources (`ManagedExecutorService`) to handle concurrency. We will
+    deal with them in the next chapter.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`DataSource`, which connects to the databases.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The JMS resources, such as `ConnectionFactory`, which connects to a broker,
+    and `Queue` and `Topic`, which represent a destination.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The Java mail `Session`, which allows you to interact with a mail box (often
+    used to send mails from the application).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The resource adapters, which provide a way of handling inputs/outputs in an
+    EE fashion (integrated with security and transactions).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: All these resources are configurable in the server—most of them from the application—and
+    allow the operation team (or the person responsible for the deployment) to tune
+    the resource the application is using. It also keeps the developer from having
+    to care about the configuration and ensure that the deployment will be customizable
+    enough.
+  prefs: []
+  type: TYPE_NORMAL
+- en: DataSource
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To illustrate it, we will refer to our `DataSource` example. In the first chapter,
+    we configured a pool and a data source. The data source was just a name in the
+    JNDI that the application was using to find the data source and later uses it
+    in its JPA layer. This is pretty much what a data source is: a connection factory.
+    What is crucial here is the way the connections are managed.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Most of the time, the production data sources are remote processes or, at least,
+    require a network connection. If you remember our MySQL connection URL, we used
+    the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This is a very common *development* configuration and it connects to `localhost`*.* Thus,
+    the network cost is the machine local loop cost, which is generally optimized
+    to be very fast. In real deployment, you will more likely connect to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: This URL will mark a remote host, and obtaining a connection will imply some
+    real latency. Indeed, it will not be as slow as an internet connection, where
+    the network has a lot of switches, routers, and hops. However, going over the
+    network always implies some milliseconds of latency.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What is interesting with data sources (it is also the case for JMS resources
+    in general) is that the protocol associated with the connection is a connected
+    protocol. Understand that once the connection is obtained, sending a command is
+    faster, as you don't have to create another connection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you ran the quote manager application, you would probably get some warning
+    like this one:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: This warning is issued by the MySQL driver and encourages you to use SSL for
+    the network communication. This is mainly for security reasons, but the SSL connection
+    is even slower. You can check out the HTTP2 protocol (introduced in Servlet 4.0
+    release, included in Java EE 8) that introduces the push protocol to avoid doing
+    too many connections from the browser over SSL, because it was starting to be
+    really slow with modern applications having a lot of web resources.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This means that reusing the same connection over and over is always a good idea
+    because it will cut down the actual connection step and will just let the application
+    issue commands and do its business.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To solve this *connection* issue, the server configures the data source as
+    a connection pool. A pool is a set of reusable connections. Each server has its
+    own pool and its own configuration, which are more or less advanced but all share
+    the same logic:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Some size configuration**: The number of connections to keep in the memory
+    while the server is idled (min), the number of connections that can be created
+    (max), how long a connection can be awaited, and so on'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Some eviction configuration**: The way to determine a connection should be
+    dropped from the pool'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The eviction is very important as the pool is related to long running connections.
+    You, therefore, need to be able to remove transparently the corrupted connections.
+    For instance, the MySQL server drops a connection after 8 hours by default. So,
+    if you run your application for 8 hours and 1 minute, all the requests will start
+    failing if you don''t have any eviction. For a data source, this is generally
+    done with `ValidationQuery`, which is a SQL query executed from time to time.
+    If this fails, it is considered as invalidating the connection and removing it
+    from the pool. The *time to time* can generally be configured too, and can mainly
+    mean three moments: *before the connection is shared and given to the application*,
+    *when the connection is given back to the pool* (the application is done with
+    it), or *in a background thread when the connection is idled*.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The choice is a trade-off between *do you accept a few requests failing because
+    the connection was not yet evicted by the background thread* and *do you accept
+    it to be a bit slower because the connection is validated every time*. You can
+    even mix all these validation types. A very important point here is to make sure
+    that the validation query is very fast to execute. Never use `SELECT * from CUSTOMER`,
+    which can return back thousands (or more) lines. Always use a constant result
+    set query. For MySQL, it is recommended that you use `SELECT 1`, which will just
+    return `1`. Each database has this kind of query, so check it out and ensure that
+    it is well configured in your pool.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You will indeed find other configurations depending on the pool you rely on,
+    but they are less impacting on the performance, so we will not detail them here.
+  prefs: []
+  type: TYPE_NORMAL
+- en: One crucial thing about the connection pools—data source ones or not—is to make
+    sure you are not waiting for them. As suggested earlier, if you are waiting for
+    connections, then you are slower than you should be, as the pool should avoid
+    this case. This means that when it comes to the performance, you don't have to
+    hesitate and should just ask your pool to never wait for a connection. This parameter
+    is often called *Max Wait Time*. Setting it to 0 or something very small can cause
+    your application to start failing with exceptions saying that the application
+    was not able to retrieve a connection in the configured time. This is exactly
+    what we want! This means that the pool is too small for the application's needs
+    and, thus, you need to increase the pool size. Alternatively, you can also decrease
+    the load sent to the server. It doesn't mean you shouldn't configure any wait
+    time in production. This is a parameter that can ensure you respond to your clients,
+    but it will potentially increase your response time. If it is acceptable, don't
+    hesitate to increase the value once you've tuned the application, but don't do
+    it before ensuring that you are not using a wrongly configured pool.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If your pool size is too small, you will likely see it in the stack traces or
+    in the monitoring you set up with the invocation, such as `allocateConnection`
+    or `getConnection`, depending on your server.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In terms of size tuning, it is tempting to simply set as many connections as
+    possible, but you need to keep in mind a few important points:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The database connection count can be limited. Never allocate all of them to
+    your application cluster, and ensure that you can keep at least a few for maintenance
+    purposes. For instance, if your MySQL allows 152 connections (default `max_connections`
+    of MySQL is 151 and `mysqld` allows `max_connections+1` actual connections), then
+    your application—as a cluster—can use 140 connections.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The pool handling requires you to deal with concurrency. Your application will
+    request connections from all its threads and then the container pool will need
+    to give different connections to all the threads to ensure that there is no data
+    corruption of cross-thread connection usage. On the other hand, eviction will
+    also happen at the same time the application is running and will potentially lock
+    the pool (it is close to the GC algorithm problem). The smaller the work needed
+    to be done on the pool, the better it will behave and the less it will impact
+    the application.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This means that not over adjusting the pool is also important. It is generally
+    a heuristic you should do based on your application and the targeted SLA. If you
+    have no idea about the size you must use, you can start setting the maximum size
+    of the pool to 25% of your maximum concurrent threads (HTTP pool size, for instance)
+    and then increase it until you don't get an error anymore, with a maximum wait
+    time of 0.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java EE and pools
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Java EE has a lot of pool types involved in its stack. Here is a summary of
+    the ones you may want to have a look at while tuning your application. Each time,
+    the tuning logic will be based on the same logic: no wait time and start with
+    a medium size in order not to over allocate resources and impact the application
+    too much.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Pool Type** | **Description** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| The `DataSource` pool | This handles and recycles database connections. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| The `ConnectionFactory` pool | This handles JMX connections to the broker.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| The `@Stateless` pool | This handles the recycling of stateless instances.
+    Today, it is relevant when stateless instances are used as a poor man throttling
+    implementation (max instance = max concurrency) or when the instances access some
+    thread of unsafe resources, which is very expensive to instantiate. It can be
+    seen as the Java EE pool API for application needs. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| The HTTP thread pool | These threads are used to server the requests. They
+    often have some sibling threads to accept the connection (selector threads). |'
+  prefs: []
+  type: TYPE_TB
+- en: '| The managed thread pool | This is usable by the application; these thread
+    pools are used to execute custom tasks. They are often used in reactive programming
+    to inherit from EE features in a reactive stack, such as RxJava. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| The Resource Adapter / JCA Connector pool | The JCA specification defines
+    multiple pools: the instance pools that are configured in a dependent way but
+    share the same principle as the other pools, and the thread pool using `WorkManager`,
+    which is the pre EE concurrency utility way to have a user thread pool injected
+    by the server into the application (connector here). Applications rarely use JCA
+    connectors today, but if you have inherited one, ensure that it is well tuned
+    and integrated with your server. |'
+  prefs: []
+  type: TYPE_TB
+- en: Java EE and HTTP pools
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Even if Java EE containers are more and more commonly used for daemons and standalone
+    applications, most of the developed applications are still web applications and,
+    therefore, use HTTP either as clients of another server or as the server themselves.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the last sentence, *Java EE containers* include the wide embedded varieties
+    of containers such as TomEE Embedded, Apache Meecrowave, WildFly Swarm, and so
+    on, and is not limited to standalone containers or full profile servers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This means that the Java EE configuration will have to deal with HTTP configuration.
+    It needs to be handled at multiple levels (networks, HTTP caching, and so on)
+    but also in multiple layers (server/HTTP connector, client connection pooling,
+    SSL tuning, and so on).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will delve into more details about this in [Chapter 5](cdbfd25b-1b43-4b9d-b45c-78586b39ebb5.xhtml), *Scale
+    Up: Threading and Implications* for the pooling - related configuration and in
+    [Chapter 6](8db12a5f-dba9-449b-af38-4963ac0adec0.xhtml), *Be Lazy, Cache Your
+    Data* for the caching configuration.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java EE implicit features
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The Java EE philosophy has always been *to work out of the box*. However, it
+    may have some impact on the performance as, sometimes, features are activated
+    without your application requiring them at all. If you know that you don't need
+    a feature, don't hesitate to disable it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, in `persistence.xml`*,* we disabled bean validation integration
+    adding this line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: This avoids the JPA provider adding the bean validation listeners it uses to
+    validate the entities and, thus, saves some CPU cycles without impacting the application.
+    If you check the chain of our application, we use JAX-RS (has a bean validation
+    integration) and then JPA (has another bean validation integration).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The rule for validation can be to always validate the data when it is entering
+    the system (JAX-RS for us) and not validate them internally. In fact, it is redundant
+    in terms of application logic. This is why it is fine to disable it at the JPA
+    layer, for instance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we saw how memory is managed with Java, and how to influence
+    it to optimize and adapt it to your application requirements. We also saw how
+    the Java EE server-provided resources help you save time, as they not only enable
+    you to skip reconnection time between usages but also imply a dedicated tuning
+    to not abuse the server memory and CPU.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The idea behind this chapter is to ensure that you have the keys and knowledge
+    to be able to investigate any issue with memory and to be able to tune the memory
+    and resources without being lost or using some random numbers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Also, this part is probably the most unportable one and will be related to the
+    JVM (for the memory) and server (for the resources) you'll use in your deployment.
+    All the concepts will still apply but the way you tune them can differ, since
+    this is not something standardized yet—even if the JVM tuning does not change
+    as much as server configurations. However, don't hesitate to check out your JVM
+    or server documentation and make sure to have read it before entering into a benchmark
+    phase in order not to lose time in testing options you don't know upfront.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the next chapter, we will see how to make the most of Java EE concurrent
+    programming and how it is linked to the Java EE threading model to ensure that
+    your application can scale. The memory and the CPU are the two most central resources
+    a server uses on a machine: we just saw the memory resource, and we will now deal
+    with the CPU through the threading study.'
+  prefs: []
+  type: TYPE_NORMAL

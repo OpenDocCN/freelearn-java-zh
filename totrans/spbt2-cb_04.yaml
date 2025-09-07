@@ -1,0 +1,557 @@
+- en: Writing Custom Spring Boot Starters
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding Spring Boot autoconfiguration
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Creating a custom Spring Boot autoconfiguration starter
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Configuring custom conditional bean instantiations
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using custom @Enable annotations to toggle configurations
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Introduction
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the previous chapters, we did a lot of configuration, and even more autoconfiguration,
+    while developing our Spring Boot application. Now, it is time to take a look behind
+    the scenes to find out the magic behind Spring Boot autoconfiguration and write
+    some starters of our own as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is a very useful capability to possess, especially for large software enterprises
+    where the presence of a proprietary code is inevitable. It is very helpful to
+    be able to create internal custom starters that would automatically add some of
+    the configuration or functionalities to the applications. Some likely candidates
+    would be custom configuration systems, libraries, and configurations that deal
+    with connecting to databases, using custom connection pools, HTTP clients, servers,
+    and more. We will go through the internals of Spring Boot autoconfiguration, take
+    a look at how new starters are created, explore conditional initialization and
+    wiring of beans based on various rules, and see that annotations can be a powerful
+    tool, providing the consumers of the starters with more control over dictating
+    what configurations should be used and where.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding Spring Boot autoconfiguration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Spring Boot has a lot of power when it comes to bootstrapping an application
+    and configuring it with exactly the things that are needed, all without much of
+    the glue code that is required of us, the developers. The secret behind this power
+    actually comes from Spring itself, or rather from the Java Configuration functionality
+    that it provides. As we add more starters as dependencies, more and more classes
+    will appear in our classpath. Spring Boot detects the presence or absence of specific
+    classes and based on this information, makes some decisions, which are fairly
+    complicated at times, and automatically creates and wires the necessary beans
+    to the application context.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Sounds simple, right?
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the previous recipes, we added a number of Spring Boot starters such as `spring-boot-starter-data-jpa`,
+    `spring-boot-starter-web`, `spring-boot-starter-data-test`, and so on. We will
+    use the same code that we finished in the previous chapter, in order to see what
+    actually happens during the application startup and the decisions that Spring
+    Boot will make while wiring our application together.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Conveniently, Spring Boot provides us with an ability to get the `CONDITIONS
+    EVALUATION REPORT` by simply starting the application with the `debug` flag. This
+    can be passed to the application either as an environment variable, `DEBUG`, as
+    a system property, `-Ddebug`, or as an application property, `--debug`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Start the application by running `DEBUG=true ./gradlew clean bootRun`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Now, if you look at the console logs, you will see a lot more information printed
+    there that is marked with the `DEBUG` level log. At the end of the startup log
+    sequence, we will see the `CONDITIONS EVALUATION REPORT` as follows:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As you can see, the amount of information that is printed in the debug mode
+    can be somewhat overwhelming, so I've selected only one example of positive and
+    negative matches each.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For each line of the report, Spring Boot tells us why certain configurations
+    have been selected to be included, what they have been positively matched on,
+    or, for the negative matches, what was missing that prevented a particular configuration
+    being included in the mix. Let''s look at the positive match for `DataSourceAutoConfiguration`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `@ConditionalOnClass` classes found tells us that Spring Boot has detected
+    the presence of a particular class, specifically two classes in our case: `javax.sql.DataSource`
+    and `org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `OnClassCondition` indicates the kind of matching that was used. This is
+    supported by the `@ConditionalOnClass` and `@ConditionalOnMissingClass` annotations.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: While `OnClassCondition` is the most common kind of detection, Spring Boot also
+    uses many other conditions. For example, `OnBeanCondition` is used to check the
+    presence or absence of specific bean instances, `OnPropertyCondition` is used
+    to check the presence, absence, or specific value of a property, as well as any
+    number of the custom conditions that can be defined using the `@Conditional` annotation
+    and `Condition` interface implementations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The negative matches show us a list of configurations that Spring Boot has evaluated,
+    which means that they do exist in the classpath and were scanned by Spring Boot
+    but didn't pass the conditions required for their inclusion. `GsonAutoConfiguration`,
+    while available in the classpath as it is a part of the imported `spring-boot-autoconfigure`
+    artifact, was not included because the required `com.google.gson.Gson` class was
+    not detected as present in the classpath, thus failing the `OnClassCondition`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The implementation of the `GsonAutoConfiguration` file looks as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: After looking at the code, it is very easy to make the connection between the
+    conditional annotations and report information that is provided by Spring Boot
+    at the start time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating a custom Spring Boot autoconfiguration starter
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We have a high-level idea of the process by which Spring Boot decides which
+    configurations to include in the formation of the application context. Now, let's
+    take a stab at creating our own Spring Boot starter artifact, which we can include
+    as an autoconfigurable dependency in our build.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In [Chapter 2](bd85f38d-1b98-47d6-a98a-b22f4478f68e.xhtml), *Configuring Web
+    Applications*, you learned how to create database `Repository` objects. So, let's
+    build a simple starter that will create another `CommandLineRunner` that will
+    take the collection of all the `Repository` instances and print out the count
+    of the total entries for each.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will start by adding a child Gradle project to our existing project that
+    will house the codebase for the starter artifact. We will call it `db-count-starter`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We will start by creating a new directory named `db-count-starter` in the root
+    of our project.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'As our project has now become what is known as a `multiproject` build, we will
+    need to create a `settings.gradle` configuration file in the root of our project
+    with the following content:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We should also create a separate `build.gradle` configuration file for our
+    subproject in the `db-count-starter` directory in the root of our project, with
+    the following content:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Now we are ready to start coding. So, the first thing is to create the directory
+    structure, `src/main/java/com/example/bookpubstarter/dbcount`, in the `db-count-starter`
+    directory in the root of our project.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'In the newly created directory, let''s add our implementation of the `CommandLineRunner`
+    file named `DbCountRunner.java` with the following content:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'With the actual implementation of `DbCountRunner` in place, we will now need
+    to create the configuration object that will declaratively create an instance
+    during the configuration phase. So, let''s create a new class file called `DbCountAutoConfiguration.java`
+    with the following content:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: We will also need to tell Spring Boot that our newly created JAR artifact contains
+    the autoconfiguration classes. For this, we will need to create a `resources/META-INF`
+    directory in the `db-count-starter/src/main` directory in the root of our project.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'In this newly created directory, we will place the file named `spring.factories`
+    with the following content:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'For the purpose of our demo, we will add the dependency to our starter artifact
+    in the main project''s `build.gradle` by adding the following entry in the dependencies
+    section:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: Start the application by running `./gradlew clean bootRun`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Once the application is compiled and has started, we should see the following
+    in the console logs:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Congratulations! You have now built your very own Spring Boot autoconfiguration
+    starter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: First, let's quickly walk through the changes that we made to our Gradle build
+    configuration and then we will examine the starter setup in detail.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As the Spring Boot starter is a separate, independent artifact, just adding
+    more classes to our existing project source tree would not really demonstrate
+    much. To make this separate artifact, we have a couple of choices: making a separate
+    Gradle configuration in our existing project, or creating a completely separate
+    project altogether. The most ideal solution, however, was to just convert our
+    build to Gradle Multi-Project Build by adding a nested project directory and subproject
+    dependency to the `build.gradle` file of the root project. By doing this, Gradle
+    actually creates a separate JAR artifact for us but we don''t have to publish
+    it anywhere, only include it as a compile `project('':db-count-starter'')` dependency.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: For more information about Gradle multi-project builds, you can check out the
+    manual at [http://gradle.org/docs/current/userguide/multi_project_builds.html](http://gradle.org/docs/current/userguide/multi_project_builds.html).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Spring Boot Auto-Configuration starter is nothing more than a regular Spring
+    Java Configuration class annotated with the `@Configuration` annotation and the
+    presence of `spring.factories` in the classpath in the `META-INF` directory with
+    the appropriate configuration entries.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'During the application startup, Spring Boot uses `SpringFactoriesLoader`, which
+    is a part of Spring Core, in order to get a list of the Spring Java Configurations
+    that are configured for the `org.springframework.boot.autoconfigure.EnableAutoConfiguration`
+    property key. Under the hood, this call collects all the `spring.factories` files
+    located in the `META-INF` directory from all the jars or other entries in the
+    classpath, and builds a composite list to be added as application context configurations.
+    In addition to the `EnableAutoConfiguration` key, we can declare the following
+    automatically initializable startup implementations in a similar fashion:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`org.springframework.context.ApplicationContextInitializer`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.context.ApplicationListener`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.autoconfigure.AutoConfigurationImportListener`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.autoconfigure.AutoConfigurationImportFilter`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`` `org.springframework.boot.autoconfigure.template.TemplateAvailabilityProvider`
+    ``'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.SpringBootExceptionReporter`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.SpringApplicationRunListener`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.env.PropertySourceLoader`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.env.EnvironmentPostProcessor`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.diagnostics.FailureAnalyzer`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.boot.diagnostics.FailureAnalysisReporter`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`org.springframework.test.contex.TestExecutionListener`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Ironically enough, a Spring Boot Starter does not need to depend on the Spring
+    Boot library as its compile time dependency. If we look at the list of class imports
+    in the `DbCountAutoConfiguration` class, we will not see anything from the `org.springframework.boot`
+    package. The only reason that we have a dependency declared on Spring Boot is
+    because our implementation of `DbCountRunner` implements the `org.springframework.boot.CommandLineRunner`
+    interface.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Configuring custom conditional bean instantiations
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the previous example, you learned how to get the basic Spring Boot Starter
+    going. On the inclusion of the jar in the application classpath, the `DbCountRunner`
+    bean will be created automatically and added to the application context. In the
+    very first recipe of this chapter, we have also seen that Spring Boot has an ability
+    to do conditional configurations depending on a few conditions, such as the presence
+    of specific classes in the classpath, existence of a bean, and others.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For this recipe, we will enhance our starter with a conditional check. This
+    will create the instance of `DbCountRunner` only if no other bean instance of
+    this class has already been created and added to the application context.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the `DbCountAutoConfiguration` class, we will add an `@ConditionalOnMissingBean`
+    annotation to the `dbCountRunner(...)` method, as follows:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We will also need to add a dependency on the `spring-boot-autoconfigure` artifact
+    to the dependencies section of the `db-count-starter/build.gradle` file:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: Now, let's start the application by running `./gradlew clean bootRun` in order
+    to verify that we will still see the same output in the console logs as we did
+    in the previous recipe
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'If we start the application with the `DEBUG` switch so as to see the Auto-Configuration
+    Report, which we already learned in the first recipe of this chapter, we will
+    see that our autoconfiguration is in the Positive Matches group, as follows:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s explicitly/manually create an instance of `DbCountRunner` in our main
+    `BookPubApplication` configuration class, and we will also override its `run(...)`
+    method, just so we can see the difference in the logs:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Start the application by running `DEBUG=true ./gradlew clean bootRun`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'If we look at the console logs, we will see two things: the Auto-Configuration
+    Report will print our autoconfiguration in the Negative Matches group and, instead
+    of the count output for each repository, we will see `Manually Declared DbCountRunner` text
+    to appear:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As we learned from the previous recipe, Spring Boot will automatically process
+    all the configuration class entries from `spring.factories` during the application
+    context creation. Without any extra guidance, everything that is annotated with
+    an `@Bean` annotation will be used to create a Spring Bean. This functionality
+    is actually a part of the plain old Spring Framework Java Configuration. What
+    Spring Boot adds on top is the ability to conditionally control the rules for
+    when certain `@Configuration` or `@Bean` annotations should be executed and when
+    it is best to ignore them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In our case, we used the `@ConditionalOnMissingBean` annotation to instruct
+    Spring Boot to create our `DbCountRunner` bean only if there was no other bean
+    matching either the class type or bean name already declared elsewhere. As we
+    explicitly created an `@Bean` entry for `DbCountRunner` in the `BookPubApplication`
+    configuration, this took precedence and caused `OnBeanCondition` to detect the
+    existence of the bean; thus instructing Spring Boot not to use `DbCountAutoConfiguration`
+    during the application context setup.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using custom @Enable annotations to toggle configuration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Allowing Spring Boot to automatically evaluate the classpath and detected configurations
+    that are found there makes it very quick and easy to get a simple application
+    going. However, there are times when we want to provide the configuration classes
+    but require consumers of the starter library to explicitly enable such a configuration,
+    rather than relying on Spring Boot to decide automatically if it should be included
+    or not.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will modify our previous recipe to make the starter be enabled via a meta-annotation
+    rather than using the `spring.factories` route.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'First, we will comment out the content of the `spring.factories` file located
+    in `db-count-starter/src/main/resources` in the root of our project, as follows:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Next, we will need to create the meta-annotation. We will create a new file
+    named `EnableDbCounting.java` in the `db-count-starter/src/main/java/com/example/bookpubstarter/dbcount`
+    directory in the root of our project with the following content:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We will now add the `@EnableDbCounting` annotation to our `BookPubApplication`
+    class and also remove the `dbCountRunner(...)` method from it, as shown in the
+    following snippet:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: Start the application by running `./gradlew clean bootRun`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'After running the application, the first thing that you might have noticed
+    is that the printed counts all showed `0`, even though `StartupRunner` had printed
+    `Number of books: 1` to the console, as shown in the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is because Spring Boot is randomly executing `CommandLineRunners` and,
+    as we changed the configuration to use the `@EnableDbCounting` annotation, it
+    gets processed before the configuration in the `BookPubApplication` class itself.
+    As the database population is done by us in the `StartupRunner.run(...)` method
+    and the execution of `DbCountRunner.run(...)` happens before this, the database
+    tables have no data and so report the `0` count.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If we want to enforce the order, Spring provides us with this ability using
+    the `@Order` annotation. Let's annotate the `StartupRunner` class with `@Order(Ordered.LOWEST_PRECEDENCE
+    - 15)`. As `LOWEST_PRECEDENCE` is the default order that is assigned, we will
+    ensure that `StartupRunner` will be executed after `DbCountRunner` by slightly
+    reducing the order number. Let's run the app again and now we will see that the
+    counts are properly displayed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now that this little ordering issue is behind us, let's examine what we did
+    with the `@EnableDbCounting` annotation in a bit more detail.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Without `spring.factories` containing the configuration, Spring Boot does not
+    really know that the `DbCountAutoConfiguration` class should be included during
+    the application context creation. By default, the configuration component scan
+    will look only from the `BookPubApplication` package and below. As the packages
+    are different—`com.example.bookpub` versus `com.example.bookpubstarter.dbcount`—the
+    scanner won't pick it up.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is where our newly created meta-annotation comes into play. In the `@EnableDbCounting`
+    annotation, there is a key-nested annotation, `@Import(DbCountAutoConfiguration.class)`,
+    which makes things happen. This is an annotation that is provided by Spring, which
+    can be used to annotate other annotations with declarations of which configuration
+    classes should be imported in the process. By annotating our `BookPubApplication`
+    class with `@EnableDbCounting`, we transitively tell Spring that it should include
+    `DbCountAutoConfiguration` as a part of the application context as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the convenience meta-annotations, `spring.factories`, and conditional
+    bean annotations, we can now create sophisticated and elaborate custom autoconfiguration
+    Spring Boot starters in order to solve the needs of our enterprises.
+  prefs: []
+  type: TYPE_NORMAL

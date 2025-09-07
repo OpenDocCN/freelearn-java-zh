@@ -1,0 +1,575 @@
+- en: Configuring Storage for Your Applications
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we will start by learning the theoretical basis of OpenShift
+    storage configuration. Later, we will show you how to deploy a database in the
+    cloud and configure your cloud applications to use it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the last section of the preceding chapter, we deployed the simple version
+    of `CatalogService` in the cloud, using OpenShift. We also got an initial feeling
+    for the web console and OpenShift `cli`. Now, it is time to go further. We will
+    reconfigure our application to use the database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before doing that, we will cover OpenShift persistence storage concepts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: OpenShift storage concepts
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the previous chapter, we hinted a the volume concept—the tool that is used
+    by OpenShift to implement storage. Let's start by looking at it more thoroughly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Volumes
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As we mentioned in the preceding chapter, OpenShift's unit of deployment and
+    scaling is a pod, which can contain many containers. The containers in the pod
+    are ephemeral—they can be stopped and started at any moment by Kubernetes. The
+    data stored in the container will be lost when the container goes down because
+    during the restart the fresh container is recreated from the image.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As a result, we will need another tool to implement the storage. Such a tool
+    is the volume.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So, what is a volume? From the technical point of view, volumes are basically
+    directories on the node that runs the pod, which are mapped into the container
+    filesystem. Also, volumes have an explicitly defined life cycle, which equals
+    the pod life cycle. Whenever the pod is stopped, the volume is destroyed. On the
+    other hand, when the containers inside the pod are restarted, the volume is unchanged;
+    it just has to be remounted inside the container.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Linux directory can also be a link to another directory or remote filesystem,
+    such as **Network File System** (**NFS**). As a result, removing the directory
+    when the pod is stopped doesn't necessarily mean removing all the pieces of data.
+    As a result, the way in which a volume behaves depends on its type—we will describe
+    it in the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: OpenShift allows you to configure a number of volume types. Let's look at the
+    most common of them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Empty directory
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Empty directory is, as its name suggests, an empty directory created in the
+    node's filesystem. The directory is created when the pod is instantiated and is
+    present as long as the pod runs on that node. When the pod is removed from the
+    node for any reason, the directory is deleted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The empty directory can be mounted inside any of the containers running inside
+    the pod. An example usage for this kind of pod may be a directory shared between
+    the containers that are used to gather common data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we mentioned in the *Volumes* section, restarting any of the containers does
+    not result in the deletion of the directory. The directory will be present till
+    the pod exists and will be remounted inside a container that has a dependency
+    on it after the container restart.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Host path
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Host path is another type of persistent volume, which mounts the directory from
+    the node's filesystem. In contrast to the empty directory, this kind of persistent
+    volume does not create or destroy any new directories. For example, when a container
+    needs access to some part of a configuration of the host, an administrator can
+    mount the directory with this configuration inside the container filesystem.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Remote filesystems
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As we hinted previously, a volume's directory doesn't have to point to the local
+    filesystem. It can also point to remote filesystem directories. It is here that
+    interesting stuff starts to happen. Let's look at it closer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Quick recall here, when you use a remote filesystem, you have to create the
+    storage on the server, export it, and then mount it on the client. On the client
+    side, the mounting directory will be implemented as a remote filesystem client.
+    As a result, operations on that directory will be propagated (using the given
+    remote filesystem protocol) to the server.
+  prefs: []
+  type: TYPE_NORMAL
+- en: OpenShift supports a number of remote filesystem protocols, for example, NFS,
+    or Fiber Channel. Additionally, if you have knowledge of your cluster architecture,
+    you can use proprietary remote filesystems, such as gcePersistentDisk (Google
+    Cloud) or awsElasticBlockStore (Amazon Web Services).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Given the knowledge that we have, let's analyze the behavior of remote filesystems
+    with OpenShift. When the pod with a remote filesystem volume is started, OpenShift
+    creates a client directory on the node and mounts it inside the appropriate containers,
+    according to the configuration. As usual, when containers are stopped, nothing
+    happens to the directory, and it is remounted again when a container is restarted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: More interesting stuff happens when the pod is being removed or when the node
+    crashes. In this scenario, the client directory is being deleted. Contrary to
+    the empty directory scenario, this doesn't mean a loss of data. Deleting a client
+    directory means that only one of the clients of the remote filesystem has been
+    destroyed. The data inside the filesystem stays untouched.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As you can see, remote volumes enable us to create persistent storage, which
+    can be mounted to our application. Also, the lifecycle is independent of the pods.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'OK, we already know how volumes work and would gladly add them to our application.
+    However, there is one problem, the configuration. The developer who would like
+    to use one of those volumes has to have a lot of information on the cluster configuration:
+    what kind of remote filesystem has been configured, or on which node it runs.
+    More importantly, even if you gather such information from your administrator,
+    you would need to ensure that it is configured correctly in each of your environments.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: That's not good for a number of reasons. Firstly, we would like to decouple
+    a developer from the cluster administrator. Ideally, the developer will specify
+    the type of volume they need without needing to learn the details of the cluster
+    configuration. Secondly, we emphasized in the preceding chapter the importance
+    of a unified view of the cloud. Since this unified view is compromised now, you
+    would have to reconfigure your pods for the testing environment to use NFS instead
+    of Google disk. We clearly don't want that.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We need a tool that will solve those problems. Let's discuss **persistent volumes**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: PersistentVolume and PersistentVolumeClaims
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Persistent volumes, similar to regular volumes, allow you to define different
+    types of persistent storage. In fact, you can use persistent volumes to define
+    storage types analogous to regular volumes, such as node directories or remote
+    filesystems. Then, what is the difference?
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Persistent volumes are Kubernetes objects, just as pods and services are objects.
+    Their lifecycle is not related to any of the pods. In this context, we can think
+    about persistent modules similar to the nodes—they are part of cluster infrastructure.
+    Let''s take a look at the sample `PersistentVolume`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As you can see in the preceding code, the `PersistentVolume` specifies the
+    NFS server to which it is going to connect, in the same way as the volume. Compared
+    to regular volume, it has a few additional fields: capacity, access mode, and
+    metadata labels. You will learn in a moment why they are needed.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the end, we would like to have this persistent storage mounted to our containers.
+    How can we achieve that? We can do so using `PersistentVolumeClaims`. The `PersistentVolumeClaim`
+    is an object that specifies the characteristics of the `PersistentVolume` that
+    we need.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s look at the example again:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see in the preceding code, the `PersistentModule` claim specifies
+    the amount of storage we need and the access type. As usual, in OpenShift, you
+    are also able to use the label mechanism to provide additional match characteristics.
+    In our example, we use those to specify from which zone the `PersistentVolume`
+    should be taken.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `PersistentVolume` provides us with the capability of declaring persistent
+    storage, which is a part of cluster infrastructure, and the `PersistentVolumeClaim`
+    is a set of criteria that allows us to specify the `PersistentStorage` that we
+    need.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, how does the match process look and how does it actually relate to
+    the pods that we are creating?
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `PersistentVolumeClaim` technically is a kind of a volume, and, as a result,
+    you can refer to the given `PersistentVolumeClaim` from within your pod configuration.
+    When the pod with such a claim is started, the `PersistentStorage` objects available
+    in the system are evaluated. If a matching `PersistentVolume` can be found, it
+    is mounted inside the containers that depend on that claim.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s take a look at the following example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can note, we were able to refer to the previously created `PersistentVolumeClaim`
+    in our pod configuration. With this configuration, when `mypod` starts, `myclaim`
+    would be evaluated, and if a matching `PersistentVolume` is found, it will be
+    mounted inside `my-container`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It's time to take a look at the bigger picture of the `PersistentVolume` and
+    `PersistentVolumeClaims` architecture; those objects decouple storage provisioning
+    from pod configuration. As a result, a developer is able to specify the characteristics
+    of the storage that they need. They don't have to configure those volumes, and
+    don't need to have the knowledge of the architecture of the given cluster. Also,
+    the `PersistentVolume` is part of a cluster configuration, whereas the `PersistentVolumeClaim`
+    is part of an application configuration; both can be created independently. The
+    application that contains `PersistentVolumeClaim` objects can be created by a
+    developer and deployed without changes in many OpenShift clusters. On the other
+    hand, those clusters may contain different persistent storage configurations created
+    by the administrators of those clusters. The details of those configurations are
+    abstracted away from the developer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The catalog-service with database
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: You have learned the essential knowledge to understand how to work with persistent
+    storage in the OpenShift cloud. Now, let's take a look at this with a practical
+    example. Let's update our catalog-service deployment so that it connects to the
+    database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Configuring PostgreSQL database
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'First, let''s ensure that we have removed the previous version of the `catalog-service`.
+    In order to do that, we will need to use the `oc` delete command. The command
+    interface is the same as the interface for the get operation. You will be able
+    to delete an object by directly specifying its name or use labels to indicate
+    objects that you want to delete. There are many objects related to a single application,
+    and we obviously don''t want to delete them one by one. As a result, we will use
+    the label version of the `delete` command for that:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now, we are ready to deploy the database. Open your web console and click on
+    the Add to the Project button. We will search for the PostgreSQL project:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/f2ceef6b-9893-4b4b-ab22-1f573cafa24b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The search results in a number of options; we need to choose the data store
+    option:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/d58deab6-0a05-4bd8-a3b0-6ccd8af2cba4.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'When you click on the Select button, the following form opens:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/54bfbd1c-40d8-4d80-bc33-06d001db2812.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: We changed the name of the database server and the name of the database instance
+    to `catalogdb`. For convenience purposes, we have set both the user and password
+    to catalog.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will also override Labels:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/40376223-9280-47bd-b433-ce535e617d5c.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: We will use a bunch of database containers for our different services. As a
+    result, we can't use standard application and template labels. We change them
+    to catalogdb-template and `catalogdb`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After we have done that, we are ready to create an application; let's click
+    on the Create button at the bottom of the page.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We have to wait for the moment till the pod has been started. Let''s click
+    on the Overview page button and further on postgresql deployment; we have to wait
+    till there is one replica active:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/95a98108-243e-4fc1-af2a-53cbcfd261da.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The application is running. Let''s fill our database with a number of pets
+    so that we can test our service behavior. To do that we need to get access to
+    the console of the container on which the database run. In order to achieve that
+    we have to go to applications/pods menu, choose the pod on which PostgreSQL runs,
+    and the terminal button:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/61f80c88-b737-4606-ad97-0f92769c288c.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Let''s fill the database now. Let''s log into the user directory and create
+    the SQL script there:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The script is very similar to the load scripts that we created in previous
+    applications:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: Please note, that we have changed the convention here. Instead of using names
+    as item identifiers, we start using UIDs we will be the consistent ID for pets
+    in the whole application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Finally, we are going to execute the script:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: The command above run PostgreSQL command line client. The `-U` parameter specifies
+    the user (catalog in our example) and the `catalogdb` parameter specifies the
+    schema on which the client must operate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our database is ready now and the question that comes to your mind may be:
+    where are my persistent volumes? And the answer is: again OpenShift has done everything
+    for you. Let''s inspect it a little bit further.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Inspecting the volumes
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In order to take a look at how the database is configured, let''s use `cli`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You will be able to see that this deployment configuration has defined a volume
+    of the `PersistentVolumeClaim` type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/25f673f5-c9fa-48ce-b72b-1bbe6d49e433.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Going further, let''s analyze the `catalogdb` persistent volume claim:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We will be able to see that the claim has been created according to the database
+    type that we provided and that it has been already bound:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/fae0a7c9-2216-4142-997d-cbe035f6334c.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: As you see in the preceding screenshot, OpenShift has created a `PersitentVolumeClaim`
+    based on information that you provided when an application was created from the
+    template. The claim has been bound to one of the `PersitentVolumes` on the cluster.
+    Since we are using Minishift now, the `PersitentVolumes` are implemented using
+    disks inside the virtual machine. But we want to emphasize again that your application
+    config wouldn't change an iota if you decided to deploy your application on any
+    other OpenShift cluster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's return to our example.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Updating catalog-service
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We have to reconfigure our catalog-service again so that it works with the PostgreSQL
+    database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Examples refrence: `chapter7/catalog-service**-**openshift**-**postgresql`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s start with the `pom.xml` changes—we have to add Postgres dependency
+    to it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: We have changed the database driver from `h2` to `PostgreSQL` (1).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s change the datasource configuration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: We have to reconfigure the JDBC driver to user `postgresql` classes and reconfigure
+    the datasource, so that it contains the data of our application. The meaning of
+    catalogdb.petstore.svc address will be explained in the next chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As in the previous database examples, we have to provide the `persistence`
+    file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: Finally, we have to add the `postgreSQL` JDBC module to the application...
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/fe71f5cd-a059-4447-9f43-2e6cc2b3e7bf.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'With the following contents:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: OK, now that we have reconfigured our catalog-service, it is time for interesting
+    stuff. Let's deploy our application to OpenShift.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will use the source-to-image build again as we did in the last chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We have to wait till our fat-JAR has started. To verify that, we may take a
+    look at the log of the pod on which the application was started:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ff92ae62-f574-4270-b600-093719a2445b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'As in the preceding example, we have to create a route. After doing that, let''s
+    find out the address of catalog-service visible from outside the cluster:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/85c23ccc-45d2-47fe-a606-94cc6552f4b7.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Let''s copy the route name and use `curl` to check whether we can get pet information
+    using catalog-service:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/20becbce-beeb-4eac-abff-7c126e3c94d1.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: It works. Let's extend our service now so that it is able to persist data to
+    the database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s extend our `CatalogService`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We have extended the service with the `add` method (1). Note that the method
+    is transactional and generates UUID for the items in the store (2). We have also
+    added a method that lists all the items in the store (3). Note that we would need
+    also to add NamedQuery for that:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We also have to add the `POST` method to the `CatalogResource`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: We have implemented the `addNew` method, which uses the `CatalogService` instance
+    to add an `Item` object(1) to the database. As you will have noticed in the preceding
+    code, both the `Request` parameter and `Response` are JSON objects. They are parsed
+    automatically by a server; the only thing that we must do is annotate the method
+    with the `@Produces` (2) and `@Consumes` (3) annotations. In the method, we use
+    the `catalogService` to store a given Item object. Finally, we return either the
+    `ok` response (5) or an error response (6) based on the result of the store operation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We have also implemented `getAll` method which will allow us to request information
+    about all the pets in the store (2).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After the application is ready, you have to commit the changed files and push
+    them to GitHub. When you do this, you can enter the web console and trigger the
+    build of the updated service. In order to do it, you have to click on Build |
+    Build in the Webconsole, select the catalog-service, and click on the Start Build
+    button in the top-right corner:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/663eda07-e9f5-4e52-adf8-570303ba0a6b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'After the application starts, we have to wait till it has been deployed in
+    the cloud. Let''s use `curl` to `POST` new Item in our store:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/fe1bf0c4-269c-4f17-bf7b-eb9f27f2ceca.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Everything seems fine, so let''s check what items are available in the store
+    using the request that we have just implemented:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/4aea7c58-3c7d-4dff-b67c-be6d2145dab1.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: There are three rabbits in our database. Our service is working correctly inside
+    the OpenShift cluster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We may now check that the storage is indeed persistent. Let's get into the web
+    console and terminate both catalog-service and database pods. In order to do that,
+    enter web console, click Applications | Pods and choose the database pod. Later
+    click on Actions in the right, upper corner and choose Delete. Repeat those actions
+    for catalog-service pod. After both pods have been restarted (you can monitor
+    that in Applications | Pods view), you can again list all items. You should be
+    able to see extract the same result as on the preceding screenshot.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, you learned how to configure persistence for the services deployed
+    in OpenShift.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This chapter started with theoretical knowledge, giving you more details on
+    volumes and their different types. Later, you learned a particularly useful type
+    of the volume the `PersistentVolumeClaim`. You also learned why it is necessary,
+    how it is related to the `PersistentVolume`, and how to use it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, we extended your `catalogService` so that it uses the `postgresql`
+    database as the storage.
+  prefs: []
+  type: TYPE_NORMAL
