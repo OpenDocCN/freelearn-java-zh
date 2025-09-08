@@ -1,0 +1,707 @@
+- en: Switching, Throttling, Windowing, and Buffering
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: It is not uncommon to run into situations where an `Observable` is producing
+    emissions faster than an `Observer` can consume them. This happens particularly
+    when you introduce concurrency, and the `Observable` chain has different operators
+    running on different Schedulers. Whether it is one operator struggling to keep
+    up with a preceding one, or the final `Observer` struggling to keep up with emissions
+    from the upstream, bottlenecks can occur where emissions start to queue up behind
+    slow operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Of course, the ideal way to handle bottlenecks is to leverage backpressure using
+    Flowable instead of `Observable`.The `Flowable` is not much different than the `Observable`
+    other than that it tells the source to slow down by having the `Observer` request
+    emissions at its own pace, as we will learn about it in *[Chapter 8](14efb9e9-14a6-41ba-86cb-20b5674dce8e.xhtml),
+    Flowables and Backpressure*. But not every source of emissions can be backpressured.
+    You cannot instruct `Observable.interval()` (or even `Flowable.interval()`) to
+    slow down because the emissions are logically time-sensitive. Asking it to slow
+    down would make those time-based emissions inaccurate. User input events, such
+    as button clicks, logically cannot be backpressured either because you cannot
+    programmatically control the user.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Thankfully, there are some operators that help cope with rapidly firing sources
+    without using backpressure and are especially appropriate for situations where
+    backpressure cannot be utilized. Some of these operators batch up emissions into
+    chunks that are more easily consumed downstream. Others simply sample emissions
+    while ignoring the rest. There is even a powerful `switchMap()` operator that
+    functions similarly to `flatMap()` but will only subscribe to the `Observable`
+    derived from the latest emission and dispose of any previous ones.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We will cover all of these topics in this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Buffering
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Windowing
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Throttling
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Switching
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We will also end the chapter with an exercise that groups up keystrokes to emit
+    strings of user inputs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Buffering
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `buffer()` operator will gather emissions within a certain scope and emit
+    each batch as a list or another collection type. The scope can be defined by a
+    fixed buffer sizing or a timing window that cuts off at intervals or even slices
+    by the emissions of another `Observable`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Fixed-size buffering
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The simplest overload for `buffer()` accepts a `count` argument that batches
+    emissions in that fixed size. If we wanted to batch up emissions into lists of
+    eight elements, we can do that as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: Of course, if the number of emissions does not cleanly divide, the remaining
+    elements will be emitted in a final list even if it is less than the specified
+    count. This is why the last emission in the preceding code has a list of two elements
+    (not eight), containing only `49` and `50`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You can also supply a second `bufferSupplier` lambda argument to put items
+    in another collection besides a list, such as `HashSet`, as demonstrated here
+    (this should yield the same output):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To make things more interesting, you can also provide a `skip` argument that
+    specifies how many items should be skipped before starting a new buffer. If `skip`
+    is equal to `count`, the `skip` has no effect. But if they are different, you
+    can get some interesting behaviors. For instance, you can buffer `2` emissions
+    but skip `3` before the next buffer starts, as shown here. This will essentially
+    cause every third element to not be buffered:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If you make `skip` less than `count`, you can get some interesting rolling
+    buffers. If you buffer items into a size of `3` but have `skip` of `1`, you will
+    get rolling buffers. In the following code, for instance, we emit the numbers
+    `1` through `10` but create buffers `[1, 2, 3]`, then `[2, 3, 4]`, then `[3, 4,
+    5]`, and so on:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Definitely play with the `skip` argument for `buffer()` , and you may find
+    surprising use cases for it. For example, I sometimes use `buffer(2,1)` to emit
+    the "previous" emission and the next emission together, as shown here. I also
+    use `filter()` to omit the last list , which only contains `10`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: Time-based buffering
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'You can use `buffer()` at fixed time intervals by providing a long and `TimeUnit`.
+    To buffer emissions into a list at 1-second intervals, you can run the following
+    code. Note that we are making the source emit every `300` milliseconds, and each
+    resulting buffered list will likely contain three or four emissions due to the
+    one-second interval cut-offs:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: There is an option to also specify a `timeskip` argument, which is the timer-based
+    counterpart to `skip`. It controls the timing of when each buffer starts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can also leverage a third `count` argument to provide a maximum buffer size.
+    This will result in a buffer emission at each time interval or when `count` is
+    reached, whichever happens first. If the `count` is reached right before the time
+    window closes, it will result in an empty buffer being emitted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here, we buffer emissions every 1 second, but we limit the buffer size to 2:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that time-based `buffer()` operators will operate on the computation `Scheduler` .
+    This makes sense since a separate thread needs to run on a timer to execute the
+    cutoffs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Boundary-based buffering
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The most powerful variance of `buffer()` is accepting another `Observable` as
+    a `boundary` argument. It does not matter what type this other `Observable` emits.
+    All that matters is every time it emits something, it will use the timing of that
+    emission as the buffer cut-off. In other words, the arbitrary occurrence of emissions
+    of another `Observable` will determine when to "slice" each buffer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For example, we can perform our previous example with 300-millisecond emissions
+    buffered every 1-second using this technique. We can have `Observable.interval()`
+    of 1 second serve as the boundary for our `Observable.interval()`emitting every
+    300 milliseconds:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is probably the most flexible way to buffer items based on highly variable
+    events. While the timing of each slicing is consistent in the preceding example
+    (which is every 1 second), the `boundary` can be any `Observable` representing
+    any kind of event happening at any time. This idea of an `Observable` serving
+    as a cut-off for another `Observable` is a powerful pattern we will see throughout
+    this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Windowing
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `window()` operators are almost identical to `buffer()`, except that they
+    buffer into other Observables rather than collections. This results in an `Observable<Observable<T>>` that
+    emits Observables. Each `Observable` emission will cache emissions for each scope
+    and then flush them once subscribed (much like the `GroupedObservable` from `groupBy()`,
+    which we worked with in *[Chapter 4](d19b22f4-bb94-4f52-99ab-d03b962d4d16.xhtml),
+    Combining Observables*). This allows emissions to be worked with immediately as
+    they become available rather than waiting for each list or collection to be finalized
+    and emitted. The `window()` operator is also convenient to work with if you want
+    to use operators to transform each batch.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Just like `buffer()`, you can cut-off each batch using fixed sizing, a time
+    interval, or a boundary from another `Observable`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Fixed-size windowing
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Let''s modify our earlier example, where we buffered 50 integers into lists
+    of size 8, but we will use `window()` to buffer them as Observables instead. We
+    can reactively transform each batch into something else besides a collection,
+    such as concatenating emissions into strings with pipe "`|`" separators:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Just like `buffer()`, you can also provide a `skip` argument. This is how many
+    emissions need to be skipped before starting a new window. Here, our window size
+    is 2, but we skip three items. We then take each windowed `Observable` and reduce it
+    to a `String` concatenation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: Time-based windowing
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'As you might be able to guess, you can cut-off windowed Observables at time
+    intervals just like `buffer()`. Here, we have an `Observable` emitting every 300
+    milliseconds like earlier, and we are slicing it into separate Observables every
+    1 second. We will then use `flatMapSingle()` on each `Observable` to a `String`
+    concatenation of the emissions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: Of course, you can use these yielded Observables for other transformations besides
+    `String` concatenations. You can use all the operators we learned up to this point
+    to perform different operations on each windowed `Observable`, and you will likely
+    do that work in `flatMap()`, `concatMap()`, or `switchMap()`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With time-based `window()` operators, you can also specify `count` or `timeshift`
+    arguments, just like its `buffer()` counterpart.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Boundary-based windowing
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: It probably is no surprise that since `window()` is similar to `buffer()` (other
+    than that it emits Observables instead of connections), you can also use another
+    `Observable` as `boundary`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here, we use an `Observable.interval()` emitting every 1 second to serve as
+    the `boundary` on an `Observable` emitting every 300 milliseconds. We leverage
+    each emitted `Observable` to concatenate emissions into concatenated strings:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: Again, the benefit of using another `Observable` as a `boundary` is that it
+    allows you to use the arbitrary timing of emissions from any `Observable` to cut-off
+    each window, whether it is a button click, a web request, or any other event.
+    This makes it the most flexible way to slice `window()` or `buffer()` operations
+    when variability is involved.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Throttling
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `buffer()` and `window()` operators batch up emissions into collections
+    or Observables based on a defined scope, which regularly consolidates rather than
+    omits emissions.The `throttle()` operator, however, omits emissions when they
+    occur rapidly. This is helpful when rapid emissions are assumed to be redundant
+    or unwanted, such as a user clicking on a button repeatedly. For these situations,
+    you can use the `throttleLast()`, `throttleFirst()`, and `throttleWithTimeout()`
+    operators to only let the first or last element in a rapid sequence of emissions
+    through. How you choose one of the many rapid emissions is determined by your
+    choice of operator, parameters, and arguments.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For the examples in this section, we are going to work with this case: we have
+    three `Observable.interval()` sources, the first emitting every 100 milliseconds,
+    the second every 300 milliseconds, and the third every 2000 milliseconds. We only
+    take 10 emissions from the first source, three from the second, and two from the
+    third. As you can see here, we will use `Observable.concat()` on them together
+    in order to create a rapid sequence that changes pace at three different intervals:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: The first source rapidly pushes 10 emissions within a second, the second pushes
+    three within a second, and the third pushes two within four seconds. Let's use
+    some `throttle()` operators to only choose a few of these emissions and ignore
+    the rest.
+  prefs: []
+  type: TYPE_NORMAL
+- en: throttleLast() / sample()
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The `throttleLast()` operator (which is aliased as `sample()`) will only emit
+    the last item at a fixed time interval. Modify your earlier example to use `throttleLast()`
+    at 1-second intervals, as shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: If you study the output, you can see that the last emission at every 1-second
+    interval was all that got through. This effectively samples emissions by dipping
+    into the stream on a timer and pulling out the latest one.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you want to throttle more liberally at larger time intervals, you will get
+    fewer emissions as this effectively reduces the sample frequency. Here, we use `throttleLast()`
+    every two seconds:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If you want to throttle more aggressively at shorter time intervals, you will
+    get more emissions, as this increases the sample frequency. Here, we use `throttleLast()`
+    every 500 milliseconds:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: Again, `throttleLast()` will push the last emission at every fixed time interval.
+    Next, we will cover `throttleFirst()`, which emits the first item instead.
+  prefs: []
+  type: TYPE_NORMAL
+- en: throttleFirst()
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The `throttleFirst()` operates almost identically to `throttleLast()`, but
+    it will emit the *first* item that occurs at every fixed time interval. If we
+    modify our example to `throttleFirst()` every 1 second, we should get an output
+    like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: Effectively, the first emission found after each interval starts is the emission
+    that gets pushed through. The 100 from `source1` was the first emission found
+    on the first interval. On the next interval, 300 from `source2` was emitted, then
+    2000, followed by 4000\. The 4000 was emitted right on the cusp of the application
+    quitting, hence we got four emissions from `throttleFirst()` as opposed to three
+    from `throttleLast()`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Besides the first item being emitted rather than the last at each interval,
+    all the behaviors from `throttleLast()` also apply to `throttleFirst()`. Specifying
+    shorter intervals will yield more emissions, whereas longer intervals will yield
+    less.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Both `throttleFirst()` and `throttleLast()` emit on the computation `Scheduler`,
+    but you can specify your own `Scheduler` as a third argument.
+  prefs: []
+  type: TYPE_NORMAL
+- en: throttleWithTimeout() / debounce()
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: If you play with `throttleFirst()` and `throttleLast()`, you might be dissatisfied
+    with one aspect of their behavior. They are agnostic to the variability of emission
+    frequency, and they simply "dip in" at fixed intervals and pull the first or last
+    emission they find. There is no notion of waiting for a "period of silence" where
+    emissions stop for a moment, and that might be an opportune time to push the last
+    emission that occurred forward.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Think of Hollywood action movies where a protagonist is under heavy gunfire.
+    While bullets are flying, he/she has to take cover and is unable to act. But the
+    moment their attackers stop to reload, there is a period of silence where they
+    have time to react. This is essentially what `throttleWithTimout()` does. While
+    emissions are firing rapidly, it will not emit anything until there is a "period
+    of silence", and then it will push the last emission forward.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`throttleWithTimout()` (also called `debounce()`) accepts time interval arguments
+    that specify how long a period of inactivity (which means no emissions are coming
+    from the source) must be before the last emission can be pushed forward. In our
+    earlier example, our three concatenated `Observable.interval()` sources are rapidly
+    firing at 100 milliseconds and then 300-millisecond spurts for approximately 2
+    seconds. But after that, intervals slow down to every 2 seconds. If we wanted
+    to only emit after 1 second of silence, we are not going to emit anything until
+    we hit that third `Observable.interval()`, emitting every 2 seconds, as shown
+    here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: The 900 emission from `source2` was the last emission as soon as `source3` started,
+    since `source3` will not push its first emission for 2 seconds, which gave more
+    than the needed 1-second period of silence for the 900 emission to be fired. The
+    2000 emission then emitted next and 1 second later no further emissions occurred,
+    so it was pushed forward by `throttleWithTimeout()`. Another second later, the
+    4000 emission was pushed and the 2-second silence (before the program exited)
+    allowed it to fire as well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `throttleWithTimeout()` is an effective way to handle excessive inputs (such
+    as a user clicking on a button rapidly) and other noisy, redundant events that
+    sporadically speed up, slow down, or cease. The only disadvantage of `throttleWithTimeout()`
+    is that it will delay each winning emission. If an emission does make it through
+    `throttleWithTimeout()`, it will be delayed by the specified time interval in
+    order to ensure no more emissions are coming. Especially for user experiences,
+    this artificial delay may be unwelcome. For these situations, which are sensitive
+    to delays, a better option might be to leverage `switchMap()`, which we will cover
+    next.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Switching
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In RxJava, there is a powerful operator called `switchMap()`. Its usage feels
+    like `flatMap()`, but it has one important behavioral difference: it will emit
+    from the latest `Observable` derived from the latest emission and dispose of any
+    previous Observables that were processing. In other words, it allows you to cancel
+    an emitting `Observable` and switch to a new one, preventing stale or redundant
+    processing.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Say we have a process that emits nine strings, and it delays each string emission
+    randomly from 0 to 2000 milliseconds. This is to emulate an intense calculation
+    done to each one, as demonstrated here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can tell, each emission takes between 0-2 seconds to be emitted, and
+    processing all the strings can take up to 20 seconds.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Say we want to run this process every 5 seconds, but we want to cancel (or
+    more technically, `dispose()`) previous instances of the process and only run
+    the latest one. This is easy to do with `switchMap()`. Here, we create another
+    `Observable.interval()`, emitting every 5 seconds and then we use `switchMap()` on
+    it to the `Observable` we want to process (which in this case is `processStrings`).
+    Every 5 seconds, the emission going into `switchMap()` will promptly dispose of
+    the currently processing `Observable` (if there are any) and then emit from the
+    new `Observable` it maps to. To prove that `dispose()` is being called, we will
+    put `doOnDispose()` on the `Observable` inside `switchMap()` to display a message:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows (yours will be different):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: Again, `switchMap()` is just like `flatMap()` except that it will cancel any
+    previous Observables that were processing and only chase after the latest one.
+    This can be helpful in many situations to prevent redundant or stale work and
+    is especially effective in user interfaces where rapid user inputs create stale
+    requests. You can use it to cancel database queries, web requests, and other expensive
+    tasks and replace it with a new task.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For `switchMap()` to work effectively, the thread pushing emissions into `switchMap()`
+    cannot be occupied doing the work inside `switchMap()`. This means that you may
+    have to use `observeOn()` or `subscribeOn()` inside `switchMap()` to do work on
+    a different thread. If the operations inside `switchMap()` are expensive to stop
+    (for instance, a database query using RxJava-JDBC), you might want to use `unsubscribeOn()`
+    as well to keep the triggering thread from becoming occupied with disposal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A neat trick you can do to cancel work within `switchMap()` (without providing
+    new work immediately) is to conditionally yield `Observable.empty()`. This can
+    be helpful to cancel a long-running or infinite process. For example, if you bring
+    in  RxJavaFX ([https://github.com/ReactiveX/RxJavaFX](https://github.com/ReactiveX/RxJavaFX))
+    as a dependency, we can quickly create a stop watch application using `switchMap()`,
+    as shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The code preceding yields  a stopwatch application that uses `switchMap()`
+    , as shown below in Figure 7.1:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/e7a2a8e1-573d-4e78-9fc6-a798cfea939b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Figure 7.1 - A stopwatch application that uses switchMap()
+  prefs: []
+  type: TYPE_NORMAL
+- en: Pressing the `ToggleButton` will start and stop the stopwatch, which displays
+    in milliseconds. Note that the `ToggleButton` will emit a Boolean `True`/`False`
+    value through an `Observable` called `selectedStates`. We multicast it to prevent
+    duplicate listeners on JavaFX, and we have two Observers. The first will use `switchMap()` on
+    each Boolean value, where `true` will emit from an `Observable.interval()` every
+    millisecond, and `false` will cancel it by replacing it with an `Observable.empty()`.
+    Since `Observable.interval()` will emit on a `Scheduler` computation, we will
+    use `observeOn()` to put it back on the JavaFX `Scheduler` provided by RxJavaFX.
+    The other `Observer` will change the text of the `ToggleButton` to STOP or START
+    depending on its state.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Grouping keystrokes
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'We will wrap up this chapter by integrating most of what we learned and achieve
+    a complex task: grouping keystrokes that happen in rapid succession to form strings
+    without any delay! It can be helpful in user interfaces to immediately "jump"
+    to items in a list based on what is being typed or perform auto-completion in
+    some way. This can be a challenging task, but as we will see, it is not that difficult
+    with RxJava.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This exercise will use JavaFX again with RxJavaFX. Our user interface will
+    simply have a `Label` that receives rolling concatenations of keys we are typing.
+    But after 300 milliseconds, it will reset and receive an empty  `""` to clear
+    it. Here is the code that achieves this as well as some screenshots with the console
+    output when I type "`Hello`" and then type "`World`" a moment later:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This is the rendered UI:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/61d41975-4212-48e6-b50f-176d36589673.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: When you type keys, the `Label` will display a rolling `String` concatenation
+    of their characters in live time on both the UI as well as the console. Note that
+    after 500 milliseconds of no activity, it resets and emits a new `scan()` operation
+    and disposes of the old one, starting with an empty `""` string. This can be enormously
+    helpful to instantly send search requests or autocomplete suggestions while the
+    user is typing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The way it works is that we have an `Observable` emitting the characters that
+    were pressed on the keyboard, but it is multicast with `share()` and used for
+    two purposes. It is first used to create another `Observable` that signals the
+    last character typed after 500 milliseconds of inactivity. But we do not care
+    about the character as much as the emission's timing, which signals 500 milliseconds
+    of inactivity has occurred. We then use `switchMap()` on it to the `Observable`
+    emitting the characters again, and we infinitely concatenate each typed character
+    in succession and emit each resulting string. However, this `scan()` operation
+    in `switchMap()` will be disposed of when 500 milliseconds of inactivity occurs
+    and start over with a new `scan()` instance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you find this example dizzying, take your time and keep studying it. It will
+    click ultimately and once it does, you will have truly mastered the ideas in this
+    chapter!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, you learned how to leverage buffering, windowing, throttling,
+    and switching to cope with rapidly emitting Observables. Ideally, we should leverage
+    Flowables and backpressure when we see that Observables are emitting faster than
+    the Observers can keep up with, which we will learn about in the next chapter.
+    But for situations where backpressure cannot work, such as user inputs or timer
+    events, you can leverage these three categories of operations to limit how many
+    emissions are passed downstream.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will learn about backpressuring with Flowables, which
+    provides more proactive ways to cope with common cases of rapid emissions overwhelming
+    Observers.
+  prefs: []
+  type: TYPE_NORMAL

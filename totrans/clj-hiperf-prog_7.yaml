@@ -1,0 +1,820 @@
+- en: Chapter 7. Performance Optimization
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Performance optimization is additive by nature, as in it works by adding performance
+    tuning to the knowledge of how the underlying system works, and to the result
+    of performance measurement. This chapter builds on the previous ones that covered
+    "how the underlying system works" and "performance measurement". Though you will
+    notice some recipe-like sections in this chapter, you already know the pre-requisite
+    in order to exploit those well. Performance tuning is an iterative process of
+    measuring performance, determining bottlenecks, applying knowledge in order to
+    experiment with tuning the code, and repeating it all until performance improves.
+    In this chapter, we will cover:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Setting up projects for better performance
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Identifying performance bottlenecks in the code
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Profiling code with VisualVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Performance tuning of Clojure code
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: JVM performance tuning
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Project setup
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: While finding bottlenecks is essential to fixing performance problems in the
+    code, there are several things one can do right from the start to ensure better
+    performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Software versions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Usually, new software versions include bug fixes, new features, and performance
+    improvements. Unless advised to the contrary, it is better to use newer versions.
+    For development with Clojure, consider the following software versions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**JVM version**: As of this writing, Java 8 (Oracle JDK, OpenJDK, Zulu) has
+    been released as the latest stable production-ready version. It is not only stable,
+    it also has better performance in several areas (especially concurrency) than
+    the earlier versions. If you have a choice, choose Java 8 over the older versions
+    of Java.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Clojure version**: As of this writing, Clojure 1.7.0 is the latest stable
+    version that has several performance improvements over the older versions. There
+    are also new features (transducers, volatile) that can make your code perform
+    better. Choose Clojure 1.7 over the older versions unless you have no choice.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Leiningen project.clj configuration
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As of version 2.5.1, the default Leiningen template (`lein new foo`, `lein new
+    app foo`) needs few tweaks to make the project amenable to performance. Ensure
+    your Leiningen `project.clj` file has the following entries, as appropriate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Enable reflection warning
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'One of the most common pitfalls in Clojure programming is to inadvertently
+    let the code resort to reflection. Recall that we discussed this in [Chapter 3](ch03.html
+    "Chapter 3. Leaning on Java"), *Leaning on Java. Enabling*, reflection warning
+    is quite easy, let''s fix it by adding the following entry to `project.clj`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the previous configuration, the first setting `*unchecked-math* :warn-on-boxed`
+    works only in Clojure 1.7—it emits numeric boxing warnings. The second setting
+    `*warn-on-reflection* true` works on earlier Clojure versions as well as Clojure
+    1.7, and emits reflection warning messages in the code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, including these settings in `project.clj` may not be enough. Reflection
+    warnings are emitted only when a namespace is loaded. You need to ensure that
+    all namespaces are loaded in order to search for reflection warnings throughout
+    the project. This can be done by writing tests that refer to all namespaces, or
+    via scripts that do so.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Enable optimized JVM options when benchmarking
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'In [Chapter 4](ch04.html "Chapter 4. Host Performance"), *Host Performance*
+    we discussed that Leiningen enables tiered compilation by default, which provides
+    low startup time at the cost of poor JIT compiler optimization. The default setting
+    is quite misleading for performance benchmarking, so you should enable JVM options
+    that are representative of what you would use in production:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'For example, the previous setting defines a Leiningen profile that overrides
+    the default JVM options to configure a `server` Java runtime with 2 GB of fixed-size
+    heap space. It also sets test paths to a directory `perf-test`. Now you can run
+    performance tests as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: If your project has performance test suites that require different JVM options,
+    you should define multiple profiles for running tests, as appropriate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Distinguish between initialization and runtime
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Most non-trivial projects need a lot of context to be set up before they can
+    function. Examples of such contexts could be app configuration, in-memory state,
+    I/O resources, thread pools, caches, and so on. While many projects start with
+    ad hoc configuration and initialization, eventually projects need to isolate the
+    initialization phase from runtime. The purpose of this distinction is not only
+    to sanitize the organization of code, but also to pre-compute as much as possible
+    once before the runtime can take over to repeatedly respond to demands. This distinction
+    also allows the initialization phase to easily (and conditionally, based on configuration)
+    instrument the initialized code for performance logging and monitoring.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Non-trivial programs are usually divided into layers, such as business logic,
+    caching, messaging, database access, and so on. Each layer has a dependency relationship
+    with one or more of the other layers. It is feasible to carry out the isolation
+    of the initialization phase by writing code using first principles, and many projects
+    actually do that. However, there are a few libraries that simplify this process
+    by letting you declare the dependency relationship between layers. **Component**
+    ([https://github.com/stuartsierra/component](https://github.com/stuartsierra/component))
+    and **Prismatic Graph** ([https://github.com/Prismatic/plumbing](https://github.com/Prismatic/plumbing))
+    are notable examples of such libraries.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The Component library is well documented. It may not be easily apparent how
+    to use Prismatic Graph for dependency resolution; following is a contrived example
+    for illustration:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: This example merely shows the construction of a layer dependency graph, but
+    often you may need different construction scope and order for testing. In that
+    case you may define different graphs and resolve them, as and when appropriate.
+    If you need teardown logic for testing, you can add extra `fnk` entries for each
+    teardown step and use those for teardown.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Identifying performance bottlenecks
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We discussed in previous chapters that random performance tuning of code rarely
+    works, because we may not be tuning in the right place. It is crucial to find
+    the performance bottlenecks before we can tune those areas in the code. Upon finding
+    the bottleneck, we can experiment with alternate solutions around it. In this
+    section we will look into finding the bottlenecks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Latency bottlenecks in Clojure code
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Latency is the starting, and the most obvious, metric to drill-down in order
+    to find bottlenecks. For Clojure code, we observed in [Chapter 6](ch06.html "Chapter 6. Measuring
+    Performance"), *Measuring Performance* that code profiling tools can help us find
+    the areas of bottleneck. Profilers are, of course, very useful. Once you discover
+    hotspots via profilers, you may find ways to tune those for latency to a certain
+    extent.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Most profilers work on aggregates, a batch of runs, ranking the hotspots in
+    code by resources consumed. However, often the opportunity to tune latency lies
+    in the long tail that may not be highlighted by the profilers. In such circumstances,
+    we may employ a direct drill-down technique. Let''s see how to carry out such
+    drill-down using **Espejito** ([https://github.com/kumarshantanu/espejito](https://github.com/kumarshantanu/espejito)),
+    a Clojure library for measuring latency (as of version 0.1.0) across measurement
+    points in single-threaded execution paths. There are two parts of using **Espejito**,
+    both requiring change to your code—one to wrap the code being measured, and the
+    other to report the collected measurement data. The following code illustrates
+    a contrived E-commerce use case of adding an item to a cart:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Reporting a call is required to be made only once at the outermost (top-level)
+    layer of the code. Measurement calls can be made at any number of places in the
+    call path. Be careful not to put measurement calls inside tight loops, which may
+    shoot memory consumption up. When this execution path is triggered, the functionality
+    works as usual, while the latencies are measured and recorded alongside transparently
+    in memory. The `e/report` call prints a table of recorded metrics. An example
+    output (edited to fit) would be:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here we can observe that the database call is the most expensive (individual
+    latency), followed by the web layer. Our tuning preference may be guided by the
+    order of expensiveness of the measurement points.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Measure only when it is hot
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'One important aspect we did not cover in the drill-down measurement is whether
+    the environment is ready for measurement. The `e/report` call is invoked unconditionally
+    every time, which would not only have its own overhead (table printing), but the
+    JVM may not be warmed up and the JIT compiler may not have kicked in to correctly
+    report the latencies. To ensure that we report only meaningful latencies, let''s
+    trigger the `e/report` call on an example condition:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now, let''s assume it is a **Ring**-based ([https://github.com/ring-clojure/ring](https://github.com/ring-clojure/ring))
+    web app and you want to trigger the reporting only when the web request contains
+    a parameter `report` with a value `true`. In that case, your call might look like
+    the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: Condition-based invocation expects the JVM to be up across several calls, so
+    it may not work with command-line apps.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This technique can also be used in performance tests, where non-reporting calls
+    may be made during a certain warm-up period, followed by a reporting call that
+    provides its own reporter function instead of `e/print-table`. You may even write
+    a sampling reporter function that aggregates the samples over a duration and finally
+    reports the latency metrics. Not only for performance testing, you can use this
+    for latency monitoring where the reporter function logs the metrics instead of
+    printing a table, or sends the latency breakup to a metrics aggregation system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Garbage collection bottlenecks
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Since Clojure runs on the JVM, one has to be aware of the GC behavior in the
+    application. You can print out the GC details at runtime by specifying the respective
+    JVM options in `project.clj` or on the Java command-line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This causes a detailed summary of GC events to be printed as the application
+    runs. To capture the output in a file, you can specify the following parameter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'It is also useful to see the time between and during full GC events:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The other useful options to troubleshoot GC are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`-XX:+HeapDumpOnOutOfMemoryError`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:+PrintTenuringDistribution`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:+PrintHeapAtGC`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The output of the previous options may help you identify GC bottlenecks that
+    you can try to fix by choosing the right garbage collector, other generational
+    heap options, and code changes. For easy viewing of GC logs, you may like to use
+    GUI tools such as **GCViewer** ([https://github.com/chewiebug/GCViewer](https://github.com/chewiebug/GCViewer))
+    for this purpose.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Threads waiting at GC safepoint
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'When there is a long tight loop (without any I/O operation) in the code, the
+    thread executing it cannot be brought to safepoint if GC happens when the loop
+    ends or goes out of memory (for example, fails to allocate). This may have a disastrous
+    effect of stalling other critical threads during GC. You can identify this category
+    of bottleneck by enabling safepoint logs using the following JVM option:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: The safepoint logs emitted by the previous option may help you identify the
+    impact of a tight-loop thread on other threads during GC.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using jstat to probe GC details
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'The Oracle JDK (also OpenJDK, Azul''s Zulu) comes with a utility called `jstat`
+    that can be handy to inspect GC details. You can find details on this utility
+    at [https://docs.oracle.com/javase/8/docs/technotes/tools/unix/jstat.html](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/jstat.html)
+    —the following examples show how to use it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: The first command mentioned previously monitors object allocations and freeing
+    in various heap generations, together with other GC statistics, one in every 10
+    seconds. The second command also prints the reason for GC, along with other details.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Inspecting generated bytecode for Clojure source
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We discussed in [Chapter 3](ch03.html "Chapter 3. Leaning on Java"), *Leaning
+    on Java* how to see the generated equivalent Java code for any Clojure code. Sometimes,
+    there may not be a direct correlation between the generated bytecode and Java,
+    which is when inspecting the generated bytecode is very useful. Of course, it
+    requires the reader to know at least a bit about the JVM instruction set ([http://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html](http://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html)).
+    This tool can allow you to very effectively analyze the cost of the generated
+    bytecode instructions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The project **no.disassemble** ([https://github.com/gtrak/no.disassemble](https://github.com/gtrak/no.disassemble))
+    is a very useful tool to discover the generated bytecode. Include it in your `project.clj`
+    file as a Leiningen plugin:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then, at the REPL, you can inspect the generated bytecodes one by one:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: The previous snippet prints out the bytecode of the Clojure expression entered
+    there.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Throughput bottlenecks
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The throughput bottlenecks usually arise from shared resources, which could
+    be CPU, cache, memory, mutexes and locks, GC, disk, and other I/O devices. Each
+    of these resources has a different way to find utilization, saturation, and load
+    level. This also heavily depends on the operating system in use, as it manages
+    the resources. Delving into the OS-specific ways of determining those factors
+    is beyond the scope of this text. However, we will look at profiling some of these
+    for bottlenecks in the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The net effect of throughput shows up as an inverse relationship with latency.
+    This is natural as per Little's law—as we will see in the next chapter. We covered
+    throughput testing and latency testing under concurrency in [Chapter 6](ch06.html
+    "Chapter 6. Measuring Performance"), *Measuring Performance*. This should be roughly
+    a good indicator of the throughput trend.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Profiling code with VisualVM
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The Oracle JDK (also OpenJDK) comes with a powerful profiler called **VisualVM**;
+    the distribution that comes with the JDK is known as Java VisualVM and can be
+    invoked using the binary executable:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: This launches the GUI profiler app where you can connect to running instances
+    of the JVM. The profiler has powerful features ([https://visualvm.java.net/features.html](https://visualvm.java.net/features.html))
+    that can be useful for finding various bottlenecks in code. Besides analyzing
+    heap dump and thread dump, VisualVM can interactively graph CPU and heap consumption,
+    and thread status in near real time. It also has sampling and tracing profilers
+    for both CPU and memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Monitor tab
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The **Monitor** tab has a graphical overview of the runtime, including CPU,
+    heap, threads and loaded classes:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![The Monitor tab](img/3642_07_01.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: This tab is useful for "at a glance" information, leaving further drill-down
+    for other tabs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Threads tab
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In the following screenshot, the **Threads** tab shows the status of all threads:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![The Threads tab](img/3642_07_02.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'It is very useful to find out if any threads are undergoing contention, entering
+    deadlock, are underutilized, or they are taking up more CPU. Especially in concurrent
+    apps with in-memory state, and in apps that use limited I/O resources (such as
+    connection pools, or network calls to other hosts) shared by threads, this feature
+    provides a great insight if you set the thread names:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Notice the threads named **citius-RollingStore-store-1** through **citius-RollingStore-store
+    - 4**. In an ideal no-contention scenario, those threads would have a green **Running**
+    status. See the legend at the bottom right of the image, which explains thread
+    state:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Running**: A thread is running, which is the ideal condition.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Sleeping**: A thread has yielded control temporarily.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Wait**: A thread is waiting for notification in a critical section. `Object.wait()`
+    was called, and is now waiting for `Object.notify()` or `Object.notifyAll()` to
+    wake it up.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Park**: A thread is parked on a permit (binary semaphore) waiting for some
+    condition. Usually seen with concurrent blocking calls in the `java.util.concurrent`
+    API.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Monitor**: A thread has reached object monitor waiting for some lock, perhaps
+    waiting to enter or exit a critical section.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: You can install the *Threads Inspector* plugin for details on threads of interest.
+    To inspect thread dumps from the command line you can use the `jstack` or `kill
+    -3` commands.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Sampler tab
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The **Sampler** tab is the lightweight sampling profiler tab that can sample
+    both CPU and memory consumption. You can easily find hotspots in code that may
+    benefit from tuning. However, sampler profiling is limited by sampling period
+    and frequency, inability to detect inlined code, and so on. It is a good general
+    indicator of the bottlenecks and looks similar to the screenshots we saw in [Chapter
+    6](ch06.html "Chapter 6. Measuring Performance"), *Measuring Performance*. You
+    can profile either CPU or memory at a time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The **CPU** tab displays both the overall CPU time distribution and per-thread
+    CPU consumption. You can take a thread dump while sampling is in progress and
+    analyze the dump. There are several VisualVM plugins available for more analysis.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The **Memory** tab displays heap histogram metrics with distribution and instance
+    count of objects. It also shows a PermGen histogram and per thread allocation
+    data. It is a very good idea and highly recommended to set thread names in your
+    project so that it is easy to locate those names in such tools. In this tab, you
+    can force a GC, take a heap dump for analysis, and view memory metrics data in
+    several ways.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Setting the thread name
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Setting a thread name in Clojure is quite straightforward using Java interop:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'However, since threads often transcend several contexts, in most cases you
+    should do so in a limited scope as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now you can use this macro to execute any body of code with a specified thread
+    name:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: This style of setting a thread name makes sure that the original name is restored
+    before leaving the thread-local scope. If your code has various sections and you
+    are setting a different thread name for each section, you can detect which code
+    sections are causing contention by looking at the name when any contention appears
+    on profiling and monitoring tools.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Profiler tab
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The **Profiler** tab lets you instrument the running code in the JVM, and profile
+    both CPU and memory consumption. This option adds a larger overhead than the **Sampler**
+    tab, and poses a different trade off in terms of JIT compilation, inlining, and
+    accuracy. This tab does not have as much diversity in visualization as the **Sampler**
+    tab. The main difference this tab has with the **Sampler** tab is it changes the
+    bytecode of the running code for accurate measurement. When you choose CPU profiling,
+    it starts instrumenting the code for CPU profiling. If you switch from CPU to
+    memory profiling, it re-instruments the running code for memory profiling, and
+    re-instruments every time you want a different profiling. One downside of such
+    instrumentation is that it may massively slow down everything if your code is
+    deployed in application containers, such as Tomcat.
+  prefs: []
+  type: TYPE_NORMAL
+- en: While you can get most of the common CPU bottleneck information from **Sampler**,
+    you may need the **Profiler** to investigate hotspots already discovered by **Sampler**
+    and other profiling techniques. You can selectively profile and drill-down only
+    the known bottlenecks using the instrumenting profiler, thereby restricting its
+    ill-effects to only small parts of the code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Visual GC tab
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The **Visual GC** is a VisualVM plugin that visually depicts the GC status in
+    near real time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![The Visual GC tab](img/3642_07_03.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: If your application uses a lot of memory and potentially has GC bottlenecks,
+    this plugin may be very useful for various troubleshooting purposes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Alternate profilers
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Besides VisualVM, there are several third-party profilers and performance-monitoring
+    tools for the Java platform. Among open source tools, Prometheus ([http://prometheus.io/](http://prometheus.io/))
+    and Moskito ([http://www.moskito.org/](http://www.moskito.org/)) are relatively
+    popular. A non-exhaustive list of Open Source performance tools is here: [http://java-source.net/open-source/profilers](http://java-source.net/open-source/profilers)'
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are several commercial proprietary profilers that you may want to know
+    about. The YourKit ([https://www.yourkit.com/](https://www.yourkit.com/)) Java
+    profiler is probably the most notable profiler that many people have found much
+    success with for profiling Clojure code. There are also other profiling tools
+    for the JVM, such as JProfiler ([https://www.ej-technologies.com/products/jprofiler/overview.html](https://www.ej-technologies.com/products/jprofiler/overview.html)),
+    which is a desktop-based profiler and web-based hosted solutions such as New Relic
+    ([http://newrelic.com/](http://newrelic.com/)) and AppDynamics ([https://www.appdynamics.com/](https://www.appdynamics.com/)).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Performance tuning
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Once we get insight into the code via testing and profiling results, we need
+    to analyze the bottlenecks worth considering for optimization. A better approach
+    is to find the most under-performing portion and optimize it, thereby eliminating
+    the weakest link. We discussed performance aspects of hardware and JVM/Clojure
+    in previous chapters. Optimization and tuning requires rethinking the design and
+    code in light of those aspects, and then refactoring for performance objectives.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Once we establish the performance bottlenecks, we have to pinpoint the root
+    cause and experiment with improvisations, one step at a time, to see what works.
+    Tuning for performance is an iterative process that is backed by measurement,
+    monitoring and experimentation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tuning Clojure code
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Identifying the nature of the performance bottleneck helps a lot in order to
+    experiment with the right aspects of the code. The key is to determine the origin
+    of cost and whether the cost is reasonable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: CPU/cache bound
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: As we noted in the beginning of this chapter, setting up a project with the
+    right JVM options and project settings informs us of reflection and boxing, the
+    common sources of CPU-bound performance issues after poor design and algorithm
+    choice. As a general rule, we have to see whether we are doing unnecessary or
+    suboptimal operations, especially inside loops. For example, transducers are amenable
+    to better performance than lazy sequences in CPU-bound operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: While public functions are recommended to work with immutable data structures,
+    the implementation details can afford to use transients and arrays when performance
+    is necessary. Records are a great alternative to maps, where appropriate, due
+    to type hints and tight field layout in the former. Operations on primitive data
+    types is faster (hence recommended) than their boxed equivalents.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In tight loops, besides transients and arrays you may prefer loop-recur with
+    unchecked math for performance. You may also like to avoid using multi-methods
+    and dynamic vars in tight loops, rather than pass arguments around. Using Java
+    and macros may be the last resort, but still an option if there is such a need
+    for performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Memory bound
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Allocating less memory in code is always going to reduce memory-related performance
+    issues. Optimization of memory-bound code is not only about reducing memory consumption,
+    but it is also about memory layout and utilizing the CPU and cache well. We have
+    to see whether we are using the data types that fit well in CPU registers and
+    cache lines. For cache and memory-bound code, we have to know whether there are
+    cache misses and the reason—often the data might be too large to fit in a cache
+    line. For memory-bound code we have to care about data locality, whether the code
+    is hitting the interconnect too often, and whether memory representation of data
+    can be slimmed down.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Multi-threaded
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Shared resources with side effects are the main source of contention and performance
+    bottlenecks in multi-threaded code. As we saw in the *Profiling VisualVM code*
+    section in this chapter, profiling the threads better informs us about the bottlenecks.
+    The best way to improve performance of multi-threaded code is to reduce contention.
+    The easy way to reduce contention is to increase the resources and reduce concurrency,
+    though only optimal levels of resources and concurrency would be good for performance.
+    While designing for concurrency, append only, single writer, and shared nothing
+    approaches work well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another way to reduce contention may be to exploit thread-local queueing of
+    data until resources are available. This technique is similar to what Clojure
+    agents use, though it is an involved technique. [Chapter 5](ch05.html "Chapter 5. Concurrency"),
+    *Concurrency* covers agents in some detail. I would encourage you to study the
+    agents source code for better understanding. When using CPU-bound resources (for
+    example `java.util.concurrent.atomic.AtomicLong`) you may use the contention-striping
+    technique used by some Java 8 classes (such as `java.util.concurrent.atomic.LongAdder`,
+    which also balances between memory consumption and contention striping across
+    processors.) This technique is also quite involved and generic contention-striping
+    solutions may have to trade off read consistency to allow fast updates.
+  prefs: []
+  type: TYPE_NORMAL
+- en: I/O bound
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: I/O-bound tasks could be limited by bandwidth or IOPS/latency. Any I/O bottleneck
+    usually manifests in chatty I/O calls or unconstrained data serialization. Restricting
+    I/O to only minimum required data is a common opportunity to minimize serialization
+    and reduce latency. I/O operations can often be batched for higher throughput,
+    for example *SpyMemcached* library employs an asynchronous batched operation for
+    high throughput.
+  prefs: []
+  type: TYPE_NORMAL
+- en: I/O-bound bottlenecks are often coupled with multi-threaded scenarios. When
+    the I/O calls are synchronous (for example, the JDBC API), one naturally has to
+    depend upon multiple threads working on a bounded resource pool. Asynchronous
+    I/O can relieve our threads from blocking, letting the threads do other useful
+    work until the I/O response arrives. In synchronous I/O, we pay the cost of having
+    threads (each allocated with memory) block on I/O calls while the kernel schedules
+    them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: JVM tuning
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Often Clojure applications might inherit bloat from Clojure/Java libraries or
+    frameworks, which cause poor performance. Hunting down unnecessary abstractions
+    and unnecessary layers of code may bring decent performance gains. Reasoning about
+    the performance of dependency libraries/frameworks before inclusion in a project
+    is a good approach.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The JIT compiler, garbage collector and safepoint (in Oracle HotSpot JVM) have
+    a significant impact on the performance of applications. We discussed the JIT
+    compiler and garbage collector in [Chapter 4](ch04.html "Chapter 4. Host Performance"),
+    *Host Performance*. When the HotSpot JVM reaches a point when it cannot carry
+    out concurrent, incremental GC anymore, it needs to suspend the JVM safely in
+    order to carry out a full GC. It is also called the stop-the-world GC pause that
+    may run up to several minutes while the JVM appears frozen.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Oracle and OpenJDK JVMs accept many command-line options when invoked, to
+    tune and monitor the way components in the JVM behave. Tuning GC is common among
+    people who want to extract optimum performance from the JVM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You may like to experiment with the following JVM options (Oracle JVM or OpenJDK)
+    for performance:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| JVM option | Description |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-XX:+AggressiveOpts` | Aggressive options that enable compressed heap pointers
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-server` | Server class JIT thresholds (use -client for GUI apps) |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-XX:+UseParNewGC` | Use Parallel GC |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-Xms3g` | Specify min heap size (keep it less on desktop apps) |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-Xmx3g` | Specify max heap size (keep min/max same on servers) |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `-XX:+UseLargePages` | Reduce Translation-Lookaside Buffer misses (if OS
+    supports), see [http://www.oracle.com/technetwork/java/javase/tech/largememory-jsp-137182.html](http://www.oracle.com/technetwork/java/javase/tech/largememory-jsp-137182.html)
+    for details |'
+  prefs: []
+  type: TYPE_TB
+- en: 'On the Java 6 HotSpot JVM, the **Concurrent Mark and Sweep** (**CMS**) garbage
+    collector is well regarded for its GC performance. On the Java 7 and Java 8 HotSpot
+    JVM, the default GC is a parallel collector (for better throughput), whereas at
+    the time of writing this, there is a proposal to use the G1 collector (for lower
+    pauses) by default in the upcoming Java 9\. Note that the JVM GC can be tuned
+    for different objectives, hence the same exact configuration for one application
+    may not work well for another. Refer to the documents Oracle published for tuning
+    the JVM at the following links:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[http://www.oracle.com/technetwork/java/tuning-139912.html](http://www.oracle.com/technetwork/java/tuning-139912.html)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[https://docs.oracle.com/javase/8/docs/technotes/guides/vm/gctuning/](https://docs.oracle.com/javase/8/docs/technotes/guides/vm/gctuning/)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Back pressure
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: It is not uncommon to see applications behaving poorly under load. Typically,
+    the application server simply appears unresponsive, which is often a combined
+    result of high resource utilization, GC pressure, more threads that lead to busier
+    thread scheduling, and cache misses. If the capacity of a system is known, the
+    solution is to apply **back pressure** by denying services after the capacity
+    is reached. Note that back pressure cannot be applied optimally until the system
+    is load-tested for optimum capacity. The capacity threshold that triggers back
+    pressure may or may not be directly associated with individual services, but rather
+    can be defined as load criteria.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: It is worth reiterating that performance optimization begins with learning about
+    how the underlying system works, and measuring the performance of systems we build
+    under representative hardware and load. The chief component of performance optimization
+    is identifying the bottlenecks using various kinds of measurements and profiling.
+    Thereafter, we can apply experiments to tune the performance of code and measure/profile
+    once again to verify. The tuning mechanism varies depending on the type of bottleneck.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will see how to address performance concerns when building
+    applications. Our focus will be on the several common patterns that impact performance.
+  prefs: []
+  type: TYPE_NORMAL

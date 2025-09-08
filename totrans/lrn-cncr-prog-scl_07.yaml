@@ -1,0 +1,1711 @@
+- en: Chapter 7. Software Transactional Memory
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '|   | *"Everybody who learns concurrency and thinks they understand it, ends
+    up finding mysterious races they thought weren''t possible, and discovers that
+    they didn''t actually understand it yet after all."* |   |'
+  prefs: []
+  type: TYPE_TB
+- en: '|   | --*Herb Sutter* |'
+  prefs: []
+  type: TYPE_TB
+- en: While investigating the fundamental primitives of concurrency in [Chapter 2](ch02.html
+    "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency on
+    the JVM and the Java Memory Model*, we recognized the need for protecting parts
+    of the program from shared access. We saw that a basic way of achieving this isolation
+    is the `synchronized` statement, which uses intrinsic object locks to ensure that
+    at most a single thread executes a specific part of the program at the same time.
+    The disadvantage of using locks is that they can easily cause deadlocks, a situation
+    in which the program cannot progress.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will introduce **Software Transactional Memory** (**STM**),
+    a concurrency control mechanism for controlling access to shared memory, which
+    greatly reduces the risk of deadlocks and races. An STM is used to designate critical
+    sections of the code. Instead of using locks in order to protect critical sections,
+    STM tracks the reads and writes to shared memory, and serializes critical sections
+    with interleaving reads and writes. The `synchronized` statement is replaced with
+    the atomic blocks that express segments of the program that need to be executed
+    in isolation. STM is safer and easier to use, and at the same time, guarantees
+    relatively good scalability.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The idea of *memory transactions* stems from database transactions, which ensure
+    that a sequence of database queries occurs in isolation. A memory transaction
+    is a sequence of reads and writes to shared memory that logically occur at a single
+    point in time. When a memory transaction T occurs, concurrent memory transactions
+    observe the state of the memory either before the transaction T started, or after
+    the transaction T completed, but not the intermediate states during the execution
+    of T. This property is called **isolation**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As we will see, **composability** is another important advantage of using an
+    STM. Consider a lock-based hash table implementation with thread-safe `insert`
+    and `remove` operations. While the individual `insert` and `remove` operations
+    can be safely invoked by different threads, it is impossible to implement a method
+    that removes an element from one hash table and adds it to another hash table,
+    without exposing the intermediate state in which the element is not present in
+    either hash table. Traditionally, STM was proposed as a part of the programming
+    language with the advantage that certain transaction limitations can be ensured
+    at compile time. Since this approach requires intrusive changes to a language,
+    many software transactional memories are implemented as libraries. ScalaSTM is
+    one such example. We will use ScalaSTM as the concrete STM implementation. Concretely,
+    we cover the following topics in this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The disadvantages of atomic variables
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The semantics and internals of STM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Transactional references
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The interaction between transactions and external side effects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Semantics of single operation transactions and nested transactions
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Retrying transactions conditionally and timing out transactions
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Transaction-local variables, transactional arrays, and transactional maps
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We already learned in [Chapter 3](ch03.html "Chapter 3. Traditional Building
+    Blocks of Concurrency"), *Traditional Building Blocks of Concurrency*, that using
+    atomic variables and concurrent collections allows expressing lock-free programs.
+    Why not just use atomic variables to express concurrently shared data? To better
+    emphasize the need for STM, we will start by presenting a situation in which atomic
+    variables prove inadequate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The trouble with atomic variables
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Atomic variables from [Chapter 3](ch03.html "Chapter 3. Traditional Building
+    Blocks of Concurrency"), *Traditional Building Blocks of Concurrency*, are one
+    of the fundamental synchronization mechanisms. We already know that volatile variables,
+    introduced in [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the
+    Java Memory Model"), *Concurrency on the JVM and the Java Memory Model*, allow
+    race conditions, in which the program correctness is subject to the precise execution
+    schedule of different threads. Atomic variables can ensure that no thread concurrently
+    modifies the variable between a read and a write operation. At the same time,
+    atomic variables reduce the risk of deadlocks. Regardless of their advantages,
+    there are situations when using atomic variables is not satisfactory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In [Chapter 6](ch06.html "Chapter 6. Concurrent Programming with Reactive Extensions"),
+    *Concurrent Programming with Reactive Extensions*, we implemented a minimalistic
+    web browser using the **Rx** framework. Surfing around the Web is great, but we
+    would like to have some additional features in our browser. For example, we would
+    like to maintain the browser's history--the list of URLs that were previously
+    visited. We decide to keep the list of URLs in the Scala `List[String]` collection.
+    Additionally, we decide to track the total character length of all the URLs. If
+    we want to copy the URL strings into an array, this information allows us to quickly
+    allocate an array of an appropriate size.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Different parts of our browser execute asynchronously, so we need to synchronize
+    access to this mutable state. We can keep the list of URLs and their total character
+    length in private mutable fields and use the `synchronized` statement to access
+    them. However, having seen the culprits of the `synchronized` statement in earlier
+    chapters, we decide to avoid locks. Instead, we will use atomic variables. We
+    will store the list of URLs and their total character length in two atomic variables,
+    that are `urls` and `clen`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Whenever the browser opens URL, we need to update these atomic variables. To
+    do this more easily, we define a helper method called `addUrl`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: As we learned in the introductory chapters, we need to use atomic operations
+    on atomic variables to ensure that their values consistently change from one state
+    to another. In the previous code snippet, we use the `compareAndSet` operation
+    to atomically replace the old list of URLs called `oldUrls` with the updated version
+    `newUrls`. As discussed at length in [Chapter 3](ch03.html "Chapter 3. Traditional
+    Building Blocks of Concurrency"), *Traditional Building Blocks of Concurrency*,
+    the `compareAndSet` operation can fail when two threads call it simultaneously
+    on the same atomic variable. For this reason, we define a nested, tail-recursive
+    method, `append`, which calls the `compareAndSet` method and restarts if the `compareAndSet`
+    method fails. Updating the `clen` field is easier. We just call the atomic `addAndGet`
+    method defined on atomic integers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Other parts of the web browser can use the `urls` and `clen` variables to render
+    the browsing history, dump it to a `log` file or to export browser data, in case
+    our users decide they like Firefox better. For convenience, we define a `getUrlArray`
+    auxiliary method that returns a character array in which the URLs are separated
+    with a newline character. The `clen` field is a quick way to get the required
+    size of the array. We call the `get` method to read the value of the `clen` field
+    and allocate the array. We then call `get` to read the current list of URLs, append
+    the newline character to each URL, flatten the list of strings into a single list,
+    zip the characters with their indices, and store them into the array:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To test these methods, we can simulate user interaction with two asynchronous
+    computations. The first asynchronous computation calls the `getUrlArray` method
+    to dump the browsing history to a file. The second asynchronous computation visits
+    three separate URLs by calling the `addURL` method three times, and then prints
+    the `"done browsing"` string to the standard output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running this program several times reveals a bug. The program sometimes mysteriously
+    crashes with an `ArrayIndexOutOfBoundsException` exception. By analyzing the `getUrlArray`
+    method, we find the cause to the bug. This bug occurs when the retrieved value
+    of the `clen` field is not equal to the length of the list. The `getUrlArray`
+    method first reads the `clen` atomic variable, and later reads the list of the
+    URLs from the `urls` atomic variable. Between these two reads, the first thread
+    modifies the `urls` variable by adding an additional URL string. By the time `getUrlArray`
+    reads the `urls` variable, the total character length becomes longer than the
+    allocated array, and we eventually get an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This example illustrates an important disadvantage of atomic variables. Although
+    specific atomic operations are themselves atomic and occur at a single point in
+    time, invoking multiple atomic operations is typically not atomic. When multiple
+    threads simultaneously execute multiple atomic operations, the operations might
+    interleave in unforeseen ways and lead to the same kind of race conditions that
+    result from using volatile variables. Note that swapping the updates to the `clen`
+    and `urls` variables does not solve the problem. Although there are other ways
+    to ensure atomicity in our example, they are not immediately obvious.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Reading multiple atomic variables is not an atomic operation and it can observe
+    the program data in an inconsistent state.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When all threads in the program observe that an operation occurs at the same,
+    single point in time, we can say that the operation is *linearizable*. The point
+    in time at which the operation occurs is called a **linearization point**. The
+    `compareAndSet` and `addAndGet` operations are inherently linearizable operations.
+    They execute atomically, usually as a single processor instruction and at a single
+    point in time, from the perspective of all the threads. The `append` nested method
+    in the previous example is also linearizable. Its linearization point is a successful
+    `compareAndSet` operation, because that is the only place where `append` modifies
+    the program state. On the other hand, the `addUrl` and `getUrlArray` methods are
+    not linearizable. They contain no single atomic operation that modifies or reads
+    the state of the program. The `addUrl` method modifies the program state twice.
+    First, it calls the `append` method and then it calls the `addAndGet` method.
+    Similarly, the `getUrlArray` method reads the program state with two separate
+    atomic `get` operations. This is a commonly misunderstood point when using atomic
+    variables, and we say that atomic variables do not compose into larger programs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can fix our example by removing the `clen` atomic variable, and computing
+    the required array length after reading the `urls` variable once. Similarly, we
+    can use a single atomic reference to store a tuple with the URL list and the size
+    of that list. Both approaches would make the `addUrl` and `getUrlArray` methods
+    linearizable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent programming experts have proven that it is possible to express any
+    program state using atomic variables, and arbitrarily modify this state with linearizable
+    operations. In practice, implementing such linearizable operations efficiently
+    can be quite challenging. It is generally hard to implement arbitrary linearizable
+    operations correctly, and it is even harder to implement them efficiently.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unlike atomic variables, multiple `synchronized` statements can be used together
+    more easily. We can modify multiple fields of an object when we use the `synchronized`
+    statement, and we can even nest multiple `synchronized` statements. We are thus
+    left with a dilemma. We can use atomic variables and risk race conditions when
+    composing larger programs, or we can revert to using the `synchronized` statement,
+    but risk deadlocks. Luckily, STM is a technology that offers the best of both
+    worlds; it allows you to compose simple atomic operations into more complex atomic
+    operations, without the risk of deadlocks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using Software Transactional Memory
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this section, we will study the basics of using STM. Historically, multiple
+    STM implementations were introduced for Scala and the JVM platform. The particular
+    STM implementation described in this chapter is called **ScalaSTM**. There are
+    two reasons that ScalaSTM is our STM of choice. First, ScalaSTM was authored by
+    a group of STM experts who agreed on a standardized set of APIs and features.
+    Future STM implementations for Scala are strongly encouraged to implement these
+    APIs. Second, the ScalaSTM API is designed for multiple STM implementations, and
+    comes with an efficient default implementation. Different STM implementations
+    can be chosen when the program starts. Users can write applications using a standardized
+    API, and seamlessly switch to a different STM implementation later.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `atomic` statement is a fundamental abstraction at the core of every STM.
+    When the program executes a block of code marked with the `atomic` symbol, it
+    starts a memory transaction, a sequence of reads and writes operations to memory
+    that occur atomically for other threads in the program. The `atomic` statement
+    is similar to the `synchronized` statement, and ensures that a block of code executes
+    in isolation, without the interference of other threads, thus avoiding race conditions.
+    Unlike the `synchronized` statement, the `atomic` statement does not cause deadlocks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following methods, `swap` and `inc`, show how to use the `atomic` statement
+    on a high level. The `swap` method atomically exchanges the contents of two memory
+    locations, `a` and `b`. Between the time that a thread reads the memory location
+    `a` (or `b`) and the time that the `atomic` statement ends, no other thread can
+    effectively modify the value at location `a` (or `b`). Similarly, the `inc` method
+    atomically increments the integer value at the memory location `a`. When a thread,
+    which calls the `inc` method, reads the value of `a` in the `atomic` statement,
+    no other thread can change the value of the memory location `a` until the `atomic`
+    statement ends:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: The ways in which an STM implements deadlock-freedom and ensures that no two
+    threads simultaneously modify the same memory locations are quite complex. In
+    most STM implementations, the `atomic` statement maintains a log of read and write
+    operations. Every time a memory location is read during a memory transaction,
+    the corresponding memory address is added to the log. Similarly, whenever a memory
+    location is written during a memory transaction, the memory address and the proposed
+    value are written to the log. Once the execution reaches the end of the `atomic`
+    block, all the writes from the transaction log are written to the memory. When
+    this happens, we say that the transaction is committed. On the other hand, during
+    the transaction, the STM might detect that another concurrent transaction performed
+    by some other thread is concurrently reading or writing the same memory location.
+    This situation is called a **transactional conflict**. When a transactional conflict
+    occurs, one or both of the transactions are cancelled, and re-executed serially,
+    one after another. We say that the STM *rolls back* these transactions. Such STMs
+    are called **optimistic**. Optimistic STMs try to execute a transaction under
+    the assumption that it will succeed, and roll back when they detect a conflict.
+    When we say that a transaction is completed, we mean that it was either committed
+    or rolled back, and re-executed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To illustrate how a memory transaction works, we consider the scenario in which
+    two threads, **T1** and **T2**, simultaneously call the `swap` and `inc` methods.
+    Since both the `atomic` statements in these methods modify the memory location
+    `a`, the execution results in a runtime transactional conflict. During the execution
+    of the program, the STM detects that the entries in the transactional logs overlap:
+    the transaction associated with the `swap` method has both memory locations `a`
+    and `b` in its read and write sets, while the `inc` method has `a` in its read
+    and write sets. This indicates a potential conflict. Both the transactions can
+    be rolled back, and then executed serially one after another, as shown in the
+    following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Using Software Transactional Memory](img/image_07_001.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We will not delve more deeply into the internals of the ScalaSTM implementation,
+    as this is beyond the scope of this book. Instead, we will focus on how to use
+    ScalaSTM to easily write concurrent applications. Where reasonable, we hint at
+    some implementation details to better understand the reasons behind the ScalaSTM
+    semantics.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In some STMs, the `atomic` statement tracks all the reads and writes to the
+    memory. ScalaSTM only tracks specially marked memory locations within transactions.
+    There are several reasons for this. First, an STM cannot ensure safety if some
+    parts of the program access memory locations outside the `atomic` statements,
+    while other parts access the same memory locations inside the `atomic` statements.
+    ScalaSTM avoids accidental uses outside transactions by explicitly marking the
+    memory locations that can only be used in transactions. Second, STM frameworks
+    for the JVM need to use post-compilation or bytecode introspection in order to
+    accurately capture all the reads and writes. ScalaSTM is a library-only STM implementation,
+    so it cannot analyze and transform the program in the same way a compiler can.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In ScalaSTM, the effects of the `atomic` statement are limited to special objects
+    called **transactional references**. Before showing how to use the `atomic` statement
+    to perform memory transactions, we will study how to create transactional references.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transactional references
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In this section, we will study how to declare transactional references. A transactional
+    reference is a memory location that provides transactional read and write access
+    to a single memory location. In ScalaSTM, transactional references to the values
+    of type `T` are encapsulated within the objects of the `Red[T]` type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Before we begin using STM in Scala, we need to add an external dependency to
+    our project, since ScalaSTM is not a part of the Scala standard library:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To use the ScalaSTM `atomic` statement in a compilation unit, we import the
+    contents of the `scala.concurrent.stm` package:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To instantiate a `Ref` object, we use the `Ref.apply` factory method on the
+    `Ref` companion object. Let''s rewrite our browser history example using transactional
+    memory. We start by replacing atomic variables with transactional references.
+    We pass the initial value of each transactional reference to the `Ref.apply` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: Calling the `apply` method on a transactional reference returns its value, and
+    calling the `update` method modifies it. However, we cannot call these methods
+    from outside of a transaction. The `apply` and `update` methods take an implicit
+    argument of type `InTxn` (which stands for *in transaction*), which designates
+    that a transaction is under way. Without the `InTxn` object, we cannot call the
+    `apply` and `update` methods. This constraint protects us from accidentally circumventing
+    the ScalaSTM safety mechanisms.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To read and modify transactional references, we must first start a transaction
+    that provides the implicit `InTxn` object. We will study how to do this next.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the atomic statement
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'After redefining the `urls` and `clen` variables as transactional references,
+    we redefine the `addUrl` method. Instead of separately updating two atomic variables,
+    we start a memory transaction with the `atomic` statement. In ScalaSTM, the `atomic`
+    statement takes a block of type `InTxn => T`, where `InTxn` is the type of the
+    previously mentioned transaction object, and `T` is the type of the return value
+    of the transaction. Note that we can annotate the `InTxn` parameter with the `implicit`
+    keyword:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: The new definition of `addUrl` is surprisingly simple. It first reads the value
+    of the `urls` list, prepends a new URL to the list, and assigns the updated list
+    back to the `urls` variable. Then, it reads the current value of the total character
+    length `clen`, increments it by the length of the new URL, and assigns the new
+    value back to `clen`. Note that the new definition of the `addUrl` method looks
+    almost identical to a single-threaded implementation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An important limitation of the `atomic` statement in ScalaSTM is that it does
+    not track reads and writes to ordinary local variables and object fields. As we
+    will see later, these are considered as arbitrary side effects, and are not allowed
+    inside the transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We reimplement the `getUrlArray` method in a similar fashion. We start by creating
+    a transaction with the `atomic` statement. The value of the `clen` variable is
+    used in order to allocate a character array of an appropriate size. We then read
+    the `urls` list and assign its characters to the array in a `for` loop. Again,
+    the implementation of the `getUrlArray` method looks surprisingly similar to the
+    corresponding single-threaded implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This time, there is no danger of seeing inconsistent values of the `clen` and
+    `urls` variables. When used in a transaction, the two values are always consistent
+    with each other, as shown in the following program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that we added the `sleep` statement in the main program, as this sets the
+    timing of the two asynchronous computations to occur approximately at the same
+    time. You can tweak the duration of the `sleep` statement in order to observe
+    the various interleavings of the two asynchronous computations. Convince yourself
+    with the fact that dumping the browsing history to the `log` file always observes
+    some prefix of the three `addUrl` calls, and does not throw an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: When encoding a complex program state, use multiple transactional references.
+    To atomically perform multiple changes on the program state, use the `atomic`
+    statement.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Having seen basic way of using the `atomic` statement with transactional references,
+    we will proceed to show more advanced examples and study the STM semantics in
+    more detail.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Composing transactions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: When used correctly, transactional memory is a powerful tool for building concurrent
+    applications that modify shared data. Nevertheless, no technology is a silver
+    bullet, and neither is STM. In this section, we will study how to compose transactions
+    in larger programs and learn how transactional memory interacts with other features
+    of Scala. We investigate some of the caveats of STM, and go beyond transactional
+    references and the `atomic` statement blocks to show how to use STM more effectively.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The interaction between transactions and side effects
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Previously, we learned that an STM may roll back and retry a transaction. An
+    attentive reader might notice that retrying a transaction means re-executing its
+    side effects. Here, the side effects are arbitrary reads and writes to regular
+    `object` fields and variables.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Sometimes, side effects are not a problem. Transactional references cannot
+    be modified outside a transaction, and inside a transaction their modifications
+    are aborted when retrying. Still, the other kinds of side effect are not rolled
+    back. Consider the following program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The preceding program declares a `myValue` transactional reference, and an
+    `inc` method that increments `myValue` inside an `atomic` block. The `inc` method
+    also contains a `log` statement which prints the current value of the `myValue`
+    reference. The program asynchronously calls the `inc` method twice. Upon executing
+    this program, we get the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: The two asynchronous computations call the `inc` method at the same time, and
+    both start a transaction. One of the transactions adds the `myValue` reference
+    to its read set, calls the `log` statement with the `0` value, and proceeds to
+    increment the `myValue` reference by adding the `myValue` reference to its write
+    set. In the meantime, the other transaction first logs the `0` value, then attempts
+    to read `myValue` again, and detects that `myValue` is in a write set of another
+    active transaction. The second transaction is rolled back, and retried after the
+    first transaction commits. The second transaction reads the `myValue` reference
+    once more, prints `1`, and then increments `myValue`. The two transactions commit,
+    but the side-effecting `log` call is executed three times as a result of the rollback.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It might not be harmful to execute a simple `log` statement multiple times,
+    but repeating arbitrary side effects can easily break the correctness of a program.
+    Avoiding side effects in transactions is a recommended practice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Recall that an operation is idempotent if executing it multiple times has the
+    same effect as executing it once, as discussed in [Chapter 6](ch06.html "Chapter 6. Concurrent
+    Programming with Reactive Extensions"), *Concurrent Programming with Reactive
+    Extensions*. You might conclude that, if a side-effecting operation is idempotent,
+    then it is safe to execute it in a transaction. After all, the worst thing that
+    can happen is that the idempotent operation gets executed more than once, right?
+    Unfortunately, this reasoning is flawed. After a transaction is rolled back and
+    retried, the values of the transactional references might change. The second time
+    a transaction is executed, the arguments to the idempotent operation might be
+    different, or the idempotent operation might not be invoked at all. The safest
+    way to avoid such situations is to avoid external side effects altogether.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Avoid external side effects inside the transactions, as transactions can be
+    re-executed multiple times.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In practice, we usually want to execute a side effect only if the transaction
+    commits, that is, after we are sure that the changes to the transactional references
+    are visible to other threads. To do this, we use the `Txn` singleton object, which
+    can schedule multiple operations that execute after the transaction commits or
+    rolls back.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After a rollback, these operations are removed, and potentially re-registered
+    when retrying the transaction. Its methods can only be called from inside an active
+    transaction. In the following code, we rewrite the `inc` method to call the `Txn`
+    object''s `afterCommit` method, and schedule the `log` statement to execute after
+    the transaction commits:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note that we read the `myValue` reference inside the transaction and assign
+    the value to a local variable `valueAtStart`. The value of the `valueAtStart`
+    local variable is later printed to the standard output. This is different from
+    reading the `myValue` reference inside the `afterCommit` block:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: Calling the last version of `inc` fails with an exception. Although the transactional
+    context `txn` exists when the `afterCommit` method is called, the `afterCommit`
+    block is executed later, after the transaction is already over and the `txn` object
+    is no longer valid. It is illegal to read or modify transactional references outside
+    a transaction. Before using it in an `afterCommit` block, we need to store the
+    value of the transactional reference into a local variable in the transaction
+    itself.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Why does accessing a transactional reference inside the `afterCommit` block
+    only fail at runtime, when the transaction executes, instead of failing during
+    compilation? The `afterCommit` method is in the **static scope** of the transaction,
+    or, in other words is statically nested within an `atomic` statement. For this
+    reason, the compiler resolves the `txn` object of the transaction, and allows
+    you to access the transactional references, such as `myValue`. However, the `afterCommit`
+    block is not executed in the dynamic scope of the transaction. In other words,
+    the `afterCommit` block is run *after* the `atomic` block returns.
+  prefs: []
+  type: TYPE_NORMAL
+- en: By contrast, accessing a transactional reference outside of the `atomic` block
+    is not in the static scope of a transaction, so the compiler detects this and
+    reports an error.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In general, the `InTxn` objects must not escape the transaction block. For example,
+    it is not legal to start an asynchronous operation from within the transaction,
+    and use the `InTxn` object to access transactional references.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Only use the transactional context within the thread that started the transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In some cases, we want to execute some side-effecting operations when a rollback
+    occurs. For instance, we would like to log each rollback to track the contention
+    in our program. This information can help us restructure the program and eliminate
+    potential performance bottlenecks. To achieve this, we use the `afterRollback`
+    method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: Importantly, after a rollback, the transaction is no longer under way. Just
+    as in the `afterCommit` blocks, it is illegal to access the transactional references
+    in the `afterRollback` blocks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the `Txn` object's `afterCommit` and `afterRollback` methods to perform
+    side-effecting operations in transactions without the danger of executing them
+    multiple times.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Not all side-effecting operations inside the transactions are bad. As long as
+    the side effects are confined to mutating objects that are created inside the
+    transaction, we are free to use them. In fact, such side effects are sometimes
+    necessary. To demonstrate this, let's define the `Node` class for a transactional
+    linked list collection. A transactional list is a concurrent, thread-safe linked
+    list that is modified using memory transactions. Similar to a functional cons
+    list, represented by the `List` class in Scala, the transactional `Node` class
+    contains two fields that we call `elem` and `next`. The `elem` field contains
+    the value of the current node. To keep things simple, the `elem` field is a value
+    field and can only contain integers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `next` field is a transactional reference containing the next node in the
+    linked list. We can read and modify the `next` field only inside memory transactions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We now define a `nodeToString` method, which takes a transactional linked list
+    node `n`, and creates a `String` representation of the transactional list starting
+    with the `n` node:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the preceding code snippet, we were careful to confine the side effects
+    to objects that were created inside the transaction, in this case, the `StringBuilder`
+    object `b`. Had we instantiated the `StringBuilder` object before the transaction
+    started, the `nodeToString` method would not work correctly:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: If the transaction gets rolled back in the `nodeToStringWrong` example, the
+    contents of the `StringBuilder` object are not cleared. The second time a transaction
+    runs, it will modify the already existing, non-empty `StringBuilder` object and
+    return a string representation that does not correspond to the state of the transactional
+    list.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: When mutating an object inside a transaction, make sure that the object is created
+    inside the transaction and that the reference to it does not escape the scope
+    of the transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Having seen how to manage side effects inside transactions, we now examine several
+    special kinds of transactions and study how to compose smaller transactions into
+    larger ones.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Single-operation transactions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In some cases, we only want to read or modify a single transactional reference.
+    It can be cumbersome to type the `atomic` keyword and the implicit `txn` argument
+    just to read a single `Ref` object. To alleviate this, ScalaSTM defines single-operation
+    transactions on transactional references. Single-operation transactions are executed
+    by calling a single method on a `Ref` object. This method returns a `Ref.View`
+    object, which has the same interface as a `Ref` object, but its methods can be
+    called from outside a transaction. Each operation on a `Ref.View` object acts
+    like a single-operation transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Recall the `Node` class for transactional linked lists from the previous section,
+    which stored integers in an `elem` field, and the reference to the next node in
+    the transactional reference called `next`. Let''s augment `Node` with two linked
+    list methods. The `append` method takes a single `Node` argument `n`, and inserts
+    `n` after the current node. The `nextNode` method returns the reference to the
+    next node, or `null` if the current node is at the end of the list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `nextNode` method does a single-operation transaction. It calls single
+    on the `next` transactional reference, and then calls the `apply` method in order
+    to obtain the value of the next node. This is equivalent to the following definition:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can use our transactional `Node` class to declare a linked list called `nodes`,
+    initially containing values `1`, `4`, and `5`, and then concurrently modify it.
+    We start two futures `f` and `g`, which call `append` to add nodes with the values
+    `2` and `3`, respectively. After the futures complete, we call `nextNode` and
+    print the value of the next node. The following code snippet will print the node
+    with either the value `2` or `3`, depending on which future completes last:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can also use the `single` method to invoke other transactional reference
+    operations. In the following code snippet, we use the `transform` operation to
+    define an `appendIfEnd` method on the `Node` class, which appends a node `n` after
+    the current node only if the current node is followed by `null`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `transform` operation on a `Ref` object containing the values of type `T`
+    takes a transformation function of type `T => T`. It atomically performs a read
+    of the transactional reference, applies the transformation function to the current
+    value, and writes the new value back. Other single-operation transactions include
+    `update`, `compareAndSet`, and `swap` operations. We refer the readers to the
+    online documentation to learn their precise semantics.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use single-operation transactions for single read, write, and CAS-like operations
+    in order to avoid the syntactic boilerplate associated with the `atomic` blocks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Single-operation transactions are convenience methods that are easier to type,
+    and are possibly more efficient, depending on the underlying STM implementation.
+    They can be useful, but as programs grow, we are more interested in building larger
+    transactions from simple ones. We will investigate how to do this in the next
+    section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Nesting transactions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Recall from [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the
+    Java Memory Model"), *Concurrency on the JVM and the Java Memory Model*, that
+    a `synchronized` statement can be nested inside other `synchronized` statements.
+    This property is essential when composing programs from multiple software modules.
+    For example, a money transfer module in a banking system must call operations
+    from a logging module to persist the transactions. Both the modules might internally
+    use arbitrary sets of locks, without the knowledge of other modules. An unfortunate
+    disadvantage of arbitrarily nested `synchronized` statements is that they allow
+    the possibility of a deadlock.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Separate `atomic` statements can also nest arbitrarily. The motivation for this
+    is the same as with the `synchronized` statement. A transaction inside a software
+    module must be able to invoke operations inside other software modules, which
+    themselves might start the transactions. Not having to know about the transactions
+    inside an operation allows a better separation between different software components.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's illustrate this with a concrete example. Recall the `Node` class from
+    the previous section, which was used for transactional linked lists. The `Node`
+    class was somewhat low-level. We can only call the `append` method to insert new
+    nodes after the specified node, and call `nodeToString` on a specific node to
+    convert its elements to a `String` object.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this section, we define the transactional sorted list class, represented
+    by the `TSortedList` class. This class stores integers in ascending order. It
+    maintains a single transactional reference `head`, which points to the head of
+    the linked list of the `Node` objects. We define the `toString` method on the
+    `TSortedList` class to convert its contents into a textual representation. The
+    `toString` method needs to read the transactional reference `head`, so it starts
+    by creating a new transaction. After reading the value of the `head` transactional
+    reference into a local value `headNode`, the `toString` method can reuse the `nodeToString`
+    method that we defined earlier:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: Recall that the `nodeToString` method starts another transaction to read the
+    next references in each node. When the `toString` method calls `nodeToString`,
+    the second transaction becomes *nested* in the transaction started by `toString`.
+    The `atomic` block in the `nodeToString` method does not start a new, separate
+    transaction. Instead, the nested transaction becomes a part of the existing transaction.
+    This has two important consequences. First, if the nested transaction fails, it
+    is not rolled back to the start of its `atomic` block in the `nodeToString` method.
+    Instead, it rolls back to the start of the `atomic` block in the `toString` method.
+    We say that the start of the transaction is determined by the dynamic scope, rather
+    than the static scope. Similarly, the nested transaction does not commit when
+    it reaches the end of the `atomic` block in the `nodeToString` method. The changes
+    induced by the nested transaction become visible when the initial transaction
+    commits. We say that the scope of the transaction is always that of the top-level
+    transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Nested `atomic` blocks result in a transaction that starts when the top-level
+    `atomic` block starts, and can commit only after the top-level `atomic` block
+    completes. Similarly, rollbacks retry the transaction starting from the top-level
+    `atomic` block.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We now study another example of using nested transactions. Atomically converting
+    transactional sorted lists to their string representation is useful, but we also
+    need to insert elements in the list. We define the `insert` method, which takes
+    an integer and inserts it into a proper position in the transactional list.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Since `insert` can modify both the transactional reference `head` and the nodes
+    in the list, it starts by creating a transaction. It then checks for two special
+    cases. A list can be empty, in this case we set `head` to a new node containing
+    `x`. Likewise, the `x` integer might be smaller than the first value in the list;
+    in which case, the `head` reference is set to a new node containing `x`, and its
+    `next` field is set to the previous value of the `head` reference. If neither
+    of these conditions applies, we call a tail-recursive, nested method `insert`
+    to process the remainder of the list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: The nested `insert` method traverses the linked list in order to find the correct
+    position for the `x` integer. It takes the current node `n` and checks if the
+    node is followed by `null`, indicating the end of the list, or if the next element
+    is greater than `x`. In both cases, we call the `append` method on the node. If
+    the node following `n` is not `null`, and its `elem` field is less than or equal
+    to `x`, we call `insert` recursively on the next node.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Note that the tail-recursive, nested method `insert` uses the transactional
+    context `txn` of the enclosing `atomic` block. We can also define a separate tail-recursive
+    method `insert` outside the scope of the transaction. In this case, we need to
+    encode the transactional context `txn` as a separate implicit parameter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Alternatively, we can omit the implicit `txn` transactional context parameter,
+    but then we have to start a nested transaction inside the tail-recursive `insert`
+    method. This might be slightly less efficient than the previous approach, but
+    it is semantically equivalent:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We test our transactional sorted list with the following snippet. We instantiate
+    an empty transactional sorted list and insert several integers concurrently from
+    the asynchronous computations `f` and `g`. After both the corresponding futures
+    complete execution, we print the contents of the sorted list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running the preceding snippet always outputs the elements `1`, `2`, `3`, and
+    `4` in the same sorted order, regardless of the execution schedule of the futures.
+    We created a thread-safe transactional sorted list class, and the implementation
+    is almost identical to the corresponding sequential sorted list implementation.
+    This example shows the true potential of STM. It allows you to create concurrent
+    data structures and thread-safe data models without having to worry too much about
+    concurrency.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There is one more aspect of transactions that we have not yet considered. What
+    happens if a transaction fails due to an exception? For example, the tail-recursive
+    `insert` method can get called with a `null` value instead of a valid `Node` reference.
+    This results in throwing a `NullPointerException`, but how does it affect the
+    transaction? We will explore the exception semantics of the transactions in the
+    following section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transactions and exceptions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: From what we've learned about transactions so far, it is not clear what happens
+    with a transaction if it throws an exception. An exception could roll back the
+    transaction, or it could commit its changes. ScalaSTM does a rollback, by default,
+    but this behavior can be overridden.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's assume that the clients of our transactional sorted list want to use it
+    as a concurrent priority queue. A *priority queue* is a collection that contains
+    ordered elements, such as integers. An arbitrary element can be inserted into
+    a priority queue using the `insert` method. At each point, we can retrieve the
+    smallest element currently in the priority queue using the `head` method. The
+    priority queue also allows you to remove the smallest element with the `pop` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The transactional sorted list is already sorted and supports element insertion
+    with the `insert` method, however, once added, elements cannot be removed. To
+    make our transactional sorted list usable as a priority queue, we define a `pop`
+    method, which removes the first `n` elements from a transactional list `xs`. We
+    start a transaction inside the `pop` method, and declare a local variable `left`,
+    initializing it with the number of removed elements `n`. We then use a `while`
+    loop to remove nodes from `head` and decrease the `left` variable until it becomes
+    0:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To test the `pop` method, we declare a new transactional list `lst`, and insert
+    integers `4`, `9`, `1`, and `16`. The list is sorted, so the integers appear in
+    the list in the order `1`, `4`, `9`, and `16`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Next, we start an asynchronous computation that removes the first two integers
+    in the list by calling `pop`. After the asynchronous computation is successfully
+    completed, we print the contents of the transactional list to the standard output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'So far, so good. The `log` statement outputs the list with the elements `9`
+    and `16`. We proceed by starting another asynchronous computation, which removes
+    the first three elements from the transactional list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: However, when we call the `pop` method again, it throws a `NullPointerException`;
+    there are only two elements left in the transactional list. As a result, the reference
+    `head` is eventually assigned `null` during the transaction. When the `pop` method
+    tries to call `next` on `null`, an exception is thrown.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the `onComplete` callback, we output the name of the exception and the contents
+    of the transactional list. It turns out that the transactional list still contains
+    the elements `9` and `16`, although the `head` reference of the transactional
+    list had been set to `null` in the transaction. When an exception is thrown, the
+    effects of the transaction are reverted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: When an exception is thrown inside a transaction, the transaction is rolled
+    back and the exception is rethrown at the point where the top-level `atomic` block
+    started.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Importantly, the nested transactions are also rolled back. In the following
+    code snippet, the nested `atomic` block in the `pop` method completes successfully,
+    but its changes are not committed. Instead, the entire transaction is rolled back
+    when the `sys.error` call throws a `RuntimeException` in the enclosing top-level
+    `atomic` block:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: Unlike ScalaSTM, some other STM implementations do not roll back transactions
+    when an exception is thrown; instead, they commit the transaction. STM experts
+    have not yet reached a consensus on what the exception semantics should be. ScalaSTM
+    uses a hybrid approach. Most exceptions roll back the transaction, but Scala's
+    **control exceptions** are excluded from this rule. Control exceptions are exceptions
+    that are used for control flow in Scala programs. They extend the `ControlThrowable`
+    trait from the `scala.util.control` package, and are sometimes treated differently
+    by the Scala compiler and runtime. When a control exception is thrown inside a
+    transaction, ScalaSTM does not roll back the transaction. Instead, the transaction
+    is committed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Control exceptions are used to support the `break` statement in Scala, which
+    is not a native language construct. The `break` statement throws a control exception,
+    which is then caught by the enclosing breakable block. In the next example, we
+    define a breakable block for the `break` statement and start a transaction that
+    calls `pop` in a `for` loop with the values `1`, `2`, and `3`. After the first
+    iteration, we break the loop. The example shows that the changes in the first
+    `pop` statement are committed. The transactional list now contains only the element
+    `16`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: Furthermore, it is possible to override how a specific transaction handles exceptions
+    by calling the `withControlFlowRecognizer` method on the atomic block. This method
+    takes a partial function from `Throwable` to `Boolean`, and uses it to decide
+    whether a particular exception is to be considered as a control exception or not.
+    If the partial function is not defined for particular exception, the decision
+    is deferred to the default control flow recognizer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following example, the `atomic` block overrides the default control
+    flow recognizer. For this specific transaction, subclasses of the `ControlThrowable`
+    trait are considered as regular exceptions. The `pop` call removes the last element
+    of the transactional list as part of this transaction, but when we call `break`;
+    the transaction is rolled back. The `log` statement at the end of the asynchronous
+    computation shows that the list still contains the number `16`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note that the exceptions thrown inside the transactions can also be intercepted
+    using the `catch` statement. In this case, the effects of the nested transactions
+    are aborted, and the execution proceeds from the point where the exception was
+    caught. In the following example, we catch the exception thrown by the second
+    `pop` call:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The second `pop` method call should not remove any elements from the list,
+    so we expect to see the element `16` at the end. Running this code snippet results
+    in the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: Interestingly, the output reveals that the first `log` statement is invoked
+    twice. The reason is that, when the exception is thrown the first time, both the
+    nested and the top-level transactions are rolled back. This is an optimization
+    in the ScalaSTM implementation, since it is more efficient to flatten the nested
+    and the top-level transaction during the first execution attempt. Note that, after
+    the transactional block is executed the second time, the exception from the nested
+    transaction is correctly handled.
+  prefs: []
+  type: TYPE_NORMAL
+- en: These examples are useful in understanding the semantics of exceptions inside
+    the transactions. Still, the clients of our transactional sorted list want more
+    than an exception when they call the `pop` method on an empty sorted list. In
+    some cases, like the producer-consumer pattern from [Chapter 3](ch03.html "Chapter 3. Traditional
+    Building Blocks of Concurrency"), *Traditional Building Blocks of Concurrency*,
+    a thread has to wait and repeat the transaction when the sorted list becomes non-empty.
+    This is called retrying, and is the topic of the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Retrying transactions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In sequential computing, a single thread is responsible for executing the program.
+    If a specific value is not available, the single thread is responsible for producing
+    it. In concurrent programming, the situation is different. When a value is not
+    available, some other thread, called a **producer**, might eventually produce
+    the value. The thread consuming the value, called a **consumer**, can either block
+    the execution until the value becomes available, or temporarily execute some other
+    work before checking for the value again. We have seen various mechanisms for
+    achieving this relationship, ranging from monitors and the `synchronized` statement
+    from [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory
+    Model"), *Concurrency on the JVM and the Java Memory Model*, concurrent queues
+    from [Chapter 3](ch03.html "Chapter 3. Traditional Building Blocks of Concurrency"),
+    *Traditional Building Blocks of Concurrency*; futures and promises in [Chapter
+    4](ch04.html "Chapter 4.  Asynchronous Programming with Futures and Promises"),
+    *Asynchronous Programming with Futures and Promises*; to event-streams in [Chapter
+    6](ch06.html "Chapter 6. Concurrent Programming with Reactive Extensions"), *Concurrent
+    Programming with Reactive Extensions*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Syntactically, the `atomic` statement best corresponds to the `synchronized`
+    statement. Recall that the `synchronized` statement support the guarded block
+    pattern, in which the thread acquires a monitor, checks for some condition, and
+    then calls `wait` on the monitor. When some other thread fulfills this condition,
+    it calls the `notify` method on the same monitor, indicating that the first thread
+    should wake up and continue its work. Although sometimes fragile, this mechanism
+    allows us to circumvent busy-waiting.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'From what we have learned about STMs so far, monitors and the `notify` method
+    have no direct counterpart in the `atomic` statement. Without them, busy-waiting
+    is the only option when a transaction needs to wait for a specific condition to
+    proceed. To illustrate this, let''s consider the transactional sorted lists from
+    the last section. We would like to augment the transactional sorted lists with
+    the `headWait` method which takes a list and returns the first integer in the
+    list if the list is non-empty. Otherwise, the execution should block until the
+    list becomes non-empty:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `headWait` method starts a transaction, and busy-waits until the `head`
+    reference of the transactional list `lst` becomes different from `null`. To test
+    this method, we create an empty transaction sorted list, and start an asynchronous
+    computation that calls the `headWait` method. After one second, we start another
+    asynchronous computation that adds the number `1` to the list. During the one-second
+    delay, the first asynchronous computation repetitively busy-waits:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: The first time we ran this example, it completed successfully after one second
+    and reported that the first element of the list is `1`. However, this example
+    is likely to fail. ScalaSTM will eventually detect that there is a conflict between
+    the transaction in the `headWait` method and the transaction in the `insert` method,
+    and will serialize the two transactions. In the case where the STM chooses the
+    `headWait` method to execute first, number `1` is never inserted into `myList`
+    value. Effectively, this program ends up in a deadlock. This example illustrates
+    that busy-waiting in a transaction is just as bad as busy-waiting inside a `synchronized`
+    statement.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Avoid long-running transactions whenever possible. Never execute an infinite
+    loop inside a transaction, as it can cause deadlocks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An STM is more than just support for executing isolated memory transactions.
+    To fully replace monitors and the `synchronized` statement, an STM must provide
+    an additional utility for transactions that block until a specific condition is
+    fulfilled. ScalaSTM defines the `retry` statement for this purpose. When the execution
+    inside the transaction reaches a `retry` statement, the transaction is rolled
+    back to the enclosing top-level `atomic` block with a special exception, and the
+    calling thread is blocked. After the rollback, the read set of the transaction
+    is saved.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Values from the transactional references in the read set are the reason why
+    the transaction decides to call the `retry` method. If and when some transactional
+    reference in the read set changes its value from within another transaction, the
+    blocked transaction can be retried.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We now reimplement the `headWait` method so that it calls the `retry` method
+    if the `head` value of the transactional list is `null`, indicating that the list
+    is empty:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We rerun the complete program. Calling the `headWait` method is a potential
+    blocking operation, so we need to use the `blocking` call inside the asynchronous
+    computation. The transaction in `headWait` reads the transactional reference `head`,
+    and puts it into the read set after calling the `retry` method. When the reference
+    `head` later changes, the transaction is automatically retried:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: This time, the program runs as expected. The first asynchronous computation
+    is suspended until the second asynchronous computation adds `1` to the list. This
+    awakens the first asynchronous computation and repeats the transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the `retry` statement to block the transaction until a specific condition
+    is fulfilled, and retry the transaction automatically once its read set changes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In some cases, when a specific condition is not fulfilled and the transaction
+    cannot proceed, we would like to retry a different transaction. Assume that there
+    are many producer threads in the program, and a single consumer thread. To decrease
+    contention between the producers, we decide to introduce two transactional sorted
+    lists called `queue1` and `queue2`. To avoid creating contention by simultaneously
+    accessing both lists, the consumer thread must check the contents of these transactional
+    sorted lists in two separate transactions. The `orAtomic` construct allows you
+    to do this.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The following snippet illustrates how to use `orAtomic` in this situation. We
+    instantiate two empty transactional sorted lists: `queue1` and `queue2`. We then
+    start an asynchronous computation that represents the consumer and starts a transaction
+    that calls the `headWait` method on the `queue1` list. We call the `orAtomic`
+    method after the first transaction. This specifies an alternative transaction
+    if the first transaction calls `retry`. In the `orAtomic` block, we call the `headWait`
+    method on the `queue2` list. When the first `atomic` block calls the `retry` method,
+    the control is passed to the `orAtomic` block, and a different transaction starts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Since both the transactional lists, `queue1` and `queue2`, are initially empty,
+    the second transaction also calls the `retry` method, and the transaction chain
+    is blocked until one of the transactional lists changes:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We now simulate several producers that call the `insert` method 50 milliseconds
+    later:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: The consumer first prints the `"probing queue1"` string, calls the `retry` method
+    inside the `headWait` method, and proceeds to the next transaction. It prints
+    the `"probing queue2"` string in the same way and then blocks its execution. After
+    the first producer computation inserts `2` into the second transactional list,
+    the consumer retries the chain of transactions again. It attempts to execute the
+    first transaction and prints the `"probing queue1"` string again before finding
+    that the `queue1` list is empty. It then prints the `"probing queue2"` string
+    and successfully outputs the element `2` from the `queue2` list.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Retrying with timeouts
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We have seen that it is useful to suspend a transaction until a specific condition
+    gets fulfilled. In some cases, we want to prevent a transaction from being blocked
+    forever. The `wait` method on the object monitors comes with an overload that
+    takes the timeout argument. When the timeout elapses without a `notify` call from
+    some other thread, an `InterruptedException` is thrown. The ScalaSTM `withRetryTimeout`
+    method is a similar mechanism for handling timeouts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following code snippet, we create a `message` transactional reference
+    that initially contains an empty string. We then start an `atomic` block whose
+    timeout is set to `1000` milliseconds. If the `message` transactional reference
+    does not change its value within that time, the transaction fails by throwing
+    an `InterruptedException`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: We deliberately set the timeout to `1025` milliseconds to create a race condition.
+    This program will either print the `"Howdy!"` message or fail with an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We use the `withRetryTimeout` method when timing out is an exceptional behavior.
+    Shutting down the application is one example of such a behavior. We want to avoid
+    having a blocked transaction that prevents the program from terminating. Another
+    example is waiting for a network reply. If there is no reply after some duration
+    of time, we want to fail the transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In some cases, a timeout is a part of a normal program behavior. In this case,
+    we wait for a specific amount of time for conditions relevant to the transaction
+    to change. If they do, we roll back and retry the transaction, as before. If the
+    specified amount of time elapses without any changes, the transaction should continue.
+    In ScalaSTM, the method that does this is called `retryFor`. In the following
+    code snippet, we rewrite the previous example using the `retryFor` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: This time, the transaction inside the asynchronous computation does not throw
+    an exception. Instead, the transaction prints the `"no message."` string if a
+    timeout occurs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: When a timeout represents exceptional program behavior, use the `withRetryTimeout`
+    method to set the timeout duration in the transaction. When the transaction proceeds
+    normally after a timeout, use the `retryFor` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The different `retry` variants are the ScalaSTM powerful additions to the standard
+    STM model. They are as expressive as the `wait` and `notify` calls, and much safer
+    to use. Together with the `atomic` statement, they unleash the full potential
+    of synchronization.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transactional collections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this section, we take a step away from transactional references, and study
+    more powerful transactional constructs, called, transactional collections. While
+    transactional references can only hold a single value at once, transactional collections
+    can manipulate multiple values. In principle, the `atomic` statements and transactional
+    references are sufficient to express any kind of transaction over shared data.
+    However, ScalaSTM's transactional collections are deeply integrated with the STM.
+    They can be used to express shared data operations more conveniently and execute
+    the transactions more efficiently.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transaction-local variables
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We have already seen that some transactions need to create a local mutable state
+    that exists only during the execution of the transaction. Sometimes, we need to
+    re-declare the same state over and over again for multiple transactions. In such
+    cases, we would like to declare the same state once, and reuse it in multiple
+    transactions. A construct that supports this in ScalaSTM is called a **transaction-local
+    variable**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To declare a transaction-local variable, we instantiate an object of the `TxnLocal[T]`
+    type, giving it an initial value of type `T`. In the following code, we instantiate
+    a `myLog` transaction-local variable. We will use `myLog` inside the transactional
+    sorted list operations to log the flow of different transactions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: The value of the `myLog` transaction-local variable is seen separately by each
+    transaction. When a transaction starts, the value of `myLog` is equal to an empty
+    string, as specified when `myLog` was declared. When the transaction updates the
+    value of the `myLog` variable, this change is only visible to that specific transaction.
+    Other transactions behave as if they have their own separate copies of `myLog`
+    variable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We now declare a `clearList` method that atomically removes all elements from
+    the specified transactional sorted list. This method uses the `myLog` variable
+    to log the elements that were removed:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Usually, we are not interested in the contents of the `myLog` variable. However,
+    we might occasionally want to inspect the `myLog` variable for debugging purposes.
+    Hence, we declare the `clearWithLog` method that clears the list and then returns
+    the contents of `myLog`. We then call the `clearWithLog` method on a non-empty
+    transactional list from two separate asynchronous computations. After both asynchronous
+    computations complete execution, we output their logs:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: Since the `clearList` operation is atomic, only one of the transactions can
+    remove all the elements. The contents of the `myLog` object reflect this. Depending
+    on the timing between the asynchronous computations, elements `14` and `22` both
+    appear either in the log of the `f` future or in the log of the `g` future. This
+    shows that each of the two transactions sees a separate duplicate of the `myLog`
+    variable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Transaction-local variables are syntactically more lightweight than creating
+    transactional references and passing them between different methods.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transaction-local variables are used while logging or gathering statistics on
+    the execution of the program. The `TxnLocal` constructor additionally allows you
+    to specify the `afterCommit` and `afterRollback` callbacks, invoked on the transaction-local
+    variable when the transaction commits or rolls back, respectively. We refer the
+    reader to the online documentation to find out how to use them. To build more
+    complex concurrent data models, we use transactional arrays and maps, which we
+    will study in the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transactional arrays
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Transactional references are a handy way to encapsulate a transactional state,
+    but they come with certain overheads. First, a `Ref` object is more heavyweight
+    than a simple object reference and consumes more memory. Second, every access
+    to a new `Ref` object needs to add an entry in the transaction's read set. When
+    we are dealing with many `Ref` objects, these overheads can become substantial.
+    Let's illustrate this with an example.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Assume that we are working in the marketing department of a company that does
+    Scala consulting. We are asked to write a program that updates the content of
+    the company website with the marketing information about the Scala 2.10 release.
+    Naturally, we decide to use ScalaSTM for this task. The website consists of five
+    separate pages, each represented with a string. We declare the contents of the
+    website in a sequence called `pages`. We then assign the content of the pages
+    to an array of transactional references. If some page changes later, we can update
+    its transactional reference in a transaction:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This solution is not satisfactory. We created a lot of transactional reference
+    objects, and the definition of `website` is not easily understandable. Luckily,
+    ScalaSTM has an alternative called a **transactional array**. A transactional
+    array, represented with the `TArray` class, is similar to an ordinary Scala array,
+    but can be accessed only from within a transaction. Its modifications are only
+    made visible to the other threads when a transaction commits. Semantically, a
+    `TArray` class corresponds to an array of transactional references, but it is
+    more memory-efficient and concise:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Scala development proceeds at an amazing pace. Not long after Scala 2.10 was announced,
+    the 2.11 release of Scala became available. The marketing team asks us to update
+    the contents of the website. All occurrences of the `"2.10"` string should be
+    replaced with the `"2.11"` string. We write a `replace` method that does this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: Using the `TArray` class is much nicer than storing transactional references
+    in an array. Not only does it spare us from a parenthesis soup resulting from
+    calling the `apply` operation on the transactional references in the array, but
+    it also occupies less memory. This is because a single contiguous array object
+    is created for the `TArray[T]` object, whereas an `Array[Ref[T]]` object requires
+    many `Ref` objects, each of which has a memory overhead.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the `TArray` class instead of arrays of transactional references to optimize
+    memory usage and make programs more concise.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s test the `TArray` class and the `replace` method in a short program.
+    We first define an additional method, `asString`, which concatenates the contents
+    of all the website pages. We then replace all occurrences of the `2.10` string
+    with the `2.11` string. To test whether `replace` works correctly, we concurrently
+    replace all occurrences of the `out` word with `"released"`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `asString` method captured all the entries in the transactional array. In
+    effect, the `asString` method atomically produced a snapshot of the state of the
+    `TArray` object. Alternatively, we could have copied the contents of `website`
+    into another `TArray` object, instead of a string. In either case, computing the
+    snapshot of a `TArray` object requires traversing all its entries, and can conflict
+    with the transactions that modify only a subset of the `TArray` class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Recall the transactional conflict example from the beginning of this chapter.
+    A transaction with many reads and writes, as in the `asString` method, can be
+    inefficient, because all the other transactions need to serialize with the `asString`
+    method when a conflict occurs. When the array is large, this creates a scalability
+    bottleneck. In the next section, we will examine another collection capable of
+    producing atomic snapshots in a much more scalable manner, namely, the transactional
+    maps.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transactional maps
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Similar to transactional arrays, transactional maps avoid the need to store
+    transactional reference objects inside a map. As a consequence, they reduce memory
+    consumption, improve the transaction performance, and provide a more intuitive
+    syntax. In ScalaSTM, transactional maps are represented with the `TMap` class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'ScalaSTM''s `TMap` class has an additional advantage. It exposes a scalable,
+    constant-time, atomic `snapshot` operation. The `snapshot` operation returns an
+    immutable `Map` object with the contents of the `TMap` object at the time of the
+    snapshot. Let''s declare a transactional map, `alphabet`, which maps character
+    strings to their position in the alphabet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We are unsatisfied with the fact that the letter `A` is in lowercase. We start
+    a transaction that atomically replaces the lowercase letter `a` with the uppercase
+    letter `A`. Simultaneously, we start another asynchronous computation that calls
+    the `snapshot` operation on the `alphabet` map. We tune the timing of the second
+    asynchronous computation so that it creates a race condition with the first transaction:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this example, the `snapshot` operation cannot interleave with the two updates
+    in the `atomic` block. We can run the program several times to convince ourselves
+    of this. The second asynchronous computation prints either the map with the lowercase
+    letter `a`, or the map with the uppercase letter `A`, but it can never output
+    a map with both the lowercase and the uppercase occurrence of the letter `A`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use `TMap` (instead of maps of transactional references) to optimize memory
+    usage, make programs more concise, and efficiently retrieve atomic snapshots.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we learned how STM works and how to apply it in concurrent
+    programs. We saw the advantages of using STM's transactional references and `atomic`
+    blocks over the `synchronized` statements, and investigated their interaction
+    with side effects. We studied the semantics of exception handling inside transactions
+    and learned how to retry and conditionally re-execute transactions. Finally, we
+    learned about transactional collections, which allow us to encode shared program
+    data more efficiently.
+  prefs: []
+  type: TYPE_NORMAL
+- en: These features together enable a concurrent programming model in which the programmer
+    can focus on expressing the meaning of the program, without having to worry about
+    handling lock objects, or avoiding deadlocks and race conditions. This is especially
+    important when it comes to modularity. It is hard or near impossible to reason
+    about deadlocks or race conditions in the presence of separate software components.
+    STM exists to liberate the programmer from such concerns, and is essential when
+    composing large concurrent programs from simpler modules.
+  prefs: []
+  type: TYPE_NORMAL
+- en: These advantages come with a cost, however, as using an STM for data access
+    is slower than using locks and the `synchronized` statement. For many applications,
+    the performance penalty of using an STM is acceptable. When it is not, we need
+    to revert to simpler primitives, such as locks, atomic variables, and concurrent
+    data structures.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To learn more about STMs, we recommend reading the related chapter in the book
+    *The Art of Multiprocessor Programming*, *Maurice Herlihy and Nir Shavit*, *Morgan
+    Kauffman*. There are many different STM implementations in the wild, and you will
+    need to study various research articles to obtain an in-depth understanding of
+    STMs. An extensive list of STM research literature is available at [http://research.cs.wisc.edu/trans-memory/biblio/index.html](http://research.cs.wisc.edu/trans-memory/biblio/index.html).
+    To learn more about the specifics of ScalaSTM, consider reading the doctoral thesis
+    entitled *Composable Operations on High-Performance Concurrent Collections*, *Nathan
+    G. Bronson*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will study the actor programming model, which takes
+    a different approach to achieving memory consistency. As we will see, separate
+    computations never access each other's regions of memory in the actor model, and
+    communicate mainly by exchanging messages.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exercises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the following exercises, you will use ScalaSTM to implement various transactional
+    programming abstractions. In most cases, their implementation will closely resemble
+    a sequential implementation, while using transactions. In some cases, you might
+    need to consult external literature or ScalaSTM documentation to correctly solve
+    the exercise.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Implement the transactional pair abstraction, represented with the `TPair`
+    class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: In addition to getters and setters for the two fields, the transactional pair
+    defines the `swap` method that swaps the fields, and can only be called if types
+    `P` and `Q` are the same.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Use ScalaSTM to implement the mutable location abstraction from Haskell, represented
+    with the `MVar` class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'An `MVar` object can be either full or empty. Calling `put` on a full `MVar`
+    object blocks until the `MVar` object becomes empty, and adds an element. Similarly,
+    calling `take` on an empty `MVar` object blocks until the `MVar` object becomes
+    full, and removes the element. Now, implement a method called `swap`, which takes
+    two `MVar` objects and swaps their values:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Contrast the `MVar` class with the `SyncVar` class from [Chapter 2](ch02.html
+    "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency on
+    the JVM and the Java Memory Model*. Is it possible to implement the `swap` method
+    for `SyncVar` objects without modifying the internal implementation of the SyncVar
+    class?
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Implement the `atomicRollbackCount` method, which is used to track how many
+    times a transaction was rolled back before it completed successfully:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE57]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Implement the `atomicWithRetryMax` method, which is used to start a transaction
+    that can be retried at most `n` times:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE58]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Reaching the maximum number of retries throws an exception.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_IND
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the `Txn` object.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Implement a transactional **First In First Out** (**FIFO**) queue, represented
+    with the `TQueue` class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE59]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: The `TQueue` class has similar semantics as `scala.collection.mutable.Queue`,
+    but calling `dequeue` on an empty queue blocks until a value becomes available.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Use ScalaSTM to implement a thread-safe `TArrayBuffer` class, which extends
+    the `scala.collection.mutable.Buffer` interface.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The `TSortedList` class described in this chapter is always sorted, but accessing
+    the last element requires traversing the entire list, and can be slow. An AVL
+    tree can be used to address this problem. There are numerous descriptions of AVL
+    trees available online. Use ScalaSTM to implement the thread-safe transactional
+    sorted set as an AVL tree:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE60]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: The `TSortedSet` class has similar semantics as `scala.collection.mutable.Set`.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Use ScalaSTM to implement a banking system that tracks amounts of money on user
+    accounts. Different threads can call the `send` method to transfer money from
+    one account to another, the `deposit` and `withdraw` methods which deposit to
+    or withdraw money from a specific account, respectively, and the `totalStock`
+    method which returns the total amount of money currently deposited in the bank.
+    Finally, implement the `totalStockIn` method that returns the total amount of
+    money currently deposited in the specified set of banks.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implement the generic transactional priority queue class, represented with the
+    type `TPriorityQueue`, used to sort elements. Then implement a method called `scheduleTask`,
+    which adds a task to the priority queue. Each task has a priority level. A set
+    of workers must wait for the queue to become non-empty, at which point they repetitively
+    remove tasks with the highest priority, and execute them.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implement a generic transactional directed graph data structure, whose nodes
+    are represented with the `Node` class. Then implement a method `scheduleTask`,
+    which adds a task to into the graph. Each task has the list of dependencies -
+    other tasks in the graph that must be executed before it begins; and this list
+    represents the directed edges in the graph. A set of workers repetitively queries
+    the graph, and schedules tasks for execution. A task can only be executed after
+    its dependencies are done executing.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL

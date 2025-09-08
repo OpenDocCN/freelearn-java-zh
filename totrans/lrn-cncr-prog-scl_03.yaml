@@ -1,0 +1,1894 @@
+- en: Chapter 3. Traditional Building Blocks of Concurrency
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '|   | *"There''s an old story about the person who wished his computer were
+    as easy to use as his telephone. That wish has come true, since I no longer know
+    how to use my telephone."* |   |'
+  prefs: []
+  type: TYPE_TB
+- en: '|   | --*Bjarne Stroustrup* |'
+  prefs: []
+  type: TYPE_TB
+- en: The concurrency primitives shown in [Chapter 2](ch02.html "Chapter 2. Concurrency
+    on the JVM and the Java Memory Model"), *Concurrency on the JVM and the Java Memory
+    Model*, are the basics of concurrent programming on JVM. Nevertheless, we usually
+    avoid using them directly, as their low-level nature makes them delicate and prone
+    to errors. As we saw, low-level concurrency is susceptible to effects such as
+    data races, reordering, visibility, deadlocks, and non-determinism. Fortunately,
+    people have come up with more advanced building blocks of concurrency, that capture
+    common patterns in concurrent programs and are a lot safer to use. Although these
+    building blocks do not solve all the issues of concurrent programming, they simplify
+    the reasoning about concurrent programs and can be found across concurrency frameworks
+    and libraries in many languages, including Scala. This chapter extends the fundamental
+    concurrent programming model from [Chapter 2](ch02.html "Chapter 2. Concurrency
+    on the JVM and the Java Memory Model"), *Concurrency on the JVM and the Java Memory
+    Model*, with traditional building blocks of concurrency and shows how to use them
+    in practice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In general, there are two aspects of a concurrent programming model. The first
+    deals with expressing concurrency in a program. Given a program, which of its
+    parts can execute concurrently and under which conditions? In the previous chapter,
+    we saw that JVM allows declaring and starting separate threads of control. In
+    this chapter, we will visit a more lightweight mechanism for starting concurrent
+    executions. The second important aspect of concurrency is data access. Given a
+    set of concurrent executions, how can these executions correctly access and modify
+    the program data? Having seen a low-level answer to these questions in the previous
+    chapter, such as the `synchronized` statement and volatile variables, we will
+    now dive into more complex abstractions. We will study the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the `Executor` and `ExecutionContext` objects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Atomic primitives for non-blocking synchronization
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The interaction of lazy values and concurrency
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using concurrent queues, sets, and maps
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to create processes and communicate with them
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The ultimate goal of this chapter will be to implement a safe API for concurrent
+    file handling. We will use the abstractions in this chapter to implement a simple,
+    reusable file-handling API for applications such as filesystem managers or FTP
+    servers. We will thus see how the traditional building blocks of concurrency work
+    separately and how they all fit together in a larger use case.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Executor and ExecutionContext objects
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As discussed in [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and
+    the Java Memory Model"), *Concurrency on the JVM and the Java Memory Model*, although
+    creating a new thread in a Scala program takes orders of magnitude less computational
+    time compared to creating a new JVM process, thread creation is still much more
+    expensive than allocating a single object, acquiring a monitor lock, or updating
+    an entry in a collection. If an application performs a large number of small concurrent
+    tasks and requires high throughput, we cannot afford to create a fresh thread
+    for each of these tasks. Starting a thread requires us to allocate a memory region
+    for its call stack and a context switch from one thread to another, which can
+    be much more time-consuming than the amount of work in the concurrent task. For
+    this reason, most concurrency frameworks have facilities that maintain a set of
+    threads in a waiting state and start running when concurrently executable work
+    tasks become available. Generally, we call such facilities **thread pools**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To allow programmers to encapsulate the decision of how to run concurrently
+    executable work tasks, JDK comes with an abstraction called `Executor`. The `Executor`
+    interface is a simple interface that defines a single `execute` method. This method
+    takes a `Runnable` object and eventually calls the `Runnable` object's `run` method.
+    The `Executor` object decides on which thread and when to call the `run` method.
+    An `Executor` object can start a new thread specifically for this invocation of
+    `execute` or even execute the `Runnable` object directly on the caller thread.
+    Usually, the `Executor` executes the `Runnable` object concurrently to the execution
+    of the thread that called the `execute` method, and it is implemented as a thread
+    pool.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'One `Executor` implementation, introduced in JDK 7, is `ForkJoinPool` and it
+    is available in the `java.util.concurrent` package. Scala programs can use it
+    in JDK 6 as well by importing the contents of the `scala.concurrent.forkjoin`
+    package. In the following code snippet, we show you how to instantiate a `ForkJoinPool`
+    class implementation and submit a task that can be asynchronously executed:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: We start by importing the `scala.concurrent` package. In later examples, we
+    implicitly assume that this package is imported. We then call the `ForkJoinPool`
+    class and assign it to a value called the `executor` method. Once instantiated,
+    the `executor` value is sent a task in the form of a `Runnable` object that prints
+    to the standard output. Finally, we invoke the `sleep` statement in order to prevent
+    the daemon threads in the `ForkJoinPool` instance from being terminated before
+    they call the `run` method on the `Runnable` object. Note that the `sleep` statement
+    is not required if you are running the example from SBT with the `fork` setting
+    set to `false`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Why do we need `Executor` objects in the first place? In the previous example,
+    we can easily change the `Executor` implementation without affecting the code
+    in the `Runnable` object. The `Executor` objects serve to decouple the logic in
+    the concurrent computations from how these computations are executed. The programmer
+    can focus on specifying parts of the code that potentially execute concurrently,
+    separately from where and when to execute those parts of the code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The more elaborate subtype of the `Executor` interface, also implemented by
+    the `ForkJoinPool` class, is called `ExecutorService`. This extended `Executor`
+    interface defines several convenience methods, the most prominent being the `shutdown`
+    method. The `shutdown` method makes sure that the `Executor` object gracefully
+    terminates by executing all the submitted tasks and then stopping all the worker
+    threads. Fortunately, our `ForkJoinPool` implementation is benign with respect
+    to termination. Its threads are daemons by default, so there is no need to shut
+    it down explicitly at the end of the program. In general, however, programmers
+    should call the `shutdown` method on the `ExecutorService` objects they created,
+    typically before the program terminates.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: When your program no longer needs the `ExecutorService` object you created,
+    you should ensure that the `shutdown` method is called.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To ensure that all the tasks submitted to the `ForkJoinPool` object are complete,
+    we need to additionally call the `awaitTermination` method, specifying the maximum
+    amount of time to wait for their completion. Instead of calling the `sleep` statement,
+    we can do the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `scala.concurrent` package defines the `ExecutionContext` trait that offers
+    a similar functionality to that of `Executor` objects but is more specific to
+    Scala. We will later learn that many Scala methods take `ExecutionContext` objects
+    as implicit parameters. Execution contexts implement the abstract `execute` method,
+    which exactly corresponds to the `execute` method on the `Executor` interface,
+    and the `reportFailure` method, which takes a `Throwable` object and is called
+    whenever some task throws an exception. The `ExecutionContext` companion object
+    contains the default execution context called `global`, which internally uses
+    a `ForkJoinPool` instance:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `ExecutionContext` companion object defines a pair of methods, `fromExecutor`
+    and `fromExecutorService`, which create an `ExecutionContext` object from an `Executor`
+    or `ExecutorService` interface, respectively:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding example, we will create an `ExecutionContext` object from a
+    `ForkJoinPool` instance with a parallelism level of `2`. This means that the `ForkJoinPool`
+    instance will usually keep two worker threads in its pool.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the examples that follow, we will rely on the global `ExecutionContext`
+    object. To make the code more concise, we will introduce the `execute` convenience
+    method in the package object of this chapter, which executes a block of code on
+    the global `ExecutionContext` object:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `Executor` and `ExecutionContext` objects are a nifty concurrent programming
+    abstraction, but they are not a silver bullets. They can improve throughput by
+    reusing the same set of threads for different tasks, but they are unable to execute
+    tasks if those threads become unavailable, because all the threads are busy with
+    running other tasks. In the following example, we declare `32` independent executions,
+    each of which lasts two seconds, and wait `10` seconds for their completion:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: You would expect that all the executions terminate after two seconds, but this
+    is not the case. Instead, on our quad-core CPU with hyper threading, the global
+    `ExecutionContext` object has eight threads in the thread pool, so it executes
+    work tasks in batches of eight. After two seconds, a batch of eight tasks print
+    that they are completed, after two more seconds another batch prints, and so on.
+    This is because the global `ExecutionContext` object internally maintains a pool
+    of eight worker threads, and calling `sleep` puts all of them into a timed waiting
+    state. Only once the `sleep` method call in these worker threads is completed
+    can another batch of eight tasks be executed. Things can be much worse. We could
+    start eight tasks that execute the guarded block idiom seen in [Chapter 2](ch02.html
+    "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency on
+    the JVM and the Java Memory Model*, and another task that calls the `notify` method
+    to wake them up. As the `ExecutionContext` object can execute only eight tasks
+    concurrently, the worker threads would, in this case, be blocked forever. We say
+    that executing blocking operations on `ExecutionContext` objects can cause starvation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Avoid executing operations that might block indefinitely on `ExecutionContext`
+    and `Executor` objects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Having seen how to declare concurrent executions, we turn our attention to how
+    these concurrent executions interact by manipulating program data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Atomic primitives
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory
+    Model"), *Concurrency on the JVM and the Java Memory Model*, we learned that memory
+    writes do not happen immediately unless proper synchronization is applied. A set
+    of memory writes is not executed at once, that is, atomically. We saw that visibility
+    is ensured by the happens-before relationship, and we relied on the `synchronized`
+    statement to achieve it. Volatile fields were a more lightweight way of ensuring
+    happens-before relationships, but a less powerful synchronization construct. Recall
+    how volatile fields alone could not implement the `getUniqueId` method correctly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this section, we study atomic variables that provide basic support for executing
+    multiple memory reads and writes at once. Atomic variables are close cousins of
+    volatile variables, but are more expressive than them; they are used to build
+    complex concurrent operations without relying on the `synchronized` statement.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Atomic variables
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: An atomic variable is a memory location that supports complex *linearizable*
+    operations. A linearizable operation is any operation that appears to occur instantaneously
+    to the rest of the system. For example, a volatile write is a linearizable operation.
+    A complex linearizable operation is a linearizable operation equivalent to at
+    least two reads and/or writes. We will use the term *atomically* to refer to complex
+    linearizable operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Various atomic variables defined in the `java.util.concurrent.atomic` package
+    support some complex linearizable operations on the Boolean, integer, long, and
+    reference types with the `AtomicBoolean`, `AtomicInteger`, `AtomicLong`, and `AtomicReference`
+    classes, respectively. Recall that the `getUniqueId` method from [Chapter 2](ch02.html
+    "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency on
+    the JVM and the Java Memory Model*, needs to return a unique numeric identifier
+    each time a thread invokes it. We previously implemented this method using the
+    `synchronized` statement, and we now reimplement it using atomic long variables:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we declare an atomic long variable, which is `uid`, with an initial value
+    `0` and call its `incrementAndGet` method from `getUniqueId`. The `incrementAndGet`
+    method is a complex linearizable operation. It simultaneously reads the current
+    value `x` of `uid`, computes `x + 1`, writes `x + 1` back to `uid`, and returns
+    `x + 1`. These steps cannot be interleaved with steps in other invocations of
+    the `incrementAndGet` method, so each invocation of the `getUniqueId` method returns
+    a unique number.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Atomic variables define other methods such as the `getAndSet` method, which
+    atomically reads the value of the variable, sets the new value, and returns its
+    previous value. Numeric atomic variables additionally have methods such as `decrementAndGet`
+    and `addAndGet`. It turns out that all these atomic operations are implemented
+    in terms of a fundamental atomic operation, which is `compareAndSet`. The compare-and-set
+    operation, sometimes called **compare-and-swap** (**CAS**), takes the expected
+    previous value and the new value for the atomic variable and atomically replaces
+    the current value with the new value only if the current value is equal to the
+    expected value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The CAS operation is a fundamental building block for lock-free programming.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The CAS operation is conceptually equivalent to the following `synchronized`
+    block, but is more efficient and does not get blocked on most JVMs, as it is implemented
+    in terms of a processor instruction:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The CAS operation is available on all types of atomic variables; `compareAndSet`
+    also exists in the generic `AtomicReference[T]` class used to store object references
+    of an arbitrary object of type `T`, and is equivalent to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: If CAS does replace the old value with the new value, it returns the value `true`.
+    Otherwise, CAS returns `false`. When using CAS, we usually start by calling the
+    `get` method on the atomic variable to read its value. We then compute a new value
+    based on the value we read. Finally, we invoke the CAS operation to change the
+    value we previously read with the new value. If the CAS operation returns `true`,
+    we are done. If the CAS operation returns `false`, then some other thread must
+    have changed the atomic variable since we last read it using the `get` variable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s see how CAS works in a concrete example. We will re-implement the `getUniqueId`
+    method using the `get` and `compareAndSet` methods:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This time, the thread`T` calls the `get` method to read the value of `uid`
+    into a local variable `oldUid`. Note that local variables such as `oldUid` are
+    only used by a single thread that initialized them, so no other thread can see
+    the version of the `oldUid` variable in thread T. The thread `T` then computes
+    the new value `newUid`. This does not happen atomically, and at this point, another
+    thread S might concurrently change the value of the `uid` variable. The `compareAndSet`
+    call by T changes `uid` successfully only if no other thread S modified the value
+    of the `uid` variable since thread `T` called the `get` method in the first line.
+    If the `compareAndSet` method is not successful, the method is called again tail-recursively.
+    Hence, we use the `@tailrec` annotation to force the compiler to generate a tail-recursive
+    call. We say that thread `T` needs to retry the operation. This is illustrated
+    in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Atomic variables](img/image_03_001.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Always use the `@tailrec` annotation for these functions, which are intended
+    to be tail-recursive. The compiler will check all the annotated functions to see
+    whether or not they are tail-recursive.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Retrying is a common pattern when programming with CAS operations. This retry
+    can happen infinitely many times. The good news is that a CAS in thread **T**
+    can fail only when another thread **S** completes the operation successfully;
+    if our part of the system does not progress, at least some other part of the system
+    does. In fact, the `getUniqueId` method is fair to all the threads in practice,
+    and most JDKs implement the `incrementAndGet` method in a very similar manner
+    to our CAS-based implementation of the `getUniqueId` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Lock-free programming
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A **lock** is a synchronization mechanism used to limit access to a resource
+    that can be used by multiple threads. In [Chapter 2](ch02.html "Chapter 2. Concurrency
+    on the JVM and the Java Memory Model"), *Concurrency on the JVM and the Java Memory
+    Model*, we learned that every JVM object has an intrinsic lock that is used when
+    invoking the `synchronized` statement on the object. Recall that an intrinsic
+    lock makes sure that at most one thread executes the `synchronized` statement
+    on the object. The intrinsic lock accomplishes this by blocking all the threads
+    that try to acquire it when it is unavailable. We will study other examples of
+    locks in this section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we already learned, programming using locks is susceptible to deadlocks.
+    Also, if the OS pre-empts a thread that is holding a lock, it might arbitrarily
+    delay the execution of other threads. In lock-free programs, these effects are
+    less likely to compromise the program's performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Why do we need atomic variables? Atomic variables allow us to implement *lock-free
+    operations*. As the name implies, a thread that executes a lock-free operation
+    does not acquire any locks. Consequently, many lock-free algorithms have an improved
+    throughput. A thread executing a lock-free algorithm does not hold any locks when
+    it gets pre-empted by the OS, so it cannot temporarily block other threads. Furthermore,
+    lock-free operations are impervious to deadlocks, because threads cannot get blocked
+    indefinitely without locks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Our CAS-based implementation of the `getUniqueId` method is an example of a
+    lock-free operation. It acquires no locks that can permanently suspend other threads.
+    If one thread fails due to concurrent CAS operations, it immediately restarts
+    and tries to execute the `getUniqueId` method again.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, not all operations composed from atomic primitives are lock-free.
+    Using atomic variables is a necessary precondition for lock-freedom, but it is
+    not sufficient. To show this, we will implement our own simple `synchronized`
+    statement, which will use atomic variables:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `mySynchronized` statement executes a block of code `body` in isolation.
+    It uses the atomic `lock` Boolean variable to decide whether some thread is currently
+    calling the `mySynchronized` method or not. The first thread that changes the
+    `lock` variable from `false` to `true` using the `compareAndSet` method can proceed
+    with executing the body. While the thread is executing the body, other threads
+    calling the `mySynchronized` method repetitively invoke the `compareAndSet` method
+    on the `lock` variable but fail. Once `body` completes executing, the thread unconditionally
+    sets the `lock` variable back to `false` in the `finally` block. A `compareAndSet`
+    method in some other thread can then succeed, and the process is repeated again.
+    After all the tasks are completed, the value of the `count` variable is always
+    `10`. The main difference with respect to the `synchronized` statement is that
+    threads calling `mySynchronized` busy-wait in the `while` loop until the lock
+    becomes available. Such locks are dangerous and much worse than the `synchronized`
+    statement. This example shows you that we need to define lock-freedom more carefully,
+    because a lock can implicitly exist in the program without the programmer being
+    aware of it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory
+    Model"), *Concurrency on the JVM and the Java Memory Model*, we learned that most
+    modern operating systems use pre-emptive multitasking, where a thread `T` can
+    be temporarily suspended by the operating system at any point in time. If this
+    happens while thread `T` is holding a lock, other threads waiting for the same
+    lock cannot proceed until the lock is released. These other threads have to wait
+    until the operating system continues executing the thread `T` and the thread `T`
+    releases the lock. This is unfortunate, as these threads could be doing useful
+    work while the thread `T` is suspended. We say that a slow thread `T` blocked
+    the execution of other threads. In a lock-free operation, a slow thread cannot
+    block the execution of other threads. If multiple threads execute an operation
+    concurrently, then at least one of these threads must complete in a finite amount
+    of time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Given a set of threads executing an operation, an operation is lock-free if
+    at least one thread always completes the operation after a finite number of steps,
+    regardless of the speed at which different threads progress.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With this more formal definition of lock-freedom, you can get a feel for why
+    lock-free programming is hard. It is not easy to prove that an operation is lock-free,
+    and implementing more complex lock-free operations is notoriously difficult. The
+    CAS-based `getUniqueId` implementation is indeed lock-free. Threads only loop
+    if the CAS fails, and the CAS can only fail if some thread successfully computed
+    the unique identifier: this means that some other thread executed `getUniqueId`
+    method successfully in a finite number of steps between the `get` and `compareAndSet`
+    method calls. This fact proves lock-freedom.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing locks explicitly
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In some cases, we really do want locks, and atomic variables allow us to implement
+    locks that do not have to block the caller. The trouble with intrinsic object
+    locks from [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java
+    Memory Model"), *Concurrency on the JVM and the Java Memory Model*, is that a
+    thread cannot inspect whether the object's intrinsic lock is currently acquired.
+    Instead, a thread that calls `synchronized` is immediately blocked until the monitor
+    becomes available. Sometimes, we would like our threads to execute a different
+    action when a lock is unavailable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We now turn to the concurrent filesystem API mentioned at the beginning of
+    this chapter. Inspecting the state of a lock is something we need to do in an
+    application such as a file manager. In the good old days of DOS and Norton Commander,
+    starting a file copy blocked the entire user interface, so you could sit back,
+    relax, and grab your Game Boy until the file transfer completes. Times change;
+    modern file managers need to start multiple file transfers simultaneously, cancel
+    existing transfers, or delete different files simultaneously. Our filesystem API
+    must ensure that:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: If a thread is creating a new file, then that file cannot be copied or deleted
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If one or more threads are copying a file, then the file cannot be deleted
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If a thread is deleting a file, then the file cannot be copied
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Only a single thread in the file manager is deleting a file at a time
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The filesystem API will allow the concurrent copying and deleting of files.
+    In this section, we will start by ensuring that only a single thread gets to delete
+    a file. We model a single file or directory with the `Entry` class:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `isDir` field of the `Entry` class denotes whether the respective path
+    is a file or a directory. The `state` field describes the file state: whether
+    the file is idle, currently being created, copied, or is scheduled for deletion.
+    We model these states with a sealed trait called `State`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that, in the case of the `Copying` state, the `n` field also tracks how
+    many concurrent copies are in progress. When using atomic variables, it is often
+    useful to draw a diagram of the different states that an atomic variable can be
+    in. As illustrated in the following figure, `state` is set to `Creating` immediately
+    after an `Entry` class is created and then becomes the `Idle` state. After that,
+    an `Entry` object can jump between the `Copying` and `Idle` states indefinitely
+    and, eventually, get from `Idle` to `Deleting`. After getting into the `Deleting`
+    state, the `Entry` class can no longer be modified; this indicates that we are
+    about to delete the file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Implementing locks explicitly](img/image_03_002.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Let''s assume that we want to delete a file. There might be many threads running
+    inside our file manager, and we want to avoid having two threads delete the same
+    file. We will require the file being deleted to be in the `Idle` state and atomically
+    change it to the `Deleting` state. If the file is not in the `Idle` state, we
+    report an error. We will use the `logMessage` method, which is defined later;
+    for now, we can assume that this method just calls our `log` statement:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `prepareForDelete` method starts by reading the `state` atomic reference
+    variable and stores its value into a local variable, `s0`. It then checks whether
+    the `s0` variable is the `Idle` state and attempts to atomically change the state
+    to the `Deleting` state. Just like in the `getUniqueId` method example, a failed
+    CAS indicates that another thread changed the `state` variable and the operation
+    needs to be repeated. The file cannot be deleted if another thread is creating
+    or copying it, so we report an error and return `false`. If another thread is
+    already deleting the file, we only return `false`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `state` atomic variable implicitly acts like a lock in this example, although
+    it neither blocks the other threads nor busy-waits. If the `prepareForDelete`
+    method returns `true`, we know that our thread can safely delete the file, as
+    it is the only thread that changed the `state` variable value to `Deleting`. However,
+    if the method returns `false`, we report an error in the file manager UI instead
+    of blocking it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An important thing to note about the `AtomicReference` class is that it always
+    uses reference equality when comparing the old object and the new object assigned
+    to `state`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The CAS instructions on atomic reference variables always use reference equality
+    and never call the `equals` method, even when the `equals` method is overridden.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As an expert in sequential Scala programming, you might be tempted to implement
+    `State` subtypes as case classes in order to get the `equals` method for free,
+    but this does not affect the `compareAndSet` method operation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The ABA problem
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The **ABA problem** is a situation in concurrent programming where two reads
+    of the same memory location yield the same value A, which is used to indicate
+    that the value of the memory location did not change between the two reads. This
+    conclusion can be violated if other threads concurrently write some value B to
+    the memory location, followed by the write of value A again. The ABA problem is
+    usually a type of a race condition. In some cases, it leads to program errors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Suppose that we implemented `Copying` as a class with a mutable field `n`. We
+    might then be tempted to reuse the same `Copying` object for subsequent calls
+    to `release` and `acquire`. This is almost certainly not a good idea!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s assume that we have a hypothetical pair of methods called `releaseCopy`
+    and `acquireCopy`. The `releaseCopy` method assumes that the `Entry` class is
+    in the `Copying` state and changes the state from `Copying` to another `Copying`
+    or `Idle` state. It then returns the old `Copying` object associated with the
+    previous state:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `acquireCopy` method takes a currently unused `Copying` object and attempts
+    to replace the old state with the previously used `Copying` object:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: Upon calling the `releaseCopy` method, a thread might store the old `Copying`
+    object. Later, the same thread can reuse the old `Copying` object in the call
+    to the `acquireCopy` method. Here, the programmer's intent could be to reduce
+    the pressure on the garbage collector by allocating fewer `Copying` objects. However,
+    this leads to the ABA problem, as we will describe further.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We consider two threads **T1** and **T2**, which call the `releaseCopy` method.
+    They both read the state of the `Entry` object and create a new state object `nstate`,
+    which is `Idle`. Let's assume that the thread **T1** executes the `compareAndSet`
+    operation first and returns the old `Copying` object `c` from the `releaseCopy`
+    method. Next, let's assume that a third thread **T3** calls the `acquireCopy`
+    method and changes the state of the `Entry` object to `Copying(1)`. If the thread
+    **T1** now calls the `acquireCopy` method with the old `Copying` object `c`, the
+    state of the `Entry` object becomes `Copying(2)`. Note that, at this point, the
+    old `Copying` object `c` is once again stored inside the atomic variable `state`.
+    If the thread **T1** now attempts to call `compareAndSet`, it will succeed and
+    set the state of the `Entry` object to `Idle`. Effectively, the last `compareAndSet`
+    operation changes the state from `Copying(2)` to `Idle`, so one acquire is lost.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This scenario is shown in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![The ABA problem](img/image_03_003.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: In the preceding example, the ABA problem manifests itself in the execution
+    of thread **T2**. Having first read the value of the `state` field in the `Entry`
+    object with the `get` method and with the `compareAndSet` method later, thread
+    **T2** assumes that the value of the `state` field has not changed between these
+    two writes. In this case, this leads to a program error.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There is no general technique to avoid the ABA problem, so we need to guard
+    the program against it on a per-problem basis. Still, the following guidelines
+    are useful when avoiding the ABA problem in a managed runtime, such as JVM:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Create new objects before assigning them to the `AtomicReference` objects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Store immutable objects inside the `AtomicReference` objects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Avoid assigning a value that was previously already assigned to an atomic variable
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If possible, make updates to numeric atomic variables monotonic, that is, either
+    strictly decreasing or strictly increasing with respect to the previous value
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: There are other techniques in order to avoid the ABA problem, such as pointer
+    masking and hazard pointers, but these are not applicable to JVM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In some cases, the ABA problem does not affect the correctness of the algorithm;
+    for example, if we change the `Idle` class to a singleton object, the `prepareForDelete`
+    method will continue to work correctly. Still, it is a good practice to follow
+    the preceding guidelines, because they simplify the reasoning about lock-free
+    algorithms.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Lazy values
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: You should be familiar with lazy values from sequential programming in Scala.
+    Lazy values are the value declarations that are initialized with their right-hand
+    side expression when the lazy value is read for the first time. This is unlike
+    regular values, which are initialized the moment they are created. If a lazy value
+    is never read inside the program, it is never initialized and it is not necessary
+    to pay the cost of its initialization. Lazy values allow you to implement data
+    structures such as lazy streams; they improve complexities of persistent data
+    structures, can boost the program's performance, and help avoid initialization
+    order problems in Scala's mix-in composition.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Lazy values are extremely useful in practice, and you will often deal with
+    them in Scala. However, using them in concurrent programs can have some unexpected
+    interactions, and this is the topic of this section. Note that lazy values must
+    retain the same semantics in a multithreaded program; a lazy value is initialized
+    only when a thread accesses it, and it is initialized at most once. Consider the
+    following motivating example in which two threads access two lazy values, which
+    are `obj` and `non`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You know from sequential Scala programming that it is a good practice to initialize
+    the lazy value with an expression that does not depend on the current state of
+    the program. The lazy value `obj` follows this practice, but the lazy value `non`
+    does not. If you run this program once, you might notice that `non` lazy value
+    is initialized with the name of the main thread:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Running the program again shows you that `non` is initialized by the worker
+    thread:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As the previous example shows you, lazy values are affected by non-determinism.
+    Non-deterministic lazy values are a recipe for trouble, but we cannot always avoid
+    them. Lazy values are deeply tied into Scala, because singleton objects are implemented
+    as lazy values under the hood:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running this program reveals that the `Lazy` initializer runs when the object
+    is first referenced in the third line and not when it is declared. Getting rid
+    of singleton objects in your Scala code would be too restrictive, and singleton
+    objects are often large; they can contain all kinds of potentially non-deterministic
+    code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You might think that a little bit of non-determinism is something we can live
+    with. However, this non-determinism can be dangerous. In the existing Scala versions,
+    lazy values and singleton objects are implemented with the so-called *double-checked
+    locking idiom* under the hood. This concurrent programming pattern ensures that
+    a lazy value is initialized by at most one thread when it is first accessed. Thanks
+    to this pattern, upon initializing the lazy value, its subsequent reads are cheap
+    and do not need to acquire any locks. Using this idiom, a single lazy value declaration,
+    which is `obj` from the previous example, is translated by the Scala compiler
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: The Scala compiler introduces an additional volatile field, `_bitmap`, when
+    a class contains lazy fields. The private `_obj` field that holds the value is
+    uninitialized at first. After the `obj` getter assigns a value to the `_obj` field,
+    it sets the `_bitmap` field to `true` to indicate that the lazy value was initialized.
+    Other subsequent invocations of the getter know whether they can read the lazy
+    value from the `_obj` field by checking the `_bitmap` field.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The getter `obj` starts by checking whether the `_bitmap` field is `true`. If
+    `_bitmap` field is `true`, then the lazy value was already initialized and the
+    getter returns `_obj`. Otherwise, the getter `obj` attempts to obtain the intrinsic
+    lock of the enclosing object, in this case, `LazyValsUnderTheHood`. If the `_bitmap`
+    field is still not set from within the `synchronized` block, the getter evaluates
+    the `new AnyRef` expression, assigns it to `_obj`, and sets `_bitmap` to `true`.
+    After this point, the lazy value is considered initialized. Note that the `synchronized`
+    statement, together with the check that the `_bitmap` field is `false`, ensure
+    that a single thread at most initializes the lazy value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The double-checked locking idiom ensures that every lazy value is initialized
+    by at most a single thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This mechanism is robust and ensures that lazy values are both thread-safe
+    and efficient. However, synchronization on the enclosing object can cause problems.
+    Consider the following example in which two threads attempt to initialize lazy
+    values `A.x` and `B.y` at the same time:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: In a sequential setting, accessing either `A.x` or `B.y` results in a stack
+    overflow. Initializing `A.x` requires calling the getter for `B.y`, which is not
+    initialized. Initialization of `B.y` calls the getter for `A.x` and continues
+    in infinite recursion. However, this example was carefully tuned to access both
+    `A.x` and `B.y` at the same time by both the main thread and the worker thread.
+    Prepare to restart SBT. After both `A` and `B` are initialized, their monitors
+    are acquired simultaneously by two different threads. Each of these threads needs
+    to acquire a monitor owned by the other thread. Neither thread lets go of its
+    own monitor, and this results in a deadlock.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cyclic dependencies between lazy values are unsupported in both sequential and
+    concurrent Scala programs. The difference is that they potentially manifest themselves
+    as deadlocks instead of stack overflows in concurrent programming.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Avoid cyclic dependencies between lazy values, as they can cause deadlocks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The previous example is not something you are likely to do in your code, but
+    cyclic dependencies between lazy values and singleton objects can be much more
+    devious and harder to spot. In fact, there are other ways to create dependencies
+    between lazy values besides directly accessing them. A lazy value initialization
+    expression can block a thread until some other value becomes available. In the
+    following example, the initialization expression uses the `thread` statement from
+    [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory Model"),
+    *Concurrency on the JVM and the Java Memory Model*, to start a new thread and
+    join it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: Although there is only a single lazy value in this example, running it inevitably
+    results in a deadlock. The new thread attempts to access `x`, which is not initialized,
+    so it attempts to call the `synchronized` statement on the `LazyValsAndBlocking`
+    object and blocks, because the main thread already holds this lock. On the other
+    hand, the main thread waits for the other thread to terminate, so neither thread
+    can progress.
+  prefs: []
+  type: TYPE_NORMAL
+- en: While the deadlock is relatively obvious in this example, in a larger code base,
+    circular dependencies can easily sneak past your guard. In some cases, they might
+    even be non-deterministic and occur only in particular system states. To guard
+    against them, avoid blocking in the lazy value expression altogether.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Never invoke blocking operations inside lazy value initialization expressions
+    or singleton object constructors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Lazy values cause deadlocks even when they do not block themselves. In the
+    following example, the main thread calls the `synchronized` statement on the enclosing
+    object, starts a new thread, and waits for its termination. The new thread attempts
+    to initialize the lazy value `x`, but it cannot acquire the monitor until the
+    main thread releases it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This kind of deadlock is not inherent to lazy values and can happen with arbitrary
+    code that uses `synchronized` statements. The problem is that the `LazyValsAndMonitors`
+    lock is used in two different contexts: as a lazy value initialization lock and
+    as the lock for some custom logic in the main thread. To prevent two unrelated
+    software components from using the same lock, always call `synchronized` on separate
+    private objects that exist solely for this purpose.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Never call `synchronized` on publicly available objects; always use a dedicated,
+    private dummy object for synchronization.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Although we rarely use separate objects for synchronization in this book, to
+    keep the examples concise, you should strongly consider doing this in your programs.
+    This tip is useful outside the context of lazy values; keeping your locks private
+    reduces the possibility of deadlocks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent collections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'As you can conclude from the discussion on the Java Memory Model in [Chapter
+    2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency
+    on the JVM and the Java Memory Model*, modifying the Scala standard library collections
+    from different threads can result in arbitrary data corruption. Standard collection
+    implementations do not use any synchronization. Data structures underlying mutable
+    collections can be quite complex; predicting how multiple threads affect the collection
+    state in the absence of synchronization is neither recommended nor possible. We
+    will demonstrate this by letting two threads add numbers to the `mutable.ArrayBuffer`
+    collection:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: Instead of printing an array buffer with 20 different elements, this example
+    arbitrarily prints different results or throws exceptions each time it runs. The
+    two threads modify the internal array buffer state simultaneously and cause data
+    corruption.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Never use mutable collections from several different threads without applying
+    proper synchronization.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can restore synchronization in several ways. First, we can use **immutable
+    collections** along with synchronization to share them between threads. For example,
+    we can store immutable data structures inside atomic reference variables. In the
+    following code snippet, we introduce an `AtomicBuffer` class that allows concurrent
+    `+=` operations. Appending reads the current immutable `List` value from the atomic
+    reference buffer and creates a new `List` object containing `x`. It then invokes
+    a CAS operation to atomically update the buffer, retrying the operation if the
+    CAS operation is not successful:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: While using atomic variables or the `synchronized` statements with immutable
+    collections is simple, it can lead to scalability problems when many threads access
+    an atomic variable at once.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we intend to continue using mutable collections, we need to add `synchronized`
+    statements around calls to collection operations:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: This approach can be satisfactory, provided that collection operations do not
+    block inside `synchronized`. In fact, this approach allows you to implement guarded
+    blocks around collection operations, as we saw in the `SynchronizedPool` example
+    in [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory
+    Model"), *Concurrency on the JVM and the Java Memory Model*. However, using the `synchronized`
+    statement can also lead to scalability problems when many threads attempt to acquire
+    the lock at once.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, concurrent collections are collection implementations with operations
+    that can be safely invoked from different threads without synchronization. In
+    addition to the thread-safe versions of basic collection operations, some concurrent
+    collections provide more expressive operations. Conceptually, the same operations
+    can be achieved using atomic primitives, `synchronized` statements, and guarded
+    blocks, but concurrent collections ensure far better performance and scalability.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent queues
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A common pattern used in concurrent programming is the **producer-consumer pattern**.
+    In this pattern, the responsibility for different parts of the computational workload
+    is divided across several threads. In an FTP server, one or more threads can be
+    responsible for reading chunks of a large file from the disk. Such threads are
+    called producers. Another dedicated set of threads can bear the responsibility
+    of sending file chunks through the network. We call these threads consumers. In
+    their relationship, consumers must react to work elements created by the producers.
+    Often, the two are not perfectly synchronized, so work elements need to be buffered
+    somewhere.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The concurrent collection that supports this kind of buffering is called a **concurrent
+    queue**. There are three main operations we expect from a concurrent queue. The
+    enqueue operation allows producers to add work elements to the queue, and the
+    dequeue operation allows consumers to remove them. Finally, sometimes we want
+    to check whether the queue is empty or inspect the value of the next item without
+    changing the queue's contents. Concurrent queues can be **bounded**, which means
+    that they can only contain a maximum number of elements, or they can be **unbounded**,
+    which means that they can grow indefinitely. When a bounded queue contains the
+    maximum number of elements, we say it is full. The semantics of the various versions
+    of enqueue and dequeue operations differ with respect to what happens when we
+    try to enqueue to a full queue or dequeue from an empty queue. This special case
+    needs to be handled differently by the concurrent queue. In single-threaded programming,
+    sequential queues usually return a special value such as `null` or `false` when
+    they are full or empty, or simply throw an exception. In concurrent programming,
+    the absence of elements in the queue can indicate that the producer has not yet
+    enqueued an element, although it might enqueue it in the future. Similarly, a
+    full queue means that the consumer did not yet remove elements but will do so
+    later. For this reason, some concurrent queues have *blocking* enqueue and dequeue
+    implementations, which block the caller until the queue is non-full or non-empty,
+    respectively.
+  prefs: []
+  type: TYPE_NORMAL
+- en: JDK represents multiple efficient concurrent queue implementations in the `java.util.concurrent`
+    package with the `BlockingQueue` interface. Rather than reinventing the wheel
+    with its own concurrent queue implementations, Scala adopts these concurrent queues
+    as part of its concurrency utilities and it does not currently have a dedicated
+    trait for blocking queues.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `BlockingQueue` interface contains several versions of the basic concurrent
+    queue operations, each with slightly different semantics. Different variants of
+    their enqueue, dequeue, and inspect-next methods are summarized in the following
+    table. The inspect, dequeue, and enqueue versions are called `element`, `remove`,
+    and `add` in the first column; they throw an exception when the queue is empty
+    or full. Methods such as `poll` and `offer` return special values such as `null`
+    or `false`. Timed versions of these methods block the caller for a specified duration
+    before returning an element or a special value, and blocking methods block the
+    calling thread until the queue becomes non-empty or non-full.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Operation** | **Exception** | **Special value** | **Timed** | **Blocking**
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Dequeue | remove(): T | poll(): T | poll(t: Long, u:  TimeUnit): T | take():
+    T |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Enqueue | add(x: T) | offer(x: T):  Boolean | offer(x: T, t: Long,  u: TimeUnit)
+    | put(x: T) |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Inspect | element: T | peek: T | N/A | N/A |'
+  prefs: []
+  type: TYPE_TB
+- en: The `ArrayBlockingQueue` class is a concrete implementation of a bounded blocking
+    queue. When creating the `ArrayBlockingQueue` class, we need to specify its capacity,
+    which is the number of elements in the queue when it is full. If producers can
+    potentially create elements faster than the consumers can process them, we need
+    to use bounded queues. Otherwise, the queue size can potentially grow to the point
+    where it consumes all the available memory in the program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another concurrent queue implementation is called `LinkedBlockingQueue`. This
+    queue is unbounded, and we can use it when we are sure that the consumers work
+    much faster than the producers. This queue is an ideal candidate for the logging
+    component of our filesystem's API. Logging must return feedback about the execution
+    to the user. In a file manager, logging produces messages to the user inside the
+    UI, while in an FTP server it sends feedback over the network. To keep the example
+    simple, we just print the messages to the standard output.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We use the `LinkedBlockingQueue` collection to buffer various messages from
+    different components of the filesystem API. We declare the queue to a private
+    variable called `messages`. A separate daemon thread, called `logger`, repetitively
+    calls the `take` method on messages. Recall from the previous table that the `take`
+    method is blocking; it blocks the `logger` thread until there is a message in
+    the queue. The `logger` thread then calls `log` to print the message. The `logMessage`
+    method, which we used in the `prepareForDelete` method earlier, simply calls the
+    `offer` method on the `messages` queue. We could have alternatively called `add`
+    or `put`. We know that the queue is unbounded, so these methods never throw or
+    block:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We place these methods and the previously defined `prepareForDelete` method
+    into the `FileSystem` class. To test this, we can simply instantiate our `FileSystem`
+    class and call the `logMessage` method. Once the main thread terminates, the `logger`
+    thread automatically stops:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'An important difference between sequential queues and concurrent queues is
+    that concurrent queues have **weakly consistent iterators**. An iterator created
+    with the `iterator` method traverses the elements that were in the queue at the
+    moment the `iterator` method was created. However, if there is an enqueue or dequeue
+    operation before the traversal is over, all bets are off, and the iterator might
+    or might not reflect any modifications. Consider the following example, in which
+    one thread traverses the concurrent queue while another thread dequeues its elements:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: The main thread creates a queue with 5,500 elements. It then starts a concurrent
+    task that creates an iterator and prints the elements one by one. At the same
+    time, the main thread starts removing all the elements from the queue in the same
+    order. In one of our thread runs, the iterator returns `1`, `4,779`, and `5,442`.
+    This does not make sense, because the queue never contained these three elements
+    alone; we would expect to see a suffix that has the range of `1` to `5,500`. We
+    say that the iterator is not consistent. It is never corrupt and does not throw
+    exceptions, but it fails to return a consistent set of elements that were in the
+    queue at some point. With a few notable exceptions, this effect can happen when
+    using any concurrent data structure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use iterators on concurrent data structures only when you can ensure that no
+    other thread will modify the data structure from the point where the iterator
+    was created until the point where the iterator's `hasNext` method returns `false`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `CopyOnWriteArrayList` and `CopyOnWriteArraySet` collections in JDK are
+    exceptions to this rule, but they copy the underlying data whenever the collection
+    is mutated and can be slow. Later in this section, we will see a concurrent collection
+    from the `scala.collection.concurrent` package called `TrieMap`, which creates
+    consistent iterators without copying the underlying dataset and allows arbitrary
+    modifications during the traversal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent sets and maps
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Concurrent API designers strive to provide programmers with interfaces that
+    resemble those from sequential programming. We have seen that this is the case
+    with concurrent queues. As the main use case for concurrent queues is the producer-consumer
+    pattern, the `BlockingQueue` interface additionally provides blocking versions
+    of methods that are already known from sequential queues. Concurrent maps and
+    concurrent sets are map and set collections, respectively, that can be safely
+    accessed and modified by multiple threads. Like concurrent queues, they retain
+    the API from the corresponding sequential collections. Unlike concurrent queues,
+    they do not have blocking operations. The reason is that their principal use case
+    is not the producer-consumer pattern, but encoding the program state.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `concurrent.Map` trait in the `scala.collection` package represents different
+    concurrent map implementations. In our filesystem API, we use it to track the
+    files that exist in the filesystem as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: This concurrent map contains paths and their corresponding `Entry` objects.
+    These are the same `Entry` objects that `prepareForDelete` used earlier. The concurrent
+    `files` map is populated when the `FileSystem` object is created.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For the examples in this section, we add the following dependency to our `build.sbt`
+    file. This will allow us to use the Apache `Commons IO` library in order to handle
+    files:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We will allow `FileSystem` objects to only track files in a certain directory
+    called `root`. By instantiating the `FileSystem` object with the `"."` string,
+    we set the `root` directory to the root of our project with the example code.
+    This way, the worst thing that can happen is that you delete all your examples
+    by accident and have to rewrite them once more. However, that''s okay, as practice
+    makes perfect! The `FileSystem` class is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: We first create a new `ConcurrentHashMap` method from the `java.util.concurrent`
+    package and wrap it to a Scala `concurrent.Map` trait by calling `asScala`. This
+    method can be called to wrap most Java collections, provided the contents of the
+    `decorateAsScala` object are imported like they are in our example. The `asScala`
+    method ensures that Java collections obtain the Scala collection API. The `iterateFiles`
+    method in the `FileUtils` class returns a Java iterator that traverses the files
+    in a specific folder; we can only use Scala iterators in `for` comprehensions,
+    so we call `asScala` again. The first argument for the `iterateFiles` method specifies
+    the `root` folder, and the second method specifies an optional filter for the
+    files. The final `false` argument for the `iterateFiles` method denotes that we
+    do not scan files recursively in the subdirectories of `root`. We play it safe
+    and expose only files in our `root` project directory to the `FileSystem` class.
+    We place each `f` file along with a fresh `Entry` object into `files` by calling
+    `put` on the concurrent map. There is no need to use a `synchronized` statement
+    around `put`, as the concurrent map takes care of synchronization and thread-safety.
+    The `put` operation is atomic, and it establishes a happens-before relationship
+    with subsequent `get` operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The same is true for the other methods such as `remove`, which removes key-value
+    pairs from a concurrent map. We can now use the `prepareForDelete` method implemented
+    earlier to atomically lock a file for deletion and then remove it from the `files`
+    map. We implement the `deleteFile` method for this purpose:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If the `deleteFile` method finds that the concurrent map contains the file
+    with the given name, it calls the `execute` method to asynchronously delete it,
+    as we prefer not to block the caller thread. The concurrent task, started by the
+    `execute` invocation, calls the `prepareForDelete` method. If the `prepareForDelete`
+    method returns `true`, then it is safe to call the `deleteQuietly` method from
+    the `Commons IO` library. This method physically removes the file from the disk.
+    If the deletion is successful, the file entry is removed from the `files` map.
+    We create a new file called `test.txt` and use it to test the `deleteFile` method.
+    We prefer not to experiment with the build definition file. The following code
+    shows the deletion of the file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: The second time we run this line, our logger thread from before complains that
+    the file does not exist. A quick check in our file manager reveals that the `test.txt`
+    file is no longer there.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `concurrent.Map` trait also defines several complex linearizable methods.
+    Recall that complex linearizable operations involve multiple reads and writes.
+    In the context of concurrent maps, methods are complex linearizable operations
+    if they involve multiple instances of the `get` and `put` methods, but appear
+    to get executed at a single point in time. Such methods are a powerful tool in
+    our concurrency arsenal. We have already seen that volatile reads and writes do
+    not allow us to implement the `getUniqueId` method; we need the `compareAndSet`
+    method for that. Similar methods on concurrent maps have comparable advantages.
+    Different atomic methods on atomic maps are summarized in the following table.
+    Note that, unlike the CAS instruction, these methods use structural equality to
+    compare keys and values, and they call the `equals` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| Signature | Description |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| putIfAbsent (k: K,  v: V):        Option[V] | This atomically assigns the
+    value `v` to the key `k` if `k` is not in the map. Otherwise, it returns the value
+    associated with `k`. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| remove (k: K, v: V):  Boolean | This atomically removes the key `k` if it
+    is associated to the value equal to `v` and returns `true` if successful. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| replace (k: K, v: V):  Option[V] | This atomically assigns the value `v`
+    to the key `k` and returns the value previously associated with `k`. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| replace (k: K, ov: V, nv: V):  Boolean | This atomically assigns the key
+    `k` to the value `nv` if `k` was previously associated with `ov` and returns `true`
+    if successful. |'
+  prefs: []
+  type: TYPE_TB
+- en: 'Coming back to our filesystem API, let''s see how these methods work to our
+    advantage. We will now implement the `copyFile` method in the `FileSystem` class.
+    Recall the diagram from the section on atomic variables. A copy operation can
+    start only if the file is either in the `Idle` state or already in the `Copying`
+    state, so we need to atomically switch the file state from `Idle` to `Copying`
+    or from the `Copying` state to another `Copying` state with the value `n` incremented.
+    We do this with the `acquire` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After a thread completes copying a file, it needs to release the `Copying`
+    lock. This is done by a similar `release` method, which decreases the `Copying`
+    count or changes the state to `Idle`. Importantly, this method must be called
+    after files are newly created in order to switch from the `Creating` state to
+    the `Idle` state. By now, the retry pattern following unsuccessful CAS operations
+    should be child''s play for you. The following code shows this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We now have all the machinery required to implement the `copyFile` method.
+    This method checks whether an `src` entry exists in the `files` map. If the entry
+    exists, the `copyFile` method starts a concurrent task to copy the file. The concurrent
+    task attempts to acquire the file for copying and creates a new `destEntry` file
+    entry in the `Creating` state. It then calls the `putIfAbsent` method, which atomically
+    checks whether the file path `dest` is a key in the map and adds the `dest` and
+    `destEntry` pair if it is not. Both the `srcEntry` and `destEntry` value pair
+    are locked at this point, so the `FileUtils.copyFile` method from the `Commons
+    IO` library is called to copy the file on the disk. Once the copying is complete,
+    both the `srcEntry` and `destEntry` value pair are released:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: You should convince yourself that the `copyFile` method would be incorrect if
+    it first called `get` to check whether `dest` is in the map and then called `put`
+    to place `dest` in the map. This would allow another thread's `get` and `put`
+    steps to interleave and potentially overwrite an entry in the `files` map. This
+    demonstrates the importance of the `putIfAbsent` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are some methods that the `concurrent.Map` trait inherits from the `mutable.Map`
+    trait and that are not atomic. An example is the `getOrElseUpdate` method, which
+    retrieves an element if it is present in the map and updates it with a different
+    element otherwise. This method is not atomic, while its individual steps are atomic;
+    they can be interleaved arbitrarily with concurrent calls to the `getOrElseUpdate`
+    method. Another example is `clear`, which does not have to be atomic on concurrent
+    collections in general and can behave like the concurrent data structure iterators
+    we studied before.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The`+=`, `-=`, `put`, `update`, `get`, `apply`, and `remove` methods in the
+    `concurrent.Map` trait are linearizable methods. The `putIfAbsent`, conditional
+    `remove`, and `replace` methods in the `concurrent.Map` trait are the only complex
+    methods guaranteed to be linearizable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Just like the Java concurrency library, Scala currently does not have a dedicated
+    trait for concurrent sets. A concurrent set of the `Set[T]` type can be emulated
+    with a concurrent map with the `ConcurrentMap[T, Unit]` type, which ignores the
+    values assigned to keys. This is the reason why concrete concurrent set implementations
+    appear less often in concurrency frameworks. In rare situations, where a Java
+    concurrent set, such as the `ConcurrentSkipListSet[T]` class, needs to be converted
+    to a Scala concurrent set, we can use the `asScala` method, which converts it
+    to a `mutable.Set[T]` class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As a final note, you should never use `null` as a key or value in a concurrent
+    map or a concurrent set. Many concurrent data structure implementations on JVM
+    rely on using `null` as a special indicator of the absence of an element.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Avoid using the `null` value as a key or a value in a concurrent data structure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Some implementations are defensive and will throw an exception; for others,
+    the results might be undefined. Even when a concurrent collection specifies that
+    `null` is allowed, you should avoid coupling `null` with your program logic in
+    order to make potential refactoring easier.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent traversals
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As you had a chance to witness, Scala directly inherits many of its basic concurrency
+    utilities from the Java concurrency packages. After all, these facilities were
+    implemented by JVM's concurrency experts. Apart from providing conversions that
+    make Java's traditional concurrency utilities feel Scala-idiomatic, there is no
+    need to reinvent what's already there. When it comes to concurrent collections,
+    a particularly bothersome limitation is that you cannot safely traverse most concurrent
+    collections and modify them in the same time. This is not so problematic for sequential
+    collections where we control the thread that calls the `foreach` loop or uses
+    iterators. In a concurrent system where threads are not perfectly synchronized
+    with each other, it is much harder to guarantee that there will be no modifications
+    during the traversal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Fortunately, Scala has an answer for concurrent collection traversals. The `TrieMap`
+    collection from the `scala.collection.concurrent` package, which is based on the
+    concurrent **Ctrie** data structure, is a concurrent map implementation that produces
+    consistent iterators. When its `iterator` method is called, the `TrieMap` collection
+    atomically takes a snapshot of all the elements. A **snapshot** is complete information
+    about the state of a data structure. The iterator then uses this snapshot to traverse
+    the elements. If the `TrieMap` collection is later modified during the traversal,
+    the modifications are not visible in the snapshot and the iterator does not reflect
+    them. You might conclude that taking a snapshot is expensive and requires copying
+    all the elements, but this is not the case. The `snapshot` method of the `TrieMap`
+    class incrementally rebuilds parts of the `TrieMap` collection when they are first
+    accessed by some thread. The `readOnlySnapshot` method, internally used by the
+    `iterator` method, is even more efficient. It ensures that only the modified parts
+    of the `TrieMap` collection are lazily copied. If there are no subsequent concurrent
+    modifications, then no part of the `TrieMap` collection is ever copied.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s study the difference between the Java `ConcurrentHashMap` and the Scala
+    `concurrent.TrieMap` collections in an example. Assume that we have a concurrent
+    map that maps names to numerals in these names. For example, `"Jane"` will be
+    mapped to `0`, but `"John"` will be mapped to `4`, and so on. In one concurrent
+    task, we add different names for John in the order of `0` to `10` to the `ConcurrentHashMap`
+    collection. We concurrently traverse the map and output these names:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If the iterator was consistent, we would expect to see the three names `Johnny`,
+    `Jane`, and `Jack` that were initially in the map and the name `John` in the interval
+    from `0` to an `n` value, depending on how many names the first task added; this
+    could be `John 1`, `John 2`, or `John 3`. Instead, the output shows you random
+    nonconsecutive names such as `John 8` and `John 5`, which does not make sense.
+    `John 8` should never appear in the map without `John 7`, and other entries inserted
+    earlier by the other task. This never happens in a concurrent `TrieMap` collection.
+    We can run the same experiment with the `TrieMap` collection and sort the names
+    lexicographically before outputting them. Running the following program always
+    prints all the `John` names in the interval of `0` and some value `n`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'How is this useful in practice? Imagine that we need to return a consistent
+    snapshot of the filesystem; all the files are as seen by the file manager or an
+    FTP server at a point in time. A `TrieMap` collection ensures that other threads
+    that delete or copy files cannot interfere with the thread that is extracting
+    the files. We thus use the `TrieMap` collection to store files in our filesystem
+    API and define a simple `allFiles` method that returns all the files. At the point
+    where we start using the `files` map in a `for` comprehension, a snapshot with
+    the filesystem contents is created:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We use the `allFiles` method to display all the files in the `root` directory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: After having seen both these concurrent maps, you might be wondering about which
+    one to use. This mainly depends on the use case. If the application requires consistent
+    iterators, then you should definitely use the `TrieMap` collections. On the other
+    hand, if the application does not require consistent iterators and rarely modifies
+    the concurrent map, you can consider using `ConcurrentHashMap` collections, as
+    their lookup operations are slightly faster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use `TrieMap` collections if you require consistent iterators and `ConcurrentHashMap`
+    collections when the `get` and `apply` operations are the bottlenecks in your
+    program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: From a performance point of view, this tip is only applicable if your application
+    is exclusively accessing a concurrent map all the time and doing nothing else.
+    In practice, this is rarely the case, and in most situations, you can use either
+    of these collections.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Custom concurrent data structures
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this section, we will show how to design a concurrent data structure. The
+    data structure we will use as a running example will be simple, but sufficient
+    to demonstrate the general approach. You will be able to apply the same principles
+    to more complex data structures.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before we start, there is a disclaimer. Designing a concurrent data structure
+    is hard, and, as a rule of the thumb, you should almost never do it. Even if you
+    manage to implement a correct and efficient concurrent data structure, the cost
+    of doing so is usually high.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are several reasons why designing a concurrent data structure is hard.
+    The first is achieving correctness: errors are much harder to notice, reproduce,
+    or analyze due to inherent non-determinism. Then, operations must not slow down
+    when more processors use the data structure. In other words, the data structure
+    must be scalable. Finally, a concurrent data structure must be efficient in absolute
+    terms, and it must not be much slower than its sequential counterpart when used
+    with a single processor.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'That said, we proceed to designing a concrete data structure: a concurrent
+    pool.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing a lock-free concurrent pool
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In this section, we will implement a concurrent lock-free pool as an example
+    of how to design a concurrent data structure. A **pool** is one of the simplest
+    data structure abstractions, and only has two methods--the `add` and the `remove`
+    operations. The `add` operation simply adds an element into the pool, but the
+    `remove` operation is more limited than in a set or a map of elements. Instead
+    of removing a specific element from the pool, the `remove` operation removes any
+    element, as long as the pool is non-empty. A lock-free pool is a pool whose operations
+    are lock-free.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Although simple, the pool abstraction is very useful, as it allows temporarily
+    storing expensive objects (for example, worker threads or database connectors).
+    For this use-case, we do not care about which exact element the `remove` operation
+    returns, as long as it returns some element.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Determining its operations is the first step in designing a concurrent data
+    structure. Knowing the operations and their exact semantics drives the rest of
+    the design, and adding supplementary operations later is likely to break the invariants
+    of the data structure. It is usually hard to correctly extend a concurrent data
+    structure once it has already been implemented.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Having determined the operations that a concurrent data structure must support,
+    the next step is to think about data representation. Since we decided that the
+    operations must be lock-free, one seemingly reasonable choice is to encode the
+    state as an `AtomicReference` object holding a pointer to an immutable list:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: Both, the `add` and `remove` operations follow naturally from this choice. To
+    add an element, we read the old list, use it to append the element at the head
+    of the list, and then invoke a `compareAndSet` operation to replace the old list,
+    retrying if necessary. Elements would be removed in a similar fashion.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, such an implementation would not be very scalable. Multiple processors
+    would need to access the same memory location, and retrying would occur frequently.
+    The expected time to complete the operation would then be *O(P)*, where *P* is
+    the number of processors that are concurrently executing `add` and `remove` operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To improve this, we will need to allow different processors to pick different
+    memory locations in the data structure when updating it. The fact that we are
+    implementing a pool mitigates this decision, since the `remove` operation will
+    not have to search for specific elements, and just needs to return any element.
+    Therefore, the `add` operation can append the element to any location in the data
+    structure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With this in mind, we choose an array of atomic references, each holding an
+    immutable list, as our internal representation. Having many atomic references
+    allows each processor to pick an arbitrary slot to perform the update. This is
+    shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that each atomic reference holds not only a list of values in the respective
+    bucket, but also a `Long` value. This unique numeric value will serve as a timestamp
+    that must be incremented each time the bucket is modified. Before we see why having
+    the timestamp is important, we will implement the `add` operation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `add` operation must pick one of the atomic references in the `buckets`
+    array, create a new version of the list that contains the new element, and then
+    invoke the CAS instruction until the respective atomic reference is updated. When
+    picking a bucket, the processor must aim for a bucket that no other processor
+    is currently using, to prevent contention and retries. There are many ways to
+    achieve this, but we will settle for a relatively simple strategy--we compute
+    the bucket from the thread ID, and the hash code of the element. Once the bucket
+    is picked, the `add` operation follows the standard retry pattern that we saw
+    earlier. This is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `remove` operation is more complex. Unlike the `add` operation, which can
+    pick any bucket when inserting an element, the `remove` operation must pick a
+    non-empty bucket. The current design of the data structure offers no apriori way
+    of knowing which bucket is non-empty, so the best we can do is pick some bucket,
+    and scan the other buckets linearly until finding a non-empty bucket. This has
+    two consequences. First, if our concurrent pool is nearly empty, we will need
+    to scan all the buckets in the worst case scenario. The `remove` operation is
+    only scalable if the pool is relatively full. Second, when the pool is almost
+    empty, it is impossible to atomically scan all the entries. It can happen that,
+    during the scan, one thread inserts an element to a bucket we already traversed,
+    and another thread removes an element from a non-traversed bucket. In this case,
+    the `remove` operation could falsely conclude that the pool is empty, which was
+    never the case.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To address the second issue, we use the timestamps associated with each bucket.
+    Recall that each timestamp is incremented when the respective bucket is modified.
+    Therefore, if the sum of the timestamps remains constant, then no operation was
+    executed on the pool. We can use this fact as follows. If we scan the bucket array
+    twice, and see that the timestamp sum did not change, we can conclude that there
+    have been no updates to the pool. This is crucial for the `remove` operation,
+    which will use this information to know when to terminate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `remove` operation starts by picking a bucket based on the current thread
+    ID, and then starting a tail-recursive `scan` method. The `scan` method traverses
+    the array, searching for non-empty buckets. When an empty bucket is observed,
+    its timestamp is added to the `sum` local variable. When a non-empty bucket is
+    found, the standard CAS pattern attempts to remove an element from the bucket
+    in the `retry` method. If successful, the element is immediately removed from
+    the `remove` operation. Otherwise, if upon traversing the array the previous timestamp
+    sum is equal to the current sum, the `scan` method terminates. This is shown in
+    the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We test the concurrent pool as follows. First, we instantiate a concurrent
+    hash map that will track the elements we removed. Then, we create a concurrent
+    pool, and set the number of threads `p` and the number of elements `num`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We first start `p` inserter threads, which insert non-overlapping ranges of
+    integers into the pool. We then wait for the threads to complete:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We similarly start `p` remover threads, which remove the elements from the
+    pool, and store the removed elements to the `check` hash map we created earlier.
+    Each thread removes `num` elements, so the pool should never be empty until all
+    the threads complete:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'At the end, we sequentially traverse the elements we expect to see in the `check`
+    hash map, and assert that they are contained, as shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: And this is it! We have verified that our concurrent pool implementation works
+    correctly. Although we will not prove this, we loosely claim that the `add` operation
+    runs in the expected *O(1)* time, the `remove` operation runs in the expected
+    *O(1)* time when the pool has enough elements, and in the expected *O(P)* time
+    when the queue is nearly empty. As an exercise, you can try to improve the `remove`
+    operation, so that it always runs in the expected *O(1)* time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating and handling processes
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: So far, we focused on concurrency within a Scala program running in a single
+    JVM process. Whenever we wanted to allow multiple computations to proceed concurrently,
+    we created new threads or sent `Runnable` objects to `Executor` threads. Another
+    route to concurrency is to create separate processes. As explained in [Chapter
+    2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency
+    on the JVM and the Java Memory Model*, separate processes have separate memory
+    spaces and cannot share the memory directly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are several reasons why we occasionally want to do this. First, while
+    JVM has a very rich ecosystem with thousands of software libraries for all kinds
+    of tasks, sometimes the only available implementation of a certain software component
+    is a command-line utility or prepackaged program. Running it in a new process
+    could be the only way to harvest its functionality. Second, sometimes we want
+    to put Scala or Java code that we do not trust in a sandbox. A third-party plugin
+    might have to run with a reduced set of permissions. Third, sometimes we just
+    don't want to run in the same JVM process for performance reasons. Garbage collection
+    or JIT compilation in a separate process should not affect the execution of our
+    process, given that the machine has sufficient CPUs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `scala.sys.process` package contains a concise API for dealing with other
+    processes. We can run the child process synchronously, in which case the thread
+    from the parent process that runs it waits until the child process terminates,
+    or asynchronously, in which case, the child process runs concurrently with the
+    calling thread from the parent process. We will first show you how to run a new
+    process synchronously:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: Importing the contents of the `scala.sys.process` package allows us to call
+    the `!` method on any string. The shell command represented by the string is then
+    run from the working directory of the current process. The return value is the
+    exit code of the new process--zero when the process exits successfully and a nonzero
+    error code otherwise.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Sometimes, we are interested in the standard output of a process rather than
+    its exit code. In this case, we start the process with the`!!` method. Let''s
+    assume that we want a `lineCount` method for text files in `FileSystem`, but are
+    too lazy to implement it from scratch:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: After removing the white space from the output with the `trim` method on `String`
+    type and converting the first part of the output to an integer, we obtain the
+    word count of a file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To start the process asynchronously, we call the `run` method on a string that
+    represents the command. This method returns a `Process` object with the `exitValue`
+    method, which is blocked until the process terminates, and the `destroy` method,
+    which stops the process immediately. Assume that we have a potentially long-running
+    process that lists all the files in our filesystem. After one second, we might
+    wish to stop it by calling the `destroy` method on the `Process` object:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: Overloads of the `run` method allow you to communicate with the process by hooking
+    the custom input and output streams or providing a custom `logger` object that
+    is called each time the new process outputs a line.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `scala.sys.process` API has additional features such as starting multiple
+    processes and piping their outputs together, running a different process if the
+    current process fails, or redirecting the output to a file. It strives to mimic
+    much of the functionality provided by the Unix shells. For complete information,
+    we refer the reader to the Scala standard library's documentation of the `scala.sys.process`
+    package.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This chapter presented the traditional building blocks of concurrent programs
+    in Scala. We saw how to use `Executor` objects to run concurrent computations.
+    We learned how to use atomic primitives to atomically switch between different
+    states in the program and implement locks and lock-free algorithms. We studied
+    the implementation of lazy values and their impact on concurrent programs. We
+    then showed you important classes of concurrent collections and learned how to
+    apply them in practice, and we concluded by visiting the `scala.sys.process` package.
+    These insights are not only specific to Scala; but most languages and platforms
+    also have concurrency utilities that are similar to the ones presented in this
+    chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Many other Java concurrency APIs are thoroughly explained in the book *Java
+    Concurrency in Practice*, by Brian Goetz, Tim Peierls, Joshua Bloch, Joseph Bowbeer,
+    David Holmes, and Doug Lea. To learn more about concepts such as lock-freedom,
+    atomic variables, various types of locks, or concurrent data structures, we recommend
+    the book *The Art of Multiprocessor Programming* by Maurice Herlihy and Nir Shavit,
+    Morgan Kaufmann.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Although the concurrency building blocks in this chapter are more high level
+    than the basic concurrency primitives of [Chapter 2](ch02.html "Chapter 2. Concurrency
+    on the JVM and the Java Memory Model"), *Concurrency on the JVM and the Java Memory
+    Model*, there are still culprits lurking at every corner. We had to be careful
+    not to block when running on the execution context, to steer clear from the ABA
+    problem, avoid synchronizing on objects that use lazy values, and ensure that
+    concurrent collections are not modified while using their iterators. All this
+    imposes quite a burden on the programmer. Couldn't concurrent programming be simpler?
+    Fortunately, the answer is yes, as Scala supports styles of expressing concurrency
+    that are more high level and declarative; less prone to effects such as deadlocks,
+    starvation, or non-determinism; and generally easier to reason about. In the following
+    chapters, we will dive into Scala-specific concurrency APIs that are safer and
+    more intuitive to use. We will start by studying futures and promises in the next
+    chapter, which allow you to compose asynchronous computations in a thread-safe
+    and intuitive way.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exercises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The following exercises cover the various topics from this chapter. Most of
+    the exercises require implementing new concurrent data structures using atomic
+    variables and the CAS instruction. These data structures can also be solved using
+    the `synchronized` statement, so it is helpful to contrast the advantages of the
+    two approaches:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implement a custom `ExecutionContext` class called `PiggybackContext`, which
+    executes `Runnable` objects on the same thread that calls the `execute` method.
+    Ensure that a `Runnable` object executing on the `PiggybackContext` can also call
+    the `execute` method and that exceptions are properly reported.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Implement a `TreiberStack` class, which implements a concurrent stack abstraction:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Use an atomic reference variable that points to a linked list of nodes that
+    were previously pushed to the stack. Make sure that your implementation is lock-free
+    and not susceptible to the ABA problem.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Implement a `ConcurrentSortedList` class, which implements a concurrent sorted
+    list abstraction:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Under the hood, the `ConcurrentSortedList` class should use a linked list of
+    atomic references. Ensure that your implementation is lock-free and avoids ABA
+    problems.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: The `Iterator` object returned by the `iterator` method must correctly traverse
+    the elements of the list in ascending order under the assumption that there are
+    no concurrent invocations of the `add` method.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: If required, modify the `ConcurrentSortedList` class from the previous example
+    so that calling the `add` method has the running time linear to the length of
+    the list and creates a constant number of new objects when there are no retries
+    due to concurrent `add` invocations.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Implement a `LazyCell` class with the following interface:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Creating a `LazyCell` object and calling the `apply` method must have the same
+    semantics as declaring a lazy value and reading it, respectively.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: You are not allowed to use lazy values in your implementation.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Implement a `PureLazyCell` class with the same interface and semantics as the
+    `LazyCell` class from the previous exercise. The `PureLazyCell` class assumes
+    that the initialization parameter does not cause side effects, so it can be evaluated
+    more than once.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: The `apply` method must be lock-free and should call the initialization as little
+    as possible.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Implement a `SyncConcurrentMap` class that extends the `Map` interface from
+    the `scala.collection.concurrent` package. Use the `synchronized` statement to
+    protect the state of the concurrent map.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Implement a method `spawn` that, given a block of Scala code, starts a new
+    JVM process and runs the specified block in the new process:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Once the block returns a value, the `spawn` method should return the value from
+    the child process. If the block throws an exception, the `spawn` method should
+    throw the same exception.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_IND
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use Java serialization to transfer the block of code, its return value, and
+    the potential exceptions between the parent and the child JVM processes.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Augment the lock-free pool implementation from this chapter with a `foreach`
+    operation, used to traverse all the elements in the pool. Then make another version
+    of `foreach` that is both lock-free and linearizable.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Prove that the lock-free pool implementation from this chapter is correct.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Currently, the `remove` operation of the lock-free pool implementation from
+    this chapter runs in *O(P)* worst-case time, where *P* is the number of processors
+    on the machine. Improve the lock-free pool implementation so that the operations
+    run in *O(1)* expected time, both in terms of the number of stored elements and
+    the number of processors.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL

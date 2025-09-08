@@ -1,0 +1,1432 @@
+- en: Chapter 5. Concurrency
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Concurrency was one of the chief design goals of Clojure. Considering the concurrent
+    programming model in Java (the comparison with Java is due to it being the predominant
+    language on the JVM), it is not only too low level, but rather tricky to get right
+    that without strictly following the patterns, one is more likely to shoot oneself
+    in the foot. Locks, synchronization, and unguarded mutation are recipes for the
+    concurrency pitfalls, unless exercised with extreme caution. Clojure''s design
+    choices deeply influence the way in which the concurrency patterns can be achieved
+    in a safe and functional manner. In this chapter, we will discuss:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The low level concurrency support at the hardware and JVM level
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The concurrency primitives of Clojure—atoms, agents, refs and vars
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The built-in concurrency that features in Java safe, and its usefulness with
+    Clojure
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Parallelization with the Clojure features and reducers
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Low-level concurrency
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Concurrency cannot be achieved without explicit hardware support. We discussed
+    about SMT and the multi-core processors in the previous chapters. Recall that
+    every processor core has its own L1 cache, and several cores share the L2 cache.
+    The shared L2 cache provides a fast mechanism to the processor cores to coordinate
+    their cache access, eliminating the comparatively expensive memory access. Additionally,
+    a processor buffers the writes to memory into something known as a **dirty write-buffer**.
+    This helps the processor to issue a batch of memory update requests, reorder the
+    instructions, and determine the final value to write to memory, known as **write
+    absorption**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Hardware memory barrier (fence) instructions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Memory access reordering is great for a sequential (single-threaded) program
+    performance, but it is hazardous for the concurrent programs where the order of
+    memory access in one thread may disrupt the expectations in another thread. The
+    processor needs the means of synchronizing the access in such a way that memory
+    reordering is either compartmentalized in code segments that do not care, or is
+    prevented where it might have undesirable consequences. The hardware supports
+    such a safety measure in terms of a "memory barrier" (also known as "fence").
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are several kinds of memory barrier instructions found in different architectures,
+    with potentially different performance characteristics. The compiler (or the JIT
+    compiler in the case of the JVM) usually knows about the fence instructions on
+    the architectures that it runs on. The common fence instructions are read, write,
+    acquire, and release barrier, and more. The barriers do not guarantee the latest
+    data, rather they only control the relative ordering of memory access. Barriers
+    cause the write-buffer to be flushed after all the writes are issued, before the
+    barrier is visible to the processor that issued it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Read and write barriers control the order of reads and writes respectively.
+    Writes happen via a write-buffer; but reads may happen out of order, or from the
+    write-buffer. To guarantee the correct ordering, acquire, and release, blocks/barriers
+    are used. Acquire and release are considered "half barriers"; both of them together
+    (acquire and release) form a "full barrier". A full barrier is more expensive
+    than a half barrier.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java support and the Clojure equivalent
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In Java, the memory barrier instructions are inserted by the higher level coordination
+    primitives. Even though fence instructions are expensive (hundreds of cycles)
+    to run, they provide a safety net that makes accessing shared variables safe within
+    the critical sections. In Java, the `synchronized` keyword marks a "critical section",
+    which can be executed by only one thread at a time, thus making is a tool for
+    "mutual exclusion". In Clojure, the equivalent of Java''s `synchronized` is the
+    `locking` macro:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `locking` macro builds upon two special forms, `monitor-enter` and `monitor-exit`.
+    Note that the `locking` macro is a low-level and imperative solution just like
+    Java's `synchronized` – their use is not considered idiomatic Clojure. The special
+    forms `monitor-enter` and `monitor-exit` respectively enter and exit the lock
+    object's "monitor" – they are even lower level and not recommended for direct
+    use.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Someone measuring the performance of the code that uses such locking should
+    be aware of its single-threaded versus the multi-threaded latencies. Locking in
+    a single thread is cheap. However, the performance penalty starts kicking in when
+    there are two or more threads contending for a lock on the same object monitor.
+    A lock is acquired on the monitor of an object called the "intrinsic" or "monitor"
+    lock. Object equivalence (that is, when the `=` function returns as true) is never
+    used for the purpose of locking. Make sure that the object references are the
+    same (that is, when `identical?` returns as true) when locking from different
+    threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Acquiring a monitor lock by a thread entails a read barrier, which invalidates
+    the thread-local cached data, the corresponding processor registers, and the cache
+    lines. This forces a reread from the memory. On the other hand, releasing the
+    monitor lock results in a write barrier, which flushes all the changes to memory.
+    These are expensive operations that impact parallelism, but they ensure consistency
+    of data for all threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Java supports a `volatile` keyword for the data members in a class that guarantees
+    read and write to an attribute outside of a synchronized block that would not
+    be reordered. It is interesting to note that unless an attribute is declared `volatile`,
+    it is not guaranteed to be visible in all the threads that are accessing it. The
+    Clojure equivalent of Java''s `volatile` is the metadata called `^:volatile-mutable`
+    that we discussed in [Chapter 3](ch03.html "Chapter 3. Leaning on Java"), *Leaning
+    on Java*. An example of `volatile` in Java and Clojure is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: Reading and writing a `volatile` data requires read-acquire or write-release
+    respectively, which means we need only a half-barrier to individually read or
+    write the value. Note that due to a half-barrier, the read-followed-by-write operations
+    are not guaranteed to be atomic. For example, the `age++` expression first reads
+    the value, then increments and sets it. This makes two memory operations, which
+    is no more a half-barrier.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Clojure 1.7 introduced a first class support for the volatile data using a
+    new set of functions: `volatile!`, `vswap!`, `vreset!,` and `volatile?` These
+    functions define volatile (mutable) data and work with that. However, make a note
+    that these functions do not work with the volatile fields in `deftype`. You can
+    see how to use them as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: Operations on volatile data are not atomic, which is why even creating a volatile
+    (using `volatile!`) is considered potentially unsafe. In general, volatiles may
+    be useful where read consistency is not a high priority but writes must be fast,
+    such as real-time trend analysis, or other such analytics reporting. Volatiles
+    may also be very useful when writing stateful transducers (refer to [Chapter 2](ch02.html
+    "Chapter 2. Clojure Abstractions"), *Clojure Abstractions*), serving as very fast
+    state containers. In the next sub-section, we will see the other state abstractions
+    that are safer (and mostly slower) than volatiles.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Atomic updates and state
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: It is a common use case to read a data element, execute some logic, and update
+    with a new value. For single-threaded programs, it bears no consequences; but
+    for concurrent scenarios, the entire operation must be carried out in a lockstep,
+    as an atomic operation. This case is so common that many processors support this
+    at the hardware level using a special Compare-and-swap (CAS) instruction, which
+    is much cheaper than locking. On x86/x64 architectures, the instruction is called
+    CompareExchange (CMPXCHG).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unfortunately, it is possible that another thread updates the variable with
+    the same value that the thread, which is working on the atomic update, is going
+    to compare the old value against. This is known as the "ABA" problem. The set
+    of instructions such as "Load-linked" (LL) and "Store-conditional" (SC), which
+    are found in some other architectures, provide an alternative to CAS without the
+    ABA problem. After the LL instruction reads the value from an address, the SC
+    instruction to update the address with a new value will only go through if the
+    address has not been updated since the LL instruction was successful.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Atomic updates in Java
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Java has a bunch of built-in lock free, atomic, thread safe compare-and-swap
+    abstractions for the state management. They live in the `java.util.concurrent.atomic`
+    package. For primitive types, such as boolean, integer, and long, there are the
+    `AtomicBoolean`, `AtomicInteger`, and `AtomicLong` classes respectively. The latter
+    two classes support additional atomic add/subtract operations. For atomic reference
+    updates, there are the `AtomicReference`, `AtomicMarkableReference`, and `AtomicStampedReference`
+    classes for the arbitrary objects. There is also a support available for arrays
+    where the array elements can be updated atomically—`AtomicIntegerArray`, `AtomicLongArray`,
+    and `AtomicReferenceArray`. They are easy to use; here is the example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: However, where and how to use it is subjected to the update points and the logic
+    in the code. The atomic updates are not guaranteed to be non-blocking. Atomic
+    updates are not a substitute to locking in Java, but rather a convenience, only
+    when the scope is limited to a compare and swap operation for one mutable variable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Clojure's support for atomic updates
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Clojure''s atomic update abstraction is called "atom". It uses `AtomicReference`
+    under the hood. An operation on `AtomicInteger` or `AtomicLong` may be slightly
+    faster than on the Clojure `atom`, because the former uses primitives. But neither
+    of them are too cheap, due to the compare-and-swap instruction that they use in
+    the CPU. The speed really depends on how frequently the mutation happens, and
+    how the JIT compiler optimizes the code. The benefit of speed may not show up
+    until the code is run several hundred thousand times, and having an atom mutated
+    very frequently will increase the latency due to the retries. Measuring the latency
+    under actual (or similar to actual) load can tell better. An example of using
+    an atom is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `swap!` function provides a notably different style of carrying out atomic
+    updates than the `compareAndSwap(oldval, newval)` methods. While `compareAndSwap()`
+    compares and sets the value, returning true if it's a success and false if it's
+    a failure, `swap!` keeps on trying to update in an endless loop until it succeeds.
+    This style is a popular pattern that is followed among Java developers. However,
+    there is also a potential pitfall associated with the update-in-loop style. As
+    the concurrency of the updaters gets higher, the performance of the update may
+    gradually degrade. Then again, high concurrency on the atomic updates raises a
+    question of whether or not uncoordinated updates was a good idea at all for the
+    use-case. The `compare-and-set!` and `reset!` are pretty straightforward.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The function passed to `swap!` is required to be pure (as in side effect free),
+    because it is retried several times in a loop during contention. If the function
+    is not pure, the side effect may happen as many times as the retries.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It is noteworthy that atoms are not "coordinated", which means that when an
+    atom is used concurrently by different threads, we cannot predict the order in
+    which the operations work on it, and we cannot guarantee the end result as a consequence.
+    The code we write around atoms should be designed with this constraint in mind.
+    In many scenarios, atoms may not be a good fit due to the lack of coordination—watch
+    out for that in the program design. Atoms support meta data and basic validation
+    mechanism via extra arguments. The following examples illustrate these features:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: The second important thing is that atoms support is adding and removing watches
+    on them. We will discuss watches later in the chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Faster writes with atom striping
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'We know that atoms present contention when multiple threads try to update the
+    state at the same time. This implies that atoms have great performance when the
+    writes are infrequent. There are some use cases, for example metrics counters,
+    where the writes need to be fast and frequent, but the reads are fewer and can
+    tolerate some inconsistency. For such use cases, instead of directing all the
+    updates to a single atom, we can maintain a bunch of atoms where each thread updates
+    a different atom, thus reducing contention. Reads from these atoms cannot be guaranteed
+    to be consistent. Let''s develop an example of such a counter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the previous example, we created a vector called `counters` of the same
+    size as the number of CPU cores in the computer, and initialize each element with
+    an atom of initial value 0\. The function called `inc!` updates the counter by
+    picking up a random atom from `counters`, and incrementing the value by 1\. We
+    also assumed that `rand-int` distributes the picking up of atom uniformly across
+    all the processor cores, so that we have almost zero contention. The `value` function
+    simply walks over all the atoms and adds up their `deref`''ed values to return
+    the counter value. The example uses `clojure.core/rand-int`, which depends on
+    `java.lang.Math/random` (due to Java 6 support) to randomly find out the next
+    counter atom. Let''s see how we can optimize this when using Java 7 or above:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we `import` the `java.util.concurrent.ThreadLocalRandom` class, and define
+    the `inc!` function to pick up the next random atom using `ThreadLocalRandom`.
+    Everything else remains the same.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Asynchronous agents and state
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'While atoms are synchronous, agents are the asynchronous mechanism in Clojure
+    to effect any change in the state. Every agent is associated with a mutable state.
+    We pass a function (known as "action") to an agent with the optional additional
+    arguments. This function gets queued for processing in another thread by the agent.
+    All the agents share two common thread pools—one for the low-latency (potentially
+    CPU-bound, cache-bound, or memory-bound) jobs, and one for the blocking (potentially
+    I/O related or lengthy processing) jobs. Clojure provides the `send` function
+    for the low-latency actions, `send-off` for blocking actions, and `send-via` to
+    have the action executed on the user-specified thread-pool, instead of either
+    of the preconfigured thread pools. All of `send`, `send-off`, and `send-via` return
+    immediately. Here is how we can use them:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'When we inspect the Clojure (as of version 1.7.0) source code, we can find
+    that the thread-pool for the low-latency actions is named as `pooledExecutor`
+    (a bounded thread-pool, initialized to max ''2 + number of hardware processors''
+    threads), and the thread-pool for the high-latency actions is named as `soloExecutor`
+    (an unbounded thread pool). The premise of this default configuration is that
+    the CPU/cache/memory-bound actions run most optimally on a bounded thread-pool,
+    with the default number of threads. The I/O bound tasks do not consume CPU resources.
+    Hence, a relatively larger number of such tasks can execute at the same time,
+    without significantly affecting the performance of the CPU/cache/memory-bound
+    jobs. Here is how you can access and override the thread-pools:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: If a program carries out a large number of I/O or blocking operations through
+    agents, it probably makes sense to limit the number of threads dedicated for such
+    actions. Overriding the `send-off` thread-pool using `set-agent-send-off-executor!`
+    is the easiest way to limit the thread-pool size. A more granular way to isolate
+    and limit the I/O actions on the agents is to use `send-via` with the thread-pools
+    of appropriate sizes for various kinds of I/O and blocking operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Asynchrony, queueing, and error handling
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Sending an action to an agent returns immediately without blocking. If the agent
+    is not already busy in executing any action, it "reacts" by enqueuing the action
+    that triggers the execution of the action, in a thread, from the respective thread-pool.
+    If the agent is busy in executing another action, the new action is simply enqueued.
+    Once an action is executed from the action queue, the queue is checked for more
+    entries and triggers the next action, if found. This whole "reactive" mechanism
+    of triggering actions obviates the need of a message loop, polling the queue.
+    This is only possible, because the entry points to an agent's queue are controlled.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Actions are executed asynchronously on agents, which raises the question of
+    how the errors are handled. Error cases need to be handled with an explicit, predefined
+    function. When using a default agent construction, such as `(agent :foo)`, the
+    agent is created without any error handler, and gets suspended in the event of
+    any exception. It caches the exception, and refuses to accept any more actions.
+    It throws the cached exception upon sending any action until the agent is restarted.
+    A suspended agent can be reset using the `restart-agent` function. The objective
+    of such suspension is safety and supervision. When the asynchronous actions are
+    executed on an agent and suddenly an error occurs, it will require attention.
+    Check out the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'There are two optional parameters `:error-handler` and `:error-mode, which`
+    we can configure on an agent to have finer control over the error handling and
+    suspension as shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: Why you should use agents
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Just as the "atom" implementation uses only compare-and-swap instead of locking,
+    the underlying "agent" specific implementation uses mostly the compare-and-swap
+    operations. The agent implementation uses locks only when dispatching action in
+    a transaction (discussed in the next section), or when restarting an agent. All
+    the actions are queued and dispatched serially in the agents, regardless of the
+    concurrency level. The serial nature makes it possible to execute the actions
+    in an independent and contention-free manner. For the same agent, there can never
+    be more than one action being executed. Since there is no locking, reads (`deref`
+    or `@`) on agents are never blocked due to writes. However, all the actions are
+    independent of each other—there is no overlap in their execution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The implementation goes so far as to ensure that the execution of an action
+    blocks other actions, which follow in the queue. Even though the actions are executed
+    in a thread-pool, actions for the same agent are never executed concurrently.
+    This is an excellent ordering guarantee that also extends a natural coordination
+    mechanism, due to its serial nature. However, note that this ordering coordination
+    is limited to only a single agent. If an agent action sends actions to two other
+    agents, they are not automatically coordinated. In this situation, you may want
+    to use transactions (which will be covered in the next section).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Since agents distinguish between the low-latency and blocking jobs, the jobs
+    are executed in an appropriate kind of thread-pools. Actions on different agents
+    may execute concurrently, thereby making optimum use of the threading resources.
+    Unlike atoms, the performance of the agents is not impeded by high contention.
+    In fact, for many cases, agents make a lot of sense due to the serial buffering
+    of actions. In general, agents are great for high volume I/O tasks, or where the
+    ordering of operations provides a win in the high contention scenarios.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Nesting
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: When an agent action sends another action to the same agent, that is a case
+    of nesting. This would have been nothing special if agents didn't participate
+    in STM transactions (which will be covered in the next section). However, agents
+    do participate in STM transactions and that places certain constraints on agent
+    implementation that warrants a second-layer buffering of actions. For now, it
+    should suffice to say that the nested sends are queued in a thread-local queue
+    instead of the regular queue in the agent. The thread-local queue is visible only
+    to the thread in which the action is executed. Upon executing an action, unless
+    there was an error, the agent implicitly calls the equivalent of `release-pending-sends`
+    function, which transfers the actions from second level thread-local queue to
+    the normal action queue. Note that nesting is simply an implementation detail
+    of agents and has no other impact.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Coordinated transactional ref and state
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We saw in an earlier section that an atom provides atomic read-and-update operation.
+    What if we need to perform an atomic read-and-update operation across two or even
+    more number of atoms? This clearly poses a coordination problem. Some entity has
+    to watch over the process of reading and updating, so that the values are not
+    corrupted. This is what a ref provides—a **Software Transactional Memory** (**STM**)
+    based system that takes care of concurrent atomic read-and-update operations across
+    multiple refs, such that either all the updates go through, or in the case of
+    failure, none does. Like atoms, on failure, refs retry the whole operation from
+    scratch with the new values.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Clojure's STM implementation is coarse grained. It works at the application
+    level objects and aggregates (that is, references to aggregates), scoped to only
+    all the refs in a program, constituting the "Ref world". Any update to a ref can
+    only happen synchronously, in a transaction, in a `dosync` block of code, within
+    the same thread. It cannot span beyond the current thread. The implementation
+    detail reveals that a thread-local transaction context is maintained during a
+    lifetime of a transaction. The same context ceases to be available, the moment
+    the control reaches another thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Like the other reference types in Clojure, reads on a ref are never blocked
+    by the updates, and vice versa. However, unlike the other reference types, the
+    implementation of ref does not depend on a lock-free spinning, but rather, it
+    internally uses locks, a low-level wait/notify, a deadlock detection, and the
+    age-based barging.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `alter` function is used to read-and-update the value of a ref, and `ref-set`
+    is used to reset the value. Roughly, `alter` and `ref-set,` for the refs, are
+    analogous to `swap!` and `reset!` for the atoms. Just like `swap!`, `alter` accepts
+    a function (and arguments) with no side effects, and may be retried several times
+    during the contention. However, unlike with the atoms, not only `alter` but also
+    `ref-set` and simple `deref`, may cause a transaction to be retried during the
+    contention. Here is a very simple example on how we may use a transaction:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Ref characteristics
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Clojure maintains the **Atomicity**, **Consistency**, and **Isolation** (**ACI**)
+    characteristics in a transaction. This overlaps with A, C, and I of the ACID guarantee
+    that many databases provide. Atomicity implies that either all of the updates
+    in a transaction will complete successfully or none of them do. Consistency means
+    that the transaction must maintain general correctness, and should honor the constraints
+    set by the validation—any exception or validation error should roll back the transaction.
+    Unless a shared state is guarded, concurrent updates on it may lead a multi-step
+    transaction into seeing different values at different steps. Isolation implies
+    that all the steps in a transaction will see the same value, no matter how concurrent
+    the updates are.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Clojure refs use something known as **Multi Version Concurrency Control**
+    (**MVCC**) to provide **Snapshot Isolation** to the transactions. In MVCC, instead
+    of locking (which could block the transactions), the queues are maintained, so
+    that each transaction can occur using its own snapshot copy, taken at its "read
+    point", independent of other transactions. The main benefit of this approach is
+    that the read-only out-of-transaction operations can go through without any contention.
+    Transactions without the ref contention go through concurrently. In a rough comparison
+    with the database systems, the Clojure ref isolation level is "Read Committed"
+    for reading a Ref outside of a transaction, and "Repeatable Read" by default when
+    inside the transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Ref history and in-transaction deref operations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We discussed earlier that both, read and update operations, on a ref, may cause
+    a transaction to be retried. The reads in a transaction can be configured to use
+    the ref history in such a manner that the snapshot isolation instances are stored
+    in the history queues, and are used by the read operations in the transactions.
+    The default, which is not supposed to use the history queues, conserves heap space,
+    and provides strong consistency (avoids the staleness of data) in the transactions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Using the ref history reduces the likelihood of the transaction retries caused
+    by read contention, thereby providing a weak consistency. Therefore, it is a tool
+    for performance optimization, which comes at the cost of consistency. In many
+    scenarios, programs do not need strong consistency—we can choose appropriately
+    if we know the trade-off, and what we need. The snapshot isolation mechanism in
+    the Clojure ref implementation is backed by the adaptive history queues. The history
+    queues grow dynamically to meet the read requests, and do not overshoot the maximum
+    limit that is set for the ref. By default, the history is not enabled, so we need
+    to specify it during the initialization or set it later. Here is an example of
+    how to use the history:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Minimum/maximum history limits are proportional to the length of the staleness
+    window of the data. It also depends on the relative latency difference of the
+    update and read operations to see what the range of the min-history and the max-history
+    works well on a given host system. It may take some amount of trial and error
+    to get the range right. As a ballpark figure, read operations only need as many
+    min-history elements to avoid the transaction retries, as many updates can go
+    through during one read operation. The max-history elements can be a multiple
+    of min-history to cover for any history overrun or underrun. If the relative latency
+    difference is unpredictable, then we have to either plan a min-history for the
+    worst case scenario, or consider other approaches.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transaction retries and barging
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A transaction can internally be in one of the five distinct states—Running,
+    Committing, Retry, Killed, and Committed. A transaction can be killed for various
+    reasons. Exceptions are the common reasons for killing a transaction. But let's
+    consider the corner case where a transaction is retried many times, but it does
+    not appear to commit successfully—what is the resolution? Clojure supports age-based
+    barging, wherein an older transaction automatically tries to abort a younger transaction,
+    so that the younger transaction is retried later. If the barging still doesn't
+    work, as a last resort, the transaction is killed after a hard limit of 10,000
+    retry attempts, and then the exception is thrown.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Upping transaction consistency with ensure
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Clojure's transactional consistency is a good balance between performance and
+    safety. However, at times, we may need the **Serializable** consistency in order
+    to preserve the correctness of the transaction. Concretely, in the face of the
+    transaction retries, when a transaction's correctness depends on the state of
+    a ref, in the transaction, wherein the ref is updated simultaneously in another
+    transaction, we have a condition called "write skew". The Wikipedia entry on the
+    write skew, [https://en.wikipedia.org/wiki/Snapshot_isolation](https://en.wikipedia.org/wiki/Snapshot_isolation),
+    describes it well, but let's see a more concrete example. Let's say we want to
+    design a flight simulation system with two engines, and one of the system level
+    constraints is not to switch off both engines at the same time. If we model each
+    engine as a ref, and certain maneuvers do require us to switch off an engine,
+    we must ensure that the other engine is on. We can do it with `ensure`. Usually,
+    `ensure` is required when maintaining a consistent relationship (invariants) across
+    the refs is necessary. This cannot be ensured by the validator functions, because
+    they do not come into play until the transaction commits. The validator functions
+    will see the same value hence cannot help.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The write-skew can be solved using the namesake `ensure` function that essentially
+    prevents a ref from modification by other transactions. It is similar to a locking
+    operation, but in practice, it provides better concurrency than the explicit read-and-update
+    operations, when the retries are expensive. Using `ensure` is quite simple—`(ensure
+    ref-object).` However, it may be performance-wise expensive, due to the locks
+    it holds during the transaction. Managing performance with `ensure` involves a
+    trade-off between the retry latency, and the lost throughput due to the ensured
+    state.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Lesser transaction retries with commutative operations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Commutative operations are independent of the order in which they are applied.
+    For example, incrementing a counter ref c1 from transactions t1 and t2 would have
+    the same effect irrespective of the order in which t1 and t2 commit their changes.
+    Refs have a special optimization for changing functions that are commutative for
+    transactions—the `commute` function, which is similar to `alter` (same syntax),
+    but with different semantics. Like `alter`, the `commute` functions are applied
+    atomically during the transaction commit. However, unlike `alter`, `commute` does
+    not cause the transaction retry on contention, and there is no guarantee about
+    the order in which the `commute` functions are applied. This effectively makes
+    `commute` nearly useless for returning a meaningful value as a result of the operation.
+    All the commute functions in a transaction are reapplied with the final in transaction
+    ref values during the transaction commit.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we can see, commute reduces the contention, thereby optimizing the performance
+    of the overall transaction throughput. Once we know that an operation is commutative
+    and we are not going to use its return value in a meaningful way, there is hardly
+    any trade-off deciding on whether to use it—we should just go ahead and use it.
+    In fact, a program design, with respect to the ref transactions, with commute
+    in mind, is not a bad idea.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Agents can participate in transactions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In the previous section on agents, we discussed how agents work with the queued
+    change functions. Agents can also participate in the ref transactions, thereby
+    making it possible to combine the use of refs and agents in the transactions.
+    However, agents are not included in the "Ref world", hence a transaction scope
+    is not extended till the execution of the change function in an agent. Rather,
+    the transactions only make sure that the changes sent to the agents are queued
+    until the transaction commit happens.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The *Nesting* sub-section, in the earlier section on agents, discusses about
+    a second-layer thread-local queue. This thread-local queue is used during a transaction
+    to hold the sent changes to an agent until the commit. The thread-local queue
+    does not block the other changes that are being sent to an agent. The out-of-transaction
+    changes are never buffered in the thread-local queue; rather, they are added to
+    the regular queue in the agent.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The participation of agents in the transactions provides an interesting angle
+    of design, where the coordinated and independent/sequential operations can be
+    pipelined as a workflow for better throughput and performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Nested transactions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Clojure transactions are nesting aware and they compose well. But, why would
+    one need a nested transaction? Often, independent units of code may have their
+    own low-granularity transactions that a higher level code can make use of. When
+    the higher level caller itself needs to wrap actions in a transaction, nested
+    transactions occur. Nested transactions have their own lifecycle and run-state.
+    However, an outer transaction can abort an inner transaction on the detection
+    of failure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The "ref world" snapshot `ensure`s and `commute`s are shared among all (that
+    is, outer and inner) levels of a nested transaction. Due to this, the inner transaction
+    is treated as any other ref change operation (similar to `alter`, `ref-set` and
+    so on) within an outer transaction. The watches and internal lock implementation
+    are handled at the respective nesting level. The detection of contention in the
+    inner transactions causes a restart of not only the inner but also the outer transaction.
+    Commits at all the levels are effected as a global state finally when the outermost
+    transaction commits. The watches, even though tracked at each individual transaction
+    level, are finally effected during the commit. A closer look at the nested transaction
+    implementation shows that nesting has little or no impact on the performance of
+    transactions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Performance considerations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Clojure Ref is likely to be the most complex reference type implemented yet.
+    Due to its characteristics, especially its transaction retry mechanism, it may
+    not be immediately apparent that such a system would have good performance during
+    the high-contention scenarios.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Understanding its nuances and best ways of use should help:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: We do not use changes with the side effects in a transaction, except for possibly
+    sending the I/O changes to agents, where the changes are buffered until the commit.
+    So by definition, we do not carry out any expensive I/O work in a transaction.
+    Hence, a retry of this work would be cheap as well.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A change function for a transaction should be as small as possible. This lowers
+    the latency and hence, the retries will also be cheaper.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Any ref that is not updated along with at least one more ref simultaneously
+    needs not be a ref—atoms would do just fine in this case. Now that the refs make
+    sense only in a group, their contention is directly proportional to the group
+    size. Small groups of refs used in the transactions lead to a low contention,
+    lower latency, and a higher throughput.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Commutative functions provide a good opportunity to enhance the transaction
+    throughput without any penalty. Identifying such cases and designing with commute
+    in mind can help performance significantly.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Refs are very coarse grained—they work at the application aggregate level. Often
+    a program may need to have more fine-grained control over the transaction resources.
+    This can be enabled by Ref striping, such as Megaref ([https://github.com/cgrand/megaref](https://github.com/cgrand/megaref)),
+    by providing a scoped view on the associative refs, thereby allowing higher concurrency.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In the high contention scenarios in which the ref group size in a transaction
+    cannot be small, consider using agents, as they have no contention due to the
+    serial nature. Agents may not be a replacement for the transactions, but rather
+    we can employ a pipeline consisting of atoms, refs, and agents to ease out the
+    contention versus latency concerns.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Refs and transactions have an intricate implementation. Fortunately, we can
+    inspect the source code, and browse through available online and offline resources.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Dynamic var binding and state
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The fourth kind among the Clojure''s reference types is the dynamic var. Since
+    Clojure 1.3, all the vars are static by default. A var must be explicitly declared
+    so in order to be dynamic. Once declared, a dynamic var can be bound to new values
+    on per-thread basis. Binding on different threads do not block each other. An
+    example is shown here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: As the dynamic binding is thread-local, it may be tricky to use in multi-threaded
+    scenarios. Dynamic vars have been long abused by libraries and applications as
+    a means to pass in a common argument to be used by several functions. However,
+    this style is acknowledged to be an anti-pattern, and is discouraged. Typically,
+    in the anti-pattern dynamic, vars are wrapped by a macro to contain the dynamic
+    thread-local binding in the lexical scope. This causes problems with the multi-threading
+    and lazy sequences.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So, how can the dynamic vars be used effectively? A dynamic var lookup is more
+    expensive than looking up a static var. Even passing a function argument is performance-wise
+    much cheaper than looking up a dynamic var. Binding a dynamic var incurs additional
+    cost. Clearly, in performance sensitive code, dynamic vars are best not used at
+    all. However, dynamic vars may prove to be useful to hold a temporary thread-local
+    state in a complex, or recursive call-graph scenario, where the performance does
+    not matter significantly, without being advertised or leaked into the public API.
+    The dynamic var bindings can nest and unwind like a stack, which makes them both
+    attractive and suitable for such tasks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Validating and watching the reference types
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Vars (both static and dynamic), atoms, refs, and agents provide a way to validate
+    the value being set as state—a `validator` function that accepts new value as
+    argument, and returns the logical as true if it succeeds, or throws exception/returns
+    logical as false (the false and nil values) if there''s an error. They all honor
+    what the validator function returns. If it is a success, the update goes through,
+    and if an error, an exception is thrown instead. Here is the syntax on how the
+    validators can be declared and associated with the reference types:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: Validators cause actual failure within a reference type while updating them.
+    For vars and atoms, they simply prevent the update by throwing an exception. In
+    an agent, a validation failure causes agent failure, and needs the agent to restart.
+    Inside a ref, the validation failure causes the transaction to rollback and rethrow
+    the exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Another mechanism to observe the changes to the reference types is a "watcher".
+    Unlike validators, a watcher is passive—it is notified of the update after the
+    fact. Hence, a watcher cannot prevent updates from going through, because it is
+    only a notification mechanism. For transactions, a watcher is invoked only after
+    the transaction commit. While only one validator can be set on a reference type,
+    it is possible to associate multiple watchers to a reference type on the other
+    hand. Secondly, when adding a watch, we can specify a key, so that the notifications
+    can be identified by the key, and be dealt accordingly by the watcher. Here is
+    the syntax on how to use watchers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: Like validators, the watchers are executed synchronously in the thread of the
+    reference type. For atoms and refs, this may be fine, since the notification to
+    the watchers goes on, the other threads may proceed with their updates. However
+    in agents, the notification happens in the same thread where the update happens—this
+    makes the update latency higher, and the throughput potentially lower.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java concurrent data structures
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Java has a number of mutable data structures that are meant for concurrency
+    and thread-safety, which implies that multiple callers can safely access these
+    data structures at the same time, without blocking each other. When we need only
+    the highly concurrent access without the state management, these data structures
+    may be a very good fit. Several of these employ lock free algorithms. We discussed
+    about the Java atomic state classes in the *Atomic updates and state section*,
+    so we will not repeat them here. Rather, we will only discuss the concurrent queues
+    and other collections.
+  prefs: []
+  type: TYPE_NORMAL
+- en: All of these data structures live in the `java.util.concurrent` package. These
+    concurrent data structures are tailored to leverage the JSR 133 "Java Memory Model
+    and Thread Specification Revision" ([http://gee.cs.oswego.edu/dl/jmm/cookbook.html](http://gee.cs.oswego.edu/dl/jmm/cookbook.html))
+    implementation that first appeared in Java 5.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent maps
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Java has a mutable concurrent hash map—`java.util.concurrent.ConcurrentHashMap`
+    (CHM in short). The concurrency level can be optionally specified when instantiating
+    the class, which is 16 by default. The CHM implementation internally partitions
+    the map entries into the hash buckets, and uses multiple locks to reduce the contention
+    on each bucket. Reads are never blocked by writes, therefore they may be stale
+    or inconsistent—this is countered by built-in detection of such situations, and
+    issuing a lock in order to read the data again in the synchronized fashion. This
+    is an optimization for the scenarios, where reads significantly outnumber writes.
+    In CHM, all the individual operations are near constant-time unless stuck in a
+    retry loop due to the lock contention.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In contrast with Clojure''s persistent map, CHM cannot accept `null` (`nil`)
+    as the key or value. Clojure''s immutable scalars and collections are automatically
+    well-suited for use with CHM. An important thing to note is that only the individual
+    operations in CHM are atomic, and exhibit strong consistency. As CHM operations
+    are concurrent, the aggregate operations provide a rather weak consistency than
+    the true operation-level consistency. Here is how we can use CHM. The individual
+    operations in CHM, which provide a better consistency, are safe to use. The aggregate
+    operations should be reserved for when we know its consistency characteristics,
+    and the related trade-off:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `java.util.concurrent.ConcurrentSkipListMap` class (CSLM in short) is another
+    concurrent mutable map data structure in Java. The difference between CHM and
+    CSLM is that CSLM offers a sorted view of the map at all times with the O(log
+    N) time complexity. The sorted view has the natural order of keys by default,
+    which can be overridden by specifying a Comparator implementation when instantiating
+    CSLM. The implementation of CSLM is based on the Skip List, and provides navigation
+    operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `java.util.concurrent.ConcurrentSkipListSet` class (CSLS in short) is a
+    concurrent mutable set based on the CSLM implementation. While CSLM offers the
+    map API, CSLS behaves as a set data structure while borrowing features of CSLM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrent queues
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Java has a built-in implementation of several kinds of mutable and concurrent
+    in-memory queues. The queue data structure is a useful tool for buffering, producer-consumer
+    style implementation, and for pipelining such units together to form the high-performance
+    workflows. We should not confuse them with durable queues that are used for similar
+    purpose in the batch jobs for a high throughput. Java's in-memory queues are not
+    transactional, but they provide atomicity and strong consistency guarantee for
+    the individual queue operations only. Aggregate operations offer weaker consistency.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `java.util.concurrent.ConcurrentLinkedQueue` (CLQ) is a lock-free, wait-free
+    unbounded "First In First Out" (FIFO) queue. FIFO implies that the order of the
+    queue elements will not change once added to the queue. CLQ''s `size()` method
+    is not a constant time operation; it depends on the concurrency level. Few examples
+    of using CLQ are here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: '| Queue | Blocking? | Bounded? | FIFO? | Fairness? | Notes |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- | --- | --- | --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| CLQ | No | No | Yes | No | Wait-free, but the size() is not constant time
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| ABQ | Yes | Yes | Yes | Optional | The capacity is fixed at instantiation
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| DQ | Yes | No | No | No | The elements implement the Delayed interface |'
+  prefs: []
+  type: TYPE_TB
+- en: '| LBQ | Yes | Optional | Yes | No | The capacity is flexible, but with no fairness
+    option |'
+  prefs: []
+  type: TYPE_TB
+- en: '| PBQ | Yes | No | No | No | The elements are consumed in a priority order
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| SQ | Yes | – | – | Optional | It has no capacity; it serves as a channel
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: In the `java.util.concurrent` package, `ArrayBlockingQueue` (ABQ), `DelayQueue`
+    (DQ), `LinkedBlockingQueue` (LBQ), `PriorityBlockingQueue` (PBQ), and `SynchronousQueue`
+    (SQ) implement the `BlockingQueue` (BQ) interface. Its Javadoc describes the characteristics
+    of its method calls. ABQ is a fixed-capacity, FIFO queue backed by an array. LBQ
+    is also a FIFO queue, backed by the linked nodes, and is optionally bounded (default
+    `Integer.MAX_VALUE`). ABQ and LBQ generate "Back pressure" by blocking the enqueue
+    operations on full capacity. ABQ supports optional fairness (with performance
+    overhead) in the order of the threads that access it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: DQ is an unbounded queue that accepts the elements associated with the delay.
+    The queue elements cannot be null, and must implement the `java.util.concurrent.Delayed`
+    interface. Elements are available for removal from the queue only after the delay
+    has been expired. DQ can be very useful for scheduling the processing of the elements
+    at different times.
+  prefs: []
+  type: TYPE_NORMAL
+- en: PBQ is unbounded and blocking while letting elements be consumed from the queue
+    as per priority. Elements have the natural ordering by default that can be overridden
+    by specifying a Comparator implementation when instantiating the queue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: SQ is not really a queue at all. Rather, it's just a barrier for a producer
+    or consumer thread. The producer blocks until a consumer removes the element and
+    vice versa. SQ does not have a capacity. However, SQ supports optional fairness
+    (with performance overhead), in the order, in which the threads access it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are some new concurrent queue types introduced after Java 5\. Since JDK
+    1.6, in the `java.util.concurrent` package Java has **BlockingDeque** (**BD**)
+    with **LinkedBlockingDeque** (**LBD**) as the only available implementation. BD
+    builds on BQ by adding the **Deque** (**double-ended queue**) operations, that
+    is, the ability to add elements and consume the elements from both the ends of
+    the queue. LBD can be instantiated with an optional capacity (bounded) to block
+    the overflow. JDK 1.7 introduced **TransferQueue** (**TQ**) with **LinkedTransferQueue**
+    (**LTQ**) as the only implementation. TQ extends the concept of SQ in such a way
+    that the producers and consumers block a queue of elements. This will help utilize
+    the producer and consumer threads better by keeping them busy. LTQ is an unbounded
+    implementation of TQ where the `size()` method is not a constant time operation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Clojure support for concurrent queues
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We covered the persistent queue in [Chapter 2](ch02.html "Chapter 2. Clojure
+    Abstractions"), *Clojure Abstractions* earlier. Clojure has a built-in `seque`
+    function that builds over a BQ implementation (LBQ by default) to expose a write-ahead
+    sequence. The sequence is potentially lazy, and the write-ahead buffer throttles
+    how many elements to realize. As opposed to the chunked sequences (of chunk size
+    32), the size of the write-ahead buffer is controllable and potentially populated
+    at all times until the source sequence is exhausted. Unlike the chunked sequences,
+    the realization doesn't happen suddenly for a chunk of 32 elements. It does so
+    gradually and smoothly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Under the hood, Clojure's `seque` uses an agent to the backfill data in the
+    write-ahead buffer. In the arity-2 variant of `seque`, the first argument should
+    either be a positive integer, or an instance of BQ (ABQ, LBQ, and more) that is
+    preferably bounded.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Concurrency with threads
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: On the JVM, threads are the de-facto fundamental instrument of concurrency.
+    Multiple threads live in the same JVM; they share the heap space, and compete
+    for the resources.
+  prefs: []
+  type: TYPE_NORMAL
+- en: JVM support for threads
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'The JVM threads are the Operating System threads. Java wraps an underlying
+    OS thread as an instance of the `java.lang.Thread` class, and builds up an API
+    around it to work with threads. A thread on the JVM has a number of states: New,
+    Runnable, Blocked, Waiting, Timed_Waiting, and Terminated. A thread is instantiated
+    by overriding the `run()` method of the `Thread` class, or by passing an instance
+    of the `java.lang.Runnable` interface to the constructor of the `Thread` class.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Invoking the `start()` method of a `Thread` instance starts its execution in
+    a new thread. Even if just a single thread runs in the JVM, the JVM would not
+    shut down. Calling the `setDaemon(boolean)` method of a thread with argument `true`
+    tags the thread as a daemon that can be automatically shut down if no other non-daemon
+    thread is running.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'All Clojure functions implement the `java.lang.Runnable` interface. Therefore,
+    invoking a function in a new thread is very easy:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `run()` method does not accept any argument. We can work around it by creating
+    a higher order function that needs no arguments, but internally applies the argument
+    `3`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Thread pools in the JVM
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Creating threads leads to the Operating System API calls, which is not always
+    a cheap operation. The general practice is to create a pool of threads that can
+    be recycled for different tasks. Java has a built-in support for threads pools.
+    The interface called `java.util.concurrent.ExecutorService` represents the API
+    for a thread pool. The most common way to create a thread pool is to use a factory
+    method in the `java.util.concurrent.Executors` class:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: The previous example is equivalent of the examples with raw threads that we
+    saw in the previous sub-section. Thread pools are also capable of helping to track
+    the completion, and the return value of a function, executed in a new thread.
+    An ExecutorService accepts an instance of the `java.util.concurrent.Callable`
+    instance as an argument to several methods that launch a task, and return `java.util.concurrent.Future`
+    to track the final result.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'All the Clojure functions also implement the `Callable` interface, so we can
+    use them as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: The thread pools described here are the same as the ones that we saw briefly
+    in the Agents section earlier. Thread pools need to be shut down by calling the
+    `shutdown()` method when no longer required.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Clojure concurrency support
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Clojure has some nifty built-in features to deal with concurrency. We already
+    discussed about the agents, and how they use the thread pools, in an earlier section.
+    There are some more concurrency features in Clojure to deal with the various use
+    cases.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Future
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'We saw earlier in this section how to use the Java API to launch a new thread,
+    to execute a function. Also, we learned how to get the result back. Clojure has
+    a built-in support called "futures" to do these things in a much smoother and
+    integrated manner. The basis of the futures is the function `future-call` (it
+    takes a `no-arg` function as an argument), and the macro `future` (it takes the
+    body of code) that builds on the former. Both of them immediately start a thread
+    to execute the supplied code. The following snippet illustrates the functions
+    that work with the future, and how to use them:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'One of the interesting aspects of `future-cancel` is that it can sometimes
+    not only cancel tasks that haven''t started yet, but may also abort those that
+    are halfway through execution:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: The previous scenario happens because Clojure's `future-cancel` cancels a future
+    in such a way that if the execution has already started, it may be interrupted
+    causing `InterruptedException`, which, if not explicitly caught, would simply
+    abort the block of code. Beware of exceptions arising from the code that is executed
+    in a future, because, by default, they are not reported verbosely! Clojure futures
+    use the "solo" thread pool (used to execute the potentially blocking actions)
+    that we discussed earlier with respect to the agents.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Promise
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: A promise is a placeholder for the result of a computation that may or may not
+    have occurred. A promise is not directly associated with any computation. By definition,
+    a promise does not imply when the computation might occur, hence realizing the
+    promise.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Typically, a promise originates from one place in the code, and is realized
+    by some other portion of the code that knows when and how to realize the promise.
+    Very often, this happens in a multi-threaded code. If a promise is not realized
+    yet, any attempt to read the value blocks all callers. If a promise is realized,
+    then all the callers can read the value without being blocked. As with futures,
+    a promise can be read with a timeout using `deref`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is a very simple example showing how to use promises:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: A promise is a very powerful tool that can be passed around as function arguments.
+    It can be stored in a reference type, or simply be used for a high level coordination.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Clojure parallelization and the JVM
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We observed in [Chapter 1](ch01.html "Chapter 1. Performance by Design"), *Performance
+    by Design* that parallelism is a function of the hardware, whereas concurrency
+    is a function of the software, assisted by the hardware support. Except for the
+    algorithms that are purely sequential by nature, concurrency is the favored means
+    to facilitate parallelism, and achieve better performance. Immutable and stateless
+    data is a catalyst to concurrency, as there is no contention between threads,
+    due to absence of mutable data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Moore's law
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In 1965, Intel's cofounder, Gordon Moore, made an observation that the number
+    of transistors per square inch on Integrated Circuits doubles every 24 months.
+    He also predicted that the trend would continue for 10 years, but in practice,
+    it has continued till now, marking almost half a century. More transistors have
+    resulted in more computing power. With a greater number of transistors in the
+    same area, we need higher clock speed to transmit signals to all of the transistors.
+    Secondly, transistors need to get smaller in size to fit in. Around 2006-2007,
+    the clock speed that the circuitry could work with topped out at about 2.8GHz,
+    due to the heating issues and the laws of physics. Then, the multi-core processors
+    were born.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Amdahl's law
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The multi-core processors naturally require splitting up computation in order
+    to achieve parallelization. Here begins a conflict—a program that was made to
+    be run sequentially cannot make use of the parallelization features of the multi-core
+    processors. The program must be altered to find the opportunity to split up computation
+    at every step, while keeping the cost of coordination in mind. This results in
+    a limitation that a program can be no more faster than its longest sequential
+    part (*contention*, or *seriality*), and the coordination overhead. This characteristic
+    was described by Amdahl's law.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Universal Scalability Law
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Dr Neil Gunther''s Universal Scalability Law (USL) is a superset of Amdahl''s
+    Law that makes both: *contention (α)* and *coherency (β)* the first class concerns
+    in quantifying the scalability very closely to the realistic parallel systems.
+    Coherency implies the coordination overhead (latency) in making the result of
+    one part of a parallelized program to be available to another. While Amdahl''s
+    Law states that contention (seriality) causes performance to level off, USL goes
+    to show that the performance actually degrades with excessive parallelization.
+    USL is described with the following formula:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: C(N) = N / (1 + α ((N – 1) + β N (N – 1)))
+  prefs: []
+  type: TYPE_NORMAL
+- en: Here, C(N) implies relative capacity or throughput in terms of the source of
+    concurrency, such as physical processors, or the users driving the software application.
+    α implies the degree of contention because of the shared data or the sequential
+    code, and β implies penalty incurred for maintaining the consistency of shared
+    data. I would encourage you to pursue USL further ([http://www.perfdynamics.com/Manifesto/USLscalability.html](http://www.perfdynamics.com/Manifesto/USLscalability.html)),
+    as this is a very important resource for studying the impact of concurrency on
+    scalability and the performance of the systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Clojure support for parallelization
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A program that relies on mutation cannot parallelize its parts without creating
+    contention on the mutable state. It requires coordination overhead, which makes
+    the situation worse. Clojure's immutable nature is better suited to parallelize
+    the parts of a program. Clojure also has some constructs that are suited for parallelism
+    by the virtue of Clojure's consideration of available hardware resources. The
+    result is, the operations execute optimized for certain use case scenarios.
+  prefs: []
+  type: TYPE_NORMAL
+- en: pmap
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The `pmap` function (similar to `map`) accepts as arguments a function and one,
+    or more collections of data elements. The function is applied to each of the data
+    elements in such a way that some of the elements are processed by the function
+    in parallel. The parallelism factor is chosen at runtime by the `pmap` implementation,
+    as two greater than the total number of available processors. It still processes
+    the elements lazily, but the realization factor is same as the parallelism factor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Check out the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: To use `pmap` effectively, it is imperative that we understand what it is meant
+    for. As the documentation says, it is meant for computationally intensive functions.
+    It is optimized for CPU-bound and cache-bound jobs. High latency and low CPU tasks,
+    such as blocking I/O, are a gross misfit for `pmap`. Another pitfall to be aware
+    of is whether the function used in `pmap` performs a lot of memory operations
+    or not. Since the same function will be applied across all the threads, all the
+    processors (or cores) may compete for the memory interconnect and the sub-system
+    bandwidth. If the parallel memory access becomes a bottleneck, `pmap` cannot make
+    the operation truly parallel, due to the contention on the memory access.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another concern is what happens when several `pmap` operations run concurrently?
+    Clojure does not attempt to detect multiple `pmap`s running concurrently. The
+    same number of threads will be launched afresh for every new `pmap` operation.
+    The developer is responsible to ensure the performance characteristics, and the
+    response time of the program resulting from the concurrent pmap executions. Usually,
+    when the latency reasons are paramount, it is advisable to limit the concurrent
+    instances of `pmap` running in the program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: pcalls
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The `pcalls` function is built using `pmap`, so it borrows properties from the
+    latter. However, the `pcalls` function accepts zero or more functions as arguments
+    and executes them in parallel, returning the result values of the calls as a list.
+  prefs: []
+  type: TYPE_NORMAL
+- en: pvalues
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The `pvalues` macro is built using `pcalls`, so it transitively shares the properties
+    of `pmap`. It's behavior is similar to `pcalls`, but instead of functions, it
+    accepts zero or more S-expressions that are evaluated in the parallel using `pmap`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Java 7's fork/join framework
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Java 7 introduced a new framework for parallelism called "fork/join," based
+    on divide-and-conquer and the work-stealing scheduler algorithms. The basic idea
+    of how to use the fork/join framework is fairly simple—if the work is small enough,
+    then do it directly in the same thread; otherwise, split the work into two pieces,
+    invoke them in a fork/join thread pool, and wait for the results to combine.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This way, the job gets recursively split into smaller parts such as an inverted
+    tree, until the smallest part can be carried out in just a single thread. When
+    the leaf/subtree jobs return, the parent combines the result of all children,
+    and returns the results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The fork/join framework is implemented in Java 7 in terms of a special kind
+    of thread pool; check out `java.util.concurrent.ForkJoinPool`. The specialty of
+    this thread pool is that it accepts the jobs of `java.util.concurrent.ForkJoinTask`
+    type, and whenever these jobs block, waiting for the child jobs to finish, the
+    threads used by the waiting jobs are allocated to the child jobs. When the child
+    finishes its work, the thread is allocated back to the blocked parent jobs in
+    order to continue. This style of dynamic thread allocation is described as "work-stealing".
+    The fork/join framework can be used from within Clojure. The `ForkJoinTask` interface
+    has two implementations: `RecursiveAction` and `RecursiveTask` in the `java.util.concurrent`
+    package. Concretely, `RecursiveTask` maybe more useful with Clojure, as `RecursiveAction`
+    is designed to work with mutable data, and does not return any value from its
+    operation.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the fork-join framework entails choosing the batch size to split a job
+    into, which is a crucial factor in parallelizing a long job. Too large a batch
+    size may not utilize all the CPU cores enough; on the other hand, a small batch
+    size may lead to a longer overhead, coordinating across the parent/child batches.
+    As we will see in the next section, Clojure integrates with the Fork/join framework
+    to parallelize the reducers implementation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Parallelism with reducers
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Reducers are a new abstraction introduced in Clojure 1.5, and are likely to
+    have a wider impact on the rest of the Clojure implementation in the future versions.
+    They depict a different way of thinking about processing collections in Clojure—the
+    key concept is to break down the notion that collections can be processed only
+    sequentially, lazily, or producing a seq, and more. Moving away from such a behavior
+    guarantee raises the potential for eager and parallel operations on one hand,
+    whereas incurring constraints on the other. Reducers are compatible with the existing
+    collections.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For an example, a keen observation of the regular `map` function reveals that
+    its classic definition is tied to the mechanism (recursion), order (sequential),
+    laziness (often), and representation (list/seq/other) aspects of producing the
+    result. Most of this actually defines "how" the operation is performed, rather
+    than "what" needs to be done. In the case of `map`, the "what" is all about applying
+    a function to each element of its collection arguments. But since the collection
+    types can be of various types (tree-structured, sequence, iterator, and more),
+    the operating function cannot know how to navigate the collection. Reducers decouple
+    the "what" and "how" parts of the operation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reducible, reducer function, reduction transformation
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Collections are of various kinds, hence only a collection knows how to navigate
+    itself. In the reducers model at a fundamental level, an internal "reduce" operation
+    in each collection type has access to its properties and behavior, and access
+    to what it returns. This makes all the collection types essentially "reducible".
+    All the operations that work with collections can be modeled in terms of the internal
+    "reduce" operation. The new modeled form of such operations is a "reducing function",
+    which is typically a function of two arguments, the first argument being the accumulator,
+    and the second being the new input.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How does it work when we need to layer several functions upon another, over
+    the elements of a collection? For an example, let's say first we need to "filter",
+    "map," and then "reduce". In such cases, a "transformation function" is used to
+    model a reducer function (for example, for "filter") as another reducer function
+    (for "map") in such a way that it adds the functionality during the transformation.
+    This is called "reduction transformation".
+  prefs: []
+  type: TYPE_NORMAL
+- en: Realizing reducible collections
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: While the reducer functions retain the purity of the abstraction, they are not
+    useful all by themselves. The reducer operations in the namespace called as `clojure.core.reducers`
+    similar to `map`, `filter`, and more, basically return a reducible collection
+    that embed the reducer functions within themselves. A reducible collection is
+    not realized, not even lazily realized—rather, it is just a recipe that is ready
+    to be realized. In order to realize a reducible collection, we must use one of
+    the `reduce` or `fold` operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `reduce` operation that realizes a reducible collection is strictly sequential,
+    albeit with the performance gains compared to `clojure.core/reduce`, due to reduced
+    object allocations on the heap. The `fold` operation, which realizes a reducible
+    collection, is potentially parallel, and uses a "reduce-combine" approach over
+    the fork-join framework. Unlike the traditional "map-reduce" style, the use of
+    fork/join the reduce-combine approach reduces at the bottom, and subsequently
+    combines by the means of reduction again. This makes the `fold` implementation
+    less wasteful and better performing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Foldable collections and parallelism
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Parallel reduction by `fold` puts certain constraints on the collections and
+    operations. The tree-based collection types (persistent map, persistent vector,
+    and persistent set) are amenable to parallelization. At the same time, the sequences
+    may not be parallelized by `fold`. Secondly, `fold` requires that the individual
+    reducer functions should be "associative", that is, the order of the input arguments
+    applied to the reducer function should not matter. The reason being, `fold` can
+    segment the elements of the collection to process in parallel, and the order in
+    which they may be combined is not known in advance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `fold` function accepts few extra arguments, such as the "combine function,"
+    and the partition batch size (default being 512) for the parallel processing.
+    Choosing the optimum partition size depends on the jobs, host capabilities, and
+    the performance benchmarking. There are certain functions that are foldable (that
+    is, parallelizable by `fold`), and there are others that are not, as shown here.
+    They live in the `clojure.core.reducers` namespace:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Foldable**: `map`, `mapcat`, `filter`, `remove`, and `flatten`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Non-foldable**: `take-while`, `take`, and `drop`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Combine functions**: `cat`, `foldcat`, and `monoid`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A notable aspect of reducers is that it is foldable in parallel only when the
+    collection is a tree type. This implies that the entire data set must be loaded
+    in the heap memory when folding over them. This has the downside of memory consumption
+    during the high load on a system. On the other hand, a lazy sequence is a perfectly
+    reasonable solution for such scenarios. When processing large amount of data,
+    it may make sense to use a combination of lazy sequences and reducers for performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Concurrency and parallelism are extremely important for performance in this
+    multi-core age. Effective use of concurrency requires substantial understanding
+    of the underlying principles and details. Fortunately, Clojure provides safe and
+    elegant ways to deal with concurrency and state. Clojure's new feature called
+    "reducers" provides a way to achieve granular parallelism. In the coming years,
+    we are likely to see more and more processor cores, and an increasing demand to
+    write code that takes advantage of these. Clojure places us in the right spot
+    to meet such challenges.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will look at the performance measurement, analysis,
+    and monitoring.
+  prefs: []
+  type: TYPE_NORMAL

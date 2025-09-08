@@ -1,0 +1,1770 @@
+- en: Chapter 2.  Measuring Performance on the JVM
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the previous chapter, we introduced and defined important concepts that
+    are related to performance. While extremely valuable, our journey so far has been
+    somewhat academic, and you may grow impatient to exercise your newly acquired
+    knowledge. Luckily, this second chapter does just this! We will take a close look
+    at a real-world scenario and dive head first into the code to profile the application
+    and measure its performance characteristics. This hands-on chapter focuses on
+    one of MV Trading''s most successful products: the order book. This is a critical
+    piece of software that was developed to deliver high throughput while maintaining
+    low latency. In this chapter, we will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Benchmarking the latency and throughput of an application
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Profiling a system with Flight Recorder
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using JMH to microbenchmark our code
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A peek into the financial domain
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This month marks the one year anniversary for **MV Trading** (**MVT**). In the
+    last year, the company delivered great returns to its clients by capitalizing
+    on novel trading strategies. These strategies work most effectively when trades
+    can be placed within milliseconds of receiving new price information. To support
+    trading with low latency, the MVT engineering team directly integrated into a
+    stock market exchange. Exchange integration involved datacenter work to collocate
+    the trading system with the exchange and development effort to build the trading
+    system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A key component of the trading system, known as the order book, holds the state
+    of the exchange. The goal of the exchange is to keep track of how many buyers
+    and sellers have an active interest in a stock and at what price each side is
+    willing to trade. As traders, such as MVT, submit orders to buy and sell a stock,
+    the exchange determines when a trade happens and notifies the buyer and the seller
+    about the transaction. The state managed by the exchange and by extension, MVT,
+    is interesting because orders do not always execute when they reach the exchange.
+    Instead, orders can remain in an open or pending state for up to the length of
+    the trading day (on the order of six hours). This first version of the order book
+    allows traders to place orders called limit orders. Limit orders include a constraint
+    on the minimally-acceptable price. For buys, the limit represents the highest
+    price that the trader wishes to pay, and for sells, this indicates the lowest
+    price the trader wishes to receive in exchange for the stock. Another operation
+    that is supported by the order book is the cancelation of an outstanding limit
+    order, which removes its presence from the book. To help summarize the possible
+    order states, the following table itemizes possible outcomes to support exchange
+    actions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Exchange action** | **Outcome** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Limit order with a price worse than best bid or offer submitted. | The order
+    rests on the book, meaning that the order remains in a pending state until an
+    order from the opposing side generates a trade or the submitted order is canceled.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Limit order with a price better than or equal to best bid or offer submitted.
+    | The order crosses the book. Crossing the book is industry jargon that indicates
+    an order caused a trade to happen because its price matched one or more orders
+    from the opposing side of the book. A trade consists of two executions, one per
+    side. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancelation submitted for a resting order. | The resting order is removed
+    from the book. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancelation submitted for an already executed or non-existent order. | The
+    cancelation request is rejected. |'
+  prefs: []
+  type: TYPE_TB
+- en: Let's suppose that as a newly-hired MVT employee, you just joined the engineering
+    team that is in charge of maintaining and improving the order book. Today is your
+    first day, and you are planning to take most of the morning to calmly skim through
+    the code and get familiar with the application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After checking out the source code repository, you start with the domain model:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: The class and trait definitions in the preceding code represent the business
+    concepts. We especially notice the two kinds of orders (`BuyLimitOrder` and `SellLimitOrder`)
+    that are identified by their unique ID and the associated price assumed to be
+    in USD.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: You may wonder why we decided to create distinct class definitions for `Price`
+    and `OrderId` while they only serve as mere wrappers for a unique attribute (respectively
+    a `BigDecimal` for the price, and a `Long` for the unique ID). Alternatively,
+    we can instead rely directly on the primitive types.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A `BigDecimal` could represent a lot of different things, including a price,
+    but also a tax rate or a latitude on the globe. Using a specific type, named `Price`,
+    gives contextual meaning to the `BigDecimal` and makes sure that the compiler
+    helps us catch possible errors. We believe that it is good practice to always
+    define explicit types to represent business concerns. This technique is part of
+    the best practices known as domain-driven design, and we often apply these principles
+    throughout the book. To learn more about this approach to software development,
+    we recommend the excellent book *Domain-Driven Design: Tackling Complexity in
+    the Heart of Software* ([http://www.amazon.com/Domain-Driven-Design-Tackling-Complexity-Software/dp/0321125215](http://www.amazon.com/Domain-Driven-Design-Tackling-Complexity-Software/dp/0321125215))
+    by Eric Evans.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `OrderBook` module leverages the domain model to define the available commands
+    and the resulting events that can be produced by the book:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s suppose that you are about to look at the implementation of the `handle`
+    function in detail when you notice a message in your IM client from your technical
+    lead, Alice: "Everybody in the conference room. We have a problem in production!"'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Readers with financial domain expertise likely realize that the presented actions
+    reflect a subset of the functionality of an actual financial exchange. One evident
+    example is the absence of quantity from an order. In our examples, we assume each
+    order represents a desire to buy an equal number of shares (for example, 100 shares).
+    Experienced readers are aware that order volume further complicates order book
+    state management, for example, by introducing the notion of partial executions.
+    We are deliberately simplifying the domain to balance working on a realistic problem
+    while minimizing the barrier to comprehension for readers who are new to the domain.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unexpected volatility crushes profits
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Alice and the head trader, Dave, kick off the meeting by summarizing the production
+    problem. You digested a lot of insight into the problem from the meeting. You
+    learned that currently, there is high market volatility and the rapid swings in
+    prices amplify opportunities to generate profitable trades. Unfortunately for
+    MVT, in recent weeks, the high volatility has brought with it unseen levels of
+    order volume. Traders have been flooding the markets with limit orders and cancelations
+    to react to the quickly changing price action. The MVT order book is certified
+    via load testing to handle a maximum of 15,000 orders per second (OPS) with a
+    99^(th) percentile latency of 10 milliseconds (ms). The current market conditions
+    are producing sustained levels of 45,000 OPS, which is destroying tail-end order
+    book latencies. In production, the deployed version of the order book is now producing
+    99^(th) percentile latencies of up to 80 ms and maximum latencies reaching 200
+    ms. In the trading business, a slow reaction can quickly turn a profitable trade
+    into a sizable loss. This is exactly what has been happening at MVT. Typically,
+    in times of volatility, MVT is able to generate healthy returns, but in recent
+    weeks, there have been staggering losses. Our goal is to apply the techniques
+    that we learned in [Chapter 1](ch01.html "Chapter 1.  The Road to Performance"),
+    *The Road to Performance*, to make inroads on the performance woes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The traders at MVT are looking for a quick performance win to take advantage
+    of the current market environment. The traders believe that the market volatility
+    will persist for another week before subsiding. Once the volatility disappears,
+    so do money-making opportunities. Therefore, it's been stressed to the engineering
+    team that an incremental reduction in 99^(th) percentile latency to 40 ms should
+    halt trading strategy losses and actually produce small profits. Once the volatility
+    subsides, more in-depth and extensive performance improvements are welcomed. For
+    now, the clock is ticking, and we need to find a way to stop the losses by improving
+    performance incrementally.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reproducing the problem
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This is not quite the first day you were expecting, but what an exciting challenge
+    ahead of you! We start our investigation of the performance issue by reproducing
+    the problem. As we mentioned in the previous chapter, it is always critical to
+    properly benchmark an application to establish a baseline. The baseline is used
+    to evaluate the effectiveness of any improvement that we may try to implement.
+    We create two simple benchmarks to reproduce the load observed in production and
+    measure the throughput and latency of the system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: But wait, I have not finished studying how `OrderBook` is actually implemented!
+    You are correct! You still have no idea of the implementation of the module. However,
+    production is broken, and we need to act fast! More seriously, this is our way
+    of highlighting an important characteristic of benchmarking that we mentioned
+    in [Chapter 1](ch01.html "Chapter 1.  The Road to Performance"), *The Road to
+    Performance*. Benchmarks treat the application as a black box. You had time to
+    study the module interface, and this is enough to write good benchmarks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Throughput benchmark
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Our first benchmark measures the throughput of our application. The operations
+    team provided us with historical data that was logged from the production environment.
+    This data contains several hundred thousand actual commands that were processed
+    by the order book. We use this sample and replay these messages against a testing
+    environment to get an accurate idea of the system's behavior.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Recall from [Chapter 1](ch01.html "Chapter 1.  The Road to Performance"), *The
+    Road to Performance*, that it is important to run all benchmarks under the exact
+    same environment to be able to compare them. To ensure consistency across tests,
+    we created a command generator that is capable of outputting a static set of commands.
+    We encourage you to review it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is the code for our throughput benchmark, which you can find under the
+    chapter subproject:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: The code is fairly straightforward, so let's walk through it. First, we read
+    our input arguments, the first one being the path to the file that contains our
+    historical data, and the second one is the number of commands that we want to
+    run. Note that in our implementation, if we ask for more commands than what is
+    contained in our static file, the program will just loop through the provided
+    commands. We then warm up the JVM by executing up to 100,000 commands without
+    recording any throughput information. The point of a warm-up is to give the JVM
+    the opportunity to exercise the code and find possible hotspots that can be optimized
+    by the **just-in-time** (**JIT**) compiler.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The JIT compiler is a compiler that runs after the application has been started.
+    It compiles the bytecode (that is, the result of the first compilation by the
+    `javac` compiler) on-the-fly into an optimized form, usually native instructions
+    for the operating system. The JIT is able to optimize the code, based on runtime
+    usage. This is something that the traditional compiler cannot do because it runs
+    before the code can be executed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The next part of the code is where we actually record the throughput. We save
+    the starting timestamp, execute all the commands against an initially empty order
+    book, and record the end timestamp. Our throughput in operations per second is
+    easily calculated by dividing the command count by the elapsed time to execute
+    them all. As our throughput is measured in seconds, millisecond precision is sufficient
+    for our benchmarking needs. Lastly, we print out the interesting results. We can
+    run this benchmark parameterized with 250,000 commands by issuing:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Running the benchmark over a range of command counts yields the following results:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Command count** | **Processing time (seconds)** | **Throughput (operations
+    per second)** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 250,000 | 2.2 | 112,309 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 500,000 | 6.1 | 81,886 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 750,000 | 12.83 | 58,456 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 1,000,000 | 22.56 | 44,328 |'
+  prefs: []
+  type: TYPE_TB
+- en: We can see that when the command count increases, our throughput decreases.
+    One explanation could be that the order book grows in size when receiving more
+    orders, and thus becomes less efficient. At this point, we are able to evaluate
+    the throughput of our application. In the next section, we focus on measuring
+    the latency of the program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Our benchmark and the ones that we will write later in this chapter are naive.
+    It runs the test and the order book in the same JVM. A more realistic example
+    would involve an order book with a server that maintains TCP connections to clients
+    exchanging FIX messages (FIX being the most widely-used protocol in finance) to
+    place or cancel orders. Our benchmark would impersonate one of these clients to
+    simulate production load on our order book. For the sake of simplicity and to
+    allow us to focus on more interesting subjects, we decided to leave this concern
+    aside.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Latency benchmark
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Recall from [Chapter 1](ch01.html "Chapter 1.  The Road to Performance"), *The
+    Road to Performance*, that the latency is the time that it takes for an operation
+    to happen, where the definition of an operation depends on your domain. In our
+    case, we define an operation as the processing of a command from the time it is
+    received to the time a new order book and a corresponding event are generated.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The first latency benchmark
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'The following listing shows a first version of our latency benchmark:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: The beginning of this code is similar to what we had in our throughput benchmark.
+    We use an HdrHistogram to record each operation's latency. The tail-recursive
+    method `sendCommands` is where most of the interesting things happen (we take
+    a closer look at tail-recursion in a later chapter). Our commands are grouped
+    by batches of size and `commandsPerSecond`, meaning that we will send one batch
+    per second. We record the current time before sending a command (`operationStart`)
+    and after receiving a response (`operationEnd`). These timestamps are used to
+    update the histogram.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: HdrHistogram is an efficient implementation of a histogram. This is specifically
+    designed to be used in latency and performance-sensitive applications. It maintains
+    a fixed cost both in space and time. It does not involve memory allocation operations,
+    and its memory footprint is constant. To learn more about HdrHistogram, visit
+    [http://hdrhistogram.org/](http://hdrhistogram.org/).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'At the end, after all batches have been processed, we take a snapshot of the
+    state of the histogram and print interesting metrics. Let''s give this a run:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We exercise our system with a rate of 45,000 operations per second for 10 seconds,
+    and we see a latency of 1 ms for the 99.9^(th) percentile. These are outstanding
+    results! They are also completely wrong. In our hurry to write a latency benchmark,
+    we overlooked a too often ignored issue: the coordinated omission problem.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The coordinated omission problem
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Our benchmark is broken because we measure the time required to process a command
+    without taking into account the time the command had to wait to be processed.
+    This becomes a problem if the previous command took longer than expected to be
+    processed. Take our previous example: we ran 45,000 commands per second, that
+    is, 45 commands per millisecond. What if processing the first 45 commands takes
+    longer than 1 millisecond? The next 45 commands have to wait before being picked
+    up and processed. However, with our current benchmark, we ignore this waiting
+    time. Let''s take an example of a web application serving pages over HTTP. A typical
+    benchmark may record request latency by measuring the elapsed time between the
+    moment a request is handled by the web server and the time a response is ready
+    to be sent back. However, this would not account for the time it took for the
+    web server to read the request and actually send back the response. A better benchmark
+    will measure the latency as the time between the moment the client sent the request
+    and the moment it actually received a response. To learn more about the coordinated
+    omission problem, refer to the discussion thread containing direct links to articles
+    and presentations at [https://groups.google.com/forum/#!msg/mechanical-sympathy/icNZJejUHfE/BfDekfBEs_sJ](https://groups.google.com/forum/#!msg/mechanical-sympathy/icNZJejUHfE/BfDekfBEs_sJ).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: To fix this problem, we need to record `operationStart` not when we start processing
+    a batch of commands, but when the batch of commands should have been processed,
+    regardless of whether the system is late.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The second latency benchmark
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: In our second attempt, we make sure to start the clock to take into account
+    when a command is meant to be sent, as opposed to when it is ready to be processed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The benchmark code remains unchanged except for the recording of latency, which
+    now uses `shouldStart` instead of `operationStart`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After this change, this is the new benchmark output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: The results are very different when compared to our first benchmark. Actually,
+    this new code also has a flaw. This assumes that all the requests sent in the same
+    second are supposed to be processed at the very beginning of this second. While
+    technically possible, it is more likely that these commands will be sent at different
+    times during the second (a few during the first millisecond, some more during
+    the second millisecond, and so on). Our current benchmark probably greatly overestimates
+    our latency by starting the timer too soon for most commands.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The final latency benchmark
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: We will attempt to fix the latest issue and finally come up with a reliable
+    benchmark. At this point, we are trying to address the problem of the distribution
+    of the commands over each second. The best way to solve this issue would be to
+    use real production data. If the recorded commands that we are using for our benchmark
+    had a timestamp attached to them (that is, the moment they were received by the
+    production system), we could replicate the distribution of commands observed in
+    production.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unfortunately, our current order book application does not record the timestamp
+    when logging data. We could go different routes. One option is to randomly send
+    the commands over a second. Another is to assume an even distribution of the commands
+    (that is, the same amount is sent on each millisecond).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We choose to modify the benchmark assuming the latter. To accomplish this goal,
+    we modify the generation of events. As our new strategy distributes commands over
+    time rather than batching commands, for a single instant, the new command list
+    return type changes from `List[(List[Command], Int)]` to `List[(Command, Int)]`.
+    The logic to generate the command list changes to account for our new strategy,
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The creation of our set of commands is a bit more involved. We now calculate
+    an offset for each command, taking into account the amount of milliseconds that
+    should elapse between each command. Our final results with this benchmark are
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: We finally established a good latency benchmark for our system, and sure enough,
+    our results come close to what is currently being observed in production.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Hopefully, this exercise made you reflect on your own production system and
+    what kind of operation you may want to benchmark. The main thing to take away
+    from this section is the importance of properly recording an operation's latency
+    and taking into account the coordinated omission problem. What do you think would
+    be the best way to measure the latency of your system? If you already have benchmarks
+    in place, do they account for the coordinated omission effect?
+  prefs: []
+  type: TYPE_NORMAL
+- en: Locating bottlenecks
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Now that we are able to consistently reproduce the bad performance in production
+    with our benchmark, we have confidence that the impact of any of the changes that
+    we make can be accurately measured. The benchmarks treated the order book as a
+    black box, meaning you have no insight into what areas of the order book are causing
+    our performance woes. If you were previously familiar with this code, you could
+    use your intuitions as a heuristic to make educated guesses about the subcomponents
+    that require a deeper focus. As this is day one for you at MVT, you do not have
+    previous intuition to rely on. Instead of guessing, we will profile the order
+    book to gain deeper insights into various facets of our black box.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The JDK bundles an excellent profiler that is named Flight Recorder. Flight
+    Recorder is free to use in nonproduction environments. Refer to Oracle's license,
+    [http://docs.oracle.com/javacomponents/jmc-5-5/jfr-runtime-guide/about.htm](http://docs.oracle.com/javacomponents/jmc-5-5/jfr-runtime-guide/about.htm),
+    to learn more about commercial usage. The existence of a great profiler is another
+    reason that Scala is a pragmatic choice for production-quality functional programming.
+    Flight Recorder works using internal JVM hooks to record events that are emitted
+    by the JVM at runtime. The events that are captured by Flight Recorder cover memory
+    allocation, thread state changes, IO activity, and CPU activity. To learn more
+    about Flight Recorder internals, refer to Oracle's Flight Recorder documentation: [http://docs.oracle.com/javacomponents/jmc-5-5/jfr-runtime-guide/about.htm#sthref7](http://docs.oracle.com/javacomponents/jmc-5-5/jfr-runtime-guide/about.htm#sthref7).
+    In contrast to third-party profilers, which do not have access to JVM internals,
+    Flight Recorder is able to access data outside of JVM safepoints. A JVM safepoint
+    is a time when all threads are suspended from execution. Safepoints are necessary
+    to coordinate global JVM activities, including stop-the-world garbage collection.
+    To read more about JVM safepoints, check out this excellent blog article by Alexey
+    Ragozin at [http://blog.ragozin.info/2012/10/safepoints-in-hotspot-jvm.html](http://blog.ragozin.info/2012/10/safepoints-in-hotspot-jvm.html).
+    If a profiler is only able to inspect at safepoints, it is likely the profiler
+    is missing useful data points because only a partial picture emerges.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s take our first look inside the order book by setting up a Flight Recorder
+    trial. To expedite cycle time, we set up the profiler via `sbt` while we execute
+    a run of `ThroughputBenchmark` replaying historical data. We set up Flight Recorder
+    with the following JVM parameters:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The max JVM heap size is set to match our benchmark runs, followed by four
+    JVM parameters. The `-XX:+UnlockCommercialFeatures` and `-XX:+FlightRecorder`
+    parameters are required to emit JVM events for Flight Recorder. The Flight Recorder
+    documentation references `-XX:+UnlockDiagnosticVMOptions` and `-XX:+DebugNonSafepoints`
+    to improve sampling quality. These options instruct the compiler to generate metadata
+    that enables Flight Recorder to capture samples that are not at safepoints. The
+    final argument configures Flight Recorder to begin recording as soon as the program
+    starts and to dump profiling results to the provided path when the program exits.
+    In our case, this means that the profile will begin when the benchmark starts
+    and terminate when the benchmark concludes. Alternatively, it is possible to configure
+    Flight Recorder to delay its start time and to record for a fixed time by the
+    following configurations:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: The preceding options configure Flight Recorder to start after five seconds
+    (the `delay` option) and record for one minute (the `duration` option). The result
+    is stored in `/tmp/order-book.jfr`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We are now ready to generate profile results. Next, we run the benchmark configured
+    to replay 2,000,000 requests. The more requests played back, the more opportunities
+    there are for the profiler to capture JVM events. All other things equal, prefer
+    longer profiles over shorter ones. The following output shows the benchmark invocation
+    and the resulting output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To have a look at the profiling results, we use **Java Mission Control** (**JMC**),
+    a free, bundled GUI that supports, among other features, inspecting Flight Recorder
+    results, and running Flight Recorder profile sessions. JMC exists in the same
+    directory as the Java executable, which means that it is accessible on your path
+    by just typing the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Once the GUI loads, open the profiler results by navigating to **File** | **Open**.
+    Browse to the profile results and click on **OK** to load them. As we look at
+    the results, we will build a checklist of questions to consider when reviewing
+    profiler results. These probing questions are intended to make you critically
+    analyze the results. These questions ensure that the experiment results truly
+    address the hypothesis that led to the profile. At the end of this chapter, we
+    will present the questions in a single checklist to make it easier to revisit
+    later.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Did I test with the expected set of resources?
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: If the test environment was set up to use incorrect resources, the results are
+    invalidated. For this reason, it makes sense to double-check the environment setup
+    first. Fortunately, Flight Recorder captures much of this information for you.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The **General** and **System** tab groups are the areas to focus on for this
+    checklist item. In **General**, click on **JVM Information** to identify key JVM
+    facts. In this section, confirm the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| Areas to focus on | Reason to focus on the area |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JVM start time | This is a quick spot check that confirms that this test
+    executed when you think it did. With a few profile results, ensuring that you
+    are reviewing the correct results is trivial. As you collect more information
+    and investigate additional hypotheses, this simple check ensures that you are
+    not conflating results. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JVM version | Variations in JVM version can yield different results. Ensure
+    that you are using the same JVM version as your production environment. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| JVM command-line arguments and JVM flags | It is common to tune the JVM via
+    command-line arguments. Often, the parameterization will change between runs,
+    making it difficult to recall later on which run corresponded to which set of
+    arguments. Reviewing this information provides useful context to review the results.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Java application arguments | Similar to the previous concern, the goal is
+    to ensure that you are confident that you understand the inputs to your test.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: 'To supplement confirmation of JVM configuration, view the **GC Configuration**
+    tab under the **Memory** tab group. This tab details garbage collection configuration,
+    which reflects a combination of user-supplied configuration and JVM defaults.
+    As you are likely aware, small changes in the garbage collection configuration
+    can yield significant runtime performance changes. Given the sensitivity of application
+    performance to garbage collection configuration, you should reflect on each parameter
+    in this tab. Questions to consider while reviewing are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: If I configured this parameter, did the configured value take effect?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If I did not configure this parameter, what effect might tuning this value have?
+    This question often helps you to create hypotheses for future profile runs.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Next, we focus on the **System** tab group. The **Overview** tab itemizes non-JVM
+    resources to make it clear which resources were used to create this profile. Continuing
+    with the theme of questions from the **General** tab group, the overarching goals
+    are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: To confirm whether recorded information matches the resources that you expected
+    to use (for example, does the amount of available RAM match how much you thought
+    was present?)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: To look for unexpected differences between the test resources and a production
+    environment (for example, my local machine uses kernel v3.18.x while production
+    is on an older minor version, v3.17.x)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If you are configuring your system via environment variables, there is an **Environment
+    Variables** tab that should be reviewed. Like the **Overview** tab, you are looking
+    to ensure your test resources are provisioned and configured as you intended.
+    It bears repeating that any unexpected differences in your test resources always
+    invalidate test results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Was the system environment clean during the profiling?
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Once you are comfortable that the appropriate resources were used, the next
+    step is to confirm that only the application being profiled used resources. This
+    is an important diagnostic step prior to reviewing test results because it ensures
+    that the profiled application was truly isolated for the test. Fortunately, Flight
+    Recorder catalogs useful information to answer this question. In the **System**
+    tab group, the **Processes** tab captures all the processes running during the
+    profiling. Scan this list with the following questions in mind:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: When I scan the list of processes, do I see anything that should not be running?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: When I filter by the command-line column and enter `java`, do I see the expected
+    set of JVM applications running?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: When I scan the list of processes, do I see any duplicate processes?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Next, inspect the **Recording** tab under the **General** tab group. Flight
+    Recorder provides the ability to create concurrent recordings. The profile results
+    will contain the union of the concurrent recordings. If there are multiple recordings
+    unexpectedly happening in only one of several runs, then you may not have an apples-to-apples
+    results comparison between recordings.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The next area to focus on is system CPU usage over the duration of the profiling.
+    Within the **General** tab group, select the **Overview** tab. This view displays
+    the CPU usage panel, which provides you with the ability to inspect machine CPU
+    usage throughout the recording. Here, you are looking for unexpected divergences
+    between JVM and machine total CPU usage. The following screenshot depicts a scenario
+    where there is a divergence worth investigating:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Was the system environment clean during the profiling?](img/image_02_001.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Unexpected non-JVM CPU usage highlighted by the CPU Usage panel
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the preceding screenshot, the combination of **JVM + Application (User)**
+    and **JVM + Application (Kernel)** indicates the JVM-under-test's CPU usage, and
+    **Machine Total** indicates machine (that is, JVM-under-test and all other processes)
+    CPU usage. For the majority of this recording, the JVM-under-test CPU usage represents
+    the majority of machine CPU usage. If your application should be the only process
+    using system resources, then the small delta between the small delta between **JVM
+    + Application (User)** and **Machine Total** represents the desired state. The
+    divergences near the middle of the recording period indicate that another process
+    or other processes were using CPU resources. These spikes suggest abnormal behavior
+    that can negatively impact profiling results. It is worth considering what other
+    processes are using system resources and whether or not your test results remain
+    valid.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is a good opportunity to introduce the range navigator, which is the small
+    horizontal widget at the top of each tab containing red marks. The range navigator
+    is a timeline that displays events from the current tab that happen over time
+    with red marks. By default, the entire timeline is selected and the duration of
+    the profiling is displayed above the center of the timeline. You can select a
+    subset of the timeline to zoom in on an area of interest. For example, you may
+    wish to zoom in on CPU usage when the machine CPU usage spikes up. When selecting
+    a subset of the timeline and data is only available for a specific point in time
+    (for example, at start of recording) or the data does not represent a time series
+    (for example, the JVM version), then the data is hidden or replaced with N/A.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A final spot check is to check the used machine physical memory in the **Memory
+    Usage** panel in the **Overview** tab under the **Memory** tab group. During this
+    spot, check whether you are trying to assess if the amount of used machine physical
+    memory is a sensible value. If there is little machine physical memory remaining
+    and the reserved heap is a small fraction of the total machine physical memory,
+    you should pause to consider what other processes are using memory. This scenario
+    is illustrated in the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Was the system environment clean during the profiling?](img/image_02_002.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Non-JVM processes using most of the available memory captured by the Memory
+    Usage panel
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the preceding example, the reserved heap space is 2 GB out of an available
+    16 GB system memory, and 13 GB of system memory is used. This implies that 11
+    GB of system memory is consumed by processes other than the profiled JVM. Unless
+    you expect to have other processes running in your test environment, this type
+    of memory-usage discrepancy warrants further investigation. For example, if your
+    application makes use of off-heap memory, this discrepancy may invalidate your
+    test results because your application may be unable to allocate memory as needed,
+    or may result in excessive system swapping.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Are the JVM's internal resources performing to expectations?
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: We began our profiling checklist with the widest possible criterion by verifying
+    that the resources are provisioned and configured correctly. We continue to tighten
+    the scope of our checklist by focusing on JVM configuration to ensure that test
+    results are created from valid configurations. Now, we introspect JVM internals
+    to continue verifying that the profile has not been compromised.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Nearly all production applications involve multithreading to make better use
+    of multiple CPU cores or to separate I/O intensive work from CPU-centric work.
+    The **Threads** tab group helps you familiarize yourself with the division of
+    labor within the application and provides hints for where it may make sense to
+    look deeper. The following table outlines areas of focus within the **Threads**
+    tab group and highlights questions that you need to consider when you are new
+    or unfamiliar with the application that is being profiled and when you have several
+    profile results to compare:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Focus area** | **New to the application** | **Familiar with the application**
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| **Thread Count** panel in the **Overview** tab | How many total threads exist?
+    Is this different than the count you might expect? For example, if the application
+    is CPU-bound and there are ten times the number of threads than cores, this may
+    be a warning sign that the application is poorly tuned. | Are there qualitative
+    changes in the thread count across profiles? For example, a doubling or halving
+    of the thread count could indicate a configuration error. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| **Hot Threads** panel in the **Hot Threads** tab | Is the distribution of
+    sample counts even, or are there a couple of threads that dominate the sample
+    count? The hottest threads are likely indicative of threads to dive deeper into
+    and also areas of the code you should be most familiar with. | Have there been
+    significant changes in thread sample count distribution? If so, do these changes
+    seem sensible to you? |'
+  prefs: []
+  type: TYPE_TB
+- en: '| **Top Blocking Locks**, **Top Blocked Threads**, and **Top Blocking Threads**
+    in the **Contention** tab | Familiarize yourself with where locks exist and which
+    threads block most often. This can be useful information to bear in mind when
+    considering what factors are affecting critical path performance. | Compared to
+    previous profile results, is there an increase in either the frequency or distribution
+    of thread blocking? Are there new locks appearing in the results? |'
+  prefs: []
+  type: TYPE_TB
+- en: '| **Latency Stack Traces** in the **Latencies** tab | Familiarize yourself
+    with the different maximum latencies per event type to better understand which
+    operations affect the application most. Make mental notes to dive deeper into
+    the more latent sections of the application. | Are maximum latencies qualitatively
+    increasing, decreasing, or similar to previous profile results? When multiple
+    top-level stack traces exist for an event type, consider the ones affecting critical
+    path performance the most. |'
+  prefs: []
+  type: TYPE_TB
+- en: After thoroughly inspecting the **Threads** tab group, you should begin to have
+    a mental picture forming about how this application functions and which areas
+    are likely to be most interesting for further study. We now turn to a topic that
+    links closely to JVM threading: **I/O**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The **I/O** tab group provides valuable information about the profiled application's
+    file and socket access. Like the review of the **Threads** tab group, this section
+    may provide hints that your application has unexpected or undesirable behavior.
+    Before diving into this tab group, pause to consider when or what causes disk
+    reads and writes, and network reads and writes. As you review the **Overview**
+    tab, do you see divergences between your thinking and the profiler results? If
+    so, you should identify why this discrepancy exists and whether it invalidates
+    your test results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'An example of unexpected I/O behavior could be excessive writes to standard
+    out. This might happen accidentally when a debugging statement is left behind.
+    Imagine if this side-effect occurs on the critical path of your application. This
+    will negatively impact profile results and invalidates testing. In Flight Recorder,
+    writes to standard out are captured by a blank write path. The following screenshot
+    shows file write results from a simple, one-off application that repeatedly writes
+    to standard out at a high frequency:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Are the JVM''s internal resources performing to expectations?](img/image_02_003.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Identifying unexpected writes to standard out via the I/O tab group
+  prefs: []
+  type: TYPE_NORMAL
+- en: This example is exaggerated for effect, which is why there is a continuous block
+    of constant writes over time. By inspecting the **File Write** tab, we can also
+    see how much time was spent writing to standard out, how much data was written,
+    and how many writes occurred. In approximately 15 seconds of execution, a whopping
+    40,000 writes took place! The file write stack trace provides invaluable information,
+    allowing us to backtrack to identify which parts of the application are responsible
+    for the writes. Flight Recorder also allows you to view writes by thread. In a
+    production application with dedicated writer threads, you can quickly isolate
+    undesired I/O access.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Monitoring I/O reads and writes presents a good opportunity to discuss how to
+    configure Flight Recorder recording parameters. The `-XX:+FlightRecorderOptions`
+    accepts a parameter named `settings`, which, by default, points to `$JAVA_HOME/jre/lib/jfr/default.jfc`.
+    You can either provide your own configuration file or modify the default file.
+    In this configuration file, you can tweak the events that are recorded by Flight
+    Recorder and the frequency at which to capture certain events. For example, by
+    default, the `java/file_write` event has a threshold of 20 ms. This is a reasonable
+    default, but you may wish to tune the value lower if you are focused on profiling
+    file writes. Setting the threshold lower means that more event samples are captured.
+    Tune carefully because more is not always better. A lower threshold implies higher
+    overhead and more information to sift through.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A final area to investigate is the **Exceptions** tab under the **Code** tab
+    group. Even if you are closely monitoring application logs during a profiling,
+    you may not be persisting the logs for historical analysis. Fortunately, Flight
+    Recorder captures exceptions and errors for review. Scanning the exceptions and
+    errors, take note of how many total exceptions and errors occurred and which ones
+    happen most frequently. Shrink the time horizon with the range navigator to better
+    understand if exceptions and errors are concentrated at application startup, later
+    in the profiling, or uniformly occurring. The timing at which exceptions and errors
+    occur often provides insight into whether or not the root cause is misconfiguration
+    or unexpected runtime behavior. As always, if you notice an alarming number of
+    exceptions or errors, consider invalidating the profile results until you have
+    a deeper understanding about why they are happening.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Where are the CPU bottlenecks?
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'At this stage, we have completed all checks necessary to maximize the likelihood
+    that the profiler results are valid and worth investigating further. Now, we begin
+    arguably the most fun part of the profiling process: identifying CPU bottlenecks.
+    This is an enjoyable process because the profiler gives you a detailed look inside
+    the black box of your application. It is an opportunity to objectively test your
+    hypotheses and mental model of how the application works by comparing with the
+    profiler results. Once you identify the bottlenecks, you will feel a sense of
+    relief that you now know where to pinpoint your next set of changes to improve
+    application performance.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s start on the **Overview** tab of the **Code** tab group. This view is
+    useful to sensitize yourself from the bottom-up on which areas of the code are
+    most expensive. The following figure displays the **Overview** tab for a sample
+    run of the order book:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Where are the CPU bottlenecks?](img/image_02_004.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The Code Overview tab summarizing expensive packages and classes
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this view, the initial goal is to get a sense for the distribution of CPU
+    time in the application. The **Hot Packages** panel quickly makes it clear to
+    us that the order book is heavily reliant upon code from the `scala.collection`
+    package. The **Hot Classes** panel shows that the order book is spending a significant
+    amount of time, approximately 55% of the time, performing some type of iteration
+    operations. In this screenshot, we also see that only a subset of the profile
+    duration is selected with the range navigator. It is often helpful to view different
+    subsets of the profile period to determine if hot spots remain constant over time.
+    In this example, the early part of the profile results are excluded because they
+    include time spent preparing requests to be sent to the order book. Selecting
+    this subset allows us to focus purely on order book operations without pollution
+    from test setup.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It is important to note that the percentage column indicates the amount of
+    application time spent executing in the displayed package and class. This means
+    that this view, along with the **Hot Methods** tab, are bottom-up views rather
+    than top-down views. In a top-down view, the percentage column indicates the sum
+    total amount of time spent in part of a stack trace. This view is captured in
+    the **Call Tree** tab. This distinction is key because these two views help us
+    answer different questions. The following table explores several topics from both
+    perspectives to better understand when each view is most helpful:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Topic** | **Top-down view (Call Tree)** | **Bottom-up view (Overview/Hot
+    Methods)** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Point of view | This is from a macro picture to a micro picture | This is
+    from a micro picture to a macro picture |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Determining hot spots | These are areas of the code base that delegate to
+    the most expensive function calls | These are the most expensive functions |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Example questions best answered by each view |'
+  prefs: []
+  type: TYPE_TB
+- en: Is the order book cancel operation more expensive than adding a resting limit
+    order?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Where is CPU time spent on the critical path?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Did switching from a `Double` price representation to a `BigDecimal` representation
+    create any hot spots?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Relative to the rest of the application, which tree operations are most costly?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '|'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As a first-time profiler of the order book, you now know from the **Overview**
+    tab that the order book makes heavy usage of Scala collections, but you do not
+    yet have a feel for which order book operations are causing the performance to
+    suffer. To deepen your understanding about the cost of different order book operations,
+    you take a top-down view by investigating the **Call Tree** tab:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Where are the CPU bottlenecks?](img/image_02_005.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Investigating order book bottlenecks using Call Tree
+  prefs: []
+  type: TYPE_NORMAL
+- en: Drilling down **Call Tree**, it becomes abundantly clear that the cancelation
+    operation is the bottleneck. Overwhelmingly, CPU time is spent canceling orders
+    rather than adding them. You call over the company's sharpest trader, Dave, to
+    share this finding. Dave's eyes light up when you mention that cancelations are
+    costly. As a trading domain expert, he is well aware that in volatile times, the
+    frequency of cancelations increases significantly as compared to calmer market
+    periods. Dave explains that traders frequently cancel orders in volatile markets
+    to quickly adjust to swinging prices. Cancelations beget cancelations because
+    traders are learning valuable pricing information. Ending the conversation, he
+    tells you to cancel everything else that you are doing (no pun intended!) and
+    focus on improving the performance of order canceling.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You walk away from the conversation feeling better knowing that you have identified
+    the bottleneck that is likely to be the source of MVT trade losses. To get a better
+    feel, you dig a bit deeper into the **Call Tree** to reveal which functions within
+    **Cancel Order** are expensive. This is the process of moving from a macro view
+    to a micro view. You end up looking at the **Call Tree** tab, which is displayed
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Where are the CPU bottlenecks?](img/image_02_006.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Understanding which cancel order functions are the slowest via Call Tree
+  prefs: []
+  type: TYPE_NORMAL
+- en: The **Call Tree** shows that canceling an order involves an invocation of the
+    `RedBlackTree find()` function and the `exists()` function. As you look deeper
+    into the call, you also notice that the percentage column becomes smaller. This
+    is because in a top-down view, the percentage column represents the sum total
+    CPU time spent on a particular function and all the functions beneath it. According
+    to the results, 84.48% of CPU time was spent `executingOrderBook$$anonfun$handleCancelOrder$1.apply()`
+    and the functions deeper in the **Call Tree**. From this view, we also see that
+    of the 84.48% of CPU time, 53.24% of the time is spent `withinAbstractIterator.exists()`
+    and deeper function calls. This looks like the biggest bottleneck, with the invocation
+    of `Queue.iterator()` in second place, taking 31.24% of CPU time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Reflecting on this information, you are curious to start at the bottom, so-to-speak,
+    with the most expensive functions, and work your way through the backtrace to
+    identify affected order book operations. To address your curiosity, you investigate
+    the **Hot Methods** tab and see the following view:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Where are the CPU bottlenecks?](img/image_02_007.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Going from the micro to the macro view with Hot Methods
+  prefs: []
+  type: TYPE_NORMAL
+- en: By an order of magnitude, you discover the same two culprits from the **Call
+    Tree** investigation are the hottest methods. This is a reassuring finding because
+    it builds confidence that changes to the implementation of canceling an order
+    are likely to yield qualitative benefits. As you have not spent any time studying
+    the source code, there is still a significant amount of mystery about the implementation.
+    Taking a step back to consider the situation, you think about the operations being
+    modeled in the abstract. Canceling an order involves finding the existing order
+    that could have any price and then once found, modifying the state of the order
+    book to remove the order. Your intuition suggests that some of these operations
+    are likely linear, or possibly logarithmic at best. As you begin considering what
+    other implementation could be faster, Dave interrupts your thoughts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In a rushed voice, you hear, "Have you fixed the order book? We need to get
+    it deployed now!" Of course, you have no idea how to respond, and the thought
+    of deploying code on day one makes you a bit uneasy. You share your findings with
+    Dave, hoping that your findings will satisfy his appetite for progress and buy
+    you more time to think. Unfortunately, Dave is not thrilled to hear the order
+    book performance mystery remains unsolved, "We're losing money everyday because
+    of this!" You acknowledge that you understand the gravity of the situation and
+    that you are moving as fast as you can. It is your first day, after all! Dave
+    sighs and acknowledges he is being a bit tough, and that his exasperation is causing
+    him to overreact. As the conversation is winding down, Dave mentions his appreciation
+    for how quickly you came up to speed, and he makes some small talk about how he
+    cannot understand how his brand new smartphone, loaded with extra memory, still
+    runs slowly. "Nothing seems to be working quickly anymore!" he exclaims. His mention
+    of memory causes you to have an epiphany.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You remember that you have not yet reviewed memory usage results. You are hoping
+    that there are some easy wins available by tuning the garbage collector to improve
+    performance without making code changes. Before making any changes, you check
+    out the **Memory** tab group for insight into memory allocation patterns.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What are the memory allocation patterns?
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The **Memory** tab group is the final area that remains to dive into for our
+    analysis. Even though we have not spent time looking at the order book source
+    code, the **Code** tab group illustrated the relative costs of the different order
+    of operations. Studying the **Hot Methods** provides insight into the types of
+    objects that are used by various areas of the order book. Looking into the memory
+    allocation patterns, we want to identify young and old generation garbage collection
+    trends and which objects are most and least allocated.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The default Flight Recorder configuration settings do not track object allocations.
+    For a more complete view of memory consumption, the following configuration settings
+    should be enabled:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Allocation-profiling-enabled
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Heap-statistics-enabled
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: gc-enabled-all
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Allocation-profiling-enabled for both `java/object_alloc_in_new_TLAB` and `java/object_alloc_outside_TLAB`
+    events
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Once a profile is generated with all the preceding parameters enabled, you
+    will get a first glimpse into application memory allocation patterns in the **Heap**
+    panel on the **Garbage Collections** tab:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![What are the memory allocation patterns?](img/image_02_008.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Visualizing memory allocation patterns via the Garbage Collections tab
+  prefs: []
+  type: TYPE_NORMAL
+- en: This view shows a shape that is commonly referred to as a sawtooth pattern.
+    There are frequent garbage collections creating a tooth-like pattern in the data
+    as the JVM is constantly freeing young generation memory. Garbage collection tuning
+    is a vast topic that is beyond the scope of this book. We encourage you to dig
+    deeper into this area by reading through this well-written blog post entitled,
+    "Understanding Java Garbage Collection" ([http://www.cubrid.org/blog/dev-platform/understanding-java-garbage-collection/](http://www.cubrid.org/blog/dev-platform/understanding-java-garbage-collection/)).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As shown in the following screenshot, Flight Recorder also provides summary
+    metrics per garbage collection category in the **GC Times** tab:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![What are the memory allocation patterns?](img/image_02_009.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Summarizing garbage per collection event type
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following are some questions worth considering when inspecting a visualization
+    of heap usage and a breakdown of garbage collection per collection type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Question** | **Thoughts to consider** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| On average, does memory usage remain constant, slope downwards, or slope
+    upwards? | An upward slope in memory can point to a memory leak. In this scenario,
+    the heap will grow until the old generation fills, causing an old generation collection.
+    If there is a memory leak, old generation collections will not clear much memory
+    and eventually cause an out of memory error. The order book''s memory usage appears
+    constant for the profiled period. When making this type of judgement, obtain the
+    longest possible profile to ensure you are viewing as complete of a picture as
+    possible. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Do outlier pause times correlate with other major events? | According to
+    the garbage collection breakdown, the maximum collection time is an order of magnitude
+    that is larger than the average collection time. Scan the **Heap** panel for collection
+    pauses that are qualitatively larger than the average. Do you see a pattern among
+    the outliers? Consider your application''s interaction with external systems and
+    the machine it is deployed onto. Could there be an explanation for the occurrence
+    of extreme pauses? It may also be worthwhile to compare outliers across profiles
+    to determine whether the pattern is specific to a single profile or appears to
+    be systemic. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| What is the frequency of collections and how long is a typical collection
+    lasting? | All other things being equal, a lower collection count is preferable
+    because it suggests garbage is generated at a slower rate. That said, a lower
+    collection count can be the result of an increased heap size, which may cause
+    an increase in the average collection time. The takeaway is that inspecting collection
+    count and latencies should be taken with a grain of salt. For this reason, the
+    total garbage collection time metric is insightful. The total collection time
+    reflects the effects of collection frequency and duration. Additionally, this
+    does not suffer from loss like the average collection duration. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| What is the lifespan of an object for important use cases? | While studying
+    these breakdowns of garbage collection performance, it is important to build an
+    intuition for how memory is allocated for different use cases in your application.
+    Understanding this relationship may help you figure out why certain allocation
+    patterns occur. In volatile markets, we expect that the order book has a lot of
+    short-lived objects because traders are frequently canceling orders. In less-volatile
+    markets, we likely expect that the average age of an order resting on the book
+    is higher, which implies more long-lived objects. |'
+  prefs: []
+  type: TYPE_TB
+- en: 'Studying these views of memory allocation provides a summary of memory allocation
+    activity. Investigating the **Allocations** tab provides several different ways
+    to see which parts of the application are applying memory pressure. Flight Recorder
+    provides three allocation views: by class, by thread, and by profile:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![What are the memory allocation patterns?](img/image_02_010.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Correlating high-pressure List allocations via Allocations by Class
+  prefs: []
+  type: TYPE_NORMAL
+- en: Class and profile allocations are shown in the preceding screenshot. Note that
+    Allocations by Thread are skipped in this case because the order book is single-threaded.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![What are the memory allocation patterns?](img/image_02_011.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Confirming memory allocation pressure using top-down Allocation Profile view
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'When you are reviewing these allocation views, you should consider the following
+    questions. As you read through these questions, reflect on how you would answer
+    them to better understand how to improve order book performance:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Question** | **Thoughts to consider** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| When inspecting **Allocation by Class**, is there a positive correlation
+    between classes with heavy collection pressure and classes that are referenced
+    on the critical path? | If you determine that the classes creating the most garbage
+    collection pressure are also often allocated on the critical path, then you have
+    good reason to believe that if you optimize the critical path, there will be both
+    algorithm speed and garbage collection benefits. The order book results indicate
+    that List allocations is the worst offender. The backtrace shows that the allocations
+    are almost entirely coming from handling **Cancel Orders**, which we know to be
+    the bottleneck. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| When inspecting **Allocation by Thread**, what does the distribution of garbage
+    collection pressure look like? | Noting which threads are responsible for generating
+    the most garbage collection pressure can direct you towards areas of the code
+    to focus intently on. Ameliorating garbage collection pressure by the worst offenders
+    will be reflected in the total pause time. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| When drilling down the **Allocation Profile** stacktrace, do known CPU time
+    bottlenecks correlate with high garbage collection pressure? | The order book
+    shows that approximately 99% of garbage is generated when handling **Cancel Orders**.
+    This is affirmation that handling **Cancel Orders** is computationally expensive
+    and is further slowing down the system due to high object allocation rates. Establishing
+    this correlation provides strong evidence that code changes to this section of
+    the code will yield qualitative performance improvements. |'
+  prefs: []
+  type: TYPE_TB
+- en: Trying to save the day
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Knowing that Dave will soon ask you again about improvements to order book
+    performance, you take a few minutes to reflect on your findings. It is clear that
+    handling **Cancel Orders** is both the CPU time and the memory allocation bottleneck.
+    With more time to think about the problem, you are confident you can change the
+    order book implementation to address either concern or possibly both. Unfortunately,
+    time is one thing you do not currently have. One interesting observation from
+    the memory allocations is that most garbage tends to be short-lived in a volatile
+    market. Two inexpensive options to test come to mind:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **JVM memory tuning options** | **Hypothesis** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Switch from the default old generation collection, parallel old, to **Concurrent
+    Mark Sweep** (**CMS**). | The CMS collector is designed to keep your application
+    responsive. Switching to the CMS collector may not improve order book throughput,
+    but it may provide more consistent response latency during highly-volatile market
+    movements. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Increase the new size from the default, approximately one-third of maximum
+    heap size, to three-fourths of maximum heap size. | The order book has 1 GB of
+    heap to store state, and it is currently only using approximately 380 MB to store
+    young generation objects. You want to leverage the intuition that frequent cancels
+    lead to frequent short-lived objects. Increasing the new generation size is a
+    bet that there will be less than 250 MB of tenured objects and that an increased
+    young generation heap improves order book throughput due to more infrequent collections.
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: 'The following table summarizes the results for each experiment:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Setup** | **Command** | **99^(th) percentile in ms** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Original |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: '| 92 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| CMS collector |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: '| 118 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| 750M new size |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: '| 74 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| CMS collector and 750M new size |'
+  prefs: []
+  type: TYPE_TB
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: '| 148 |'
+  prefs: []
+  type: TYPE_TB
+- en: It looks like it will be more complicated than expected to improve the performance
+    of the order book. At least one of the options, increasing the new size, seems
+    to yield a better overall latency. We suggest that you take the time to go over
+    this chapter again and repeat the process of benchmarking and profiling the application
+    with these new sets of options. Observe what new behaviors these JVM options introduce,
+    and try to understand the resulting increase or decrease in latency.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A word of caution
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: We want to take a moment to highlight some context about the profiling results
+    that we interpreted in the previous section. We worked through an example that
+    exhibited multiple real-world concerns. We laid out a pragmatic approach to working
+    through the performance problem that has been applied by your authors at their
+    day jobs. The point to be cautious of is that the order book is likely much simpler
+    than most applications you work on day-to-day. We deliberately chose an example
+    that was complicated enough to illustrate how to work through a performance problem,
+    but also simple enough to understand without hours of code review. In practice,
+    you will possibly need to repeat profiling numerous times, each time testing out
+    a new hypothesis, in order to gain traction with your performance problem. Applying
+    the structured approach that we walked through will ensure that you validate your
+    results before analyzing them, and it will also ensure that you have well-founded
+    evidence to pinpoint where to make changes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A profiling checklist
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'We worked through each item on the profiling checklist throughout the chapter.
+    We present the entire checklist for ease of reference, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Did I test with the expected set of resources?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Was the system environment clean during the profiling?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Are resources internal to the JVM performing as I would expect?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Where are the CPU bottlenecks?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: What are the memory allocation patterns?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Taking big steps with microbenchmarks
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In the coming chapters, we will share techniques from the functional paradigm
+    and from the Scala language that enable you to write more performant software.
+    However, you should not accept our prescriptions at face value. Measuring the
+    performance is the objective way to determine whether the changes improve performance.
+    A microbenchmark is a term used to describe a benchmark that exercises a small,
+    isolated portion of a larger application. As microbenchmarks, by design, test
+    a small piece of code, it is often easier to run a microbenchmark than to benchmark
+    an entire application when a nuanced change is made.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unfortunately, accurately observing the performance of nuanced changes is difficult,
+    particularly on the JVM. Consider these order book-related examples of changes
+    that warrant microbenchmarking.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Replacing the data structure holding resting limit orders with one that handles
+    cancels more efficiently
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Normalizing stock prices from a double representation to an integer representation
+    to perform order matching with a lower overhead
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Determining the performance boost of reordering a set of branch statements to
+    reflect the order you perceive to be accessed most frequently
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'How would you measure the performance before and after each change? You may
+    try writing small benchmark programs, which are similar to the `ThroughputBenchmark`.
+    This approach is likely to provide you with untrustworthy results due to the JVM''s
+    cleverness. The JVM applies a number of heuristics to make runtime optimizations.
+    In a production environment, these changes are welcome because improved performance
+    is always welcomed. However, in a microbenchmark, these changes are not welcomed
+    because they decrease confidence that the microbenchmark is isolating only the
+    nuanced change. Examples of changes the JVM is capable of making include the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Dead-code elimination
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Just-in-time optimization (refer to our earlier sidebar regarding the JIT compiler)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Constant folding (an optimization to avoid the evaluation on each call of a
+    function with constant arguments and a return value dependent on these parameters)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We encourage you to read more about JVM optimizations by reading Oracle's *The
+    Java HotSpot Performance Engine Architecture* ([http://www.oracle.com/technetwork/java/whitepaper-135217.html](http://www.oracle.com/technetwork/java/whitepaper-135217.html)).
+    Given that this is a challenge to isolate small code changes, how can we write
+    a proper microbenchmark? Fortunately, the OpenJDK team recognized these same challenges
+    and introduced a library for this purpose named JMH, the Java microbenchmarking
+    harness ([http://openjdk.java.net/projects/code-tools/jmh/](http://openjdk.java.net/projects/code-tools/jmh/)).
+    JMH is designed for the express purpose of overcoming the limitations that we
+    referenced in order to isolate the performance impact of your changes. The process
+    to work with JMH is similar to other testing libraries. Similar to JUnit, JMH
+    defines a set of annotations to control test setup and execution. Although tests
+    can be run in several ways, we focus on executing tests via the sbt plugin, `sbt-jmh`
+    ([https://github.com/ktoso/sbt-jmh](https://github.com/ktoso/sbt-jmh)), for ease
+    of use. Let's walk through the process of creating, running, and analyzing a microbenchmark
+    with the order book. In future chapters, we will leverage our JMH knowledge to
+    objectively measure the performance impact of prescribed changes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Are there changes that you made recently to your application that could benefit
+    from microbenchmarking? If you did not microbenchmark the change, do you think
+    microbenchmarking could have led you towards alternative solutions?
+  prefs: []
+  type: TYPE_NORMAL
+- en: Microbenchmarking the order book
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Having made progress towards improving performance by tweaking JVM memory settings,
+    you set your eyes towards better understanding cancel performance. Based on the
+    existence of a `scala.collection.immutable.Queue` in the profiler results, you
+    hypothesize that there may be a linear time traversal of a FIFO queue to support
+    order cancels. One way to test this hypothesis is to devise a microbenchmark that
+    measures the cancelation performance in different scenarios. You brainstormed
+    the following scenarios:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Canceling a nonexistent order
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Canceling the first order in line for a price level
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Canceling the last order in line for a price level
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Canceling a nonexistent order happens in the real world when a resting order
+    is crossed before the cancel request arrives. This is an interesting scenario
+    because you are unsure whether there is early termination logic to make this operation
+    cheaper or whether canceling a nonexistent order requires inspecting the entire
+    order book. The remaining two scenarios focus on the fill guarantees that are
+    provided by stock exchanges. When multiple orders are placed at the same price,
+    they are guaranteed to be filled on a first-come, first-served basis. You are
+    speculating that the FIFO queue seen in the profile results is preserving the
+    time ordering of resting orders for a price level. You expect canceling the first
+    order in line to be faster by a linear factor than canceling the final order in
+    line.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After reading through the excellent JMH examples at [http://hg.openjdk.java.net/code-tools/jmh/file/tip/jmh-samples/src/main/java/org/openjdk/jmh/samples/](http://hg.openjdk.java.net/code-tools/jmh/file/tip/jmh-samples/src/main/java/org/openjdk/jmh/samples/)
+    and some deep thinking, you are able to put together the following tests that
+    capture the scenarios that you are interested in. The code is in-full and is followed
+    by a walkthrough, displayed as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: Rather than duplicating JMH documentation, we will focus on the specific segments
+    of interest and expect you to also investigate the JMH samples for additional
+    context. Surveying the `CancelBenchmarks` class, you see the use of annotations
+    to define benchmarks and control the benchmark outputs. Several benchmark modes
+    exist. We are using the throughput mode to measure the number of times the benchmark
+    completes in a fixed period of time. The implementation of each cancellation benchmark
+    differs only by the ID of the order being canceled. Let's switch focus to the `CancelBenchmarks` object,
+    which provides the necessary scaffolding to set up each benchmark.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `CancelBenchmarks` object defines the `BookWithLargeQueue` state, which
+    we observed is an argument to each benchmark. Defining the state that is required
+    by the test is the first step towards parameterizing the benchmark. For this set
+    of tests, we simplify the test setup by creating an order book with only a single
+    price level at $1.00\. We focus on sweeping the number of orders enqueued for
+    the $1.00 price level in order to help identify the runtime behavior that we believe
+    to be operating in linear time. The use of the `param` annotation supplies a set
+    of default values to sweep for enqueued order count. We use the `setup` annotation
+    to instruct JMH to prepare the state of the order book prior to invoking each
+    of the three benchmarks. For each enqueued order count value, JMH invokes the
+    `setup` method to create an order book with the desired number of resting orders
+    at the $1.00 level.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Next, we run the benchmarks from sbt. JMH provides a number of command-line
+    flags that control test configuration, which can be viewed from `sbt` using the
+    following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'All parameters that are configured as annotations can be overridden by supplying
+    the associated command-line flag. The following is a sample invocation of `CancelBenchmarks`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this invocation of JMH, we configure three warm-up iterations, each running
+    for 5 seconds. Warm-up iterations do not count toward the output throughput result.
+    We configure 30 recorded iterations, each lasting 10 seconds to compute throughput.
+    We supply a 1 GB heap size for this test and switch on exiting the benchmark on
+    uncaught exceptions to defend against a regression in the code. Lastly, we parameterize
+    the enqueued order counts that we wish to sweep, indicating that we want to run
+    three warm-up iterations and 30 recorded iterations for an enqueued order count
+    of 1, 10, 50, and 100 orders.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With a single order in the book, we hypothesize that all operations should be
+    approximately equally expensive. As we believe that cancel operations run in linear
+    time, our expectation is that each benchmark should be approximately five times
+    slower when the enqueued order count is 50 than when the count is 10\. We cap
+    testing at 100 enqueued orders because in discussion with Dave, we learned that
+    in his experience, he has never analyzed a book with more than 85 orders in a
+    level. Capping at 100 orders ensures that we understand performance characteristics
+    at a level that we do not expect to see in production but could conceivably occur.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Imagine that you are writing a microbenchmark for the most performance-sensitive
+    use case in your system. What variables would be important to sweep to have a
+    complete understanding of how the system performs in this use case? How would
+    you go about identifying a base case, step values, and a maximum value to parameterize
+    your tests? Consider speaking with domain experts or using production data to
+    guide decision making.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After executing the test, we see the following results summarized, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Benchmark** | **Enqueued order count** | **Throughput (ops per second)**
+    | **Error (ops per second)** | **Error as percentage of throughput** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- | --- | --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel first order | 1 | 6,688,878.23 | Â±351,518.041 | Â±5.26 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel first order | 10 | 2,202,233.77 | Â±103,557.824 | Â±4.70 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel first order | 50 | 555,592.56 | Â±18,632.547 | Â±3.35 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel first order | 100 | 305,615.75 | Â±14,345.296 | Â±4.69 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel last order | 1 | 7,365,825.52 | Â±284,773.895 | Â±3.87 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel last order | 10 | 1,691,196.48 | Â±54,903.319 | Â±3.25 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel last order | 50 | 509,339.60 | Â±15,582.846 | Â±3.06 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel last order | 100 | 242,049.87 | Â±8,967.785 | Â±3.70 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel nonexistent order | 1 | 13,285,699.96 | Â±374,134.340 | Â±2.82 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel nonexistent order | 10 | 3,048,323.44 | Â±140,983.947 | Â±4.62 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel nonexistent order | 50 | 772,034.39 | Â±16,535.652 | Â±2.14 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Cancel nonexistent order | 100 | 404,647.90 | Â±3,889.509 | Â±0.96 |'
+  prefs: []
+  type: TYPE_TB
+- en: 'From this result set, we can answer a number of interesting questions that
+    help us characterize order book performance. Here are some questions for you to
+    answer by inspecting the results:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Does the base case of a single enqueued order result in qualitatively similar
+    performance across the three benchmarks?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Does each benchmark exhibit linear throughput degradation as enqueued order
+    count increases?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: As enqueued order count increases, are there changes in relative performance
+    between benchmarks (for example, between canceling the first and last order when
+    the enqueued order count is 100 instead of 10)?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Does it appear that there is early termination logic in place when evaluating
+    nonexistent orders?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'In addition to these questions that are specific to the order book, it is critical
+    to ask yourself the following questions of any benchmark result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Do the results pass a test of reasonableness?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: What could have gone wrong with the test (that is, producing invalid results),
+    and have we put in place safeguards to prevent these shortcomings from occurring?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Errors in measurement or test setup destroy the integrity of your results. These
+    questions aim to make you critically analyze the microbenchmark results. The test
+    of reasonableness requires you to develop a mental model for the executed test.
+    Using the order book, we need to consider what is a plausible number of cancel
+    operations per second. One way to answer this question is to take one of the throughput
+    results, for example, cancel last order with 50 queued orders, and compute the
+    average milliseconds per operation. This is useful because we have a sense for
+    the cost on a per-operation basis from earlier benchmarks; 509,339.595 cancels
+    per second translates to approximately 0.002 ms per operation. This result might
+    be surprisingly low, but bear in mind these results do not account for coordinated
+    omission because there is no targeted throughput rate (that is, the test attempts
+    to send as many cancels per second as possible). The other reason the cost might
+    be lower than expected is because there is only one price level in the book. Typically,
+    the book contains numerous price levels on the buying and selling sides. This
+    may direct us toward designing benchmarks that sweep the number of price levels
+    to better inform our understanding of the cost of managing multiple price levels.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The second question forces us to critically analyze the test setup and the test
+    methodology. For example, how do we know that the setup function produces the
+    intended order book? One way to defend against this is to add assertions to enforce
+    intended constraints. Another concern to verify is that each cancel invocation
+    in the benchmark yields the intended event. Adding assertions to the benchmark
+    for a single trial may address this concern. However, leaving assertions in the
+    benchmark code is likely to affect performance, and this should be used sparingly,
+    if at all. For added safety, it could make sense to write unit tests for the scenarios
+    that are being tested to ensure that the desired behavior occurs and ensure that
+    the unit test and performance test code are shared.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When interpreting JMH results, it is important to consider the significance
+    of the computed error. JMH computes error by constructing a confidence interval
+    from a benchmark's iterations. The confidence interval assumes that the results
+    follow a normal distribution, and the error represents the range of the computed
+    99.9% confidence interval. This suggests that all other things being equal, running
+    more benchmark iterations improves your confidence in the results. The final column
+    in the results table is illustrative of the variability of the results. The lower
+    the variability, the more inclined you should be to trust the results. High result
+    variability suggests that there is an error in measurement or that there is something
+    inhibiting your ability to measure true performance characteristics. This is often
+    a warning sign that you need to revisit your testing methodology and that you
+    should put little trust in the results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: For our example, we ran 30 iterations to record throughput information. What
+    do you think are the implications of running with fewer iterations? Alternatively,
+    consider the effects of running fewer iterations with increased duration. For
+    example, 10 iterations, each lasting 30 seconds. Build a hypothesis and then run
+    JMH to see the results. Developing awareness for the sensitivity of different
+    benchmark parameters is another way to build an intuition for how to approach
+    future benchmarks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As our JMH configuration does not account for coordinated omission and instead
+    sends a firehose of cancel requests to the order book, we should focus on the
+    relative results rather than the absolute throughput values. The order book-related
+    questions that are posed after the results hone in on relative differences that
+    should be visible independent of the testing environment (for example, available
+    cores or RAM). There is value in focusing on relative concerns because the answers
+    should be more robust to change. If future code changes cause significant relative
+    changes, for example, causing an exponential instead of linear cancel performance
+    degradation, you can have higher confidence that this degradation is due to a
+    code change instead of an environmental change.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this section, we saw how to set up, execute, and interpret a JMH microbenchmark.
+    Along the way, we looked at the shortcomings of microbenchmarking without JMH,
+    and the concerns to be aware of during benchmark result analysis. We've only scratched
+    the surface of the capabilities of JMH. We will build on this introduction to
+    JMH in future chapters.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Congratulations, in this chapter you helped improve MVT order book performance,
+    which is going to directly translate to increased company profits and reduced
+    losses! Along the way, you took an in-depth look at how to benchmark and profile
+    on the JVM and what shortcomings to avoid. You also worked through a JMH microbenchmarking
+    primer that will allow you to objectively assess performance improvements in future
+    chapters. In the next chapter, we will look at how Scala language features can
+    be used to write functional software, and we will assess their performance impacts
+    using the skills that we learned in this chapter.
+  prefs: []
+  type: TYPE_NORMAL

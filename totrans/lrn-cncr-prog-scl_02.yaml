@@ -1,0 +1,1564 @@
+- en: Chapter 2. Concurrency on the JVM and the Java Memory Model
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '|   | *"All non-trivial abstractions, to some degree, are leaky."* |   |'
+  prefs: []
+  type: TYPE_TB
+- en: '|   | --*Jeff Atwood* |'
+  prefs: []
+  type: TYPE_TB
+- en: Since its inception, Scala has run primarily on top of JVM, and this fact has
+    driven the design of many of its concurrency libraries. The memory model in Scala,
+    its multithreading capabilities, and its inter-thread synchronization are all
+    inherited from the JVM. Most, if not all, higher-level Scala concurrency constructs
+    are implemented in terms of the low-level primitives presented in this chapter.
+    These primitives are the basic way to deal with concurrency-in a way, the APIs
+    and synchronization primitives in this chapter constitute the assembly of concurrent
+    programming on the JVM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In most cases, you should avoid low-level concurrency in place of higher-level
+    constructs introduced later, but we felt it was important for you to understand
+    what a thread is, that a guarded block is better than busy-waiting, or why a memory
+    model is useful. We are convinced that this is essential for a better understanding
+    of high-level concurrency abstractions. Despite the popular notion that an abstraction
+    that requires knowledge about its implementation is broken, understanding the
+    basics often proves very handy- in practice, all abstractions are to some extent
+    leaky.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In what follows, we not only explain the cornerstones of concurrency on JVM,
+    but also discuss how they interact with some Scala-specific features. In particular,
+    we will cover the following topics in this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating and starting threads and waiting for their completion
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Communication between threads using object monitors and the `synchronized` statement
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to avoid busy-waiting using guarded blocks
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The semantics of volatile variables
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The specifics of the **Java Memory Model** (**JMM**), and why the JMM is important
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In the following section, we will study how to use threads--the basic way to
+    express concurrent computations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Processes and threads
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In modern, pre-emptive, multitasking operating systems, the programmer has little
+    or no control over the choice of processor on which the program will be executed.
+    In fact, the same program might run on many different processors during its execution
+    and sometimes even simultaneously on several processors. It is usually the task
+    of the **Operating System** (**OS**) to assign executable parts of the program
+    to specific processors--this mechanism is called **multitasking**, and it happens
+    transparently for the computer user.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Historically, multitasking was introduced to operating systems to improve the
+    user experience by allowing multiple users or programs to use resources of the
+    same computer simultaneously. In cooperative multitasking, programs were able
+    to decide when to stop using the processor and yield control to other programs.
+    However, this required a lot of discipline on the programmer's part and programs
+    could easily give the impression of being unresponsive. For example, a download
+    manager that starts downloading a file must take care in order to yield control
+    to other programs. Blocking the execution until a download finishes will completely
+    ruin the user experience. Most operating systems today rely on pre-emptive multitasking,
+    in which each program is repetitively assigned slices of execution time at a specific
+    processor. These slices are called **time slices**. Thus, multitasking happens
+    transparently for the application programmer as well as the user.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The same computer program can be started more than once, or even simultaneously
+    within the same OS. A **process** is an instance of a computer program that is
+    being executed. When a process starts, the OS reserves a part of the memory and
+    other computational resources and associates them with a specific computer program.
+    The OS then associates the processor with the process, and the process executes
+    during one-time slice. Eventually, the OS gives other processes control over the
+    processor. Importantly, the memory and other computational resources of one process
+    are isolated from the other processes: two processes cannot read each other''s
+    memory directly or simultaneously use most of the resources.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Most programs are comprised of a single process, but some programs run in multiple
+    processes. In this case, different tasks within the program are expressed as separate
+    processes. Since separate processes cannot access the same memory areas directly,
+    it can be cumbersome to express multitasking using multiple processes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Multitasking was important long before recent years when multicore computers
+    became mainstream. Large programs such as web browsers are divided into many logical
+    modules. A browser's download manager downloads files independent of rendering
+    the web page or updating the HTML **Document Object Model** (**DOM**). While the
+    user is browsing a social networking website, the file download proceeds in the
+    background; but both independent computations occur as part of the same process.
+    These independent computations occurring in the same process are called **threads**.
+    In a typical operating system, there are many more threads than processors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Every thread describes the current state of the program **stack** and the program
+    **counter** during program execution. The program stack contains a sequence of
+    method invocations that are currently being executed, along with the local variables
+    and method parameters of each method. The program counter describes the position
+    of the current instruction in the current method. A processor can advance the
+    computation in some thread by manipulating the state of its stack or the state
+    of the program objects and executing the instruction at the current program counter.
+    When we say that a thread performs an action such as writing to a memory location,
+    we mean that the processor executing that thread performs that action. In pre-emptive
+    multitasking, thread execution is scheduled by the operating system. A programmer
+    must assume that the processor time assigned to their thread is unbiased towards
+    other threads in the system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**OS threads** are a programming facility provided by the OS, usually exposed
+    through an OS-specific programming interface. Unlike separate processes, separate
+    OS threads within the same process share a region of memory, and communicate by
+    writing to and reading parts of that memory. Another way to define a process is
+    to define it as a set of OS threads along with the memory and resources shared
+    by these threads.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Based on the preceding discussion about the relationships between processes
+    and threads, a summary of a typical OS is depicted in the following simplified
+    diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Processes and threads](img/image_02_001.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The preceding diagram shows an OS in which multiple processes are executing
+    simultaneously. Only the first three processes are shown in the illustration.
+    Each process is assigned a fixed region of computer memory. In practice, the memory
+    system of the OS is much more complex, but this approximation serves as a simple
+    mental model.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Each of the processes contains multiple OS threads, two of which are shown for
+    each process. Currently, **Thread 1** of **Process 2** is executing on **CPU Core
+    1**, and **Thread 2** of **Process 3** is executing on **CPU Core 2**. The OS
+    periodically assigns different OS threads to each of the CPU cores to allow the
+    computation to progress in all the processes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Having shown the relationship between the OS threads and processes, we turn
+    our attention to see how these concepts relate to the **Java Virtual Machine**
+    (**JVM**), the runtime on top of which Scala programs execute.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Starting a new JVM instance always creates only one process. Within the JVM
+    process, multiple threads can run simultaneously. The JVM represents its threads
+    with the `java.lang.Thread` class. Unlike runtimes for languages such as Python,
+    the JVM does not implement its custom threads. Instead, each Java thread is directly
+    mapped to an OS thread. This means that Java threads behave in a very similar
+    way to the OS threads, and the JVM depends on the OS and its restrictions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Scala is a programming language that is by default compiled to the JVM bytecode,
+    and the Scala compiler output is largely equivalent to that of Java from the JVM's
+    perspective. This allows Scala programs to transparently call Java libraries,
+    and in some cases, even vice versa. Scala reuses the threading API from Java for
+    several reasons. First, Scala can transparently interact with the existing Java
+    thread model, which is already sufficiently comprehensive. Second, it is useful
+    to retain the same threading API for compatibility reasons, and there is nothing
+    fundamentally new that Scala can introduce with respect to the Java thread API.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The rest of this chapter shows how to create JVM threads using Scala, how they
+    can be executed, and how they can communicate. We will show and discuss several
+    concrete examples. Java aficionados, already well-versed in this subject, might
+    choose to skip the rest of this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating and starting threads
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Every time a new JVM process starts, it creates several threads by default.
+    The most important thread among them is the **main thread**, which executes the
+    `main` method of the Scala program. We will show this in the following program,
+    which gets the name of the current thread and prints it to the standard output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'On the JVM, thread objects are represented with the `Thread` class. The preceding
+    program uses the static `currentThread` method to obtain a reference to the current
+    thread object, and stores it to a local variable named `t`. It then calls the
+    `getName` method to obtain the thread''s name. If you are running this program
+    from **Simple Build Tool** (SBT) with the `run` command, as explained in [Chapter
+    1](ch01.html "Chapter 1. Introduction"), *Introduction*, you should see the following
+    output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Normally, the name of the main thread is just the `main` method. The reason
+    we see a different name is because SBT started our program on a separate thread
+    inside the SBT process. To ensure that the program runs inside a separate JVM
+    process, we need to set SBT''s `fork` setting to `true`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Invoking the SBT `run` command again should give the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Every thread goes through several **thread states** during its existence. When
+    a `Thread` object is created, it is initially in the **new** state. After the
+    newly created thread object starts executing, it goes into the **runnable** state.
+    After the thread is done executing, the thread object goes into the **terminated
+    state**, and cannot execute anymore.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Starting an independent thread of computation consists of two steps. First,
+    we need to create a `Thread` object to allocate the memory for the stack and thread
+    state. To start the computation, we need to call the `start` method on this object.
+    We show how to do this in the following example application called `ThreadsCreation`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: When a JVM application starts, it creates a special thread called the **main
+    thread** that executes the method called `main` in the specified class, in this
+    case, the `ThreadsCreation` object. When the `App` class is extended, the `main`
+    method is automatically synthesized from the object body. In this example, the
+    main thread first creates another thread of the `MyThread` type and assigns it
+    to `t`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Next, the main thread starts `t` by calling the `start` method. Calling the
+    `start` method eventually results in executing the `run` method from the new thread.
+    First, the OS is notified that `t` must start executing. When the OS decides to
+    assign the new thread to some processor, this is largely out of the programmer's
+    control, but the OS must ensure that this eventually happens. After the main thread
+    starts the new thread `t`, it calls its `join` method. This method halts the execution
+    of the main thread until `t` completes its execution. We say that the `join` operation
+    puts the main thread into the **waiting state** until `t` terminates. Importantly,
+    the waiting thread relinquishes its control over the processor, and the OS can
+    assign that processor to some other thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Waiting threads notify the OS that they are waiting for some condition and cease
+    spending CPU cycles, instead of repetitively checking that condition.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the meantime, the OS finds an available processor and instructs it to run
+    the child thread. The instructions that a thread must execute are specified by
+    overriding its `run` method. The `t` instance of the `MyThread` class starts by
+    printing the "`New thread running."` text to the standard output and then terminates.
+    At this point, the operating system is notified that `t` is terminated and eventually
+    lets the main thread continue the execution. The OS then puts the main thread
+    back into the running state, and the main thread prints `"New thread joined."`.
+    This is shown in the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Creating and starting threads](img/image_02_002.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: It is important to note that the two outputs `"New thread running."` and `"New
+    thread joined."` are always printed in this order. This is because the `join`
+    call ensures that the termination of the `t` thread occurs before the instructions
+    following the `join` call.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'When running the program, it is executed so fast that the two `println` statements
+    occur almost simultaneously. Could it be that the ordering of the `println` statements
+    is just an artifact in how the OS chooses to execute these threads? To verify
+    the hypothesis that the main thread really waits for `t` and that the output is
+    not just because the OS is biased to execute `t` first in this particular example,
+    we can experiment by tweaking the execution schedule. Before we do that, we will
+    introduce a shorthand to create and start a new thread; the current syntax is
+    too verbose! The new `thread` method simply runs a block of code in a newly started
+    thread. This time, we will create the new thread using an anonymous thread class
+    declared inline at the instantiation site:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `thread` method takes a block of code body, creates a new thread that executes
+    this block of code in its `run` method, starts the thread, and returns a reference
+    to the new thread so that the clients can call `join` on it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating and starting threads using the `thread` statement is much less verbose.
+    To make the examples in this chapter more concise, we will use the `thread` statement
+    from now on. However, you should think twice before using the `thread` statement
+    in production projects. It is prudent to correlate the syntactic burden with the
+    computational cost; lightweight syntax can be mistaken for a cheap operation and
+    creating a new thread is relatively expensive.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can now experiment with the OS by making sure that all the processors are
+    available. To do this, we will use the static `sleep` method on the `Thread` class,
+    which postpones the execution of the thread that is being currently executed for
+    the specified number of milliseconds. This method puts the thread into the **timed
+    waiting** state. The OS can reuse the processor for other threads when `sleep`
+    is called. Still, we will require a sleep time much larger than the time slice
+    on a typical OS, which ranges from 10 to 100 milliseconds. The following code
+    depicts this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: The main thread of the `ThreadSleep` application creates and starts a new `t`
+    thread that sleeps for one second, then outputs some text, and repeats this two
+    or more times before terminating. The main thread calls `join` as before and then
+    prints `"New thread joined."`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note that we are now using the `log` method described in [Chapter 1](ch01.html
+    "Chapter 1. Introduction"), *Introduction*. The `log` method prints the specified
+    string value along with the name of the thread that calls the `log` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Regardless of how many times you run the preceding application, the last output
+    will always be `"New thread joined."`. This program is **deterministic**: given
+    a particular input, it will always produce the same output, regardless of the
+    execution schedule chosen by the OS.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, not all the applications using threads will always yield the same
+    output if given the same input. The following code is an example of a **nondeterministic**
+    application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'There is no guarantee that the `log("...")` statements in the main thread occur
+    before or after the `log` call in the `t` thread. Running the application several
+    times on a multicore processor prints `"..."` before, after, or interleaved with
+    the output by the `t` thread. By running the program, we get the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Running the program again results in a different order between these outputs:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: Most multithreaded programs are nondeterministic, and this is what makes multithreaded
+    programming so hard. There are multiple possible reasons for this. First, the
+    program might be too big for the programmer to reason about its determinism properties,
+    and interactions between threads could simply be too complex. But some programs
+    are inherently non-deterministic. A web server has no idea which client will be
+    the first to send a request for a web page. It must allow these requests to arrive
+    in any possible order and respond to them as soon as they arrive. Depending on
+    the order in which the clients prepare inputs for the web server, they can behave
+    differently even though the requests might be the same.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Atomic execution
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'We have already seen one basic way in which threads can communicate: by waiting
+    for each other to terminate. The information that the joined thread delivers is
+    that it has terminated. In practice, however, this information is not necessarily
+    useful; for example, a thread that renders one page in a web browser must inform
+    the other threads that a specific URL has been visited, so as to render such a
+    visited URL in a different color.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'It turns out that the `join` method on threads has an additional property.
+    All the writes to memory performed by the thread being joined occur before the
+    `join` call returns and are visible to threads that call the `join` method. This
+    is illustrated by the following example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: The main thread will never print `null`, as the call to `join` always occurs
+    before the `log` call, and the assignment to `result` occurs before the termination
+    of `t`. This pattern is a very basic way in which the threads can use their results
+    to communicate with each other.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, this pattern only allows very restricted one-way communication, and
+    it does not allow threads to mutually communicate during their execution. There
+    are many use cases for an unrestricted two-way communication. One example is assigning
+    unique identifiers, in which a set of threads concurrently choose numbers such
+    that no two threads produce the same number. We might be tempted to proceed as
+    in the following incorrect example. We start by showing the first half of the
+    program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the preceding code snippet, we first declare a `uidCount` variable that
+    will hold the last unique identifier picked by any thread. The threads will call
+    the `getUniqueId` method to compute the first unused identifier and then update
+    the `uidCount` variable. In this example, reading `uidCount` to initialize `freshUid`
+    and assigning `freshUid` back to `uniqueUid` do not necessarily happen together.
+    We say that the two statements do not happen **atomically** since the statements
+    from the other threads can interleave arbitrarily. We next define a `printUniqueIds`
+    method such that, given a number `n`, the method calls `getUniqueId` to produce
+    `n` unique identifiers and then prints them. We use Scala for-comprehensions to
+    map the range `0 until n` to unique identifiers. Finally, the main thread starts
+    a new `t` thread that calls the `printUniqueIds` method, and then calls `printUniqueIds`
+    concurrently with the `t` thread as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running this application several times reveals that the identifiers generated
+    by the two threads are not necessarily unique; the application prints `Vector(1,
+    2, 3, 4, 5)` and `Vector(1, 6, 7, 8, 9)` in some runs, but not in the others!
+    The outputs of the program depend on the timing at which the statements in separate
+    threads get executed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: A **race condition** is a phenomenon in which the output of a concurrent program
+    depends on the execution schedule of the statements in the program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A race condition is not necessarily an incorrect program behavior. However,
+    if some execution schedule causes an undesired program output, the race condition
+    is considered to be a program error. The race condition from the previous example
+    is a program error, because the `getUniqueId` method is not atomic. The `t` thread
+    and the main thread sometimes concurrently calls `getUniqueId`. In the first line,
+    they concurrently read the value of `uidCount`, which is initially `0`, and conclude
+    that their own `freshUid` variable should be `1`. The `freshUid` variable is a
+    local variable, so it is allocated on the thread stack; each thread sees a separate
+    instance of that variable. At this point, the threads decide to write the value
+    `1` back to `uidCount` in any order, and both return a non-unique identifier `1`.
+    This is illustrated in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Atomic execution](img/image_02_003.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'There is a mismatch between the mental model that most programmers inherit
+    from sequential programming and the execution of the `getUniqueId` method when
+    it is run concurrently. This mismatch is grounded in the assumption that `getUniqueId`
+    executes atomically. Atomic execution of a block of code means that the individual
+    statements in that block of code executed by one thread cannot interleave with
+    those statements executed by another thread. In atomic execution, the statements
+    can only be executed all at once, which is exactly how the `uidCount` field should
+    be updated. The code inside the `getUniqueId` function reads, modifies, and writes
+    a value, which is not atomic on the JVM. An additional language construct is necessary
+    to guarantee atomicity. The fundamental Scala construct that allows this sort
+    of atomic execution is called the `synchronized` statement, and it can be called
+    on any object. This allows us to define `getUniqueId` as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `synchronized` call ensures that the subsequent block of code can only execute
+    if there is no other thread simultaneously executing this synchronized block of
+    code, or any other synchronized block of code called on the same `this` object.
+    In our case, the `this` object is the enclosing singleton object, `ThreadsUnprotectedUid`,
+    but in general, this can be an instance of the enclosing class or trait.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Two concurrent invocations of the `getUniqueId` method are shown in the following
+    figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Atomic execution](img/image_02_004.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: We can also call `synchronized` and omit the `this` part, in which case the
+    compiler will infer what the surrounding object is, but we strongly discourage
+    you from doing so. Synchronizing on incorrect objects results in concurrency errors
+    that are not easily identified.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Always explicitly declare the receiver for the `synchronized` statement doing
+    so protects you from subtle and hard to spot program errors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The JVM ensures that the thread executing a `synchronized` statement invoked
+    on some `x` object is the only thread executing any `synchronized` statement on
+    that particular `x` object. If a `T` thread calls `synchronized` on `x`, and there
+    is another `S` thread calling `synchronized` on `x`, then the `T` thread is put
+    into the **blocked** state. Once the `S` thread completes its `synchronized` statement,
+    the JVM can choose the `T` thread to execute its own `synchronized` statement.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Every object created inside the JVM has a special entity called an **intrinsic
+    lock** or a **monitor**, which is used to ensure that only one thread is executing
+    some `synchronized` block on that object. When a thread starts executing the `synchronized`
+    block, we say that the thread **gains ownership** of the `x` monitor, or alternatively,
+    **acquires** it. When a thread completes the `synchronized` block, we say that
+    it **releases** the monitor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `synchronized` statement is one of the fundamental mechanisms for inter-thread
+    communication in Scala and on the JVM. Whenever there is a possibility that multiple
+    threads access and modify a field in some object, you should use the `synchronized`
+    statement.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reordering
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'The `synchronized` statement is not without a price: writes to fields such
+    as `uidCount`, which are protected by the `synchronized` statement are usually
+    more expensive than regular unprotected writes. The performance penalty of the
+    `synchronized` statement depends on the JVM implementation, but it is usually
+    not large. You might be tempted to avoid using `synchronized` when you think that
+    there is no bad interleaving of program statements, like the one we saw previously
+    in the unique identifier example. Never do this! We will now show you a minimal
+    example in which this leads to serious errors.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s consider the following program, in which two threads, `t1` and `t2`,
+    access a pair of Boolean variables, `a` and `b`, and a pair of Integer variables,
+    `x` and `y`. The `t1` thread sets the variable `a` to `true`, and then reads the
+    value of `b`. If the value of `b` is `true`, the `t1` thread assigns `0` to `y`,
+    and otherwise it assigns `1`. The `t2` thread does the opposite: it first assigns
+    `true` to the variable `b`, and then assigns `0` to `x` if `a` is `true`, and
+    `1` otherwise. This is repeated in a loop `100000` times, as shown in the following
+    snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: This program is somewhat subtle, so we need to carefully consider several possible
+    execution scenarios. By analyzing the possible interleaving of the instructions
+    of the `t1` and `t2` threads, we can conclude that if both threads simultaneously
+    assign to `a` and `b`, then they will both assign `0` to `x` and `y`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This outcome indicates that both the threads started at almost the same time,
+    and is shown on the left in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Reordering](img/image_02_005.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Alternatively, let's assume that the `t2` thread executes faster. In this case,
+    the `t2` thread sets the variable `b` to `true`, and proceeds to read the value
+    of `a`. This happens before the assignment to `a` by the `t1` thread, so the `t2`
+    thread reads the value `false`, and assigns `1` to `x`. When the `t1` thread executes,
+    it sees that the value of `b` is `true`, and assigns `0` to `y`. This sequence
+    of events is shown on the right in the preceding figure. Note that the case where
+    the `t1` thread starts first results in a similar assignment where `x = 0` and
+    `y = 1`, so it is not shown in the figure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The conclusion is that regardless of how we reorder the execution of the statements
+    in the `t1` and `t2` threads, the output of the program should never be such that
+    `x = 1` and `y = 1` simultaneously. Thus, the assertion at the end of the loop
+    never throws an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, after running the program several times, we get the following output,
+    which indicates that both `x` and `y` can be assigned the value `1` simultaneously:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: This result is scary and seems to defy common sense. Why can't we reason about
+    the execution of the program the way we did? The answer is that by the JMM specification,
+    the JVM is allowed to reorder certain program statements executed by one thread
+    as long as it does not change the serial semantics of the program for that particular
+    thread. This is because some processors do not always execute instructions in
+    the program order. Additionally, the threads do not need to write all their updates
+    to the main memory immediately, but can temporarily keep them cached in registers
+    inside the processor. This maximizes the efficiency of the program and allows
+    better compiler optimizations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How then should we reason about multithreaded programs? The error we made when
+    analyzing the example is that we assumed that the writes by one thread are immediately
+    visible to all the other threads. We always need to apply proper synchronization
+    to ensure that the writes by one thread are visible to another thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `synchronized` statement is one of the fundamental ways to achieve proper
+    synchronization. Writes by any thread executing the `synchronized` statement on
+    an `x` object are not only atomic but also visible to threads that execute `synchronized`
+    on `x`. Enclosing each assignment in the `t1` and `t2` threads in a `synchronized`
+    statement makes the program behave as expected.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the `synchronized` statement on some object `x` when accessing (reading
+    or modifying) a state shared between multiple threads. This ensures that at most,
+    a single thread is at any time executing a `synchronized` statement on `x`. It
+    also ensures that all the writes to the memory by the `T` thread are visible to
+    all the other threads that subsequently execute `synchronized` on the same object
+    `x`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the rest of this chapter and in [Chapter 3](ch03.html "Chapter 3. Traditional
+    Building Blocks of Concurrency"), *Traditional Building Blocks of Concurrency*,
+    we will see additional synchronization mechanisms, such as volatile and atomic
+    variables. In the next section, we will take a look at other use cases of the
+    `synchronized` statement and learn about object monitors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Monitors and synchronization
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this section, we will study inter-thread communication using the `synchronized`
+    statement in more detail. As we saw in the previous sections, the `synchronized`
+    statement serves both to ensure the visibility of writes performed by different
+    threads, and to limit concurrent access to a shared region of memory. Generally
+    speaking, a synchronization mechanism that enforces access limits on a shared
+    resource is called a **lock**. Locks are also used to ensure that no two threads
+    execute the same code simultaneously; that is, they implement **mutual exclusion**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As mentioned previously, each object on the JVM has a special built-in **monitor
+    lock**, also called the **intrinsic lock**. When a thread calls the `synchronized`
+    statement on an `x` object, it gains ownership of the monitor lock of the `x`
+    object, given that no other thread owns the monitor. Otherwise, the thread is
+    blocked until the monitor is released. Upon gaining ownership of the monitor,
+    the thread can witness the memory writes of all the threads that previously released
+    that monitor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A natural consequence is that `synchronized` statements can be nested. A thread
+    can own monitors belonging to several different objects simultaneously. This is
+    useful when composing larger systems from simpler components. We do not know which
+    sets of monitors independent software components use in advance. Let''s assume
+    that we are designing an online banking system in which we want to log money transfers.
+    We can maintain the transfers list of all the money transfers in a mutable `ArrayBuffer`
+    growable array implementation. The banking application does not manipulate transfers
+    directly, but instead appends new messages with a `logTransfer` method that calls
+    `synchronized` on `transfers`. The `ArrayBuffer` implementation is a collection
+    designed for single-threaded use, so we need to protect it from concurrent writes.
+    We will start by defining the `logTransfer` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Apart from the logging modules of the banking system, the accounts are represented
+    with the `Account` class. The `Account` objects hold information about their owner
+    and the amount of money with them. To add some money to an account, the system
+    uses an `add` method that obtains the monitor of the `Account` object and modifies
+    its `money` field. The bank''s business process requires treating large transfers
+    specially: if a money transfer is bigger than 10 currency units, we need to log
+    it. In the following code, we will define the `Account` class and the `add` method,
+    which adds an amount `n` to the `Account` object:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `add` method calls `logTransfer` from inside the `synchronized` statement,
+    and `logTransfer` first obtains the `transfers` monitor. Importantly, this happens
+    without releasing the `account` monitor. If the `transfers` monitor is currently
+    acquired by some other thread, the current thread goes into the blocked state
+    without releasing any of the monitors that it previously acquired.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following example, the main application creates two separate accounts
+    and three threads that execute transfers. Once all the threads complete their
+    transfers, the main thread outputs all the transfers that were logged:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The use of the `synchronized` statement in this example prevents threads `t1`
+    and `t3` from corrupting Jane''s account by concurrently modifying it. The `t2`
+    and `t3` threads also access the `transfers` log. This simple example shows why
+    nesting is useful: we do not know which other components in our banking system
+    potentially use the `transfers` log. To preserve encapsulation and prevent code
+    duplication, independent software components should not explicitly synchronize
+    to log a money transfer; synchronization is instead hidden in the `logTransfer`
+    method.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Deadlocks
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A factor that worked to our advantage in the banking system example is that
+    the `logTransfer` method never attempts to acquire any monitors other than the
+    `transfers` monitor. Once the monitor is obtained, a thread will eventually modify
+    the `transfers` buffer and release the monitor; in a stack of nested monitor acquisitions,
+    `transfers` always comes last. Given that `logTransfer` is the only method synchronizing
+    on `transfers`, it cannot indefinitely delay other threads that synchronize on
+    `transfers`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A **deadlock** is a general situation in which two or more executions wait for
+    each other to complete an action before proceeding with their own action. The
+    reason for waiting is that each of the executions obtains an exclusive access
+    to a resource that the other execution needs to proceed. As an example from our
+    daily life, assume that you are sitting in a cafeteria with your colleague and
+    just about to start your lunch. However, there is only a single fork and a single
+    knife at the table, and you need both the utensils to eat. You grab the fork,
+    but your colleague grabs a knife. Both of you wait for the other to finish the
+    meal, but do not let go of your own utensil. You are now in a state of deadlock,
+    and you will never finish your lunch. Well, at least not until your boss arrives
+    to see what's going on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In concurrent programming, when two threads obtain two separate monitors at
+    the same time and then attempt to acquire the other thread's monitor, a deadlock
+    occurs. Both the threads go into a blocked state until the other monitor is released,
+    but do not release the monitors they own.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `logTransfer` method can never cause a deadlock, because it only attempts
+    to acquire a single monitor that is released eventually. Let''s now extend our
+    banking example to allow money transfers between specific accounts, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We import the `Account` class from the previous example. The `send` method
+    atomically transfers a given amount of money `n` from an account `a` to another
+    account `b`. To do so, it invokes the `synchronized` statement on both the accounts
+    to ensure that no other thread is modifying either account concurrently, as shown
+    in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: Now, assume that two of our bank's new clients, Jack and Jill, just opened their
+    accounts and are amazed with the new e-banking platform. They log in and start
+    sending each other small amounts of money to test it, frantically hitting the
+    send button a 100 times. Soon, something very bad happens. The `t1` and `t2` threads,
+    which execute Jack's and Jill's requests, invoke `send` simultaneously with the
+    order of accounts `a` and `b` reversed. Thread `t1` locks `a` and `t2` locks `b`,
+    but are then both unable to lock the other account. To Jack's and Jill's surprise,
+    the new transfer system is not as shiny as it seems. If you are running this example,
+    you'll want to close the terminal session at this point and restart SBT.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: A deadlock occurs when a set of two or more threads acquire resources and then
+    cyclically try to acquire other thread's resources without releasing their own.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How do we prevent deadlocks from occurring? Recall that, in the initial banking
+    system example, the order in which the monitors were acquired was well defined.
+    A single account monitor was acquired first and the `transfers` monitor was possibly
+    acquired afterward. You should convince yourself that whenever resources are acquired
+    in the same order, there is no danger of a deadlock. When a thread `T` waits for
+    a resource `X` acquired by some other thread S, the thread S will never try to
+    acquire any resource `Y` already held by `T`, because `Y` < `X` and `S` might
+    only attempt to acquire resources `Y` > `X`. The ordering breaks the cycle, which
+    is one of the necessary preconditions for a deadlock.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Establish a total order between resources when acquiring them; this ensures
+    that no set of threads cyclically wait on the resources they previously acquired.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In our example, we need to establish an order between different accounts. One
+    way of doing so is to use the `getUniqueId` method introduced in an earlier section:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The new `Account` class ensures that no two accounts share the same `uid` value,
+    regardless of the thread they were created on. The deadlock-free `send` method
+    then needs to acquire the accounts in the order of their `uid` values, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: After a quick response from the bank's software engineers, Jack and Jill happily
+    send each other money again. A cyclic chain of blocked threads can no longer happen.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Deadlocks are inherent to any concurrent system in which the threads wait indefinitely
+    for a resource without releasing the resources they previously acquired. However,
+    while they should be avoided, deadlocks are often not as deadly as they sound.
+    A nice thing about deadlocks is that by their definition, a deadlocked system
+    does not progress. The developer that resolved Jack and Jill's issue was able
+    to act quickly by doing a heap dump of the running JVM instance and analyzing
+    the thread stacks; deadlocks can at least be easily identified, even when they
+    occur in a production system. This is unlike the errors due to race conditions,
+    which only become apparent long after the system transitions into an invalid state.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Guarded blocks
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Creating a new thread is much more expensive than creating a new lightweight
+    object such as `Account`. A high-performance banking system should be quick and
+    responsive, and creating a new thread on each request can be too slow when there
+    are thousands of requests per second. The same thread should be reused for many
+    requests; a set of such reusable threads is usually called a **thread pool**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following example, we will define a special thread called `worker` that
+    will execute a block of code when some other thread requests it. We will use the
+    mutable `Queue` class from the Scala standard library collections package to store
+    the scheduled blocks of code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We represent the blocks of code with the `() => Unit` function type. The `worker`
+    thread will repetitively call the `poll` method that synchronizes on `tasks` to
+    check whether the queue is non-empty. The `poll` method shows that the `synchronized`
+    statement can return a value. In this case, it returns an optional `Some` value
+    if there are tasks to do, or `None` otherwise. The `Some` object contains the
+    block of code to execute:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We set the `worker` thread to be a **daemon** thread before starting it. Generally,
+    a JVM process does not stop when the main thread terminates. The JVM process terminates
+    when all non-daemon threads terminate. We want `worker` to be a daemon thread
+    because we send work to it using the `asynchronous` method, which schedules a
+    given block of code to eventually execute the `worker` thread:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Run the preceding example and witness the `worker` thread print `Hello` and
+    then `world!`. Now listen to your laptop. The fan should start humming by now.
+    Turn on your **Task Manager** or simply type `top` into your terminal if you are
+    running this on a Unix system. One of your CPUs is completely used up by a process
+    called `java`. You can guess the reason. After `worker` completes its work, it
+    is constantly checking if there are any tasks on the queue. We say that the `worker`
+    thread is **busy-waiting**. Busy-waiting is undesired, because it needlessly uses
+    processor power. Still, shouldn''t a daemon thread be stopped once the main thread
+    terminates? In general, yes, but we are running this example from SBT in the same
+    JVM process that SBT itself is running. SBT has non-daemon threads of its own,
+    so our `worker` thread is not stopped. To tell SBT that it should execute the
+    `run` command in a new process, enter the following directive:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running the preceding example again should stop the `worker` thread as soon
+    as the main thread completes its execution. Still, our busy-waiting `worker` thread
+    can be a part of a larger application that does not terminate so quickly. Creating
+    new threads all the time might be expensive, but a busy-waiting thread is even
+    more expensive. Several such threads can quickly compromise system performance.
+    There are only a handful of applications in which busy-waiting makes sense. If
+    you still have doubts that this is dangerous, start this example on your laptop
+    while running on battery power and go grab a snack. Make sure that you save any
+    open files before you do this; you might lose data once the CPU drains all the
+    battery power.
+  prefs: []
+  type: TYPE_NORMAL
+- en: What we would really like the `worker` thread to do is to go to the waiting
+    state, similar to what a thread does when we call `join`. It should only wake
+    up after we ensure that there are additional function objects to execute on the
+    `tasks` queue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Scala objects (and JVM objects in general) support a pair of special methods
+    called `wait` and `notify`, which allow waiting and awakening the waiting threads,
+    respectively. It is only legal to call these methods on an `x` object if the current
+    thread owns the monitor of the object `x`. In other words, `wait` and `notify`
+    can only be called from a thread that owns the monitor of that object. When a
+    thread `T` calls `wait` on an object, it releases the monitor and goes into the
+    waiting state until some other thread `S` calls `notify` on the same object. The
+    thread `S` usually prepares some data for `T`, as in the following example in
+    which the main thread sets the `Some` message for the `greeter` thread to print:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: The threads use the monitor from a fresh `lock` object of an `AnyRef` type that
+    maps into the `java.lang.Object` class. The `greeter` thread starts by acquiring
+    the lock's monitor and checks whether the message is set to `None`. If it is,
+    there is nothing to output as yet and the `greeter` thread calls `wait` on `lock`.
+    Upon calling `wait`, the `lock` monitor is released and the main thread, which
+    was previously blocked at its `synchronized` statement, now obtains the ownership
+    of the `lock` monitor, sets the message, and calls `notify`. When the main thread
+    leaves the `synchronized` block, it releases `lock`. This causes `greeter` to
+    wake up, acquire `lock`, check whether there is a message again, and then output
+    it. Since `greeter` acquires the same monitor that the main thread previously
+    released, the write to `message` by the main thread occurs before the check by
+    the `greeter` thread. We now know that the `greeter` thread will see the message.
+    In this example, the `greeter` thread will output `Hello!` regardless of which
+    thread runs `synchronized` first.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An important property of the `wait` method is that it can cause **spurious wakeups**.
+    Occasionally, the JVM is allowed to wake up a thread that called `wait` even though
+    there is no corresponding `notify` call. To guard against this, we must always
+    use `wait` in conjunction with a `while` loop that checks the condition, as in
+    the previous example. Using an `if` statement would be incorrect, as a spurious
+    wakeup could allow the thread to execute `message.get`, even though `message`
+    was not set to a value different than `None`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: After the thread that checks the condition wakes up, the monitor becomes owned
+    by that thread, so we are guaranteed that the check is performed atomically. Note
+    that a thread that checks the condition must acquire the monitor to wake up. If
+    it cannot acquire the monitor immediately, it goes into the blocked state.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A `synchronized` statement in which some condition is repetitively checked
+    before calling `wait` is called a **guarded block**. We can now use our insight
+    on guarded blocks to avoid the busy-wait in our `worker` thread in advance. We
+    will now show the complete `worker` implementation using monitors:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this example, we declared the `Worker` thread as a singleton object within
+    our application to be more concise. This time, the `poll` method calls `wait`
+    on the `tasks` object and waits until the main thread adds a code block to `tasks`
+    and calls `notify` in the `asynchronous` method. Start the example and inspect
+    your CPU usage again. If you restarted SBT (and still have battery power) since
+    running the busy-wait example, you will see that the CPU usage by the `java` process
+    is zero.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Interrupting threads and the graceful shutdown
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In the previous example, the `Worker` thread loops forever in its `run` method
+    and never terminates. You might be satisfied with this; `Worker` does not use
+    the CPU if it has no work to do, and since `Worker` is a daemon thread, it is
+    destroyed when the application exits. However, its stack space is not reclaimed
+    until the application terminates. If we have a lot of dormant workers lying around,
+    we might run out of memory. One way to stop a dormant thread from executing is
+    to interrupt it, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: Calling the `interrupt` method on a thread that is in the waiting or timed waiting
+    state causes it to throw an `InterruptedException`. This exception can be caught
+    and handled, but in our case, it will terminate the `Worker` thread. However,
+    if we call this method while the thread is running, the exception is not thrown
+    and the thread's `interrupt` flag is set. A thread that does not block must periodically
+    query the interrupt flag with the `isInterrupted` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'An alternative is to implement an idiom known as the **graceful shutdown**.
+    In the graceful shutdown, one thread sets the condition for the termination and
+    then calls `notify` to wake up a worker thread. The worker thread then releases
+    all its resources and terminates willingly. We first introduce a variable called
+    `terminated` that is `true` if the thread should be stopped. The `poll` method
+    additionally checks this variable before waiting on `tasks` and optionally returns
+    a task only if the `Worker` thread should continue to run, as shown in the following
+    code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We change the `run` method to check if `poll` returns `Some(task)` in a pattern
+    match. We no longer use a `while` loop in the `run` method. Instead, we call `run`
+    tail-recursively if `poll` returned `Some(task)`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: The main thread can now call the synchronized `shutdown` method on the `Worker`
+    thread to communicate with the termination request. There is no need to make the
+    `Worker` thread a daemon thread anymore. Eventually, the `Worker` thread will
+    terminate on its own.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: To ensure that various utility threads terminate correctly without race conditions,
+    use the graceful shutdown idiom.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The situation where calling `interrupt` is preferred to a graceful shutdown
+    is when we cannot wake the thread using `notify`. One example is when the thread
+    does blocking I/O on an `InterruptibleChannel` object, in which case the object
+    the thread is calling the `wait` method on is hidden.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `Thread` class also defines a deprecated `stop` method that immediately
+    terminates a thread by throwing a `ThreadDeath` exception. You should avoid it
+    as it stops the thread's execution at an arbitrary point, possibly leaving the
+    program data in an inconsistent state.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Volatile variables
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The JVM offers a more lightweight form of synchronization than the `synchronized`
+    block, called **volatile variables**. Volatile variables can be atomically read
+    and modified, and are mostly used as status flags; for example, to signal that
+    a computation is completed or canceled. They have two advantages. First, writes
+    to and reads from volatile variables cannot be reordered in a single thread. Second,
+    writing to a volatile variable is immediately visible to all the other threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Reads and writes to variables marked as volatile are never reordered. If a write
+    `W` to a volatile `v` variable is observed on another thread through a read `R`
+    of the same variable, then all the writes that preceded the write `W` are guaranteed
+    to be observed after the read `R`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following example, we search for at least one `!` character in several
+    pages of the text. Separate threads start scanning separate pages `p` of the text
+    written by a person that is particularly fond of a popular fictional hero. As
+    soon as one thread finds the exclamation, we want to stop searching in other threads:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: Separate pages of text are represented by the `Page` class, which has a special
+    `position` field for storing the result of the exclamation mark search. The `found`
+    flag denotes that some thread has found an exclamation. We add the `@volatile`
+    annotation to the `found` flag to declare it volatile. When some thread finds
+    an exclamation character in some page, the `position` value is stored and the
+    `found` flag is set so that the other threads can stop their search early. It
+    is entirely possible that all the threads end up scanning the entire text, but
+    more likely that they see that `found` is `true` before that. Thus, at least one
+    thread stores the exclamation position.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For the purposes of this example, the main thread busy-waits until it reads
+    `found`, which is `true`. It then prints the positions. Note that a write to `position`
+    occurs before the write to `found` in the spawned threads, which in turn occurs
+    before reading `found` in the main thread. This means that the main thread always
+    sees the write of the thread that set `found`, and hence prints at least one position
+    other than `-1`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `ThreadSharedStateAccessReordering` example from an earlier section can
+    be fixed by declaring all the variables as volatile. As we will learn in the next
+    section, this ensures a correct order between reads from and writes to `a` and
+    `b`. Unlike Java, Scala allows you to declare local fields volatile (in this case,
+    local to the closure of the enclosing `for` loop). A heap object with a volatile
+    field is created for each local volatile variable used in some closure or a nested
+    class. We say the variable is **lifted** into an object.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A volatile read is usually extremely cheap. In most cases, however, you should
+    resort to the `synchronized` statements; volatile semantics are subtle and easy
+    to get wrong. In particular, multiple volatile reads and writes are not atomic
+    without additional synchronization; volatiles alone cannot help us to implement
+    `getUniqueId` correctly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Java Memory Model
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: While we were never explicit about it throughout this chapter, we have actually
+    defined most of the JMM. What is a memory model in the first place?
+  prefs: []
+  type: TYPE_NORMAL
+- en: A language memory model is a specification that describes the circumstances
+    under which a write to a variable becomes visible to other threads. You might
+    think that a write to a variable `v` changes the corresponding memory location
+    immediately after the processor executes it, and that other processors see the
+    new value of `v` instantaneously. This memory consistency model is called **sequential
+    consistency**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we already saw in the `ThreadSharedStateAccessReordering` example, sequential
+    consistency has little to do with how processors and compilers really work. Writes
+    rarely end up in the main memory immediately; instead, processors have hierarchies
+    of caches that ensure a better performance and guarantee that the data is only
+    eventually written to the main memory. Compilers are allowed to use registers
+    to postpone or avoid memory writes, and reorder statements to achieve optimal
+    performance, as long as it does not change the serial semantics. It makes sense
+    to do so; while the short examples in this book are interspersed with synchronization
+    primitives, in actual programs, different threads communicate relatively rarely
+    compared to the amount of time spent doing useful work.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: A memory model is a trade-off between the predictable behavior of a concurrent
+    program and a compiler's ability to perform optimizations. Not every language
+    or platform has a memory model. A typical purely functional programming language,
+    which doesn't support mutations, does not need a memory model at all.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Differences between processor architectures result in different memory models;
+    it would be very difficult, if not impossible, to correctly write a Scala program
+    that works in the same way on every computer without the precise semantics of
+    the `synchronized` statement or volatile reads and writes. Scala inherits its
+    memory model from the JVM, which precisely specifies a set of **happens-before**
+    relationships between different actions in a program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the JMM, the different actions are (volatile) variable reads and writes,
+    acquiring and releasing object monitors, starting threads, and waiting for their
+    termination. If an action A happens before an action B, then the action B sees
+    A''s memory writes. The same set of happens-before relationships is valid for
+    the same program irrespective of the machine it runs on; it is the JVM''s task
+    to ensure this. We already summarized most of these rules, but we will now present
+    a complete overview:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Program order**: Each action in a thread happens-before every other subsequent
+    action in the program order of that thread.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Monitor locking**: Unlocking a monitor happens-before every subsequent locking
+    of that monitor.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Volatile fields**: A write to a volatile field happens-before every subsequent
+    read of that volatile field.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Thread start**: A call to `start()` on a thread happens-before any actions
+    in the started thread.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Thread termination**: Any action in a thread happens-before another thread
+    completes a `join()` call on that thread.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Transitivity**: If action A happens-before action B, and action B happens-before
+    action C, then action A happens-before action C.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Despite its somewhat misleading name, the happens-before relationship exists
+    to ensure that threads see each other's memory writes. It does not exist to establish
+    a temporal ordering between different statements in the program. When we say that
+    a write A happens before a read B, it is guaranteed that the effects of the write
+    A are visible to that particular read B. Whether or not the write A occurs earlier
+    than the read B depends on the execution of the program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The happens-before relationship describes the visibility of the writes performed
+    by a different thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Additionally, the JMM guarantees that volatile reads and writes as well as
+    monitor locks and unlocks are never reordered. The happens-before relationship
+    ensures that nonvolatile reads and writes also cannot be reordered arbitrarily.
+    In particular, this relationship ensures the following things:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A non-volatile read cannot be reordered to appear before a volatile read (or
+    monitor lock) that precedes it in the program order
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A non-volatile write cannot be reordered to appear after a volatile write (or
+    monitor unlock) that follows it in the program order
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Higher-level constructs often establish a happens-before relationship on top
+    of these rules. For example, an `interrupt` call happens before the interrupted
+    thread detects it; this is because the `interrupt` call uses a monitor to wake
+    the thread in a typical implementation. Scala concurrency APIs described in the
+    later chapters also establish happens-before relationships between various method
+    calls, as we will see. In all these cases, it is the task of the programmer to
+    ensure that every write of a variable is in a happens-before relationship with
+    every read of that variable that should read the written value. A program in which
+    this is not true is said to contain **data races**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Immutable objects and final fields
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We have said that programs must establish happens-before relationships to avoid
+    data races, but there is an exception to this rule. If an object contains only
+    **final fields** and the reference to the enclosing object does not become visible
+    to another thread before the constructor completes, then the object is considered
+    immutable and can be shared between the threads without any synchronization.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In Java, a final field is marked with the `final` keyword. In Scala, declaring
+    an object field as `final` means that the getter for that field cannot be overridden
+    in a subclass. The field itself is always final provided that it is a value declaration,
+    that is, a `val` declaration. The following class depicts this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The preceding class corresponds to the following Java class after the Scala
+    compiler translates it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that both the fields become final at the JVM level and can be shared without
+    synchronization. The difference is that the getter for `a` cannot be overridden
+    in a `Foo` subclass. We have to disambiguate finality in the reassignment and
+    overriding sense.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Since Scala is a hybrid between functional and object-oriented paradigms, many
+    of its language features map to immutable objects. A lambda value can capture
+    a reference to the enclosing class or a lifted variable, as in the following example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The local `number` variable is captured by the lambda, so it needs to be lifted.
+    The statement in the last line translates to an anonymous `Function0` class instantiation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: There is no happens-before relationship between the assignment to `inc` and
+    the read of `inc` by the thread `t`. However, if the `t` thread sees that `inc`
+    is not `null`, invoking `inc` still works correctly, because the `$number` field
+    is appropriately initialized since it is stored as a field in the immutable lambda
+    object. The Scala compiler ensures that lambda values contain only final, properly
+    initialized fields. Anonymous classes, auto-boxed primitives, and value classes
+    share the same philosophy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In current versions of Scala, however, certain collections that are deemed immutable,
+    such as `List` and `Vector`, cannot be shared without synchronization. Although
+    their external API does not allow you to modify them, they contain non-final fields.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Even if an object seems immutable, always use proper synchronization to share
+    any object between the threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we showed how to create and start threads, and wait for their
+    termination. We have shown how to achieve inter-thread communication by modifying
+    the shared memory and by using the `synchronized` statement, and what it means
+    for a thread to be in a blocked state. We have studied approaches to prevent deadlocks
+    by imposing the ordering on the locks and avoided busy-waits in place of guarded
+    blocks. We have seen how to implement a graceful shutdown for thread termination
+    and when to communicate using volatiles. We witnessed how the correctness of a
+    program can be compromised by undesired interactions known as race conditions
+    as well as data races due to the lack of synchronization. And, most importantly,
+    we have learned that the only way to correctly reason about the semantics of a
+    multithreaded program is in terms of happens-before relationships defined by the
+    JMM.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The language primitives and APIs presented in this section are low-level; they
+    are the basic building blocks for concurrency on the JVM and in Scala, and there
+    are only a handful of situations where you should use them directly. One of them
+    is designing a new concurrency library yourself; another one is dealing with a
+    legacy API built directly from these primitives. Although you should strive to
+    build concurrent Scala applications in terms of concurrency frameworks introduced
+    in the later chapters, the insights from this chapter will be helpful in understanding
+    how higher-level constructs work. You should now have a valuable insight of what's
+    going on under the hood.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you would like to learn more about concurrency on the JVM and the JMM, we
+    recommend that you read the book *Java Concurrency in Practice*, *Brian Goetz,
+    Tim Peierls, Joshua Bloch, Joseph Bowbeer, David Holmes, and Doug Lea*, *Addison-Wesley*.
+    For an in-depth understanding of processes, threads, and the internals of operating
+    systems, we recommend the book *Operating System Concepts*, *Abraham Silberschatz,
+    Peter B. Galvin, and Greg Gagne*, *Wiley*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will cover more advanced building blocks of concurrent
+    programs. We will learn how to use executors to avoid creating threads directly,
+    concurrent collections for thread-safe data access, and atomic variables for deadlock-free
+    synchronization. These high-level abstractions will alleviate many of the problems
+    inherent to the fundamental concurrency primitives presented in this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exercises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the following set of exercises, you are required to implement higher-level
+    concurrency abstractions in terms of basic JVM concurrency primitives. Some of
+    these exercises introduce concurrent counterparts of sequential programming abstractions,
+    and, in doing so, highlight important differences between sequential and concurrent
+    programming. The exercises are not ordered in any particular order, but some of
+    them rely on specific content from earlier exercises or this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Implement a `parallel` method, which takes two computation blocks, `a` and
+    `b`, and starts each of them in a new thread. The method must return a tuple with
+    the result values of both the computations. It should have the following signature:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Implement a `periodically` method, which takes a time interval `duration` specified
+    in milliseconds, and a computation block `b`. The method starts a thread that
+    executes the computation block `b` every `duration` milliseconds. It should have
+    the following signature:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Implement a `SyncVar` class with the following interface:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'A `SyncVar` object is used to exchange values between two or more threads.
+    When created, the `SyncVar` object is empty:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Calling `get` throws an exception
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Calling `put` adds a value to the `SyncVar` object
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'After a value is added to a `SyncVar` object, we say that it is non-empty:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Calling `get` returns the current value, and changes the state to empty
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Calling `put` throws an exception
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `SyncVar` object from the previous exercise can be cumbersome to use, due
+    to exceptions when the `SyncVar` object is in an invalid state. Implement a pair
+    of methods, `isEmpty` and `nonEmpty`, on the `SyncVar` object. Then, implement
+    a producer thread that transfers a range of numbers `0 until 15` to the consumer
+    thread that prints them.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Using the `isEmpty` and `nonEmpty` pair of methods from the previous exercise
+    requires busy-waiting. Add the following methods to the `SyncVar` class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: These methods have similar semantics as before, but go into the waiting state
+    instead of throwing an exception, and return once the `SyncVar` object is empty
+    or non-empty, respectively.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: A `SyncVar` object can hold at most one value at a time. Implement a `SyncQueue`
+    class, which has the same interface as the `SyncVar` class, but can hold at most
+    `n` values. The `n` parameter is specified in the constructor of the `SyncQueue`
+    class.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The `send` method in the *Deadlocks* section was used to transfer money between
+    the two accounts. The `sendAll` method takes a set `accounts` of bank accounts
+    and a `target` bank account, and transfers all the money from every account in
+    `accounts` to the `target` bank account. The `sendAll` method has the following
+    signature:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Implement the `sendAll` method and ensure that a deadlock cannot occur.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Recall the `asynchronous` method from the *Guarded blocks* section. This method
+    stores the tasks in a **First In First Out** (**FIFO**) queue; before a submitted
+    task is executed, all the previously submitted tasks need to be executed. In some
+    cases, we want to assign priorities to tasks so that a high-priority task can
+    execute as soon as it is submitted to the task pool. Implement a `PriorityTaskPool`
+    class that has the `asynchronous` method with the following signature:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: A single worker thread picks tasks submitted to the pool and executes them.
+    Whenever the worker thread picks a new task from the pool for execution, that
+    task must have the highest priority in the pool.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Extend the `PriorityTaskPool` class from the previous exercise so that it supports
+    any number of worker threads `p`. The parameter `p` is specified in the constructor
+    of the `PriorityTaskPool` class.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Extend the `PriorityTaskPool` class from the previous exercise so that it supports
+    the `shutdown` method:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: When the `shutdown` method is called, all the tasks with the priorities greater
+    than `important` must be completed, and the rest of the tasks must be discarded.
+    The `important` integer parameter is specified in the constructor of the `PriorityTaskPool`
+    class.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Implement a `ConcurrentBiMap` collection, which is a concurrent bidirectional
+    map. The invariant is that every key is mapped to exactly one value, and vice
+    versa. Operations must be atomic. The concurrent bidirectional map has the following
+    interface:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Make sure that your implementation prevents deadlocks from occurring in the
+    map.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Add a `replace` method to the concurrent bidirectional map from the previous
+    exercise. The method should atomically replace a key-value pair with another key-value
+    pair:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Test the implementation of the concurrent bidirectional map from the earlier
+    exercise by creating a test in which several threads concurrently insert millions
+    of key-value pairs into the map. When all of them complete, another batch of threads
+    must concurrently invert the entries in the map - for any key-value pair `(k1,
+    k2)`, the thread should replace it with a key-value pair `(k2, k1)`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Implement a `cache` method, which converts any function into a memoized version
+    of itself. The first time that the resulting function is called for any argument,
+    it is called in the same way as the original function. However, the result is
+    memoized, and subsequently invoking the resulting function with the same arguments
+    must return the previously returned value:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Make sure that your implementation works correctly when the resulting function
+    is called simultaneously from multiple threads.
+  prefs: []
+  type: TYPE_NORMAL

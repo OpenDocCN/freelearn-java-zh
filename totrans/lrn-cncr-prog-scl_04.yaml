@@ -1,0 +1,1662 @@
+- en: Chapter 4.  Asynchronous Programming with Futures and Promises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '|   | *Programming in a functional style makes the state presented to your
+    code explicit, which makes it much easier to reason about, and, in a completely
+    pure system, makes thread race conditions impossible.* |   |'
+  prefs: []
+  type: TYPE_TB
+- en: '|   | --*John Carmack* |'
+  prefs: []
+  type: TYPE_TB
+- en: 'In the examples of the previous chapters, we often dealt with blocking computations.
+    We have seen that blocking synchronization can have negative effects: it can cause
+    deadlocks, starve thread pools, or break lazy value initialization. While, in
+    some cases, blocking is the right tool for the job, in many cases we can avoid
+    it. Asynchronous programming refers to the programming style in which executions
+    occur independently of the main program flow. Asynchronous programming helps you
+    to eliminate blocking instead of suspending the thread whenever a resource is
+    not available; a separate computation is scheduled to proceed once the resource
+    becomes available.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In a way, many of the concurrency patterns seen so far support asynchronous
+    programming; thread creation and scheduling execution context tasks can be used
+    to start executing a computation concurrent to the main program flow. Still, using these
+    facilities directly when avoiding blocking or composing asynchronous computations
+    is not straightforward. In this chapter, we will focus on two abstractions in
+    Scala that are specifically tailored for this task: futures and promises.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'More specifically, we will study the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Starting asynchronous computations, and using `Future` objects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Installing callbacks that handle the results of asynchronous computations
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Exception semantics of `Future` objects, and using the type `Try`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Functional composition of `Future` objects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using `Promise` objects to interface with callback-based APIs, implement future
+    combinators, and support cancellation
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Blocking threads inside asynchronous computations
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using the Scala `Async` library
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In the next section, we will start by introducing the try `Future` , and show
+    why it is useful.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Futures
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In earlier chapters, we learned that parallel executions in a concurrent program
+    proceed on entities called **threads**. At any point, the execution of a thread
+    can be temporarily suspended, until a specific condition is fulfilled. When this
+    happens, we say that the thread is blocked. Why do we block threads in the first
+    place in concurrent programming? One of the reasons is that we have a finite amount
+    of resources; multiple computations that share these resources sometimes need
+    to wait. In other situations, a computation needs specific data to proceed, and
+    if that data is not yet available, threads responsible for producing the data
+    could be slow or the source of the data could be external to the program. A classic
+    example is waiting for the data to arrive over the network. Let''s assume that
+    we have a `getWebpage` method, that given a `url` string with the location of
+    the webpage, returns that webpage''s contents:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: The return type of the `getWebpage` method is `String`; the method must return
+    a string with the webpage's contents. Upon sending an HTTP request, though, the
+    webpage's contents are not available immediately. It takes some time for the request
+    to travel over the network to the server and back before the program can access
+    the document. The only way for the method to return the contents of the webpage
+    as a string value is to wait for the HTTP response to arrive. However, this can
+    take a relatively long time from the program's point of view; even with a high-speed
+    Internet connection, the `getWebpage` method needs to wait. Since the thread that
+    called the `getWebpage` method cannot proceed without the contents of the webpage,
+    it needs to pause its execution; therefore, the only way to correctly implement
+    the `getWebpage` method is to block.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We already know that blocking can have negative side-effects, so can we change
+    the return value of the `getWebpage` method to some special value that can be
+    returned immediately? The answer is yes. In Scala, this special value is called
+    a **future**. A future is a placeholder, that is, a memory location for the value.
+    This placeholder does not need to contain a value when the future is created;
+    the value can be placed into the future eventually by the `getWebpage` method.
+    We can change the signature of the `getWebpage` method to return a future as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, the `Future[String]` type means that the future object can eventually
+    contain a `String` value. We can now implement the `getWebpage` method without
+    blocking-we can start the HTTP request asynchronously and place the webpage's
+    contents into the future when they become available. When this happens, we say
+    that the `getWebpage` method completes the future. Importantly, after the future
+    is completed with some value, that value can no longer change.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The `Future[T]` type encodes latency in the program; use it to encode values
+    that will become available later during execution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This removes blocking from the `getWebpage` method, but it is not clear how
+    the calling thread can extract the content of the future. Polling is one non-blocking
+    way of extracting the content. In the polling approach, the calling thread calls
+    a special method to block until the value becomes available. While this approach
+    does not eliminate blocking, it transfers the responsibility of blocking from
+    the `getWebpage` method to the caller thread. Java defines its own `Future` type
+    to encode values that will become available later. However, as a Scala developer,
+    you should use Scala's futures instead; they allow additional ways of handling
+    future values and avoid blocking, as we will soon see.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'When programming with futures in Scala, we need to distinguish between **future
+    values** and **future computations**. A future value of the type `Future[T]` 
+    denotes some value of type `T`  in the program that might not be currently available,
+    but could become available later. Usually, when we say a future, we really mean
+    a future value. In the `scala.concurrent` package, futures are represented with
+    the `Future[T]` trait:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'By contrast, a future computation is an asynchronous computation that produces
+    a future value. A future computation can be started by calling the `apply` method
+    on the `Future` companion object. This method has the following signature in the
+    `scala.concurrent` package:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: This method takes a by-name parameter of the type `T` . This is the body of
+    the asynchronous computation that results in some value of type `T`. It also takes
+    an implicit `ExecutionContext` parameter, which abstracts over where and when
+    the thread gets executed, as we learned in [Chapter 3](ch03.html "Chapter 3. Traditional
+    Building Blocks of Concurrency"), *Traditional Building Blocks of Concurrency*.
+    Recall that Scala's implicit parameters can either be specified when calling a
+    method, in the same way as normal parameters, or they can be left out-in this
+    case, the Scala compiler searches for a value of the `ExecutionContext` type in
+    the surrounding scope. Most `Future` methods take an implicit execution context.
+    Finally, the `Future.apply` method returns a future of the type `T`. This future
+    is completed with the value resulting from the asynchronous computation, `b`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Starting future computations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Let''s see how to start a future computation in an example. We first import
+    the contents of the `scala.concurrent` package. We then import the `global` execution
+    context from the `Implicits` object. This makes sure that future computations
+    execute on `global`, the default execution context you can use in most cases:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The order in which the `log` method calls (in the future computation and the
+    main thread) execute is nondeterministic. The `Future` singleton object followed
+    by a block is syntactic sugar for calling the `Future.apply` method. The `Future.apply`
+    method acts similarly to the `execute` statement from [Chapter 3](ch03.html "Chapter 3. Traditional
+    Building Blocks of Concurrency"), *Traditional Building Blocks of Concurrency*.
+    The difference is that the `Future.apply` method returns a future value. We can
+    poll this future value until it is completed. In the following example, we can
+    use the `scala.io.Source` object to read the contents of our `build.sbt` file
+    in a future computation. The main thread calls the `isCompleted` method on the
+    `buildFile` future value, returned from the future computation. Chances are that
+    the build file was not read so rapid, so `isCompleted` returns `false`. After
+    250 milliseconds, the main thread calls `isCompleted` again, and this time `isCompleted`
+    returns `true`. Finally, the main thread calls the `value` method, which returns
+    the contents of the build file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this example, we used polling to obtain the value of the future. The `Future`
+    singleton object's polling methods are non-blocking, but they are also nondeterministic;
+    `isCompleted` will repeatedly return `false` until the future is completed. Importantly,
+    completion of the future is in a happens-before relationship with the polling
+    calls. If the future completes before the invocation of the polling method, then
+    its effects are visible to the thread after polling completes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Shown graphically, polling looks like the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Starting future computations](img/image_04_001.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Polling diagram
+  prefs: []
+  type: TYPE_NORMAL
+- en: Polling is like calling your potential employer every five minutes to ask if
+    you're hired. What you really want to do is hand in a job application and then
+    apply for other jobs, instead of busy-waiting for the employer's response. Once
+    your employer decides to hire you, they will give you a call on the phone number
+    you left them. We want futures to do the same; when they are completed, they should
+    call a specific function we left for them. This is the topic of the next section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Future callbacks
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A callback is a function that is called once its arguments become available.
+    When a Scala future takes a callback, it eventually calls that callback. However,
+    the future does not call the callback before this future is completed with some
+    value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s assume that we need to look up details of the URL specification from
+    the W3 consortium. We are interested in all the occurrences of the `telnet` keyword.
+    The URL specification is available as a text document at [https://www.w3.org/](https://www.w3.org/).
+    We can use the `scala.io.Source` object to fetch the contents of the specification,
+    and use futures in the `getUrlSpec` method to asynchronously execute the HTTP
+    request. The `getUrlSpec` method first calls the `fromURL` method to obtain a
+    `Source` object with the text document. It then calls `getLines` to get a list
+    of separate lines in the document:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To find the lines in the `urlSpec` future that contains the `telnet` keyword,
+    we use the `find` method which takes a list of lines and a keyword and returns
+    a string containing the matches:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `find` method takes a `List[String]` parameter, but `urlSpec` is of the
+    `Future[List[String]]` type. We cannot pass the `urlSpec` future directly to the
+    `find` method; and for a good reason, the value might not be available at the
+    time when we call the `find` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Instead, we install a callback to the future using the `foreach` method. Note
+    that the equivalent of the `foreach` method is the `onSuccess` method, but it
+    might be deprecated after Scala 2.11\. This method takes a partial function that,
+    given a value of the future, performs some action, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Importantly, installing a callback is a non-blocking operation. The `log` statement
+    in the main thread immediately executes after the callback is registered, but
+    the `log` statement in the callback can be called much later. This is illustrated
+    in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Future callbacks](img/image_04_002.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Callback diagram
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note that the callback is not necessarily invoked immediately after the future
+    is completed. Most execution contexts schedule a task to asynchronously process
+    the callbacks. The same is true if the future is already completed when we try
+    to install a callback.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: After the future is completed, the callback is called *eventually* and independently
+    from other callbacks on the same future. The specified execution context decides
+    when and on which thread the callback gets executed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There is a happens-before relationship between completing the future and starting
+    the callback.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We are not limited to installing a single callback to the future. If we additionally
+    want to find all the occurrences of the `password` keyword, we can install another
+    callback:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: As an experienced Scala programmer, you might have heard about referential transparency.
+    Roughly speaking, a function is referentially transparent if it does not execute
+    any side effects such as variable assignment, modifying mutable collections, or
+    writing to the standard output. Callbacks on futures have one very useful property.
+    Programs using only the `Future.apply` and `foreach` calls with referentially
+    transparent callbacks are deterministic. For the same inputs, such programs will
+    always compute the same results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Programs composed from referentially transparent future computations and callbacks
+    are deterministic.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the examples so far, we assumed that an asynchronous computation yielding
+    a future always succeeds. However, computations occasionally fail and throw exceptions.
+    We will study how to handle failures in asynchronous computations next.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Futures and exceptions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: If a future computation throws an exception, then its corresponding future object
+    cannot be completed with a value. Ideally, we would like to be notified when this
+    happens. If you apply for a job and the employer decides to hire someone else,
+    you would still like to receive a phone call. Otherwise, you might spend days
+    sitting idly in front of your phone, waiting for the call from the recruiter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When a Scala future is completed, it can either be completed *successfully*
+    or with a failure. When a future is completed with a failure, we also say that
+    a future has *failed*. To summarize all the different states of a future, we show
+    the following state diagram. A future is created without any associated callbacks.
+    Then, any number of callbacks `f1`, `f2`, ..., `fn` can be assigned to it. When
+    the future is completed, it has either completed successfully or has failed. After
+    that, the future's state no longer changes, and registering a callback immediately
+    schedules it for execution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Futures and exceptions](img/image_04_003.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'We now take a closer look at handling the failure case. The `foreach` method
+    only accepts callbacks that handle values from a successfully completed future,
+    so we need another method to install failure callbacks. This method is called
+    `failed`. It returns a `Future[Throwable]` object that contains the exception
+    that the current object has failed with, and can be used with the `foreach` statement
+    to access the exception:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this example, our asynchronous computation sends an HTTP request to an invalid
+    URL. As a result, the `fromURL` method throws an exception, and the `urlSpec`
+    future fails. The program then prints the exception name and message with the
+    `log` statement.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the Try type
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: For conciseness, sometimes we want to subscribe to both successes and failures
+    in the same callback. To do this, we need to use the type `Try[T]`. The type `Try[T]` is
+    very similar to the type `Option[T]` . Recall from your experience with sequential
+    Scala programming that the type `Option[T]`  is used to encode a value of the
+    type `T` or its absence. A value of `Option[T]` type can either be an object of
+    a type `Some[T]` , which holds some value, or `None`, which does not hold anything.
+    We use pattern matching to determine whether an `Option[T]` type is `Some[T]`
+    or `None`. Optional types are an alternative to using `null` values, which is
+    what one typically does in Java. However, the `Option[T]` type does not allow
+    encoding failures in its `None` subtype. The `None` subtype tells us nothing about
+    the exception in the computation. For this, we use the `Try[T]` type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The type `Try[T]` has two implementations--the type `Success[T]`, which encodes
+    the results of the successful computations, and the `Failure[T]` type, which encodes
+    the `Throwable` objects that failed the computation. We use pattern matching to
+    determine which of the two a `Try[T]` object is:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `Try[T]` objects are immutable objects used synchronously; unlike futures,
+    they contain a value or an exception from the moment they are created. They are
+    more akin to collections than to futures. We can even compose `Try[T]` values
+    in for-comprehensions. In the following code snippet, we will compose the name
+    of the current thread with some custom text:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: We will first create two `Try[String]` values, `threadName` and `someText`,
+    using the `Try.apply` factory method. The `for` comprehension extracts the thread
+    name, `tn`, from the `threadName` value, and then the `st` text from the `someText`
+    value. These values are then used to yield another string. If any of the `Try`
+    values in the `for` comprehension fail, then the resulting `Try` value fails with
+    the `Throwable` object from the first failed `Try` value. However, if all the
+    `Try` values are `Success`, then the resulting `Try` value is `Success` with the
+    value of the expression after the `yield` keyword. If this expression throws an
+    exception, the resulting `Try` value fails with that exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note that the preceding example always prints the name of the main thread. Creating
+    `Try` objects and using them in `for` comprehensions always occurs on the caller
+    thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Unlike `Future[T]` values, `Try[T]` values are manipulated synchronously.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In most cases, we use the `Try` values in pattern matching. When calling the
+    `onComplete` callback, we will provide a partial function that matches the `Success`
+    and `Failure` values. Our example for fetching the URL specification is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Fatal exceptions
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'We have seen futures storing exceptions that caused them to fail. However,
+    there are some `Throwable` objects that a future computation does not catch. In
+    the following short program, the callback on the `f` future is never invoked.
+    Instead, the stack trace of `InterruptedException` exception is printed on the
+    standard error output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `InterruptedException` exception and some severe program errors such as
+    `LinkageError`, `VirtualMachineError`, `ThreadDeath`, and Scala''s `ControlThrowable`
+    error are forwarded to the execution context''s `reportFailure` method introduced
+    in [Chapter 3](ch03.html "Chapter 3. Traditional Building Blocks of Concurrency"),
+    *Traditional Building Blocks of Concurrency*. These types of `Throwable` object
+    are called **fatal errors**. To find out if a `Throwable` object will be stored
+    in a `Future` instance, you can pattern match the `Throwable` object with the
+    `NonFatal` extractor:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that you never need to manually match in order to see whether errors in
+    your futures are nonfatal. Fatal errors are automatically forwarded to the execution
+    context.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Future computations do not catch fatal errors. Use the `NonFatal` extractor
+    to pattern match against nonfatal errors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Functional composition on futures
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Callbacks are useful, but they can make reasoning about control flow difficult
+    when programs become larger. They also disallow certain patterns in asynchronous
+    programming in particular, it is cumbersome to use a callback to subscribe to
+    multiple futures at once. Luckily, Scala futures have an answer to these problems
+    called **functional composition**. Functional composition on futures allows using
+    futures inside `for` comprehensions, and is often more intuitive to use than callbacks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Introducing futures transfers the responsibility for blocking from the API to
+    the caller. The `foreach` method helps you to avoid blocking altogether. It also
+    eliminates non-determinism inherent to polling methods such as `isCompleted` and
+    `value`. Still, there are some situations when the `foreach` statement is not
+    the best solution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's say that we want to implement some of the functionality from the Git version
+    control system; we want to use the `.gitignore` file to find files in our project
+    tree that should not be versioned. We simplify our task by assuming that the `.gitignore`
+    file only contains a list of prefixes for blacklisted file paths, and no regular
+    expressions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We perform two asynchronous actions. First, we fetch the contents of our `.gitignore`
+    file in a future computation. Then, using its contents, we will asynchronously
+    scan all the files in our project directory and match them. We will start by importing
+    the packages necessary for file handling. In addition to the `scala.io.Source`
+    object, we use the `java.io` package and the `apache.commons.io.FileUtils` class,
+    and import them as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If you haven''t already added the dependency on Commons IO to your `build.sbt`
+    file in the previous chapters, now is a good time to introduce the following line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We will first create a future using the `blacklistFile` method, which reads
+    the contents of the `.gitignore` file. Given the pace at which technology is evolving
+    these days, we never know when a different version control system will become
+    more popular; so we add the `name` parameter for the name of the blacklist file.
+    We filter out the empty lines and all the comment lines starting with a `#` sign.
+    We then convert them to a list, as shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In our case, the future returned by the `blacklistFile` method eventually contains
+    a list with a single string, the `target` directory is where SBT stores files
+    created by the Scala compiler. Then, we implement another method named `findFiles`
+    that, given a list of patterns, finds all the files in the current directory containing
+    these patterns. The `iterateFiles` method from the Commons IO library returns
+    a Java iterator over the project files, so we can convert it to a Scala iterator
+    by calling `asScala`. We then yield all the matching file paths:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If we now want to list blacklisted files, we first need to call `foreach` on
+    the `blacklistFile` future, and call `findPatterns` from inside the callback,
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Assume your fellow developer now asks you to implement another `blacklisted`
+    method that takes the name of the blacklist file and returns a future with a list
+    of blacklisted files. This allows us to specify the callback independently in
+    the program; instead of printing the files to the standard output, another part
+    of the program can, for example, create a safety backup of the blacklisted files
+    using the following method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: Being an experienced object-oriented developer, you'd like to reuse the `blacklistFile`
+    future and the `findFiles` method. After all, the functionality is already there.
+    We challenge you to reuse the existing methods to implement the new `blacklisted`
+    method. Try to use the `foreach` statement. You will find this task extremely
+    difficult.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'So far, we haven''t seen methods that produce new futures using the values
+    in existing futures. The `Future` trait has a `map` method that maps the value
+    in one future to a value in another future:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This method is non blocking--it returns the `Future[S]` object immediately.
+    After the original future completes with some value `x`, the returned `Future[S]`
+    object is eventually completed with `f(x)`. With the `map` method, our task is
+    trivial: we transform the patterns into a list of matching files by calling the
+    `findFiles` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: As a Scala developer, you know that a `map` operation on a collection transforms
+    many elements into a new collection. To more easily comprehend operations such
+    as the `map` operation on futures, you can consider a future as a specific form
+    of collection that contains at most one element.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Functional composition** is a programming pattern in which simpler values
+    are composed into more complex ones by means of higher-order functions called
+    **combinators**. Functional composition on Scala collections should be familiar
+    to you from sequential Scala programming. For example, the `map` method on a collection
+    produces a new collection containing elements from the original collection, mapped
+    with a specified function.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Functional composition on futures is similar; we can produce new futures by
+    transforming or merging existing futures, as in the preceding example. Callbacks
+    are useful, but they do not directly allow functional composition in the way combinators
+    such as `map` do. Just as with callbacks, a function passed to a combinator is
+    never invoked before the corresponding future completes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: There is a happens-before relationship between completing the future and invoking
+    the function in any of its combinators.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Choosing between alternative ways to handle futures can be confusing. When should
+    we use functional composition in place of callbacks? A good rule of thumb is to
+    use callbacks for side-effecting actions that depend on a single future. In all
+    other situations, we can use functional composition.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: When an action in the program depends on the value of a single future, use callbacks
+    on futures. When subsequent actions in the program depend on values of multiple
+    futures or produce new futures, use functional composition on futures.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let us consider several crucial combinators for functional composition. The
+    `map` method on a `Future[T]` takes an `f` function and returns a new `Future[S]`
+    future. After the `Future[T]` is completed, the `Future[S]` is completed by applying
+    `f` to the value in `Future[T]`. If `Future[T]` fails with an exception `e`, or
+    the mapping function `f` throws an exception `e`, then `Future[S]` also fails
+    with that exception `e`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Recall that Scala allows using for-comprehensions on objects that have a `map`
+    method, so we can use futures in for-comprehensions. Let''s assume that we want
+    to get the future with the longest line from our `build.sbt` file. The computation
+    proceeds in two steps. First, we read in the lines from the disk, and then we
+    call the `maxBy` method to get the longest line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `longest` declaration is desugared by the Scala compiler into the following
+    line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The real advantage of `for` comprehensions becomes apparent when we use the
+    `flatMap` combinator, which has the following signature:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `flatMap` combinator uses the current future with the `Future[T]` type to
+    produce another future with the type `Future[S]` . The resulting `Future[S]` is
+    completed by taking the value `x` of the type `T` from the current future, and
+    mapping that value to another future `f(x)`. While the future resulting from a
+    `map` method completes when the mapping function `f` completes, the future resulting
+    from a `flatMap` method completes when both `f` and the future returned by `f`
+    complete.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To understand how this combinator is useful, let''s consider the following
+    example. Assume that your job application went well and you got that new job you
+    were hoping for. On the first day of work, you receive a chain e-mail from your
+    secretary. The chain e-mail claims that you should never open URLs starting with
+    `ftp://`, because all of them contain viruses. As a skillful techie with a lot
+    of experience, you quickly recognize the chain letter for what it is--a scam.
+    You, therefore, decide to enlighten your secretary by sending her instructions
+    on how to communicate using e-mails, and an explanation of what FTP links are.
+    You write a short program that replies asynchronously. You''ve got better things
+    to do than to spend your day writing e-mails:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This program asynchronously fetches the good old **RFC 1855**--the guidelines
+    for e-mail communication or netiquette. It then asynchronously fetches the URL
+    specification with information on the `ftp` schema. The program attempts to concatenate
+    the two texts. It calls `flatMap` on the `netiquette` future. Based on the `nettext`
+    value in the `netiquette` future, the `flatMap` future needs to return another
+    future. It could return the `urlSpec` future directly, but the resulting future,
+    `answer`, would then be completed with just the URL specification. Instead, we
+    can call the `map` combinator on the `urlSpec` future; we map its value, `urltext`,
+    into the concatenation of the `nettext` and `urltext` values. This results in
+    another intermediate future holding the concatenation; once this future is completed,
+    the `answer` future is completed as well. Graphically, this looks as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Functional composition on futures](img/image_04_004.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'If you look at this execution diagram from a distance, you will notice that
+    there is an inherent ordering between asynchronous computations. We can capture
+    these relationships in a graph, as shown in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Functional composition on futures](img/image_04_005.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: This graph is called the **dataflow graph**, because it describes how the data
+    flows from one future to another. Futures are represented with vertices and asynchronous
+    computations are directed edges between them. An edge points from one vertex to
+    another if the value of future in the first vertex is used to compute the value
+    of future in the second vertex. In this graph, futures produced by `Future.apply`
+    are source vertices-they have only outward edges. Various future combinators such
+    as `map` and `flatMap` connect different vertices. Callback functions such as
+    `foreach` lead to sink vertices-they have no outward edges. Some combinators,
+    such as `flatMap`, can use values from multiple vertices.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'The `flatMap` combinator combines two futures into one: the one on which the
+    `flatMap` combinator is invoked and the one that is returned by the argument function.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are two issues with our e-mail example. First, we should be nicer to
+    our new secretary; she''s not a techie like we are. Second, using `flatMap` directly
+    makes the program hard to understand. There are not many developers in the Scala
+    community that use `flatMap` like this. Instead, `flatMap` should be used implicitly
+    in `for` comprehensions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: After desugaring, this `for` comprehension is identical to what we had before.
+    This is much simpler; the program now almost reads itself. For the `nettext` value
+    of the `netiquette` future and the `urltext` value of the `urlSpec` future, the
+    `answer` future is a new future with the concatenation of `nettext` and `urltext`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: You should prefer for-comprehensions to using `flatMap` directly to make programs
+    more concise and understandable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Note that the following for-comprehension looks very similar to what we had
+    before, but it is not equivalent:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code, the `nettext` value is extracted from the first future.
+    Only after the first future is completed, the second future computation start.
+    This is useful when the second asynchronous computation uses `nettext`, but in
+    our case fetching the `netiquette` document and the URL specification can proceed
+    concurrently.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'So far, we have only considered future combinators that work with successful
+    futures. When any of the input futures fail or the computation in the combinator
+    throws an exception, the resulting future fails with the same exception. In some
+    situations, we want to handle the exception in the future in the same way as we
+    handle exceptions with a `try-catch` block in sequential programming. A combinator
+    that is helpful in these situations is called `recover`. Its simplified signature
+    is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: When this combinator is called on a future, which is successfully completed
+    with some value `x` of the type `T`, the resulting future is completed with the
+    same value `x`. On the other hand, if a future fails, then the `pf` partial function
+    is applied to the `Throwable` object that failed it. If the `pf` partial function
+    is not defined for the `Throwable` object, then the resulting future is failed
+    with the same `Throwable` object. Otherwise, the resulting future is completed
+    with the result of applying `pf` to the `Throwable` object. If the `pf` partial
+    function itself throws an exception, the resulting future is completed with that
+    exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s assume you''re worried about misspelling the URL for the `netiquette`
+    document. You can use the `recover` combinator on the `netiquette` future to provide
+    a reasonable default message if anything fails, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: Futures come with other combinators such as `filter`, `fallbackTo`, or `zip`,
+    but we will not cover all of them here; an understanding of the basic combinators
+    should be sufficient. You might wish to study the remaining combinators in the
+    API documentation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Promises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory
+    Model"), *Concurrency on the JVM and the Java Memory Model*, we implemented an
+    `asynchronous` method that used a worker thread and a task queue to receive and
+    execute asynchronous computations. That example should have left you with a basic
+    intuition about how the `execute` method is implemented in execution contexts.
+    You might be wondering how the `Future.apply` method can return and complete a
+    `Future` object. We will study promises in this section to answer this question.
+    **Promises** are objects that can be assigned a value or an exception only once.
+    This is why promises are sometimes also called single-assignment variables. A
+    promise is represented with the `Promise[T]` type in Scala. To create a promise
+    instance, we use the `Promise.apply` method on the `Promise` companion object:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: This method returns a new promise instance. Like the `Future.apply` method,
+    the `Promise.apply` method returns immediately; it is non-blocking. However, the
+    `Promise.apply` method does not start an asynchronous computation; it just creates
+    a fresh promise object. When the promise object is created, it does not contain
+    a value or an exception. To assign a value or an exception to a promise, we use
+    the `success` or `failure` method, respectively.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Perhaps you have noticed that promises are very similar to futures. Both futures
+    and promises are initially empty and can be completed with either a value or an
+    exception. This is intentional; every promise object corresponds to exactly one
+    future object. To obtain the future associated with a promise, we can call the
+    `future` method on the promise. Calling this method multiple times always returns
+    the same future object.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: A promise and a future represent two aspects of a single--assignment variable--the
+    promise allows you to assign a value to the future object, whereas the future
+    allows you to read that value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following code snippet, we create two promises, `p` and `q`, that can
+    hold string values. We then install a `foreach` callback on the future associated
+    with the `p` promise and wait for one second. The callback is not invoked until
+    the `p` promise is completed by calling the `success` method. We then fail the
+    `q` promise in the same way and install a `failed.foreach` callback:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: Alternatively, we can use the `complete` method and specify a `Try[T]` object
+    to complete the promise. Depending on whether the `Try[T]` object is a success
+    or a failure, the promise is successfully completed or failed. Importantly, after
+    a promise is either successfully completed or failed, it cannot be assigned an
+    exception or a value again in any way. Trying to do so results in an exception.
+    Note that this is true even when there are multiple threads simultaneously calling
+    `success` or `complete`. Only one thread completes the promise, and the rest throw
+    an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Assigning a value or an exception to an already completed promise is not allowed
+    and throws an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can also use the `trySuccess`, `tryFailure`, and `tryComplete` methods that
+    correspond to `success`, `failure`, and `complete`, respectively, but return a
+    Boolean value to indicate whether the assignment was successful. Recall that using
+    `Future.apply` and callback methods with referentially transparent functions results
+    in deterministic concurrent programs. As long as we do not use the `trySuccess`,
+    `tryFailure`, and `tryComplete` methods, and none of the `success`, `failure`,
+    and `complete` methods ever throw an exception, we can use promises and retain
+    determinism in our programs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We now have everything we need to implement our custom `Future.apply` method.
+    We call it `myFuture` in the following example. The `myFuture` method takes a
+    `b` by-name parameter that is the asynchronous computation. First, it creates
+    a `p` promise. Then, it starts an asynchronous computation on the `global` execution
+    context. This computation tries to evaluate `b` and complete the promise. However,
+    if the `b` body throws a nonfatal exception, the asynchronous computation fails
+    the promise with that exception. In the meanwhile, the `myFuture` method returns
+    the future immediately after starting the asynchronous computation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is a common pattern when producing futures. We create a promise, let some
+    other computation complete that promise, and return the corresponding future.
+    However, promises were not invented just for our custom future computation method,
+    `myFuture`. In the following sections, we will study use cases in which promises
+    are useful.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Converting callback-based APIs
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Scala futures are great. We already saw how they can be used to avoid blocking.
+    We have learned that callbacks help us to avoid polling and busy-waiting. We witnessed
+    that futures compose well with functional combinators and `for` comprehensions.
+    In some cases, futures and promises even guarantee deterministic programs. But,
+    we have to face the truth-not all legacy APIs were created using Scala futures.
+    Although futures are now the right way to do asynchronous computing, various third-party
+    libraries have different approaches to encoding latency.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Legacy frameworks deal with latency in the program with raw callbacks. Methods
+    that take an unbounded amount of time to complete do not return the result; instead,
+    they take a callback argument, which is invoked with the result later. JavaScript
+    libraries and frameworks are a good example for this--there is a single thread
+    executing a JavaScript program and it is unacceptable to block that thread every
+    time we call a blocking method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Such legacy systems have issues in large-scale development. First, they do not
+    nicely compose, as we already saw. Second, they are hard to understand and reason
+    about; a bunch of unstructured callbacks feels almost like spaghetti code. The
+    control flow of the program is not apparent from the code, but is dictated by
+    the internals of the library. This is called **inversion of control**. We would
+    like to somehow create a bridge between legacy callback-based APIs and futures,
+    and avoid this inversion of control. This is where promises come in handy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use promises to bridge the gap between callback-based APIs and futures.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s consider the `org.apache.commons.io.monitor` package from the **Commons
+    IO** library. This package allows subscribing to filesystem events such as file
+    and directory creation and deletion. Having become well versed in the use of futures,
+    we do not want to deal with this API directly anymore. We, therefore, implement
+    a `fileCreated` method that takes a directory name and returns a future with the
+    name of the first file in that freshly created directory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To subscribe to a filesystem event using this package, we first need to instantiate
+    a `FileAlterationMonitor` object. This object periodically scans the filesystem
+    for changes. After that, we need to create a `FileAlterationObserver` object,
+    which observes a specific directory for changes. Finally, we create a `FileAlterationListenerAdaptor`
+    object, which represents the callback. Its `onFileCreate` method is called when
+    a file is created in the filesystem; we use it to complete the promise with the
+    name of the file that was changed:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: Notice that the structure of this method is the same as the structure of the
+    `myFuture` method. We first create a promise and defer the completion of the promise
+    to some other computation. Then, we return the future associated with the promise.
+    This recurring pattern is called the future-callback bridge.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can now use the future to subscribe to the first file change in the filesystem.
+    We add a `foreach` call to the future returned by the `fileCreated` method, create
+    a new file in the editor, and witness how the program detects a new file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'A useful utility that is not available on futures is the `timeout` method.
+    We want to call a `timeout` method that takes some number of `t` milliseconds and
+    returns a future that is completed after at least `t` milliseconds. We apply the
+    callback-future bridge to the `Timer` class from the `java.util` package. We use
+    a single timer object for all the `timeout` calls:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Again, we first create a promise `p`. This promise holds no useful information
+    other than the fact that it is completed, so we give it the type `Promise[Unit]` .
+    We then call the `Timer` class''s `schedule` method with a `TimerTask` object
+    that completes the `p` promise after `t` milliseconds:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: The future returned by the `timeout` method can be used to install a callback,
+    or it can be combined with other futures using combinators. In the next section,
+    we will introduce new combinators for this purpose.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Extending the future API
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Usually, the existing future combinators are sufficient for most tasks, but
+    occasionally we want to define new ones. This is another use case for promises.
+    Assume that we want to add a combinator to futures, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This method returns a new future of the same type that is assigned the value
+    of the `this` future or the `that` future, whichever is completed first. We cannot
+    add this method directly to the `Future` trait because futures are defined in
+    the Scala standard library, but we can create an implicit conversion that adds
+    this method. Recall that, if you call a nonexistent `xyz` method on an object
+    of some type `A`, the Scala compiler will search for all implicit conversions
+    from type `A`  to some other type that has the `xyz` method. One way to define
+    such an implicit conversion is to use Scala''s implicit classes:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: The implicit `FutureOps` class converts a future of type `Future[T]`  to an
+    object with an additional `or` method. Inside the `FutureOps` object, we refer
+    to the original future with the name `self`; we cannot use `this` word, because
+    `this` is a reserved keyword that refers to the `FutureOps` object. The `or` method
+    installs callbacks on `self` and `that` future. Each of these callbacks calls
+    the `tryComplete` method on the `p` promise; the callback that executes first
+    successfully completes the promise. The `tryComplete` method in the other callback
+    returns `false` and does not change the state of the promise.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use promises to extend futures with additional functional combinators.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note that we used the `tryComplete` method in this example, and the `or` combinator
+    is nondeterministic as a result. The resulting future is completed with the value
+    of one of the input futures depending on the execution schedule. In this particular
+    case, this is exactly what we want.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cancellation of asynchronous computations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In some cases, we want to cancel a future computation. This might be because
+    a future computation takes more than the allotted amount of time, or because the
+    user clicks on the **Cancel** button in the UI. In either case, we need to provide
+    some alternative value for the canceled future.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Futures come without built-in support for cancellation. Once a future computation
+    starts, it is not possible to cancel it directly. Recall from [Chapter 2](ch02.html
+    "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency on
+    the JVM and the Java Memory Model*, that violently stopping concurrent computations
+    can be harmful, and this is why the `Thread` methods such as `stop` were deprecated
+    in the early JDK releases.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'One approach to cancel a future is to compose it with another future called
+    the **cancellation future**. The `cancellation` future provides a default value
+    when a future is canceled. We can use the `or` combinator, discussed in the previous
+    section, along with the `timeout` method, to compose a future with its `cancellation`
+    future:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: The nondeterminism of the `or` combinator is apparent when running this program.
+    The `timeout` and `sleep` statements are precisely tuned to occur approximately
+    at the same time. Another thing worth noting is that the computation started by
+    the `Future.apply` method does not actually stop if a timeout occurs. The `f`
+    future is completed with the value `"timeout!"`, but the future computation proceeds
+    concurrently. Eventually, it fails to set the value of the promise when calling
+    `tryComplete` in the `or` combinator. In many cases, this is not a problem. An
+    HTTP request that needs to complete a future does not occupy any computational
+    resources, and will eventually timeout anyway. A keyboard event that completes
+    a future only consumes a small amount of CPU time when it triggers. Callback-based
+    futures can usually be canceled, as in the preceding example. On the other hand,
+    a future that performs an asynchronous computation can use a lot of CPU power
+    or other resources. We might want to ensure that actions such as scanning the
+    filesystem or downloading a huge file really terminate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A future computation cannot be forcefully stopped. Instead, there should exist
+    some form of cooperation between the future computation and the client of the
+    future. In the examples seen so far, asynchronous computations always use futures
+    to communicate a value to the client. In this case, the client also communicates
+    in the opposite direction to let the asynchronous computation know that it should
+    stop. Naturally, we use futures and promises to accomplish this two-way communication.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First, we define a type `Cancellable[T]`  as a pair of `Promise[Unit]` and
+    `Future[T]` objects. The client will use the `Promise[Unit]` part to request a
+    cancellation, and the `Future[T]` part to subscribe to the result of the computation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `cancellable` method takes the `b` body of the asynchronous computation.
+    This time, the `b` body takes a single parameter, `Future[Unit]`, to check if
+    the cancellation was requested. The `cancellable` method creates a `cancel` promise
+    of the type `Promise[Unit]`  and forwards its corresponding future to the asynchronous
+    computation. We call this promise the **cancellation promise**. The `cancel` promise
+    will be used to signal that the asynchronous computation `b` should end. After
+    the asynchronous computation `b` returns some value `r`, the `cancel` promise
+    needs to fail. This ensures that, if the type `Future[T]`  is completed, then
+    the client cannot successfully cancel the computation using the `cancel` promise:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: If calling `tryFailure` on the `cancel` promise returns `false`, then the client
+    must have already completed the `cancel` promise. In this case, we cannot fail
+    the client's attempt to cancel the computation, so we throw a `CancellationException`.
+    Note that we cannot omit this check, as it exists to avoid the race in which the
+    client successfully requests the cancellation, and the future computation simultaneously
+    completes the future.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The asynchronous computation must occasionally check if the future was canceled
+    using the `isCompleted` method on the `cancel` future. If it detects that it was
+    canceled, it must cease execution by throwing a `CancellationException` value:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After the `cancellable` computation starts, the main thread waits for 1,500
+    milliseconds and then calls `trySuccess` to complete the cancellation promise.
+    By this time, the cancellation promise could have already failed; in this case,
+    calling `success` instead of the `trySuccess` method would result in an exception:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: We expect to see the final `working` message printed after the `"computation
+    cancelled!"` message from the main thread. This is because the asynchronous computation
+    uses polling and does not immediately detect that it was cancelled.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use promises to implement cancellation or any other form of two-way communication
+    between the client and the asynchronous computation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note that calling the `trySuccess` method on the `cancel` promise does not guarantee
+    that the computation will really be canceled. It is entirely possible that the
+    asynchronous computation fails the `cancel` promise before the client has a chance
+    to cancel it. Thus, the client, such as the main thread in our example, should
+    in general use the return value from the `trySuccess` method to check if the cancellation
+    succeeded.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Futures and blocking
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Examples in this book should have shed the light into why blocking is sometimes
+    considered an anti-pattern. Futures and asynchronous computations mainly exist
+    to avoid blocking, but in some cases, we cannot live without it. It is, therefore,
+    valid to ask how blocking interacts with futures.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are two ways to block with futures. The first is waiting until a future
+    is completed. The second is blocking from within an asynchronous computation.
+    We will study both the topics in this section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Awaiting futures
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In rare situations, we cannot use callbacks or future combinators to avoid blocking.
+    For example, the main thread that starts multiple asynchronous computations has
+    to wait for these computations to finish. If an execution context uses daemon
+    threads, as is the case with the `global` execution context, the main thread needs
+    to block to prevent the JVM process from terminating.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In these exceptional circumstances, we use the `ready` and `result` methods
+    on the `Await` object from the `scala.concurrent` package. The `ready` method
+    blocks the caller thread until the specified future is completed. The `result`
+    method also blocks the caller thread, but returns the value of the future if it
+    was completed successfully, or throws the exception in the future if the future
+    was failed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Both the methods require specifying a timeout parameter-the longest duration
+    that the caller should wait for the completion of the future before a `TimeoutException`
+    is thrown. To specify a timeout, we import the `scala.concurrent.duration` package.
+    This allows us to write expressions such as `10.seconds`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this example, the main thread starts a computation that retrieves the URL
+    specification and then awaits. By this time, the World Wide Web Consortium is
+    worried that a DOS attack is under way, so this is the last time we download the
+    URL specification.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Blocking in asynchronous computations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Waiting for the completion of a future is not the only way to block. Some legacy
+    APIs do not use callbacks to asynchronously return results. Instead, such APIs
+    expose the blocking methods. After we call a blocking method, we lose control
+    over the thread; it is up to the blocking method to unblock the thread and return
+    the control back.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Execution contexts are often implemented using thread pools. As we saw in [Chapter
+    3](ch03.html "Chapter 3. Traditional Building Blocks of Concurrency"), *Traditional
+    Building Blocks of Concurrency*, blocking worker threads can lead to thread starvation.
+    Thus, by starting future computations that block, it is possible to reduce parallelism
+    and even cause deadlocks. This is illustrated in the following example, in which
+    16 separate future computations call the `sleep` method, and the main thread waits
+    until they complete for an unbounded amount of time:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: Assume that you have eight cores in your processor. This program does not end
+    in one second. Instead, the first batch of eight futures started by the `Future.apply`
+    method will block all the worker threads for one second, and then another batch
+    of eight futures will block for another second. As a result, none of our eight
+    processor cores can do any useful work for one second.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Avoid blocking in asynchronous computations, as it can cause thread starvation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you absolutely must block, then the part of the code that blocks should
+    be enclosed within the `blocking` call. This signals to the execution context
+    that the worker thread is blocked and allows it to temporarily spawn additional
+    worker threads if necessary:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: With the `blocking` call around the `sleep` call, the `global` execution context
+    spawns additional threads when it detects that there is more work than the worker
+    threads. All 16 future computations can execute concurrently, and the program
+    terminates after one second.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The `Await.ready` and `Await.result` statements block the caller thread until
+    the future is completed, and are in most cases used outside the asynchronous computations.
+    They are blocking operations. The `blocking` statement is used inside asynchronous
+    code to designate that the enclosed block of code contains a blocking call. It
+    is not a blocking operation by itself.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Scala Async library
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the final section of this chapter, we turn to the Scala **Async** library.
+    You should understand that the Scala Async library does not add anything conceptually
+    new to futures and promises. If you got this far in this chapter, you already
+    know everything that you need to know about asynchronous programming, callbacks,
+    future composition, promises, and blocking. You can start building asynchronous
+    applications right away.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Having said that, the Scala Async library is a convenient library for futures
+    and promises that allow expressing chains of asynchronous computations more conveniently.
+    Every program that you express using the Scala Async library can also be expressed
+    using futures and promises. Often, the Scala Async library allows writing shorter,
+    more concise, and understandable programs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Scala Async library introduces two new method calls--the `async` and `await`
+    methods. The `async` method is conceptually equivalent to the `Future.apply` method;
+    it starts an asynchronous computation and returns a future object. The `await`
+    method should not be confused with the `Await` object used to block on futures.
+    The `await` method takes a future and returns that future's value. However, unlike
+    the methods on the `Await` object, the `await` method does not block the underlying
+    thread; we will soon see how this is possible.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The Scala Async library is currently not part of the Scala standard library.
+    To use it, we need to add the following line to our build definition file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As a simple example, consider the `delay` method, which returns a future that
+    is completed after `n` seconds. We use the `async` method to start an asynchronous
+    computation that calls the `sleep` method. When the `sleep` call returns, the
+    future is completed:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `await` method must be statically enclosed within an `async` block in the
+    same method; it is a compile-time error to invoke `await` outside of the `async`
+    block. Whenever the execution inside the `async` block reaches an `await` statement,
+    it stops until the value from the future in the `await` statement becomes available.
+    Consider the following example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, the asynchronous computation in the `async` block prints `"T-minus 1 second"`.
+    It then calls `delay` to obtain a future that is completed after one second. The
+    `await` call designates that the computation can proceed only after the future
+    returned by `delay` completes. After that happens, the `async` block prints the
+    text `done`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The natural question is: How can the Scala Async library execute the preceding
+    example without blocking? The answer is that the Scala Async library uses Scala
+    Macros to transform the code inside the `async` statement. The code is transformed
+    in such a way that the code after every `await` statement becomes a callback registered
+    to the future inside `await`. Immensely simplifying how this transformation works
+    under the hood, the preceding code is equivalent to the following computation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As you can see, the equivalent code produced by the Scala Async library is
+    completely non-blocking. The advantage of the `async`/`await` style code is that
+    it is much more understandable. For example, it allows defining a custom `countdown`
+    method that takes a number of seconds and an `n` and a `f` function to execute
+    every second. We use a `while` loop for the `countdown` method inside the `async`
+    block: each time an `await` instance is invoked, the execution is postponed for
+    one second. The implementation using the Scala Async library feels like regular
+    procedural code, but it does not incur the cost of blocking:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `countdown` method can be used from the main thread to print to the standard
+    output every second. Since the `countdown` method returns a future, we can additionally
+    install a `foreach` callback to execute after the `countdown` method is over:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Having seen how expressive the Async library is in practice, the question is:
+    When to use it in place of callbacks, future combinators, and for-comprehensions?
+    In most cases, whenever you can express a chain of asynchronous computations inside
+    a single method, you are free to use Async. You should use your best judgment
+    when applying it; always choose the programming style that results in concise,
+    more understandable, and more maintainable programs.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the Scala Async library when a chain of asynchronous computations can be
+    expressed more intuitively as procedural code using the `async` and `await` statements.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Alternative future frameworks
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Scala futures and promises API resulted from an attempt to consolidate several
+    different APIs for asynchronous programming, among them, legacy Scala futures,
+    Akka futures, Scalaz futures, and Twitter's Finagle futures. Legacy Scala futures
+    and Akka futures have already converged to the futures and promises APIs that
+    you've learned about so far in this chapter. Finagle's `com.twitter.util.Future`
+    type is planned to eventually implement the same interface as `scala.concurrent.Future`,
+    while the Scalaz `scalaz.concurrent.Future` type implements a slightly different
+    interface. In this section, we give a brief description of Scalaz futures.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To use Scalaz, we add the following dependency to the `build.sbt` file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We now encode an asynchronous tombola program using Scalaz. The `Future` type
+    in Scalaz does not have the `foreach` method. Instead, we use its `runAsync` method,
+    which asynchronously runs the future computation to obtain its value, and then
+    calls the specified callback:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE57]'
+  prefs: []
+  type: TYPE_PRE
+- en: Unless you are terribly lucky and draw the same permutation twice, running this
+    program reveals that the two `runAsync` calls print different numbers. Each `runAsync`
+    call separately computes the permutation of the random numbers. This is not surprising,
+    as Scalaz futures have the pull semantics, in which the value is computed each
+    time some callback requests it, in contrast to the push semantics of Finagle and
+    Scala futures, in which the callback is stored, and applied if and when the asynchronously
+    computed value becomes available.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To achieve the same semantics as we would have with Scala futures, we need
+    to use the `start` combinator that runs the asynchronous computation once, and
+    caches its result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE58]'
+  prefs: []
+  type: TYPE_PRE
+- en: With this change, the two `runAsync` calls use the same permutation of random
+    numbers `tombola`, and print the same values.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will not delve further into the internals of alternate frameworks. The fundamentals
+    of futures and promises that you learned about in this chapter should be sufficient
+    to easily familiarize yourself with other asynchronous programming libraries,
+    should the need arise.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This chapter presented some powerful abstractions for asynchronous programming.
+    We have seen how to encode latency with the `Future` type, how to avoid blocking
+    with callbacks on futures, and how to compose values from multiple futures. We
+    have learned that futures and promises are closely tied together and that promises
+    allow interfacing with legacy callback-based systems. In cases where blocking
+    was unavoidable, we learned how to use the `Await` object and the `blocking` statement.
+    Finally, we learned that the Scala Async library is a powerful alternative for
+    expressing future computations more concisely.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Futures and promises only allow dealing with a single value at a time. What
+    if an asynchronous computation produces more than a single value before completing?
+    Similarly, how do we efficiently execute thousands of asynchronous operations
+    on different elements of large datasets? Should we use futures in such cases?
+    In the next chapter, we will explore Scala's support for data-parallelism, a form
+    of concurrency where similar asynchronous computations execute in parallel on
+    different collection elements. We will see that using data-parallel collections
+    is preferable to using futures when collections are large, as it results in a
+    better performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exercises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The following exercises summarize what we have learned about futures and promises
+    in this chapter, and require implementing custom future factory methods and combinators.
+    Several exercises also deal with several deterministic programming abstractions
+    that were not covered in this chapter, such as single-assignment variables and
+    maps:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implement a command-line program that asks the user to input a URL of some website,
+    and displays the HTML of that website. Between the time that the user hits **ENTER**
+    and the time that the HTML is retrieved, the program should repetitively print
+    a `.` to the standard output every 50 milliseconds, with a 2 second timeout. Use
+    only futures and promises, and avoid synchronization primitives from the previous
+    chapters. You may reuse the `timeout` method defined in this chapter.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Implement an abstraction called a single-assignment variable, represented by
+    the `IVar` class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE59]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: When created, the `IVar` class does not contain a value, and calling `apply`
+    results in an exception. After a value is assigned using the `:=` method, subsequent
+    calls to `:=` throw an exception, and the `apply` method returns the previously
+    assigned value. Use only futures and promises, and avoid the synchronization primitives
+    from the previous chapters.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Extend the `Future[T]` type with the `exists` method, which takes a predicate
+    and returns a `Future[Boolean]` object:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE60]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: The resulting future is completed with `true` if and only if the original future
+    is completed and the predicate returns `true`, and `false` otherwise. You can
+    use future combinators, but you are not allowed to create any `Promise` objects
+    in the implementation.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Repeat the previous exercise, but use `Promise` objects instead of future combinators.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Repeat the previous exercise, but use the Scala Async framework.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Implement the `spawn` method, which takes a command-line string, asynchronously
+    executes it as a child process, and returns a future with the exit code of the
+    child process:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE61]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Make sure that your implementation does not cause thread starvation.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Implement the `IMap` class, which represents a single-assignment map:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE62]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Pairs of keys and values can be added to the `IMap` object, but they can never
+    be removed or modified. A specific key can be assigned only once, and subsequent
+    calls to `update` with that key result in an exception. Calling `apply` with a
+    specific key returns a future, which is completed after that key is inserted into
+    the map. In addition to futures and promises, you may use the `scala.collection.concurrent.Map`
+    class.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Extend the type `Promise[T]`  with the `compose` method, which takes a function
+    of the type `S => T` , and returns a `Promise[S]` object:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE63]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Whenever the resulting promise is completed with some value `x` of the type
+    `S` (or failed), the original promise must be completed with the value `f(x)`
+    asynchronously (or failed), unless the original promise is already completed.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: 'Implement the `scatterGather` method, which given a sequence of tasks, runs
+    those tasks as parallel asynchronous computations, then combines the results,
+    and returns a future that contains the sequence of results from different tasks.
+    The `scatterGather` method has the following interface:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE64]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Implement another version of the `timeout` method shown in this chapter, but
+    without using the `blocking` construct or `Thread.sleep`. Instead use the `java.util.Timer`
+    class from the JDK. What are the advantages of this new implementation?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: A directed graph is a data structure composed from a finite set of nodes, where
+    each node has a finite number of directed edges that connect it with other nodes
+    in the graph. A directed acyclic graph, or shorter, DAG, is a directed graph data
+    structure in which, starting from any node N and following any path along the
+    directed edges, we cannot arrive back at N. In other words, directed edges of
+    a DAG never form a cycle.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'One way to represent the nodes of the DAG data structure is as follows:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE65]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Here is an example of a DAG declaration:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE66]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'The preceding DAG declaration is shown graphically in the following figure:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '![Exercises](img/image_04_006.jpg)'
+  prefs:
+  - PREF_IND
+  type: TYPE_IMG
+- en: 'DAGs are often used to declare dependencies between different items, for example,
+    build tasks in a project build tool or an IDE. Your task is to implement the `fold`
+    method that takes a DAG node and a function that maps each item and its inputs
+    into some value, and then returns the future with the resulting value of the input
+    node:'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: '[PRE67]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'The `fold` method runs an asynchronous task for each item in the DAG to map
+    the item and its inputs to a new value. Dependencies between DAG items must be
+    respected: an item can only run after all of its dependencies have been computed.
+    For example, in the previous figure, task `b` can only run after both `c` and
+    `d` have produced a result.'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL

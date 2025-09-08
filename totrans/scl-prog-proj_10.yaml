@@ -1,0 +1,1762 @@
+- en: Fetching and Persisting Bitcoin Market Data
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we will develop a data pipeline to fetch, store, and, later
+    on, analyze bitcoin transaction data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After an introduction to Apache Spark, we will see how to call a REST API to
+    fetch transactions from a cryptocurrency exchange. A cryptocurrency exchange allows
+    customers to trade digital currencies, such as bitcoin, for fiat currencies, such
+    as the US dollar. The transaction data will allow us to track the price and quantity
+    exchanged at a certain point in time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will then introduce the Parquet format. This is a columnar data format that
+    is widely used for big data analytics. After that, we will build a standalone
+    application that will produce a history of bitcoin/USD transactions and save it
+    in Parquet. In the following chapter, we will use Apache Zeppelin to query and
+    analyze the data interactively.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The volume of data that we will deal with is not very large, but the tools and
+    techniques used will be the same if the data were to grow or if we were to store
+    the data for more currencies or from different exchanges. The benefit of using
+    Apache Spark is that it can scale horizontally and that you can just add more
+    machines to your cluster to speed up your processing, without having to change
+    your code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another advantage of using Spark is that it makes it easy to manipulate table-like
+    data structures and to load and save them from/to different formats. This advantage
+    remains even when the volume of data is small.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Apache Spark
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Calling the REST API of a cryptocurrency exchange
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Parquet format and partitioning
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'After we are done with this chapter, we have learned a few things such as the
+    following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to store large volumes of data
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to use the Spark Dataset API
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to use the IO `Monad` to control side effects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Setting up the project
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Create a new SBT project. In IntelliJ, go to **File** | **New** | **Project**
+    | **Scala** | **sbt**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Then edit `build.sbt` and paste the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We use Scala 2.11 because, at the time of writing, Spark does not provide its
+    libraries for Scala 2.12\. We are going to use the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`spark-core` and `spark-sql` for reading the transactions and saving them to
+    Parquet. The `Provided` configuration will make SBT exclude these libraries when
+    we package the application in an assembly JAR file.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: ScalaTest for testing our code.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`scala-logging`, a convenient and fast logging library that wraps SLF4J.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`cats-core` and `cats-effects` for managing our side effects with the IO `Monad`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`spark-streaming`, `spark-sql-kafka`, and `pusher` for the next chapter.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `-Ypartial-unification` compiler option is required by `cats`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The last line makes SBT write the classes to the `/tmp` folder, in order to
+    avoid a *file name too long* bug with the Linux encrypted home folders. You might
+    not need it on your platform.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you do not wish to retype the code examples, you can check out the complete
+    project code from GitHub at [https://github.com/PacktPublishing/Scala-Programming-Projects](https://github.com/PacktPublishing/Scala-Programming-Projects).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding Apache Spark
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Spark is an open source framework built to perform analytics on large datasets.
+    Unlike other tools such as R, Python, and MathLab that are using in-memory processing,
+    Spark gives you the possibility to scale out. And thanks to its expressiveness
+    and interactivity, it also improves developer productivity.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are entire books dedicated to Spark. It has a vast number of components
+    and lots of areas to explore. In this book, we aim to get you started with the
+    fundamentals. You should then be more comfortable exploring the documentation
+    if you want to.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The purpose of Spark is to perform analytics on a collection. This collection
+    could be in-memory and you could run your analytics using multiple threads, but
+    if your collection is becoming too large, you are going to reach the memory limit
+    of your system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Spark solved this issue by creating an object to hold all of this data. Instead
+    of keeping everything in the local computer's memory, Spark chunks the data into
+    multiple collections and distributes it on multiple computers. This object is
+    called an **RDD** (short for **Resilient Distributed Dataset**). RDD keeps references
+    to all of the distributed chunks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: RDD, DataFrame, and Dataset
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The core concept of Spark is the RDD. From the user''s point of view, for a
+    given type `A`, `RDD[A]` looks similar to a standard Scala collection, such as
+    `Vector[A]`: they are both **immutable** and share many well-known methods, such
+    as `map`, `reduce`, `filter`, and `flatMap`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, the RDD has some unique characteristics. They are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Lazy**: When you call a **transformation** function, such as `map` or `filter`,
+    nothing happens immediately. The function call is just added to a computation
+    graph that is stored in the RDD class. This computation graph is executed when
+    you subsequently call an **action** function, such as `collect` or `take`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Distributed**: The data in the RDD is split in several partitions that are
+    scattered across different **executors** in a cluster. A **task** represents a
+    chunk of data and the transformation that must be applied to it.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Resilient**: If one of the executors dies when you execute a job, Spark automatically
+    resends the tasks that were lost to another executor.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Given two types, `A` and `B`, `RDD[A]` and `RDD[B]` can be joined together
+    to obtain `RDD[(A, B)]`. For instance, consider `case class Household(id: Int,
+    address: String)` and  `case class ElectrictyConsumption(houseHoldId: Int, kwh:
+    Double)`. If you want to count the number of households consuming more than 2
+    kWh, you could do either of the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Join `RDD[HouseHold]` with `RDD[ElectricityConsumption]` and then apply `filter`
+    on the result
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Apply `filter` to `RDD[ElectricityConsumption]` first, and then join it with
+    `RDD[HouseHold]`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The result will be the same but the performances will be different; the second
+    algorithm will be faster. Wouldn't it be nice if Spark could perform this kind
+    of optimization for us?
+  prefs: []
+  type: TYPE_NORMAL
+- en: Spark SQL
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The answer is yes and the module is called Spark SQL. Spark SQL sits on top
+    of Spark Core and allows the manipulation of structured data. Unlike with the
+    basic RDD API, the `DataFrame` API provides more information to the Spark engine.
+    Using this information, it can change the execution plan and optimize it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can also use the module to execute SQL queries as you would with a relational
+    database. It makes it easy for people comfortable with SQL to run queries on heterogeneous
+    sources of data. You can, for instance, join a data table coming from a CSV file
+    with another one stored in Parquet in a Hadoop filesystem and with yet another
+    one coming from a relational database.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Dataframe
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Spark SQL is composed of three main APIs:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The SQL literal syntax
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `DataFrame` API
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`DataSet`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`DataFrame` is conceptually the same as a table in the relational database.
+    The data is distributed in the same way as in an RDD. `DataFrame` has a schema
+    but is untyped. You can create `DataFrame` from an RDD or manually build it. Once
+    created, `DataFrame` will contain a schema that maintains the name and type for
+    each column (field).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you then want to use `DataFrame` in an SQL query, all you need to do is
+    create a named view (equivalent to the table name in the relational database)
+    using the `Dataframe.createTempView(viewName: String)` method. In the SQL query,
+    the fields that are available in the `SELECT` statement will come from the schema
+    of `DataFrame` and the name of the table used in the `FROM` statement will come
+    from `viewName`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Dataset
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As Scala developers, we are used to working with types and with a friendly compiler
+    that infers types and tells us our mistakes. The problem with `DataFrame` API
+    and Spark SQL is that you can write a query such as `Select lastname From people`,
+    but in your `DataFrame`, you might not have a `lastname` column, but `surname`
+    one. In this case, you are only going to discover that mistake at runtime with
+    a nasty exception!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Wouldn't it be nice to have a compilation error instead?
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is why Spark introduced `Dataset` in version 1.6\. `Dataset` attempts to
+    unify the RDD and the `DataFrame` APIs. `Dataset` has a type parameter, and you
+    can use anonymous functions to manipulate the data as you would with an RDD or
+    a vector.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Actually, `DataFrame` is, in fact, a type alias for `DataSet[Row]`. This means
+    you can seamlessly mix the two APIs and use in the same query a filter using a
+    Lambda expression followed by another filter using a `DataFrame` operator.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next sections, we are only going to use `Dataset`, which is a good compromise
+    between code quality and performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exploring the Spark API with the Scala console
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'If you are not already familiar with Spark, it can be a bit intimidating to
+    write Spark jobs straight away. To make it easier, we are first going to explore
+    the API using a Scala console. Start a new Scala console (*Ctrl* + *Shift* + *D*
+    in IntelliJ), and type the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: This will initialize a new Spark session and bring some handy implicit in scope.
+    The master `"local[*]"` URL means that we will use all of the cores available
+    on the localhost when running jobs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The Spark session is available to accept new jobs. Let''s use it to create
+    `Dataset` containing a single string:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: The implicit that we imported earlier let us use the `.toDS()` function on `Seq`
+    to produce `Dataset`. We can observe that the `.toString` method that was called
+    by the Scala console was output by the schema of `Dataset`—it has a single column
+    `value` of the `string` type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, we could not see the content of `Dataset`. This is because `Dataset`
+    is a lazy data structure; it just stores a computation graph, which is not evaluated
+    until we call one of the action methods. Still, for debugging, it is very handy
+    to be able to evaluate `Dataset` and print its content. For that we need to call
+    `show`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You should see the following output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`show()` is an **action**; it will submit a job to the Spark cluster, collect
+    the results in the driver, and print them. By default, `show` limits the number
+    of rows to 20 and truncates the columns. You can call it with extra parameters
+    if you want more information.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now we would like to convert each string to `Int`, in order to obtain `Dataset[Int]`.
+    We have two ways of doing that.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transforming rows using map
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Type the following in the Scala console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You should see something similar to this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `explain()` method shows the execution plan that will be run if we call
+    an action method, such as `show()` or `collect()`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: From this plan, we can deduce that calling `map` is not very efficient. Indeed,
+    Spark stores the rows of `Dataset` off-heap in binary format. Whenever you call
+    `map`, it has to deserialize this format, apply your function, and serialize the
+    result in binary format.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transforming rows using select
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'A more efficient way to transform rows is to use `select(cols: Column*)`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: The implicits that we imported earlier let us use the `$"columnName"` notation
+    to produce a `Column` object from `String`. The string after the `$` sign must
+    refer to a column that exists in the `DataFrame` source; otherwise, you would
+    get an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We then call the `.cast` method to transform each `String` into `Int`. But,
+    at this stage, the resulting `df` object is not of the `Dataset[Int];` type; it
+    is `DataFrame`. `DataFrame` is actually a type alias for `Dataset[Row]`, and `Row`
+    is akin to a list of key-value pairs. `DataFrame` is a representation of the distributed
+    data in an untyped way. The compiler does not know the type or names of each column;
+    they are only known at runtime.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In order to obtain `Dataset[Int]`, we need to cast the type of the elements
+    using `.as[Int]`. This would fail at runtime if the elements of `DataFrame` cannot
+    be cast to the target type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Force a specific type for the elements of your `Dataset`; this will make your
+    programs safer. You should only expose `DataFrame` in a function if it genuinely
+    does not know what the types of the columns will be at runtime; for instance,
+    if you are reading or writing arbitrary files.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s see what our `explain` plan looks like now:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You should see this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: This time we can see that there is no extra serialization/deserialization step.
+    The evaluation of this `Dataset` will be faster than when we used `map`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Exercise: Filter the elements of `Dataset[Int]` to keep only the elements that
+    are greater than 2\. First use `filter(func: Int => Boolean)`, and then use `filter(condition:
+    Column)`. Compare the execution plans for both implementations.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The conclusion of this is that you should prefer functions that use `Column`
+    arguments whenever possible. They can fail at runtime, as opposed to the type-safe
+    alternatives because they can refer to column names that do not exist in your
+    `Dataset`. However, they are more efficient.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Fortunately, there is an open source library called **Frameless** that can let
+    you use these efficient methods in a type-safe way. If you are writing large programs
+    that use `Dataset`, I recommend that you check it out here: [https://github.com/typelevel/frameless.](https://github.com/typelevel/frameless)
+  prefs: []
+  type: TYPE_NORMAL
+- en: Execution model
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The methods available in `Dataset` and the RDD are of two kinds:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Transformations**: They return a new `Dataset` API that will apply the transformation
+    later when an action method is called. For instance, `map`, `filter`, `join`,
+    and `flatMap`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Actions**: They trigger the execution of a Spark job, for instance, `collect`,
+    `take`, and `count`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: When a **job** is triggered by an action method, it is divided into several
+    **stages**. A stage is a part of a job that can be run without having to **shuffle**
+    the data across different nodes of the cluster. It can encompass several transformations,
+    such as `map` and `filter`. But as soon as one transformation, such as `join`,
+    requires the data be moved (shuffling), another stage must be introduced.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The data contained in `Dataset` is split into several **partitions**. The combination
+    of a stage (code to execute) with a partition (data used by the stage) is a **task**.
+    The ideal parallelism would be achieved when you have *nb of tasks* = *nb of cores*
+    in the cluster. When you need to optimize a job, it can be beneficial to repartition
+    your data to better match the number of cores at your disposal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'When Spark starts executing a job, the **Driver** program distributes the tasks
+    to all the executors of the cluster:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/a6d611c2-4d81-4318-938e-ada40bc6e02f.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The preceding diagram is described as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The driver is on the same JVM as the code that called the action method
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: An executor runs on its own JVM on a remote node of the cluster. It can use
+    many cores to execute several tasks in parallel
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The Spark **master** coordinates several **worker** nodes in a cluster. When
+    you start a Spark application, you have to specify the URL of the master. It will
+    then ask its worker to spawn executor processes that will be dedicated to the
+    jobs of your application. At a given point in time, a worker can manage several
+    executors running completely different applications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When you want to quickly run or test an application without using a cluster,
+    you can use a **local** master. In this special mode, only one JVM is used for
+    the master, driver, and executor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing the transaction batch producer
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this section, we will first discuss how to call a REST API to fetch BTC/USD
+    transactions. Then we will see how to use Spark to deserialize the JSON payload
+    into a well-typed distributed `Dataset`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After that, we will introduce the parquet format and see how Spark makes it
+    easy to save our transactions in this format.
+  prefs: []
+  type: TYPE_NORMAL
+- en: With all of these building blocks, we will then implement our program in a purely
+    functional way using the **Test-Driven-Development** (**TDD**) technique.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Calling the Bitstamp REST API
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Bitstamp is a cryptocurrency exchange that people use to trade a cryptocurrency,
+    such as bitcoin, for a conventional currency, such as US dollar or euro. One of
+    the good things about Bitstamp is that it provides a REST API, which can be used
+    to get information about the latest trades, and can also be used to send orders
+    if you have an account.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can find out more here: [https://www.bitstamp.net/api/.](https://www.bitstamp.net/api/)
+  prefs: []
+  type: TYPE_NORMAL
+- en: For this project, the only endpoint we are interested in is the one that gets
+    the latest transactions that happened on the exchange. It will give us an indication
+    of the price and of the quantity of currency exchanged in a given period of time.
+    This endpoint can be called with the following URL: [https://www.bitstamp.net/api/v2/transactions/btcusd/?time=hour.](https://www.bitstamp.net/api/v2/transactions/btcusd/?time=hour)
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you paste this URL in your favorite browser, you should see a JSON array
+    containing all of the BTC (Bitcoin)/USD (US dollar) transactions that happened
+    during the last hour. It should look similar to this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the previous result, if we inspect the first transaction, we can see that
+    0.05 bitcoins were sold (`"type": "1"` means sell) at a price of 6488.27 USD for
+    1 BTC.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are many Java and Scala libraries to call a REST endpoint, but to keep
+    things simple, we are just going to use the Scala and Java SDK to call the endpoint.
+    Start a new Scala console, and run this code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: With the help of the `scala.io.Source` class, we can get the HTTP response in
+    a string. This is the first building block of our program. The next thing we need
+    to do is parse the JSON objects into a collection of Scala objects to make them
+    easier to manipulate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we read the whole HTTP response in a string in one go, we need enough memory
+    on the driver process to keep that string in the heap. You might think that it
+    would be better to read it with `InputStream`, but unfortunately, it is not possible
+    with Spark Core to split a stream of data. You would have to use Spark Streaming
+    to do this.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Parsing the JSON response
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We have observed that when we call the Bitstamp endpoint, we get a string containing
+    a JSON array, and each element of the array is a JSON object that represents a
+    transaction. But it would be nicer to have the information in a Spark `Dataset`.
+    This way, we will be able to use all of the powerful Spark functions to store,
+    filter, or aggregate the data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unit testing jsonToHttpTransaction
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'First, we can start by defining a case class that represents the same data
+    as in our JSON payload. Create a new package, `coinyser`, and then a class, `coinyser.HttpTransaction`,
+    in `src/main/scala`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In Scala, if you want to use a variable name already defined as a Scala keyword,
+    you can enclose the variable with backticks such as the `type` variable name in
+    this example: `` `type`: String ``.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This class has the same attribute names with the same types (all string) as
+    the JSON objects. The first step is to implement a function that transforms a
+    JSON string into `Dataset[HttpTransaction]`. For this purpose, let''s create a
+    new test class, `coinyser.BatchProducerSpec`, in `src/test/scala`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Our test extends `SharedSparkSession`. This trait provides an implicit `SparkSession`
+    that can be shared across several tests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: First, we defined a string containing a JSON array with two transactions that
+    we extracted from Bitstamp's endpoint. We defined two instances of `HttpTransaction`
+    that we expect to have in our `Dataset` outside of the test because we will reuse
+    them in another test later on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After the call to `jsonToHttpTransaction` that we are going to implement, we
+    obtain `Dataset[HttpTransaction]`. However, Spark's `Dataset` is lazy—at this
+    stage, nothing has been processed yet. In order to *materialize* `Dataset`, we
+    need to force its evaluation by calling `collect()`. The return type of `collect()`
+    here is `Array[HttpTransaction]`, and we can therefore use ScalaTest's assertion, `contain
+    theSameElementsAs`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing jsonToHttpTransaction
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Create the `coinyser.BatchProducer` class and type the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Some of the imports will be used later. Do not worry if they show up as being
+    unused in IntelliJ. Let''s explain, step by step, what is happening here. I would
+    encourage you to run each step in a Scala console and call `.show()` after each
+    `Dataset` transformation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As specified in the unit test, the signature of our function takes `String`
+    containing a JSON array of transactions and returns `Dataset[HttpTransaction].`
+    As we need to produce `Dataset`, we also need to pass a `SparkSession` object.
+    It is a good practice to pass it as an implicit parameter, as there is only one
+    instance of this class in a typical application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: The first step is to produce `Dataset[String]` from our JSON string. This `Dataset`
+    will have a single row containing the whole JSON array of transactions. For this,
+    we use the `.toDS()` method that was made available when we called `import spark.implicits:`
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We have seen in the previous section that it is more efficient to use Spark
+    functions that take `Column` as an argument. In order to parse the JSON, we use
+    the `from_jso` function, which is in the `org.apache.spark.sql.functions` package.
+    We use this particular signature: `def from_json(e: Column, schema: StructType):
+    Column`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The first parameter is the column we want to parse. We pass the `"value"` column,
+    which is the default column name for our single-column `Dataset`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The second argument is the target schema. `StructType` represents the structure
+    of `Dataset`—the names, types, and order of its columns. The schema we pass to
+    the function must match the names and types of the JSON string. You can create
+    a schema by hand but, to make things easier, we first create `txSchema` using
+    an empty `Dataset[HttpTransaction]`. `txSchema` is the schema for a single transaction,
+    but as our JSON string contains an array of transactions, we must wrap `txSchema`
+    in `ArrayType`:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: If we just select `arrayColumn`, we would obtain `Dataset[Seq[HttpTransaction]]`—one
+    row containing a collection. But what we want is `Dataset[HttpTransaction]`—one
+    row per element of the array.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For this purpose, we use the `explode` function, which is similar to flatten
+    for vectors. After `explode`, we obtain several rows, but at this stage, each
+    row has a single `StructType` column that contains the desired columns—`date`,
+    `tid`, and `price`. Our transaction data is actually wrapped in an object. In
+    order to unwrap it, we first rename this `StructType` column `"v"`, and then call
+    `select("v.*")`. We obtain `DataFrame` with the `date`, `tid`, and `price` columns,
+    so that we can safely cast to `HttpTransaction`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can run the unit test; it should pass now.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unit testing httpToDomainTransactions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'We now have all of the pieces to fetch transactions and put them in `Dataset[HttpTransaction]`.
+    But it would not be wise to store these objects as they are and then run some
+    analytics with them, because of the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The API could change in the future, but we would want to keep the same storage
+    format regardless of these changes
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: As we will see in the next chapter, the Bitstamp WebSocket API for receiving
+    live transactions uses a different format
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: All of the attributes of `HttpTransaction` are of the `String` type. It would
+    be easier to run analytics if the attributes were properly typed
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'For these reasons, it would better to have a different class that represents
+    a transaction. Let''s create a new class called `coinyser.Transaction`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: It has the same attributes as `HttpTransaction`, but with better types. We have
+    to use `java.sql.Timestamp` and `java.sql.Date`, because they are the types exposed
+    externally by Spark for timestamps and dates. We also added a `date` attribute
+    that will contain the date of the transaction. The information is already contained
+    in `timestamp`, but this denormalization will be useful later on when we want
+    to filter transactions for a specific date range.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In order to avoid having to pass the date, we can create a new `apply` method
+    in the companion object:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now we can write a unit test for a new function, `httpToDomainTransactions`,
+    that you need to create inside the existing `BatchProducerSpec`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: The test is quite straightforward. We build `Dataset[HttpTransaction]`, call
+    the `httpToDomainTransactions` function, and make sure that the result contains
+    the expected `Transaction` objects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing httpToDomainTransactions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'This implementation uses `select` to avoid an extra serialization/deserialization.
+    Add the following function in `BatchProducer`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: We use `cast` to convert the string columns into the appropriate types. For
+    converting in to `TimeStampType`, we have to first convert in to `LongType`, and
+    for converting in to `DateType`, we have to first convert in to `TimestampType`.
+    Since all the types match the target `Transaction` object, we can call `.as[Transaction]`
+    at the end to obtain `Dataset[Transaction]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can now run `BatchProducerSpec` and make sure the two tests pass.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Saving transactions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We now have all of the functions required to fetch the last 24 hours of transactions
+    from the Bitstamp API, and produce well-typed transaction objects inside `Dataset`.
+    What we need after that is to persist this data on disk. This way, once we have
+    run our program for many days, we will be able to retrieve transactions that happened
+    in the past.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Introducing the Parquet format
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Spark supports many different formats for persisting `Datasets`: CSV, Parquet,
+    ORC, JSON, and many others, such as Avro, with the appropriate library.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: With a row format, such as CSV, JSON, or Avro, the data is saved row by row.
+    With a columnar format, such as Parquet or ORC, the data in the file is stored
+    by columns.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, we might have the following dataset of transactions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If we write using a row format, the file would look like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In contrast, if we write using a columnar format, the file would look like
+    this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Using a columnar data format offers several performance benefits when reading
+    the data, including the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Projection push-down: When you need to select a few columns, you do not need
+    to read the whole row. In the preceding example, if I am only interested in the
+    evolution of the price of transactions, I can select only the timestamp and price,
+    and the rest of the data will not be read from the disk.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Predicate push-down: When you want to retrieve only the rows where a column
+    has a specific value, you can quickly find these rows by scanning the column data.
+    In the preceding example, if I want to retrieve the transactions that happened
+    between 07:22:00 and 07:22:30, the columnar storage will allow me to find these
+    rows by only reading the timestamp column on the disk.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Better compression: Row formats can be compressed before being stored on the
+    disk, but the columnar format has a better compression ratio. The data is indeed
+    more homogeneous, as consecutive column values differ less than consecutive rows.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Splittable: When a Spark cluster runs a job that reads or writes to Parquet,
+    the job''s tasks are distributed across many executors. Each executor will read/write
+    chunks of rows from/to its own set of files in parallel.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: All these benefits make a columnar format particularly well suited for running
+    analytics queries. This is why, for our project, we are going to use Parquet to
+    store transactions. The choice is a bit arbitrary; ORC would work equally well.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In a typical Spark cluster production setting, you have to store files in a
+    **distributed filesystem**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Every node of the cluster must indeed have access to any chunk of the data.
+    If one of your Spark nodes were to die, you would still want to have access to
+    the data that was saved by it. You would not be able to do so if the files were
+    stored on the local filesystem. Generally, people use the **Hadoop** filesystem
+    or **Amazon S3** to store their parquet files. They both offer a distributed,
+    reliable way of storing files, and they have good parallelism characteristics.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In a production project, it can be beneficial to benchmark the performance of
+    different formats. Depending on the shape of your data and the type of queries,
+    one format might be better suited than the others.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Writing transactions in Parquet
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Add the following `import` and function declaration in `BatchProducer`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s have a look in more detail:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Writing to a file is a side effect; this is why we prefixed our function with
+    `unsafe`. As functional programmers, we strive to control side effects, and it
+    is a good practice to name any side effecting function explicitly. We will see
+    in the next section how to use the IO `Monad` to push this side effect to the
+    boundaries of our application.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We use `java.net.URI` to pass the path to the directory where our files will
+    be written. This makes sure that the path we pass to the function is really a
+    path. As usual, we try to avoid using strings for our parameters to make our code
+    more robust.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The corresponding test will actually write to the filesystem; hence, it is rather
+    more an integration test than a unit test. We are therefore going to create a
+    new test with the `IT` suffix for the integration test.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Create a new test called `coinyser.BatchProducerIT` in `src/test/scala`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: We use the handy `withTempDir` function from `SharedSparkSession`. It creates
+    a temporary directory and deletes it after the test is finished. Then, we create
+    a sample `Dataset[Transaction]`, and call the function we want to test.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After having written the dataset, we assert that the target path contains a
+    directory named `date=2018-07-23`. We indeed want to organize our storage with
+    a `date` partition to make it faster to retrieve a specific date range.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, when we read back the file, we should get the same elements as in the
+    original `Dataset`. Run the test and make sure it fails as expected.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now that we have a failing test, we can implement `BatchProducer.unsafeSave`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'First, `transactions.write` creates `DataFrameWriter`. This is an interface
+    that lets us configure some options before calling a final action method, such
+    as `parquet(path: String): Unit`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We configure the `DataFrameWriter` with the following options:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`mode(SaveMode.Append)`: With this option, if there is already some data saved
+    in the path, the content of `Dataset` will be appended to it. This will be useful
+    when we call `unsafeSave` at regular intervals to get new transactions.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`partitionBy("date")`: In the context of storage, a partition is an intermediate
+    directory that will be created under the path. It will have a name, such as `date=2018-08-16`.
+    Partitioning is a good technique for optimizing the storage layout. This will
+    allow us to speed up all the queries that only need the data for a specific date
+    range.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Do not confuse a storage partition (an intermediate folder in the filesystem)
+    with a Spark partition (a chunk of the data, stored on a node in the cluster).
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can now run the integration test; it should pass.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An interesting property of storage partitioning is that it further reduces file
+    sizes. You might be worried that by storing both the timestamp and date, we would
+    waste some storage space to store the date. It turns out that when the date is
+    a storage partition, it is not stored in the Parquet files at all.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To convince yourself, add the following line in the unit test, just after the
+    call to `unsafeSave`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then run the unit test again. You should see this in the console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: The date column is missing! This means that the `date` column is not stored
+    at all in the Parquet files. In the unit test, when we were reading from the URI,
+    Spark detected that there was a partition, `date=2018-07-23`, under that directory
+    and added a column, `date`, containing the value `2018-07-23` for all values.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you want to add a new column that has the same value for all rows, the easiest
+    way is to create an intermediate directory, `myColum=value`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the IO Monad
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We mentioned earlier that our function, `unsafeSave`, has a side effect, which
+    is to write to a file. But as functional programmers, we try to only write pure
+    functions that have no side effects. However, at the end of the program, you still
+    want this side effect to happen; otherwise, there would be no point in running
+    it!
+  prefs: []
+  type: TYPE_NORMAL
+- en: A common way of solving this dilemma is to use a parametrized type that encapsulates
+    the side effect to run it asynchronously. A good candidate for that is the `cats.effect.IO`
+    class in the `cats.effect` library (see [https://typelevel.org/cats-effect/datatypes/io.html](https://typelevel.org/cats-effect/datatypes/io.html)).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is an example that you can try in a Scala Console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can observe that nothing happened when we declared the `io` variable. At
+    this point, the block passed to the `IO` constructor is only registered and will
+    be executed later. The actual execution only happens when we call `unsafeRunSync()`.
+    Our `io` variable is a pure, immutable value, and hence preserves referential
+    transparency.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`IO` is `Monad`, and as such we can use `map`, `flatMap` and `for` comprehensions
+    to compose side effects:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can reuse the `io` variable many times; the side effect that it encapsulates
+    will be run as many times as necessary *at the end of the world* when we call
+    `unsafeRunSync()`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If we had used `scala.concurrent.Future` instead of `cats.effect.IO`, the side
+    effect would have been only run once. This is because `Future` memorizes the result.
+    The behavior of `Future` may be desirable in some cases, but in some other cases,
+    you really want your effects to be performed as many times as you define them
+    in your code. The approach of `IO` also avoids shared state and memory leaks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`IO` values can also be run in parallel. They can effectively replace `scala.concurrent.Future`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `IO` block returns the current thread's name as a string. We create a program
+    of the `IO[String]` type using `parMapN` to indicate that we want to execute the
+    `IO` values in the tuple in parallel. The output of `unsafeRunSync` shows that
+    the program was executed in three different threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Going back to our transaction saving, all we have to do to make our `unsafeSave`
+    function safe is to wrap it in `IO`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Alternatively, you can inline `unsafeSave` and change the integration test
+    to call `save` instead:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can now save transactions while controlling side effects and keeping our
+    functions pure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Putting it all together
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: At this point, we can read transactions from the REST API, transform the JSON
+    payload in `Dataset[Transaction]`, and save it to parquet. It is time to put all
+    these pieces together.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Bitstamp API allows us to get the transactions that happened in the last
+    24 hours, in the last hour, or in the last minute. At the end of the day, we would
+    like to build an application that regularly fetches and saves new transactions
+    for long-term analysis. This application is our *batch* layer, and it is not meant
+    to get real-time transactions. Therefore, it will be enough to get the transactions
+    for the last hour. In the next chapter, we will build a *speed* layer to process
+    the live transactions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our `BatchProducer` application will work as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: On startup, fetch the last 24 hours of transactions. Set `start` = current day
+    at midnight UTC and `end` = last transaction's timestamp.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Filter the transactions to only keep those between `start` and `end` and save
+    them to Parquet.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Wait 59 minutes.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Fetch the last one hour of transactions. We have a one minute overlap to make
+    sure that we do not miss any transaction. Set the `start` = `end` and `end` =
+    `last` transaction timestamps.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Go to step 2.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: To implement this algorithm, we are going to write a `processOneBatch` function
+    that encompasses steps 2 to 4, and after that, we will implement step 1 and the
+    infinite loop.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing processOneBatch
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Our function will need a few configuration parameters and implicit values.
+    To keep our signature tidy, we are going to put them in a class. Create a new
+    class, `coinyser.AppContext`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`AppContext` contains the target location for the Parquet files, the `SparkSession`
+    object, and a `Timer[IO]` object that is required by `cats.effect` when we need
+    to call `IO.sleep`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Then declare the `processOneBach` function in `BatchProducer`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The function accepts these parameters:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`fetchNextTransactions` is an `IO` operation that will return the transactions
+    of the past hour when run. We pass it as a parameter so that we can simulate the
+    call to the Bitstamp API in a unit test.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`transactions` is `Dataset` containing the last transactions that were read
+    (steps 1 or 4 in our algorithm).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`saveStart` and `saveEnd` is the time interval used to filter `transactions`
+    before saving them.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`appCtx` is as described previously.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Our function will have to perform side effects; hence, it returns `IO`. This
+    `IO` will contain a tuple with the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`Dataset[Transaction]` that will be obtained by running `fetchNextTransactions`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The next `saveStart` and the next `saveEnd`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Now that we have a good declaration of our function, we can write an integration
+    test for it. The test is quite long; hence, we are going to describe it bit by
+    bit. Create a new integration test in `BatchProducerIT`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: We first define `FakeTimer` that implements the `Timer[IO]` interface. This
+    timer lets us simulate a clock that starts at `2018-08-02T01:00:00Z`. This way,
+    we will not have to wait 59 minutes to run our test. The implementation uses `var
+    clockRealTimeInMillis` that keeps the current time of our fake clock and updates
+    it when `sleep` is called.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Then, we create `AppContext` using the temporary directory, and the implicits
+    that are in scope: `FakeTimer` and `SparkSession`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The next portion of the test defines some transactions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `implicit` conversion `toTimestamp` lets us declare our transaction objects
+    with `String` instead of `Timestamp`. This makes the test easier to read. We use
+    it to declare five `Transaction` objects with timestamps ranging around the initial
+    clock of `FakeTimer`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Then, we declare batches of transactions that simulate what would have been
+    read from the Bitstamp API. We cannot indeed call the real Bitstamp API from our
+    integration test; the data would be random and our integration test could fail
+    if the API is not available:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`txs0` is `Seq[Transaction]`, which simulates an initial batch of transactions
+    that we read at 01:00\. If you remember the `BatchProducer` algorithm, this initial
+    batch would contain the last 24 hours of transactions. In our example, this batch
+    only contains `tx1`, even though `tx2`''s timestamp is 01:00\. This is because,
+    with the real API, we would not get a transaction that happened exactly at the
+    same time. There is always a bit of lag.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`txs1` is the batch of transactions that we read 59 minutes after, at 01:59\.
+    In this batch, we consider that the API lag makes us miss `tx4`, which happens
+    at 01:58:59.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`txs2` is the batch that we read 59 minutes after `txs1`, at 02:58.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`txs3` is the batch that we read 59 minutes after `txs2`, at 03:57.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The following portion actually calls the function under test, `processOneBatch`,
+    three times:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'For the first call, we pass the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`txs0.toDS()` represents the initial batch of transactions. This would cover
+    the last 24 hours of transactions.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`start0` = 00:00\. In our algorithm, we choose to cut the first batch to start
+    at midnight. This way, we won''t save partial data for the previous day.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`end0` = 00:59:55\. Our clock starts at 01:00, but the API has always some
+    lag for making a transaction visible. We estimate that lag to not exceed five
+    seconds.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`IO(txs1.toDS())` represents the next batch of transactions to be fetched.
+    It will be fetched 59 minutes after the initial one.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The subsequent calls pass the results of the previous calls, as well as the
+    `IO` value to fetch the following batch.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We then run the three calls with `unsafeRunSync()`, and obtain the results
+    of the two first calls in `ds1`, `start1`, `end1`, `ds2`, `start2`, and `end2`.
+    This allows us to verify the results with the following assertions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Lets have a look in detail at the preceding code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`ds1` is the batch that was obtained by running the `IO(txs1.toDS())`. It must,
+    therefore, be the same as `txs1`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`start1` must be equal to `end0`—we need to shift the time period without any
+    gap'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`end1` must be equal to the initial clock *(01:00) + 59 mn (wait time) - 5
+    seconds* (API lag)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`ds2`, `start2`, and `end2` follow the same logic'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`lastClock` must be equal to the initial clock *+ 3 * 59* mn'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Finally, we can assert that the right transactions were saved to disk:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: The assertion excludes `tx1`, as it happened in the previous day. It also verifies
+    that even though our batches, `txs1` and `txs2`, had some overlap, there is no
+    duplicate transaction in our Parquet file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can compile and run the integration test. It should fail with `NotImplementedError`
+    as expected.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing processOneBatch
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Here is the implementation of  `BatchProducer.processOneBatch`. As is often
+    the case, the implementation is much shorter than the test:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We first filter the transactions using a `filterTxs` function that we will
+    define shortly. Then, using a `for` comprehension, we chain several `IO` values:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Save the filtered transactions, using the `save` function that we implemented
+    earlier
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Wait 59 minutes, using the implicit `Timer` that was brought in scope with `import
+    appCtx._`
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Get the current time, using a `currentInstant` function that we will define
+    shortly
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Fetch the next transactions using the first argument
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Here is the implementation of the helper function, `filterTxs`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: We did not need to pass an implicit `SparkSession`, as it is already available
+    in the transaction `Dataset`. We only keep transactions for the interval `(fromInstant,
+    untilInstant)`. The end instant is excluded so that we do not have any overlap
+    when we loop over `processOneBatch`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is the definition of `currentInstant`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: We use the `Timer` class to get the current time. As we saw while writing the
+    integration test, this allowed us to use a fake timer to simulate a clock.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing processRepeatedly
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We are now ready to implement the algorithm of our `BatchProducer` application,
+    which will loop repeatedly over `processOneBatch`. We are not going to write an
+    integration test for it, as it merely assembles other parts that have been tested.
+    Ideally, in a production system, you should write an end-to-end test that would
+    start the application and connect to a fake REST server.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is the implementation of `processRepeatedly`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In the function''s signature, we have the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A parameter `initialJsonTxs`, which is `IO`  that will fetch the last 24 hours
+    of transactions in `Dataset`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A second parameter, `jsonTxs`, which fetches the last hour of transactions
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A return type, `IO[Unit]`, which will run infinitely when we call `unsafeRunSync`
+    in the main application
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The functions'' body is a `for` comprehension that chains the `IO` values as
+    follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: We first calculate `firstEnd`= current time - 5 seconds. By using an `ApiLag`
+    of 5 seconds, when we then fetch transactions using `initialJsonTxs`, we are certain
+    that we will get all the transactions until `firstEnd`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '`firstStart` is set to midnight on the current day. For the initial batch,
+    we want to filter out transactions from the previous day.'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We fetch the last 24 hours of transactions in `firstTxs`, of the `Dataset[Transaction]` type.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: We call `tailRecM` from `Monad`. It calls the anonymous function in the block
+    until it returns `Monad[Right[Unit]]`. But since our function always returns `Left`,
+    it will loop infinitely.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implementing BatchProducerApp
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Finally, all we need to do is create an application that will call `processRepeatedly`
+    with the right parameters.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Create a new class, `coinyser.BatchProducerApp`, in `src/main/scala` and type
+    the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The class extends `cats.effect.IOApp`. It is a helper trait that will call
+    `unsafeRunSync` on `IO` returned by the `run` method. It also extends `StrictLogging`.
+    This trait brings an attribute `logger` in scope that we will use to log messages.
+    The body of our object defines the following members:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`spark` is the `SparkSession`, required for manipulating datasets. The master
+    is set to `local[*]`, which means that Spark will use all of the cores available
+    on the localhost to execute our jobs. But, as we will see in the next section,
+    this can be overridden when using a Spark cluster.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`appContext` requires the path for saving our transaction. Here, we use a relative
+    directory on the local filesystem. In a production environment, you would typically
+    use an S3 or HDFS location. `AppContext` also requires two implicits: `SparkSession`
+    and `Timer[IO]`. We already defined the former, and the latter is provided by
+    `IOApp`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`bitstampUrl` is a function that returns the URL that is used to retrieve the
+    transactions that happened in the last day or in the last hour'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`transactionsIO` fetches the transactions by calling the Bitstamp URL. As seen
+    at the beginning of this chapter, we use `scala.io.Source` to create a string
+    from the HTTP response. We then transform it into `Dataset[Transaction]` using
+    the two functions, `jsonToHttpTransactions` and  `httpToDomainTransactions`, that
+    we implemented earlier.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`initialJsonTxs` and `nextJsonTxs` are the IO values that, respectively, retrieve
+    the last 24 hours of transactions and the last hour of transactions.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`run` implements the only abstract method of `IOApp`. It produces `IO[ExitCode]`
+    to be run as an application. Here we just call `processRepeatedly` with `vals`
+    that were defined previously. Then, we have to map to change the unit result to
+    `ExitCode.Success` in order to type check. Actually, this exit code will never
+    be returned, because `processRepeatedly` loops infinitely.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If you now try to run `BatchProducerAppSpark`, you will get `ClassNotFoundException`
+    about a Spark class. This is because in `build.sbt`**,** we declared some libraries
+    as `% Provided`. As we shall see, this configuration is useful for packaging the
+    application, but right now it prevents us from testing our program easily.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The trick to avoid that is to create another object, `coinyser.BatchProducerAppIntelliJ`,
+    in the `src/test/scala` directory, that also extends the class `BatchProducerApp`.
+    IntelliJ indeed brings all of the provided dependencies to the test runtime classpath:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: This is why we defined a class and an object in `BatchProducerApp.scala`. We
+    can have one implementation that will be used with `spark-submit`, and one that
+    we can run from IntelliJ.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now run the `BatchProducerAppIntelliJ` application. After a couple of seconds,
+    you should see something similar to this in the console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: After this point, you should have a Parquet file in the `data/transactions/date=<current
+    date>` directory, containing all of the transactions that happened from midnight
+    on the current day. If you wait one more hour, you will get another Parquet file
+    containing the transactions of the last hour.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you do not want to wait one hour to see it happening, you can fetch transactions
+    every minute instead:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Change `BatchProducerApp.nextJsonTxs` to `jsonIO("?time=minute")`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Change `BatchProducer.WaitTime` to `45.seconds` to have a 15 seconds overlap
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `WARN` message in the console tells us that `"Stage 0 contains a task of
+    very large size"`. This is because `String` that contains the HTTP response is
+    sent as a whole to one Spark task. If we had a much larger payload (several hundreds
+    of MB), it would be less memory intensive to split it and write it to a file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the next chapter, we will see how to use Zeppelin to query these Parquet
+    files and plot some charts. But we can already check them using the Scala Console.
+    Start a new Scala Console and type the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: Feel free to play around with the Dataset API. You can try to count the transactions,
+    filter them for a specific period, and find the maximum price or quantity.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running the application with spark-submit
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We have run our application in a standalone way, but when you want to process
+    large datasets you would need to use a Spark cluster. It is out of the scope of
+    this book to explain how to set up a Spark cluster. If you want to set up one,
+    you can refer to the Spark documentation or use an off-the-shelf cluster from
+    a cloud computing vendor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Nonetheless, the submission process is the same whether we run Spark in local
+    mode or in cluster mode.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Installing Apache Spark
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We are going to install Spark to run it in local mode. This mode only uses the
+    CPU cores of the localhost to run jobs. For this, download Spark 2.3.1 from this
+    page: [https://spark.apache.org/downloads.html](https://spark.apache.org/downloads.html).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Then extract it to some folder for instance, `~/` for your `home` folder on
+    Linux or macOS:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can try running `spark shell` to verify that the installation is correct:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After a couple of seconds, you should see a welcome message followed by the
+    same `scala>` prompt that we had in the Scala console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'A Spark shell is actually a Scala Console connected to a Spark cluster. In
+    our case, it is a Spark local cluster, as you can see with `master = local[*]`.
+    Spark-shell provides a variable, `spark: SparkSession`, that you can use to manipulate
+    datasets. It can be a handy tool, but I generally prefer using IntelliJ''s console
+    and create `SparkSession` by hand. IntelliJ''s console has the benefit of having
+    syntax highlighting and better code completion.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Packaging the assembly JAR
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In order to run our application with a Spark distribution, we need to package
+    our compiled classes and their dependencies in a JAR file. This is what we call
+    an assembly JAR or fat JAR: its size can be quite large if you have many dependencies.
+    To do that, we have to modify our SBT build files.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First, we need to enable the assembly plugin. Add a new file, `assembly.sbt`**,**
+    in the `bitcoin-analyser/project` folder and type the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs: []
+  type: TYPE_PRE
+- en: We also need to exclude all the Spark dependencies from our assembly JAR. There
+    is no point in having them as they are already present in the Spark distribution.
+    Excluding them will save space and build time. For this, we had already scoped
+    these dependencies to `% Provided` in `build.sbt`. This will make sure that the
+    dependencies are present for compiling the project and running the tests, but
+    are excluded when building the assembly JAR.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Then we have to add a few configuration options at the end of `build.sbt`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here is a short explanation talking about what line performs what action:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The first line excludes all Scala runtime JARs.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The second line tells SBT to skip the tests when running the assembly task
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The last line declares what is our main class. This declaration will end up
+    in the `MANIFEST.MF` file, and will be used by Spark to bootstrap our program.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Our build files are ready; we can run the assembly task. Open the SBT shell
+    in IntelliJ (*Ctrl* + *Shift* + *S*), and type `assembly` after the `sbt>` prompt.
+    This should compile the project and package the assembly JAR. The output of your
+    SBT shell should look like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs: []
+  type: TYPE_PRE
+- en: The assembly JAR is ready; we can submit it to Spark.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running spark-submit
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Using a console, go to the Spark distribution''s `bin` folder, and `run spark-submit`
+    with the path of the assembly JAR:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE57]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`spark-submit` has lots of options that let you change the Spark master, the
+    number of executors, their memory requirements, and so on. You can find out more
+    by running `spark-submit -h`. After having submitted our JAR, you should see something
+    like this in your console (we only show the most important parts):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE58]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You would see a similar output if you were using a remote cluster:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The line `Submitted application`: Tells us what `main` class we submitted. This
+    corresponds to the `mainClass` setting that we put in our SBT file. This can be
+    overridden with the `--class` option in `spark-submit`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A few lines after, we can see that Spark started a **SparkUI** web server on
+    port `4040`. With your web browser, go to the URL `http://localhost:4040` to explore
+    this UI. It allows you to see the progress of running jobs, their execution plan,
+    how many executors they use, the logs of the executors, and so on. SparkUI is
+    a precious tool when you need to optimize your jobs.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Added JAR file`: Before Spark can run our application, it must distribute
+    the assembly JAR to all the cluster nodes. For doing this, we can see that it
+    starts a server on port `37370`. The executors would then connect to that server
+    to download the JAR file.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Starting Executor ID driver`: The driver process coordinates the execution
+    of jobs with the executors. The following line shows that it listens on port `37370`
+    to receive updates from the executors.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Calling https//`: This corresponds to what we logged in our code, `logger.info(s"calling
+    $url")`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Starting job`: Our application started a Spark job. Line 115 in `BatchProducer`
+    corresponds to the `.parquet(path.toString)` instruction in `BatchProducer.save`.
+    This `parquet` method is indeed an action and as such triggers the evaluation
+    of `Dataset`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Job 0 finished`: The job finishes after a few seconds.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: After this point, you should have a `parquet` file saved with the last transactions.
+    If you let the application continue for 1 hour, you will see that it starts another
+    job to get the last hour of transactions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: By now, you should be more comfortable using Spark's `Dataset` API. Our little
+    program is focused on fetching BCT/USD transactions, but it could be interesting
+    to enhance it. For instance, you could fetch and save other currency pairs, such
+    as ETH/EUR or XRP/USD. Use a different cryptocurrency exchange. This would allow
+    you to compare prices in different exchanges, and possibly work out an arbitrage
+    strategy. Arbitrage is a simultaneous purchase and sale of an asset in different
+    marketplaces to profit from an imbalance in the price. You could get data for
+    traditional currency pairs, such as EUR/USD, or use Frameless to refactor the
+    `Dataset` manipulations and make them more type-safe. See the website for further
+    clarification [https://github.com/typelevel/frameless.](https://github.com/typelevel/frameless)
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we are going to exploit saved transaction data to perform
+    some analytics queries.
+  prefs: []
+  type: TYPE_NORMAL

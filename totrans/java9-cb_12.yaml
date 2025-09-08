@@ -1,0 +1,1910 @@
+- en: Memory Management and Debugging
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'This chapter deals with managing the memory of your Java application. Understanding
+    the garbage collection process is crucial to developing memory-efficient applications.
+    We will introduce you to the garbage collection algorithm being used in Java 9\.
+    Then, we will introduce you to some new features of Java 9, which help in advanced
+    application diagnostics. We''ll also show you how to manage the resources by using
+    the new *try with resources* construct. Later, we''ll show you the new stack walking
+    API introduced in Java 9\. Тhe following recipes will be covered:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding the G1 garbage collector
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Unified logging for JVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using the new diagnostic commands for the JVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Try with resources for better resource handling
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Stack walking for improved debugging
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some best practices for better memory usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Introduction
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Memory management is the process of memory allocation (for program execution)
+    and memory reuse (after some of the allocated memory is not used anymore). In
+    Java, this process happens automatically and is called **Garbage Collection**
+    (**GC**). The effectiveness of GC affects two major application characteristics--responsiveness
+    and throughput.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Responsiveness is measured by how quickly an application responds (brings necessary
+    data) to the request. For example, how quickly a website returns a page or how
+    quickly a desktop application responds to an event. Naturally, the lower the response
+    time, the better the user experience, which is the goal of design and implementation
+    for many applications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Throughput indicates the amount of work an application can do in a unit of time.
+    For example, how many requests a web application can serve or how many transactions
+    a database can support. The bigger the number, the more value the application
+    can potentially generate and the greater number of users it can accommodate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Not every application needs to have the minimal possible responsiveness and
+    the maximum achievable throughput. An application may be an asynchronous submit-and-go-do-something-else,
+    which does not require much user interaction. There may be a few potential application
+    users too, so a lower than average throughput could be more than enough. Yet,
+    there are applications that have high requirements to one or both of these characteristics
+    and cannot tolerate long pauses imposed by the GC process.
+  prefs: []
+  type: TYPE_NORMAL
+- en: GC, on the other hand, needs to stop any application execution to reassess the
+    memory usage and to release it from data not used anymore. Such periods of GC
+    activity are called stop-the-world. The longer they are, the quicker the GC does
+    its job and the longer an application freeze lasts, which can eventually grow big
+    enough to affect both the application responsiveness and throughput. If that is
+    the case, the GC tuning and JVM optimization become important and require an understanding
+    of the GC principles and its modern implementations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unfortunately, this step is often missed. Trying to improve responsiveness and/or
+    throughput, companies and individuals just add memory and other computing capacities,
+    thus providing the originally small existing problem with the space to grow. The
+    enlarged infrastructure, in addition to hardware and software costs, requires
+    more people to maintain it and eventually justifies the building of a whole new
+    organization dedicated to keeping up the system. By then, the problem reaches
+    the scale of becoming virtually unsolvable and feeds on those who have created
+    it by forcing them to do the routine--almost menial--work for the rest of their
+    professional lives.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will focus on **Garbage-First** (**G1**) garbage collector
+    that is going to be the default one in Java 9\. However, we'll also refer to a
+    few other available GC implementations to contrast and explain some design decisions
+    that have brought G1 to life. Besides, they might be more appropriate than G1
+    for some of the systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Memory organization and management are very specialized and complex areas of
+    expertise in JVM development. This book is not intended to address the implementation
+    details on such a level. Our focus is on those aspects of GC that can help an
+    application developer to tune it for the application needs by setting the corresponding
+    parameters of the JVM runtime.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are two memory areas that are used by GC, heap and stack, which illustrate
+    the main principle of any GC implementation. The first one is used by the JVM
+    to allocate memory and store objects created by the program. When an object is
+    created with the `new` keyword, it is allocated on the heap, and the reference
+    to it is stored on the stack. The stack also stores primitive variables and references
+    to heap objects that are used by the current method or thread. The stack operates
+    in **Last-In-First-Out** (**LIFO**). The stack is much smaller than the heap,
+    and only the GC reads it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is a slightly simplistic, but good enough for our purpose, high-level
+    view of the main activity of any GC: walking through objects in the heap and removing
+    those that don’t have any references in the stack.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding the G1 garbage collector
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The previous GC implementations include **Serial GC**, **Parallel GC**, and
+    **Concurrent Mark-Sweep** (**CMS**) collector. They divide the heap into three
+    sections: young generation, old or tenured generation, and humongous regions for
+    holding the objects that are 50% the size of a standard region or larger. The
+    young generation contains most of the newly created objects; this is the most
+    dynamic area because a majority of the objects are short-lived and soon (as they
+    age) become eligible for collection. The term age refers to the number of collection
+    cycles the object has survived. The young generation has three collection cycles:
+    an *Eden space* and two survivor spaces, such as survivor 0 (*S0*) and survivor
+    1 (*S1*). The objects are moved through them (according to their age and some
+    other characteristics) until they are eventually discarded or placed in the old
+    generation.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The old generation contains objects that are older than a certain age. This
+    area is bigger than the young generation, and because of this, the garbage collection
+    here is more expensive and happens not as often as in the young generation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The permanent generation contains metadata that describes the classes and methods
+    used in applications. It also stores strings, library classes, and methods.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When the JVM starts, the heap is empty and then the objects are pushed into
+    Eden. When it is filling up, a minor GC process starts. It removes the unreferenced
+    and circular referred objects and moves the others to the *S0* area.
+  prefs: []
+  type: TYPE_NORMAL
+- en: First, any new object is allocated to the Eden space. Both the survivor spaces
+    start out empty. When the Eden space fills up, a minor garbage collection is triggered.
+    Referenced objects are moved to the S0 space. Unreferenced objects are deleted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The next minor GC process migrates the referenced objects to *S1* and increments
+    the age of those that survived the previous minor collection. After all the surviving
+    objects (of different ages) are moved to *S1*, both *S0* and Eden become empty.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next minor collection, *S0* and *S1* switch their roles. The referenced
+    objects are moved from Eden to *S1* and *S1* to *S0*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In each of the minor collections, the objects that have reached a certain age
+    are moved to the old generation. As we mentioned earlier, the old generation is
+    checked eventually (after several minor collections), the unreferenced objects
+    are removed from there, and the memory is defragmented. This cleaning of the old
+    generation is considered a major collection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The permanent generation is cleaned at different times by different GC algorithms.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The G1 GC does it somewhat differently. It divides the heap into equal-sized
+    regions and assigns each of them one of the same roles--Eden, survivor, or old--but
+    changes the number of regions with the same role dynamically, depending on the
+    need. It makes the memory cleaning process and the memory defragmentation more
+    predictable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The serial GC cleans the young and the old generations in the same cycle (serially,
+    thus the name). During the task, it stops the world. That is why it is used for
+    non-server applications with one CPU and a heap size of a few hundred MB.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The parallel GC works in parallel on all available cores, although the number
+    of threads can be configured. It also stops the world and is appropriate only
+    for applications that can tolerate long freezing times.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The CMS collector was designed to address this very issue of long pauses. It
+    does it at the expense of not defragmenting the old generation and doing some
+    analysis in parallel to the application execution (typically using 25% of CPU).
+    The collection of old generation starts when it is 68% full (by default, but this
+    value can be configured).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The G1 GC algorithm is similar to the CMS collector. First, it concurrently
+    identifies all the referenced objects in the heap and marks them correspondingly.
+    Then it collects the emptiest regions first, thus releasing a lot of free space.
+    That's why it is called *Garbage-First*. Because it uses many small dedicated
+    regions, it has a better chance in predicting the amount of time it needs to clean
+    one of them and in fitting a user-defined pause time (G1 may exceed it occasionally,
+    but it is pretty close most of the times).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The main beneficiaries of G1 are applications that require large heaps (6 GB
+    or more) and that do not tolerate long pauses (0.5 sec or less). If an application
+    encounters an issue of too many and/or too long pauses, it can benefit from switching
+    from the CMS or parallel GC (especially the parallel GC of the old generation)
+    to the G1 GC. If that is not the case, switching to the G1 collector is not a
+    requirement for using JDK 9.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The G1 GC starts with the young generation collection using stop-the-world
+    pauses for evacuation (moving objects inside the young generation and out to the
+    old generation). After the occupancy of the old generation reaches a certain threshold,
+    it is collected too. The collection of some of the objects in the old generation
+    is done concurrently and some objects are collected using stop-the-world pauses. The
+    steps include the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The initial marking of the survivor regions (root regions), which may have references
+    to objects in the old generation, done using stop-the-world pauses
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The scanning of survivor regions for references to the old generation, done
+    concurrently while the application continues to run
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The concurrent marking of live objects over the entire heap, done concurrently
+    while the application continues to run
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The remark step completes the marking of live objects, done using stop-the-world
+    pauses
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The cleanup process calculates the age of live objects, frees the regions (using
+    stop-the-world pauses), and returns them to the free list (concurrently)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The preceding sequence might be interspersed with young generation evacuations
+    because most of the objects are short-lived and it is easier to free a lot of
+    memory by scanning the young generation more often.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There is also a mixed phase, when G1 collects the regions already marked as
+    mostly garbage in both the young and old generations, and humongous allocation,
+    when large objects are moved to or evacuated from humongous regions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are a few occasions when full GC is performed, using stop-the-world pauses:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Concurrent failure**: This happens if the old generation gets full during
+    the marking phase'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Promotion failure**: This happens if the old generation runs out of space
+    during the mixed phase'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Evacuation failure**: This happens when the collector cannot promote objects
+    to the survivor space and the old generation'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Humongous allocation**: This happens when an application tries to allocate
+    a very big object'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If tuned properly, your applications should avoid full GC.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To help with GC tuning, the JVM documentation describes *ergonomics*--the process
+    by which "*the JVM and garbage collection tuning, such as behavior-based tuning,
+    improve application performance. The JVM provides platform-dependent default selections
+    for the garbage collector, heap size, and runtime compiler. These selections match
+    the needs of different types of applications while requiring less command-line
+    tuning. In addition, behavior-based tuning dynamically tunes the sizes of the
+    heap to meet a specified behavior of the application*" (from the JVM documentation).
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To see how GC works, write the following program:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, it creates 99,888,999 objects and adds them to the `List<AnObject>
+    list` collection. You might tune it by decreasing the maximum number of objects
+    (`max`) to match the configuration of your computer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The G1 GC is the default collector in Java 9, so you don''t have to set anything
+    if it is good enough for your application. Nevertheless, you can explicitly enable
+    G1 by providing `-XX:+UseG1GC` on the command line (run in the same folder, where
+    the executable `.jar` file is located, which contains the `com.packt.cookbook.ch12_memory.Chapter12Memory` class
+    with the `main()` method):'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that we assume you can build an executable `.jar` file and understand the
+    basic Java execution command. If not, please refer to the JVM documentation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Other available GCs can be used by setting one of the following options:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`-XX:+UseSerialGC` for using a Serial collector.'
+  prefs:
+  - PREF_UL
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:+UseParallelGC` for using parallel collector with parallel compaction
+    (which enables the parallel collector to perform major collections in parallel).
+    Without parallel compaction, major collections are performed using a single thread,
+    which can significantly limit the scalability. Parallel compaction is disabled
+    by the `-XX:+UseParallelOldGC` option.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:+UseConcMarkSweepGC` for using the CMS collector.'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To see the log messages of GC, set `-Xlog:gc`. You can also use the Unix utility, `time`,
+    to measure the time it took to do the job (the utility publishes the last three
+    lines of the output, so you do not need to use it if you cannot or do not want
+    to do it):'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Run the preceding command, the result may look as follows (the actual values
+    may be different on your computer):'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![](img/cfe1bbe4-a376-451b-8a77-0f84e2042647.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: You can see that the GC went through most of the steps we have described. It
+    has started with collecting the young generation. Then, when the `List<AnObject>
+    list` object (see the preceding code) becomes too big (more than 50% of a young
+    generation region), the memory for it is allocated in the *humongous* region.
+    You can also see the initial mark step and the following remark and other steps
+    described earlier.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Each line starts with an accumulative time amount (in seconds) the JVM was
+    running for and ends with the time (in milliseconds) that every step took. At
+    the bottom of the screenshot we see three lines printed by the `time` utility:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`real` is the amount of wall clock time spent--all the time elapsed (should
+    align with the first column of the JVM uptime value) since the command was run'
+  prefs:
+  - PREF_UL
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`user` is the amount of time all the CPUs spent in the user-mode code (outside
+    the kernel) within the process; it is bigger because GC worked concurrently with
+    the application'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`sys` is the amount of time the CPU spent in the kernel within the process'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`user`+`sys` is the amount of CPU time the process used'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Set the `-XX:+PrintGCDetails` option (or just add a `*` to the log option `-Xlog:gc*`)
+    to see more details about GC activity (in the following screenshot, we provide
+    only the beginning of the log related to GC step 0):'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![](img/4548fcf5-7594-422b-98d0-4d6f6570523b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Now the log has more than a dozen entries for each of the GC steps and ends
+    up with logging the `User`, `Sys`, and `Real` amount of time (the amounts accumulated
+    by the `time` utility) each step took. You can modify the program (by adding more
+    short-lived objects, for example) and see how the GC activity changes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Get even more information with the `-Xlog:gc*=debug` option (the following
+    is a fragment only):'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '![](img/7e2430e5-bac7-4cdc-9758-b1f48116cd4c.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: So, it is up to you to choose how much info you need for the analysis.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We will discuss more details of the logging format and other log options in
+    the following recipe, *Unified logging for JVM*, of this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'As we had mentioned earlier, the G1 GC uses default ergonomic values that probably
+    would be good enough for most applications. Here is the list of the most important
+    ones (`<ergo>` means that the actual value is determined ergonomically depending
+    on the environment):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`-XX:MaxGCPauseMillis=200` holds the value for the maximum pause time'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:GCPauseTimeInterval=<ergo>` holds the maximum pause time between GC steps
+    (not set by default, allowing G1 to perform garbage collections back to back if
+    need be)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:ParallelGCThreads=<ergo>` holds the maximum number of threads used for
+    parallel work during garbage collection pauses (by default, derived from the number
+    of available threads; if the number of CPU threads available to the process is
+    less than or equal to 8, it uses this number; otherwise, it adds five-eighths
+    of the threads greater than 8 to the final number of threads)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:ConcGCThreads=<ergo>` holds the maximum number of threads used for concurrent
+    work (set by default as `-XX:ParallelGCThreads` divided by 4).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:+G1UseAdaptiveIHOP` indicates that the initiating heap occupancy should
+    be adaptive'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:InitiatingHeapOccupancyPercent=45` sets the first few collection cycles;
+    G1 will use an occupancy of 45% of the old generation as the mark start threshold'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:G1HeapRegionSize=<ergo>` holds the heap region size based on the initial
+    and maximum heap sizes (by default, because heap contains roughly 2048 heap regions,
+    the size of a heap region can vary from 1 to 32 MB and must be a power of 2)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:G1NewSizePercent=5` and`-XX:XX:G1MaxNewSizePercent=60` define the size
+    of the young generation in total, which varies between these two values as percentages
+    of the current JVM heap in use'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:G1HeapWastePercent=5` holds the allowed unreclaimed space in the collection
+    set candidates as a percentage (G1 stops the space reclamation if the free space
+    in the collection set candidates is lower than that)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:G1MixedGCCountTarget=8` holds the expected length of the space-reclamation
+    phase in a number of collections)'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:G1MixedGCLiveThresholdPercent=85` holds the percentage of the live object
+    occupancy of the old generation regions, after which a region won''t to be collected
+    in this space-reclamation phase'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In general, the G1 goals in the default configuration are *to provide relatively
+    small, uniform pauses at high throughput *(from the G1 documentation). If these
+    default settings do not fit your application, you can change the pause time (using
+    `-XX:MaxGCPauseMillis`) and the maximum Java heap size (using the `-Xmx` option).
+    Note, though, that the actual pause time will not be an exact match at runtime,
+    but G1 will try its best to meet the goal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you would like to increase the throughput, decrease the pause time goal or
+    request a larger heap. To increase responsiveness, change the pause time value.
+    Note, though, that the limiting of the young generation size (using the `-Xmn`,
+    `-XX:NewRatio`, or other options) can impede the pause time control because *the
+    young generation size is the main means for G1 to allow it to meet the pause time *(from
+    the G1 documentation).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'One of the first possible causes of poor performance can be full GC in the
+    presence of pause full (allocation failure) in the log. It usually happens when
+    too many objects are created in a quick succession (and cannot be collected quickly
+    enough) or many large (humongous) objects cannot be allocated in a timely manner.
+    There are several recommended ways to handle this condition:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the case of an excessive number of humongous objects, try to reduce their
+    count by increasing the region size, using the `-XX:G1HeapRegionSize` option (the
+    currently selected heap region size is printed at the beginning of the log).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Increase the size of the heap.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Increase the number of concurrent marking threads by setting `-XX:ConcGCThreads`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Facilitate the beginning of marking earlier (using the fact that G1 makes the
+    decisions based on earlier application behavior). Increase the buffer used in
+    an adaptive IHOP calculation by modifying `-XX:G1ReservePercent`, or disable the
+    adaptive calculation of the IHOP by setting it manually using `-XX:-G1UseAdaptiveIHOP`
+    and `-XX:InitiatingHeapOccupancyPercent`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Only after addressing full GC can one start tuning the JVM for better responsiveness
+    and/or throughput. The JVM documentation identifies the following cases for responsiveness
+    tuning:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unusual system or real-time usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Reference processing takes too long
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Young-only collections take too long
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Mixed collections take too long
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: High update RS and scan RS times
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Better throughput can be achieved by decreasing the overall pause times and
+    the frequency of the pauses. Refer to the JVM documentation for the identification
+    and recommendations of mitigating the issues.
+  prefs: []
+  type: TYPE_NORMAL
+- en: See also
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Do refer to the following recipes in this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unified logging for JVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using the new diagnostic commands for the JVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some best practices for better memory usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Unified logging for JVM
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Java 9 implemented *JEP 158: Unified JVM Logging*, which requested to *introduce
+    a common logging system for all the components of the JVM.* The main components
+    of JVM include the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Class loader
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Runtime data area
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Stack area
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Method area
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Heap area
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: PC registers
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Native method stack
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Execution engine
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Interpreter
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The JIT compiler
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Garbage collection
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Native method interface JNI
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Native method library
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The log message of all these components can now be captured and analyzed using
+    unified logging, turned on by the `-Xlog` option.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The main features of the new logging system are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Usage of the log levels: `trace`, `debug`, `info`, `warning`, `error`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Message tags that identify the JVM component, action, or message of a specific
+    interest
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Three output types: `stdout`, `stderr`, and `file`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The enforcement of the one-message-per-line limit
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To see all the logging possibilities at a glance, you can run the following
+    command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here is the output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/258604c0-9b0a-475b-9910-ef90d7eb1de8.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'As you can see, the format of the `-Xlog` option is defined as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s explain the option in detail:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `what` is a combination of tags and levels of the form, `tag1[+tag2...][*][=level][,...]`.
+    We have already demonstrated how this construct works when we used the `gc` tag
+    in the `-Xlog:gc*=debug` option. The wildcard (`*`) indicates that you'd like to
+    see all the messages that have the `gc` tag (maybe among other tags). An absence
+    of the `-Xlog:gc=debug` wildcard indicates that you would like to see messages
+    marked by one tag (`gc`, in this case) only. If only `-Xlog` is used, the log
+    will show all the messages at the `info` level.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `output` sets the type of output (the default is `stdout`).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `decorators` indicate what will be placed at the beginning of each line
+    of the log (before the actual log message comes from a component). Default decorators
+    are `uptime`, `level`, and `tags`, each included in square brackets.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `output_options` may include `filecount=file count` and/or `filesize=file
+    size with optional K, M or G suffix`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To summarize, the default log configuration is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Let''s run some of the log settings, which are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Run the following command:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: There are no messages because the JVM does not log messages with the `cpu` tag
+    only. The tag is used in combination with other tags.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Add a `*` sign and run the command again:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The result will look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/16f1ff6c-ca64-4b7f-82ac-69c0d9b95fda.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: As you can see, the tag `cpu` brings only messages that log time it took a garbage
+    collection task to execute. Even if we set the log level to `trace` or `debug`
+    (`-Xlog:cpu*=debug`, for example), no other messages will be shown.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now run the command with the `heap` tag:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You will only get heap-related messages:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/4d03c1fc-819c-4465-9633-831172e782c5.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: But let's look closer at the first line. It starts with three decorators--`uptime`,
+    `log` level, and `tags`--and then with the message itself, which starts with the
+    collection cycle number (0 in this case) and the information that the number of
+    Eden regions dropped from 24 to 0 (and their count now is 9). It happened because
+    (as we see in the next line) the count of survivor regions grew from 0 to 3 and
+    the count of the old generation (the third line) grew to 18, while the count of
+    humongous regions (23) did not change. These are all the heap-related messages
+    in the first collection cycle. Then, the second collection cycle starts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Add the `cpu` tag again and run:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As you can see, the `cpu` message shows how long each cycle took:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/5fd27d43-9a39-4bcb-bcb3-c63004018638.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Try and use two tags combined via sign `+` (`-Xlog:gc+heap`, for example). It
+    brings up only the messages that have both tags (similar to the binary `AND` operation).
+    Notice that a wildcard will not work together with the `+` sign (`-Xlog:gc*+heap` ,
+    for example, does not work).
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'You can also select the output type and decorators. In practice, the decorator
+    level does not seem very informative and can be easily omitted by explicitly listing
+    only the decorators that are needed. Consider the following example:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note how the two colons (`:`) were inserted to preserve the default setting
+    of the output type. We could also show it explicitly:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To remove any decoration, one can set them to `none`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: The most useful aspect of a new logging system is tag selection. It allows a
+    better analysis of the memory evolution of each JVM component and its subsystems
+    or to find the performance bottleneck, analyzing the time spent in each collection
+    phase--both are critical for the JVM and application tuning.
+  prefs: []
+  type: TYPE_NORMAL
+- en: See also
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Do refer to the other recipes of this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the new diagnostic commands for the JVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Stack walking for improved debugging
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some best practices for better memory usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using the new diagnostic commands for the JVM
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: If you open the `bin` folder of the Java installation, you can find there quite
+    a few command-line utilities that can be used to diagnose issues and monitor an
+    application deployed with the **Java Runtime Environment** (**JRE**). They use
+    different mechanisms to get the data they report. The mechanisms are specific
+    to the **Virtual Machine** (**VM**) implementation, operating systems, and release.
+    Typically, only a subset of the tools is applicable to a given issue at a particular
+    time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this recipe, we will focus on the new diagnostic commands introduced in
+    Java 9, some of them listed in *JEP 228: Add More Diagnostic Commands* (the actual
+    command names are slightly different than in JEP). The new diagnostic commands
+    were implemented as commands of the command-line utility, `jcmd`. You can find
+    this utility in the same `bin` folder of the Java installation and can invoke
+    it (if this folder is on the path) just by typing `jcmd` on the command prompt.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you do type it and there is no Java process currently running on the machine,
+    you will get back only one line, which looks as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: It shows that only one Java process is currently running (the `jcmd` utility
+    itself) and it has the **process identifier** (**PID**) 87863 (which will be different
+    with each run).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s run another Java program, for example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output of `jcmd` will show (with different PIDs) the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As you can see, if entered without any options, the `jcmd` utility reports
+    the PIDs of all the currently running Java processes. After getting the PID, you
+    can then use `jcmd` to request data from the JVM that runs the process:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Alternatively, you can avoid using PID (and calling `jcmd` without parameters)
+    by referring to the process by the main class of the application:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: You can read the JVM documentation for more details about the `jcmd` utility
+    and how to use it. In this recipe, we will focus only on the new diagnostic commands
+    that came with Java 9.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Get the full list of the available `jcmd` commands by running the following
+    line:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: Instead of `PID/main-class`, put the process identifier or the main class name. The
+    list is specific to the JVM, so the command requests the data from the specific
+    process.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you can, compile the same class with JDK 8 and with JDK 9 and run the preceding
+    command for each of the JSK versions. This way, you can compare the lists and
+    see that JDK 9 introduced the following new `jcmd` commands:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '`Compiler.queue`: This prints the methods queued for compilation with either
+    C1 or C2 (separate queues)'
+  prefs:
+  - PREF_UL
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Compiler.codelist`: This prints n-methods (compiled) with full signature,
+    address range, and state (alive, non-entrant, and zombie) and allows the selection
+    of printing to `stdout` , a file, XML, or text printout'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Compiler.codecache`: This prints the content of the code cache, where the
+    JIT compiler stores the generated native code to improve performance'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Compiler.directives_add file`: This adds compiler directives from a file to
+    the top of the directives stack'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Compiler.directives_clear`: This clears the compiler directives stack (leaves
+    the default directives only)'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Compiler.directives_print`: This prints all the directives on the compiler
+    directives stack from top to bottom'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Compiler.directives_remove`: This removes the top directive from the compiler
+    directives stack'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`GC.heap_info`: This prints the current heap parameters and status'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`GC.finalizer_info`: This shows the status of the finalizer thread, which collects
+    objects with a finalizer (that is, a `finalize()` method)'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`JFR.configure`: This allows configuring the Java Flight Recorder'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`JVMTI.data_dump`: This prints the Java Virtual Machine Tool Interface data
+    dump'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`JVMTI.agent_load`: This loads (attaches) the Java Virtual Machine Tool Interface agent'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`ManagementAgent.status`: This prints the status of the remote JMX agent'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Thread.print`: This prints all the threads with stack traces'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.log [option]`: This allows setting the JVM log configuration (which we
+    described in the previous recipe) at runtime, after the JVM has started (the availability
+    can be seen by using `VM.log list`)'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.info`: This prints the unified JVM info (version and configuration), a
+    list of all threads and their state (without thread dump and heap dump), heap
+    summary, JVM internal events (GC, JIT, safepoint, and so on), memory map with
+    loaded native libraries, VM arguments and environment variables, and details of
+    the operation system and hardware'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.dynlibs`: This prints information about dynamic libraries'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.set_flag`: This allows setting the JVM *writable* (also called *manageable*)
+    flags (see the JVM documentation for a list of the flags)'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.stringtable` and `VM.symboltable`: These print all UTF-8 string constants'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.class_hierarchy [full-class-name]`: This prints all the loaded classes
+    or just a specified class hierarchy'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.classloader_stats`: This prints information about the classloader'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`VM.print_touched_methods`: This prints all the methods that have been touched
+    at runtime'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: As you can see, these new commands belong to several groups, denoted by the
+    prefix compiler, **garbage collector** (**GC**), **Java Flight Recorder** (**JFR**), **Java
+    Virtual Machine Tool Interface** (**JVMTI**),  **Management Agent** (related to
+    remote JMX agent), thread, and VM. In this book, we do not have enough space to
+    go through each command in detail. We will only demonstrate the usage of a few
+    most practical ones.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'To get help for the `jcmd` utility, run the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here is the result of the command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/e7685cf9-19f1-4481-89a9-bc91acfa45bb.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: It tells us that the commands can also be read from the file specified after
+    `-f` and that there is a `PerfCounter.print` command, which prints all the performance
+    counters (statistics) of the process.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s run the following command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output may look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/771a97b3-6d9b-47bd-abc0-f7646c33df72.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: It shows the total heap size and how much of it was used, the size of a region
+    in the young generation and how many regions are allocated, and the parameters
+    of `Metaspace` and `class space`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following command is very helpful in case you are looking for runaway threads
+    or would like to know what else is going on behind the scenes:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here is a fragment of the possible output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/12ccab5c-ce62-486b-836a-46a9e2d45970.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The following command is probably used most often, as it produces a wealth
+    of information about the hardware, the JVM process as a whole, and the current
+    state of its components:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'It starts with a summary, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/07ee898d-cf7c-497d-a978-d155e6463417.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Then the general process description follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/b42a94c1-15af-4c1c-bdc0-8a8d9d6bca9d.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Then come the details of the heap (this is only a tiny fragment of it):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/37456028-8bd0-4b9b-bdb4-21b7724e6d9a.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: It then prints the compilation events, GC heap history, deoptimization events,
+    internal exceptions, events, dynamic libraries, logging options, environment variables, VM
+    arguments, and many parameters of the system running the process.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `jcmd` commands give a deep insight into the JVM process, which helps us
+    debug and tune the process for best performance and optimal resource usage.
+  prefs: []
+  type: TYPE_NORMAL
+- en: See also
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Do refer to the other recipes of this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Stack walking for improved debugging
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some best practices for better memory usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Try with resources for better resource handling
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Managing resources is important. Here is an excerpt from the JDK 7 documentation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '"The typical Java application manipulates several types of resources such as
+    files, streams, sockets, and database connections. Such resources must be handled
+    with great care, because they acquire system resources for their operations. Thus,
+    you need to ensure that they get freed even in case of errors. Indeed, incorrect
+    resource management is a common source of failures in production applications,
+    with the usual pitfalls being database connections and file descriptors remaining
+    opened after an exception has occurred somewhere else in the code. This leads
+    to application servers being frequently restarted when resource exhaustion occurs,
+    because operating systems and server applications generally have an upper-bound
+    limit for resources."'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The phrase *because they acquire system resources for their operations* is
+    the key. It means that mishandling (not releasing) the resources can exhaust the
+    system''s capability to operate. That''s why, in JDK 7  the *try-with-resources*
+    statement was introduced and we used it in the examples of [Chapter 6](41632f15-3abe-4f59-8ce9-009aacfbe1cf.xhtml),
+    *Database Programming*:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Another variation of the same statement is to include the acquisition of both
+    the resources into the same `try` block:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'As a reminder, we used the `getDbConnection()` and `createStatement()` methods.
+    Here is the `getDbConnection()` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here is the `createStatement()` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This was very helpful, but in some cases, we were still required to write extra
+    code in old style. For example, if there is an  `execute()` method that accepts
+    a `Statement` object as a parameter, and we would like to release (close) it as
+    soon as it was used. In such a case, the code will look as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, most of it is just boilerplate copy-and-paste code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The new *try-with-resources* statement (coming with Java 9) addresses this case
+    by allowing effectively-final variables to be used as resources in the *try-with-resources*
+    statement.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Rewrite the previous example using the new *try-with-resources* statement:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, it is much more concise and focused, without the need of repeatedly
+    writing trivial code that closes the resource. No more `finally` and extra `try...catch`
+    in it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Try and write it so that it closes the connection as soon as it was used:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: It may or may not fit your application connection handling, but often, this
+    capability is handy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Try a different combination, such as the following:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can also try this combination:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: The new statement provides more flexibility to write code that fits the needs
+    without writing lines to close the resource.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The only requirements are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The variable included in the `try` statement has to be final or effectively
+    final
+  prefs:
+  - PREF_UL
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The resource has to implement the `AutoCloseable` interface , which includes
+    only one method:'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: To demonstrate how the new statement works, let's create our own resources that
+    implement `AutoCloseable` and use them in a fashion similar to the resources of
+    the previous examples.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is one resource:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here is the second resource:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s use them in the code example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If we run it, the result will be as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/1b617582-087d-4a90-996f-04c642c55a41.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Note that the resource listed first in the `try` statement is closed last.
+    If we make only one change and switch the order in the `try` statement:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output confirms it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/aeb523cc-3d63-4076-843a-a827cbb6c280.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: This rule of closing the resources in the reverse order addresses the most important
+    possible issue of dependency between resources, but it is up to the programmer
+    to define the sequence of closing the resources (by listing them in the `try` statement
+    in the correct order). Fortunately, the closing of most standard resources is
+    handled by the JVM gracefully, and the code does not break if the resources are
+    listed in incorrect order. Still, it is a good idea to list them in the same sequence
+    as they were created.
+  prefs: []
+  type: TYPE_NORMAL
+- en: See also
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Do refer to the other recipes of this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Some best practices for better memory usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Stack walking for improved debugging
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Stack trace can be very helpful in figuring out the source of the problem, although
+    the need to read it is usually caused by some unpleasant surprise. Once in a while,
+    especially in a big and complex system, the need arises to read it programmatically
+    when an automatic correction is possible.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Since Java 1.4, the current stack trace can be accessed via the `java.lang.Thread`
+    and `java.lang.Throwable` classes. To any method of your code, you can add the
+    following line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can also add the following line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'It will print the stack trace to the standard output. Alternatively, since
+    Java 8, you can use any of the following lines for the same effect:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can use the stack trace to find the fully qualified name of the caller
+    class, using one of these lines:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'All the aforementioned lines are possible because of the `java.lang.StackTraceElement` class,
+    which represents a stack frame in a stack trace. This class provides other methods
+    that describe the execution point represented by this stack trace element, which
+    allows programmatic access to the stack trace information. For example, you can
+    run this code snippet from anywhere in your program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can also run this one from anywhere in the program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: In either case, you can see how much information you get. Unfortunately, this
+    wealth of data comes with a price. The JVM captures the entire stack (except for
+    hidden stack frames), and it may affect the performance, while the chances are
+    that you only need a fraction of this data (like in the preceding example where
+    we use only one element of the stack trace array).
+  prefs: []
+  type: TYPE_NORMAL
+- en: This is where the new Java 9 class, `java.lang.StackWalker`, with its nested
+    `Option` class and `StackFrame` interface, comes in handy.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting ready
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The `StackWalker` class has four variants of the static factory method, `getInstance()`,
+    which are different only in their ability to take one of the following several
+    options or no options at all:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`StackWalker getInstance()`: This is configured to skip all the hidden frames
+    and no caller class reference.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`StackWalker getInstance(StackWalker.Option option)`: This creates an instance
+    with the given option, specifying the stack frame information it can access.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`StackWalker getInstance(Set<StackWalker.Option> options)`: This creates an
+    instance with the given set of options, specifying the stack frame information
+    it can access. If the given set is empty, the instance is configured exactly like
+    an instance of `StackWalker getInstance()`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`StackWalker getInstance(Set<StackWalker.Option> options, int estimatedDepth)`:
+    This creates a similar instance as the preceding one and accepts the `estimatedDepth`
+    parameter, which specifies the estimated number of stack frames this instance
+    will traverse so that it can estimate the buffer size it might need.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'One of the following values is passed as an option:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`StackWalker.Option.RETAIN_CLASS_REFERENCE`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`StackWalker.Option.SHOW_HIDDEN_FRAMES`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`StackWalker.Option.SHOW_REFLECT_FRAMES`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The `StackWalker` class also has three methods:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`T walk(Function<Stream<StackWalker.StackFrame>, T> function)`: This applies
+    the given function to the stream of `StackFrames` for the current thread, traversing
+    from the top frame of the stack, which is the method calling this walk method.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`void forEach(Consumer<StackWalker.StackFrame> action)`: This performs the
+    given action on each element of the `StackFrame` stream of the current thread,
+    traversing from the top frame of the stack, which is the method calling the `forEach`
+    method. This method is equivalent to calling `walk(s -> { s.forEach(action); return
+    null; })`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`Class<?> getCallerClass()`: This gets the `Class` object of the caller that
+    invoked the method that invoked `getCallerClass()`. This method throws `UnsupportedOperationException`
+    if this `StackWalker` instance is not configured with the `RETAIN_CLASS_REFERENCE`
+    option.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to do it...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Create several classes and methods that will call each other, so you can perform
+    stack trace processing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Create a `Clazz01` class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Create a `Clazz02` class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Create a `Clazz03` class:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Write a `demo4_StackWalk()` method:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Call this method from the main method of the `Chapter12Memory` class:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If we run now the `Chapter12Memory` class, the result will be as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/e3941b47-746b-4bdc-8b6f-6685b1ec985a.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: The message, `Do something`, is passed from `Clazz01` and printed out in `Clazz03`.
+    Then `Clazz02` passes null to `Clazz03`, and the message, `Throw the exception:`,
+    is printed out before the stack trace caused by the `NullPointerException` from
+    the `action.toString();` line.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How it works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'For a deeper understanding of the concepts here, let''s modify `Clazz03`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The result will be the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/c0289bc5-b946-4518-b1c2-b60fe74ac929.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Alternatively, we can get a similar output by using `Throwable` instead of
+    `Thread`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'It does look very familiar:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ec4edfae-5d60-48ce-9241-401f08f00299.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'A similar result will produce each of the following two lines:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now with Java 9, the same output is achieved by using the `StackWalker` class.
+    Let''s look at what happens if we modify `Clazz03` as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The result will be the same:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/80e70b00-e7ae-4f08-ab66-e8c67621b1ad.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'However, contrary to the full stack trace generated and stored in an array
+    in the memory, the `StackWalker` class only brings the requested elements. This
+    is already a big plus. However, `StackWalker` shows the biggest advantage when
+    we need the caller class name only. Instead of getting all the arrays and using
+    only one element, we can now get the info we need by using the following two lines:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We will get the result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/0109fd66-5daa-48ef-9bdb-95645c0b7d8a.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: See also
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Do refer to the other recipes of this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Some best practices for better memory usage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some best practices for better memory usage
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Memory management may never become an issue for you, or it can be a haunting
+    never-ending story of your life, and anything in between. It is probably going
+    to be a non-issue for a majority of programmers, especially with the constantly
+    improving garbage collection algorithms. The G1 garbage collector (default in
+    JVM 9) is definitely a step in the right direction. But there is also a chance
+    you will be called (or will notice yourself) about the degrading application performance,
+    and that is when you'll learn how well you are equipped to meet the challenge.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This recipe is an attempt to help you avoid such a situation or to get out of
+    it successfully.
+  prefs: []
+  type: TYPE_NORMAL
+- en: How it  works...
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The first line of defense is the code itself. In the previous recipes, we have
+    already discussed the need to release resources as soon as they are not needed
+    anymore and the usage of `StackWalker` to consume less memory. There are plenty
+    of recommendations on the internet, but they might not apply to your application.
+    You'll have to monitor the memory consumption and test your design decisions,
+    especially if your code handles a lot of data before deciding where to concentrate
+    your attention.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For example, the choice of the collection (different collections use more or
+    less memory) may be irrelevant if your collection is going to be small. However,
+    programmers usually use the same coding pattern, and one can identify the code's
+    author by their style. That's why it pays back in a long run to figure the most
+    efficient constructs and use them routinely. However, try to avoid making your
+    code difficult to understand; readability is an important aspect of the code quality.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here are a few most popular pieces of advice on memory-aware coding style:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Use lazy initialization and create an object just before the usage, especially
+    if there is a good chance, this need may never materialize at all
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Use `StringBuilder` instead of the `+` operator
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Use `ArrayList` if it fits your needs, before using `HashSet` (the memory usage
+    increases from `ArrayList` to `LinkedList`, `HashTable`, `HashMap`, and `HashSet`,
+    in this sequence)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Avoid regular expressions and cache `Pattern` references if you cannot avoid
+    them
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Prefer primitives over the class wrappers (use autoboxing)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Don't forget to clean the cache and remove unnecessary entries
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Pay attention to the object created inside the loop
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Test and profile your code as soon as it starts doing what it was supposed to
+    do. You might need to change your design or some details of implementation. It
+    will also inform your future decisions. There are many profilers and diagnostic
+    tools available for any environment. We described one of them (`jcmd`) in the *Using
+    the new diagnostic commands for the JVM *recipe of this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Learn how your garbage collector works (see the recipe, *Understanding the G1
+    garbage collector*) and do not forget to use JVM logging (described in the recipe, *Unified
+    logging for JVM*).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After that, you might need to tune the JVM and garbage collector. Here are
+    a few most often used JVM parameters (the size is specified in bytes by default,
+    but you can append the letter k or K to indicate kilobytes, m or M to indicate
+    megabytes, g or G to indicate gigabytes):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`-Xms size`: This sets the initial size of the heap, which must be a multiple
+    of 1024 and greater than 1 MB.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-Xmx size`: This sets the maximum size of the heap, which must be a multiple
+    of 1024 and greater than 2 MB. The default value is chosen at runtime based on
+    the system configuration. For server deployments, `-Xms size` and `-Xmx size`
+    are often set to the same value. The actual memory usage may exceed the amount
+    you have set by `-Xmx size`, because it limits the Java heap size only, while
+    the JVM allocates memory for other purposes too, including a stack for each thread.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-Xmn size`: This sets the initial and maximum size of the heap for the young
+    generation (nursery). If the size for the young generation is too small, then
+    a lot of minor garbage collections will be performed. If the size is too large,
+    then only full garbage collections will be performed, which can take a long time
+    to complete. Oracle recommends that you keep the size for the young generation
+    greater than 25% and less than 50% of the overall heap size. This parameter is
+    equivalent to `-XX:NewSize=size`. For efficient garbage collection, `-Xmn size` should
+    be lower than `-Xmx size`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:MaxNewSize=size`: This sets the maximum size of the heap for the young
+    generation (nursery). The default value is set ergonomically. Oracle advises that
+    after the total available memory, the second most influential factor is the proportion
+    of the heap reserved for the young generation. By default, the minimum size of
+    the young generation is 1310 MB, and the maximum size is unlimited.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:NewRatio=ratio`: This sets the ratio between the young and old generation
+    sizes; the default is set to 2.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-Xss size`: This sets the thread stack size, the default value depends on
+    the platform:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Linux/ARM (32-bit): 320 KB'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Linux/ARM (64-bit): 1024 KB'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Linux/x64 (64-bit): 1024 KB'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'OS X (64-bit): 1024 KB'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Oracle Solaris/i386 (32-bit): 320 KB'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Oracle Solaris/x64 (64-bit): 1024 KB'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Windows: The default value depends on virtual memory'
+  prefs:
+  - PREF_IND
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Each thread has a stack, so the stack size will limit the number of threads
+    the JVM can have. If the stack size is too small, you can get the `java.lang.StackOverflowError` exception.
+    However, making the stack size too big can exhaust the memory too, as each thread
+    will allocate more memory than it needs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`-XX:MaxMetaspaceSize=size`: This sets the upper limit of the memory allocated
+    for class metadata, not limited by default.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The tell-tell sign of a memory leak is the growing of the old generation causing
+    the full GC to run more often. To investigate, you can use the JVM parameters
+    that dump heap memory into a file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`-XX:+HeapDumpOnOutOfMemoryError`: This saves the Java heap into a file in
+    the current directory when a `java.lang.OutOfMemoryError` exception is thrown.
+    You can explicitly set the heap dump file path and name using the `-XX:HeapDumpPath=path`
+    option. By default, this option is disabled and the heap is not dumped when an
+    `OutOfMemoryError` exception is thrown.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:HeapDumpPath=path`: This sets the path and filename for writing the heap
+    dump provided by the heap profiler (`hprof`) when the `-XX:+HeapDumpOnOutOfMemoryError` parameter
+    is set. By default, the file is created in the current working directory, and
+    it is named `java_pidpid.hprof` where `pid` is the identifier of the process that
+    caused the error.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:OnOutOfMemoryError="< cmd args >;< cmd args >"`: This sets a custom command
+    or a series of semicolon-separated commands to run when an `OutOfMemoryError`
+    exception is first thrown. If the string contains spaces, then it must be enclosed
+    in quotation marks. For an example of a command string, see the description of
+    the `-XX:OnError` parameter.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '`-XX:+UseGCOverheadLimit`: This enables the use of a policy that limits the
+    proportion of time spent by the JVM on GC before an `OutOfMemoryError` exception
+    is thrown. This option is enabled by default, and the parallel GC will throw an
+    `OutOfMemoryError` exception if more than 98% of the total time is spent on garbage
+    collection and less than 2% of the heap is recovered. When the heap is small,
+    this feature can be used to prevent applications from running for long periods
+    of time with little or no progress. To disable this option, specify `-XX:-UseGCOverheadLimit`.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: See also
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Do refer to the other recipes of this chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding the G1 garbage collector
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Unified logging for JVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using the new diagnostic commands for the JVM
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Try with resources for better resource handling
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Stack walking for improved debugging
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL

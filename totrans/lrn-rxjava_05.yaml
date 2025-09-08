@@ -1,0 +1,831 @@
+- en: Multicasting, Replaying, and Caching
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: We have seen the hot and cold `Observable` in action throughout this book, although
+    most of our examples have been cold Observables (even ones using `Observable.interval()`).
+    As a matter of fact, there are a lot of subtleties in the hotness and coldness
+    of Observables, which we will look at in this chapter. When you have more than
+    one `Observer`, the default behavior is to create a separate stream for each one.
+    This may or may not be desirable, and we need to be aware of when to force an
+    `Observable` to be hot by multicasting using a `ConnectableObservable`. We got
+    a brief introduction to the `ConnectableObservable` in [Chapter 2](7fea3844-94e9-442e-9d54-239d146a8250.xhtml),
+    *Observables and Subscribers*, but we will look at it in deeper context within
+    an entire `Observable` chain of operators.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will learn about multicasting with `ConnectableObservable`
+    in detail and uncover its subtleties. We will also learn about replaying and caching,
+    both of which multicast and leverage the `ConnectableObservable`. Finally, we
+    will learn about Subjects, a utility that can be useful for decoupling while multicasting but
+    should be used conservatively for only certain situations. We will cover the different
+    flavors of subjects as well as when and when not to use them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is a broad outline of what to expect:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Understanding multicasting
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Automatic connection
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Replaying and caching
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Subjects
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Understanding multicasting
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'We have used the `ConnectableObservable` earlier in [Chapter 2](7fea3844-94e9-442e-9d54-239d146a8250.xhtml), *Observables
+    and Subscribers*. Remember how cold Observables, such as `Observable.range()`,
+    will regenerate emissions for each `Observer`? Let''s take a look at the following
+    code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here, `Observer One` received all three emissions and called `onComplete()`.
+    After that, `Observer Two` received the three emissions (which were regenerated
+    again) and called `onComplete()`. These were two separate streams of data generated
+    for two separate subscriptions. If we wanted to consolidate them into a single
+    stream of data that pushes each emission to both Observers simultaneously, we
+    can call `publish()` on `Observable`, which will return a `ConnectableObservable`.
+    We can set up the Observers in advance and then call `connect()` to start firing
+    the emissions so both Observers receive the same emissions simultaneously. This
+    will be indicated by the printing of each `Observer` interleaving here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Using `ConnectableObservable` will force emissions from the source to become
+    hot, pushing a single stream of emissions to all Observers at the same time rather
+    than giving a separate stream to each `Observer`. This idea of stream consolidation
+    is known as multicasting, but there are nuances to it, especially when operators
+    become involved. Even when you call `publish()`and use a `ConnectableObservable`,
+    any operators that follow can create separate streams again. We will take a look
+    at this behavior and how to manage it next.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Multicasting with operators
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: To see how multicasting works within a chain of operators, we are going to use `Observable.range()`
+    and then map each emission to a random integer. Since these random values will
+    be nondeterministic and different for each subscription, this will provide a good
+    means to see whether our multicasting is working because Observers should receive
+    the same numbers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s start with emitting the numbers 1 through 3 and map each one to a random
+    integer between 0 and 100,000\. If we have two Observers, we can expect different
+    integers for each one. Note that your output will be different than mine due to
+    the random number generation and just acknowledge that both Observers are receiving
+    different random integers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'What happens here is that the `Observable.range()` source will yield two separate
+    emission generators, and each will coldly emit a separate stream for each `Observer`.
+    Each stream also has its own separate `map()` instance, hence each `Observer`
+    gets different random integers. You can visually see this structure of two separate
+    streams in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/1177eebf-3c77-4e22-b990-12dcfd877448.png)**Figure 5.1** - Two separate
+    streams of operations are created for each Observer'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Say, you want to emit the same three random integers to both Observers. Your
+    first instinct might be to call `publish()` after `Observable.range()` to yield
+    a `ConnectableObservable`. Then, you may call the `map()` operator on it, followed
+    by the Observers and a `connect()` call. But you will see that this does not achieve
+    our desired result. Each `Observer` still gets three separate random integers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This occurred because we multicast *after* `Observable.range()`, but the multicasting
+    happens before the `map()` operator. Even though we consolidated to one set of
+    emissions coming from `Observable.range()`, each `Observer` is still going to
+    get a separate stream at `map()`. Everything before `publish()` was consolidated
+    into a single stream (or more technically, a single proxy `Observer`). But after
+    `publish()`, it will fork into separate streams for each `Observer` again, as
+    shown in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/c5e50532-6875-466d-8773-3a92168cc253.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Figure 5.2 - Mulitcasting after Observable.range() will consolidate the interval
+    emissions into a single stream before publish(), but will still fork to two separate
+    streams after publish() for each Observer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If we want to prevent the `map()` operator from yielding two separate streams
+    for each `Observer`, we need to call `publish()` after `map()` instead:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'That is better! Each `Observer` got the same three random integers, and we
+    have effectively multicast the entire operation right before the two Observers,
+    as shown in the following figure. We now have a single stream instance throughout
+    the entire chain since `map()` is now behind, not in front, of `publish()`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/5dc580de-2dd5-4c4b-8606-a471a3f8840b.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Figure 5.3 - A fully multicast operation that guarantees both Observers get
+    the same emissions since all operators are behind the publish() call
+  prefs: []
+  type: TYPE_NORMAL
+- en: When to multicast
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Multicasting is helpful in preventing redundant work being done by multiple
+    Observers and instead makes all Observers subscribe to a single stream, at least
+    to the point where they have operations in common. You may do this to increase
+    performance, reducing memory and CPU usage, or simply because your business logic
+    requires pushing the same emissions to all Observers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Data-driven cold Observables should only be multicast when you are doing so
+    for performance reasons and have multiple Observers receiving the same data simultaneously.
+    Remember that multicasting creates hot `ConnectableObservables`, and you have
+    to be careful and time the `connect()` call so data is not missed by Observers.
+    Typically in your API, keep your cold Observables cold and call `publish()` when
+    you need to make them hot.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Even if your source `Observable` is hot (such as a UI event in JavaFX or Android),
+    putting operators against that `Observable` can cause redundant work and listeners.
+    It is not necessary to multicast when there is only a single `Observer` (and multicasting
+    can cause unnecessary overhead). But if there are multiple Observers, you need
+    to find the proxy point where you can multicast and consolidate the upstream operations.
+    This point is typically the boundary where Observers have common operations upstream and
+    diverge into different operations downstream.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For instance, you may have one `Observer` that prints the random integers but
+    another one that finds the sum with `reduce()`. At this point, that single stream
+    should, in fact, fork into two separate streams because they are no longer redundant
+    and doing different work, as shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here is a visual diagram showing the common operations being multicasted:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**![](img/b0fc9938-a5c9-4d07-899c-7346de057c9f.png)**'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Figure 5.4 - Common operations that are shared between both Observers are put
+    behind publish(), but divergent operations happen after publish()
+  prefs: []
+  type: TYPE_NORMAL
+- en: With a thorough understanding of `ConnectableObservable` and multicasting under
+    our belt, we will move on to some convenience operators that help streamline multicasting.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Automatic connection
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: There are definitely times you will want to manually call `connect()` on `ConnectableObservable`
+    to precisely control when the emissions start firing. There are convenient operators
+    that automatically call `connect()` for you, but with this convenience, it is
+    important to have awareness of their subscribe timing behaviors. Allowing an `Observable`
+    to dynamically connect can backfire if you are not careful, as emissions can be
+    missed by Observers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: autoConnect()
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The `autoConnect()` operator on `ConnectableObservable` can be quite handy.
+    For a given `ConnectableObservable<T>`, calling `autoConnect()` will return an
+    `Observable<T>` that will automatically call `connect()` after a specified number
+    of Observers are subscribed. Since our previous example had two Observers, we
+    can streamline it by calling `autoConnect(2)` immediately after `publish()`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: This saved us the trouble of having to save `ConnectableObservable` and call
+    its `connect()` method later. Instead, it will start firing when it gets `2` subscriptions,
+    which we have planned and specified as an argument in advance. Obviously, this
+    does not work well when you have an unknown number of Observers and you want all
+    of them to receive all emissions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Even when all downstream Observers finish or dispose, `autoConnect()` will
+    persist its subscription to the source. If the source is finite and disposes,
+    it will not subscribe to it again when a new `Observer` subscribes downstream.
+    If we add a third `Observer` to our example but keep `autoConnect()` specified
+    at `2` instead of `3`, it is likely that the third `Observer` is going to miss
+    the emissions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note that if you pass no argument for `numberOfSubscribers`, it will default
+    to `1`. This can be helpful if you want it to start firing on the first subscription
+    and do not care about any subsequent Observers missing previous emissions. Here,
+    we `publish` and `autoConnect` the `Observable.interval()`. The first `Observer`
+    starts the firing of emissions, and 3 seconds later, another `Observer` comes
+    in but misses the first few emissions. But it does receive the live emissions
+    from that point on:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: If you pass `0` to `autoConnect()` for the `numberOfSubscribers` argument, it
+    will start firing immediately and not wait for any `Observers`. This can be handy
+    to start firing emissions immediately without waiting for any Observers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: refCount() and share()
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `refCount()` operator on `ConnectableObservable` is similar to `autoConnect(1)`,which
+    fires  after getting one subscription. But there is one important difference;
+    when it has no Observers anymore, it will dispose of itself and start over when
+    a new one comes in. It does not persist the subscription to the source when it
+    has no more Observers, and when another `Observer` follows, it will essentially
+    "start over".
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Look at this example: we have `Observable.interval()` emitting every second,
+    and it is multicast with `refCount()`. `Observer 1` takes five emissions, and
+    `Observer 2` takes two emissions. We stagger their subscriptions with our `sleep()`
+    function to put three-second gaps between them. Because these two subscriptions
+    are finite due to the `take()` operators, they should be terminated by the time
+    `Observer 3` comes in, and there should no longer be any previous Observers. Note
+    how `Observer 3` has started over with a fresh set of intervals starting at `0`!
+    Let''s take a look at the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Using `refCount()` can be helpful to multicast between multiple Observers but
+    dispose of the upstream connection when no downstream Observers are present anymore.
+    You can also use an alias for `publish().refCount()` using the `share()` operator.
+    This will accomplish the same result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: Replaying and caching
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Multicasting also allows us to cache values that are shared across multiple
+    Observers. This may sound surprising, but when you think about it long enough,
+    you may realize this makes sense. If we are sharing data across multiple Observers,
+    it makes sense that any caching feature would be shared across Observers too.
+    Replaying and caching data is a multicasting activity, and we will explore how
+    to do it safely and efficiently with RxJava.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Replaying
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The `replay()` operator is a powerful way to hold onto previous emissions within
+    a certain scope and re-emit them when a new `Observer` comes in. It will return
+    a `ConnectableObservable` that will both multicast emissions as well as emit previous
+    emissions defined in a scope. Previous emissions it caches will fire immediately
+    to a new `Observer` so it is caught up, and then it will fire current emissions
+    from that point forward.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s start with a `replay()` with no arguments. This will replay all previous
+    emissions to tardy Observers, and then emit current emissions as soon as the tardy
+    `Observer` is caught up. If we use `Observable.interval()` to emit every second,
+    we can call `replay()` on it to multicast and replay previous integer emissions.
+    Since `replay()` returns `ConnectableObservable`, let''s use `autoConnect()` so
+    it starts firing on the first subscription. After 3 seconds, we will bring in
+    a second `Observer`. Look closely at what happens:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Did you see that? After 3 seconds, `Observer 2` came in and immediately received
+    the first three emissions it missed: `0`, `1`, and `2`. After that, it receives
+    the same emissions as `Observer 1` going forward. Just note that this can get
+    expensive with memory, as `replay()` will keep caching all emissions it receives.
+    If the source is infinite or you only care about the last previous emissions,
+    you might want to specify a `bufferSize` argument to limit only replaying a certain
+    number of last emissions. If we called `replay(2)` on our second `Observer` to
+    cache the last two emissions, it will not get 0, but it will receive `1` and `2`.
+    The `0` fell out of that window and was released from the cache as soon as `2`
+    came in.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note that if you always want to persist the cached values in your `replay()`even
+    if there are no subscriptions, use it in conjunction with `autoConnect()`, not
+    `refCount()`. If we emit our `Alpha` through `Epsilon` strings and use `replay(1).autoConnect()`
+    to hold on to the last value, our second `Observer` will only receive the last
+    value, as expected:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Make a modification here to use `refCount()` instead of `autoConnect()` and
+    see what happens:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: What happened here is that `refCount()` causes the cache (and the entire chain)
+    to dispose of and reset the moment `Observer 1` is done, as there are no more
+    Observers. When `Observer 2` came in, it starts all over and emits everything
+    just like it is the first Observer, and another cache is built. This may not be
+    desirable, so you may consider using `autoConnect()` to persist the  state of `replay()` and
+    not have it dispose of when no Observers are present.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are other overloads for `replay()`, particularly a time-based window
+    you can specify. Here, we construct an `Observable.interval()` that emits every
+    300 milliseconds and subscribe to it. We also map each emitted consecutive integer
+    into the elapsed milliseconds. We will replay only the last 1 second of emissions
+    for each new `Observer`, which we will bring in after 2 seconds:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: Look closely at the output, and you will see that when `Observer 2` comes in,
+    it immediately receives emissions that happened in the last second, which were
+    1500 and 1800\. After these two values are replayed, it receives the same emissions
+    as `Observer 1` from that point on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You can also specify a `bufferSize` argument on top of a time interval, so
+    only a certain number of last emissions are buffered within that time period.
+    If we modify our example to only replay one emission that occurred within the
+    last second, it should only replay `1800` to `Observer 2`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: Caching
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'When you want to cache all emissions indefinitely for the long term and do
+    not need to control the subscription behavior to the source with `ConnectableObservable`,
+    you can use the `cache()` operator. It will subscribe to the source on the first
+    downstream `Observer` that subscribes and hold all values indefinitely. This makes
+    it an unlikely candidate for infinite Observables or large amounts of data that
+    could tax your memory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can also call `cacheWithInitialCapacity()` and specify the number of elements
+    to be expected in the cache. This will optimize the buffer for that size of elements
+    in advance:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: Again, do not use `cache()` unless you really want to hold all elements indefinitely
+    and do not have plans to dispose it at any point. Otherwise, prefer `replay()`
+    so you can more finely control cache sizing and windows as well as disposal policies.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Subjects
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Before we discuss Subjects, it would be remiss to not highlight, they have use
+    cases but beginners often use them for the wrong ones, and end up in convoluted
+    situations. As you will learn, they are both an `Observer` and an `Observable`**,**
+    acting as a proxy mulitcasting device (kind of like an event bus). They do have
+    their place in reactive programming, but you should strive to exhaust your other
+    options before utilizing them. Erik Meijer, the creator of ReactiveX, described
+    them as the "*mutable variables of reactive programming*". Just like mutable variables
+    are necessary at times even though you should strive for immutability, Subjects
+    are sometimes a necessary tool to reconcile imperative paradigms with reactive
+    ones.
+  prefs: []
+  type: TYPE_NORMAL
+- en: But before we discuss when to and when not to use them, let's take a look at
+    what they exactly do.
+  prefs: []
+  type: TYPE_NORMAL
+- en: PublishSubject
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: There are a couple implementations of `Subject`, which is an abstract type that
+    implements both `Observable` and `Observer`. This means that you can manually
+    call `onNext()`, `onComplete()`, and `onError()` on a `Subject`**,** and it will,
+    in turn, pass those events downstream toward its Observers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The simplest `Subject` type is the `PublishSubject`, which, like all Subjects,
+    hotly broadcasts to its downstream Observers. Other `Subject` types add more behaviors,
+    but `PublishSubject` is the "vanilla" type, if you will.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can declare a `Subject<String>`, create an `Observer` that maps its lengths
+    and subscribes to it, and then call `onNext()` to pass three strings. We can also
+    call `onComplete()` to communicate that no more events will be passed through
+    this `Subject`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: This shows Subjects act like magical devices that can bridge imperative programming
+    with reactive programming, and you would be right. Next, let's look at cases of
+    when to and when not to use Subjects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When to use Subjects
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'More likely, you will use Subjects to eagerly subscribe to an unknown number
+    of multiple source Observables and consolidate their emissions as a single `Observable`.
+    Since Subjects are an `Observer`, you can pass them to a `subscribe()` method
+    easily. This can be helpful in modularized code bases where decoupling between
+    Observables and Observers takes place and executing `Observable.merge()` is not
+    that easy. Here, I use `Subject` to merge and multicast two `Observable` interval
+    sources:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: Of course, I could use `Observable.merge()` to accomplish this (and technically
+    for this case, I should). But when you have modularized code managed through dependency
+    injection or other decoupling mechanisms, you may not have your `Observable` sources
+    prepared in advance to put in `Observable.merge()`. For example, I could have
+    a JavaFX application that has a refresh event coming from a menu bar, button,
+    or a keystroke combination. I can declare these event sources as Observables and
+    subscribe them to a `Subject` in a backing class to consolidate the event streams
+    without any hard coupling.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another note to make is that the first `Observable` to call `onComplete()` on
+    `Subject` is going to cease other `Observables` from pushing their emissions,
+    and downstream cancellation requests are ignored. This means that you will most
+    likely use Subjects for infinite, event-driven (that is, user action-driven) Observables.
+    That being said, we will next look at cases where Subjects become prone to abuse.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When Subjects go wrong
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Hopefully, you will feel that our earlier `Subject` example emitting `Alpha`,
+    `Beta`, and `Gamma` is counterintuitive and backward considering how we have architected
+    our reactive applications so far, and you would be right to think that way. We
+    did not define the source emissions until the end after all the Observers are
+    set up, and the process no longer reads left-to-right, top-to-bottom. Since Subjects
+    are hot, executing the `onNext()` calls before the Observers are set up would
+    result in these emissions being missed with our `Subject`. If you move the `onNext()`
+    calls like this, you will not get any output because the `Observer` will miss
+    these emissions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: This shows that Subjects can be somewhat haphazard and dangerous, especially
+    if you expose them to your entire code base and any external code can call `onNext()`
+    to pass emissions. For instance, say our `Subject` was exposed to an external
+    API and something can arbitrarily pass the emission `Puppy` on top of `Alpha`,
+    `Beta`, and `Gamma`. If we want our source to only emit these Greek letters, it
+    is prone to receiving accidental or unwanted emissions. Reactive programming only
+    maintains integrity when source Observables are derived from a well-defined and
+    predictable source. Subjects are not disposable either, as they have no public
+    `dispose()` method and will not release their sources in the event that `dispose()`
+    is called downstream.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It is much better to keep data-driven sources like this cold and to multicast
+    using `publish()` or `replay()` if you want to make them hot. When you need to
+    use `Subject`, cast it down to `Observable` or just do not expose it at all. You
+    can also wrap a `Subject` inside a class of some sorts and have methods pass the
+    events to it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Serializing Subjects
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'A critical *gotcha* to note with Subjects is this: the `onSubscribe()`, `onNext()`,
+    `onError()`, and `onComplete()` calls are not threadsafe!  If you have multiple
+    threads calling these four methods, emissions could start to overlap and break
+    the `Observable` contract, which demands that emissions happen sequentially. If
+    this happens, a good practice to adopt is to call `toSerialized()` on `Subject`
+    to yield a  safely serialized `Subject` implementation (backed by the private
+    `SerializedSubject`). This will safely sequentialize concurrent event calls so
+    no train wrecks occur downstream:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: Unfortunately, due to limitations with the Java compiler (including Java 8),
+    we have to explicitly declare the type parameter `String` for our `create()` factory
+    earlier. The compiler's type inference does not cascade beyond more than one method
+    invocation, so having two invocations as previously demonstrated would have a
+    compilation error without an explicit type declaration.
+  prefs: []
+  type: TYPE_NORMAL
+- en: BehaviorSubject
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'There are a few other flavors of Subjects. Aside from the commonly used `PublishSubject`,
+    there is also `BehaviorSubject`. It behaves almost the same way as `PublishSubject`,
+    but it will replay the last emitted item to each new `Observer` downstream. This
+    is somewhat like putting `replay(1).autoConnect()` after a `PublishSubject`, but
+    it consolidates these operations into a single optimized `Subject` implementation
+    that subscribes eagerly to the source:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, you can see that `Observer 2` received the last emission `Gamma` even
+    though it missed the three emissions that `Observer 1` received. If you find yourself
+    needing a `Subject` and want to cache the last emission for new Observers, you
+    will want to use a `BehaviorSubject`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: ReplaySubject
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '`ReplaySubject` is similar to `PublishSubject` followed by a `cache()` operator. It
+    immediately captures emissions regardless of the presence of downstream Observers and
+    optimizes the caching to occur inside the `Subject` itself:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: Obviously, just like using a parameterless `replay()` or a `cache()` operator,
+    you need to be wary of using this with a large volume of emissions or infinite
+    sources because it will cache them all and take up memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: AsyncSubject
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '`AsyncSubject` has a highly tailored, finite-specific behavior: it will only
+    push the last value it receives, followed by an `onComplete()` event:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can tell from the preceding command, the last value to be pushed to `AsyncSubject`
+    was `Gamma` before `onComplete()` was called. Therefore, it only emitted `Gamma`
+    to all Observers. This is a `Subject` you do not want to use with infinite sources
+    since it only emits when `onComplete()` is called.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`AsyncSubject` resembles `CompletableFuture` from Java 8 as it will do a computation
+    that you can choose to observe for completion and get the value. You can also
+    imitate `AsyncSubject` using `takeLast(1).replay(1)` on an `Observable`. Try to
+    use this approach first before resorting to `AsyncSubject`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: UnicastSubject
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'An interesting and possibly helpful kind of `Subject` is `UnicastSubject`.
+    A `UnicastSubject`, like all Subjects, will be used to observe and subscribe to
+    the sources. But it will buffer all the emissions it receives until an `Observer`
+    subscribes to it, and then it will release all these emissions to the `Observer`
+    and clear its cache:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: When you run this code, you will see that after 2 seconds, the first six emissions
+    are released immediately to the `Observer` when it subscribes. Then, it will receive
+    live emissions from that point on. But there is one important property of `UnicastSubject`;
+    it will only work with one `Observer` and will throw an error for any subsequent
+    ones. Logically, this makes sense because it is designed to release buffered emissions
+    from its internal queue once it gets an `Observer`. But when these cached emissions
+    are released, they cannot be released again to a second `Observer` since they
+    are already gone. If you want a second `Observer` to receive missed emissions,
+    you might as well use `ReplaySubject`. The benefit of `UnicastSubject` is that
+    it clears its buffer, and consequently frees the memory used for that buffer,
+    once it gets an `Observer`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you want to support more than one `Observer` and just let subsequent Observers
+    receive the live emissions without receiving the missed emissions, you can trick
+    it by calling `publish()` to create a single `Observer` proxy that multicasts
+    to more than one `Observer` as shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The output is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we covered multicasting using `ConnectableObservable` and `Subject`.
+    The biggest takeaway is that `Observable` operators result in separate streams
+    of events for each `Observer` that subscribes. If you want to consolidate these
+    multiple streams into a single stream to prevent redundant work, the best way
+    is to call `publish()` on an `Observable` to yield `ConnectableObservable`. You
+    can then manually call `connect()` to fire emissions once your Observers are set
+    up or automatically trigger a connection using `autoConnect()`or `refCount()`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Mutlicasting also enables replaying and caching, so tardy Observers can receive
+    missed emissions. Subjects provide a means to multicast and cache emissions as
+    well, but you should only utilize them if existing operators cannot achieve what
+    you want.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will start working with concurrency. This is where RxJava
+    truly shines and is often the selling point of reactive programming.
+  prefs: []
+  type: TYPE_NORMAL

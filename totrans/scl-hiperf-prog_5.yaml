@@ -1,0 +1,1511 @@
+- en: Chapter 5. Lazy Collections and Event Sourcing
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the last chapter, we explored a number of Scala collections that readily
+    perform evaluations eagerly. The Scala standard library provides two collections
+    that operate lazily: views and streams. To motivate an exploration of these collections,
+    we will tackle another performance dilemma at MVT revolving around performance
+    reports that are generated for clients. In this chapter, we will cover the following
+    topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Views
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Stream processing with two real-world applications
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Event sourcing
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Markov chain generation
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Improving the client report generation speed
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Wanting to learn more about the customers of MVT, you decide to attend the weekly
+    client status meeting. As you look around, you see that you are the only engineer
+    here and everyone else is from the sales team. Johnny, the head of the MVT client
+    management team, runs through a list of newly-signed on clients. Each time he
+    reads off a name, a loud bell is rung. It seems like a strange custom to you,
+    but the sales team is excitedly cheering each time the bell rings.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After the new client listing ends and the ringing in your ears stops, one of
+    the sales team members asks Johnny, "When will the performance reports be generated
+    faster? Clients are calling me everyday complaining about the inability to see
+    their positions and profits and losses during the trading day. It's embarrassing
+    that we do not have this kind of transparency, and we will lose business because
+    of this." You realize that the report in question is a PDF that can be downloaded
+    via the private web portal that is exposed by MVT to clients. Unless a client
+    is sophisticated enough to set up his or her own reporting using MVT's performance
+    API, then the client is dependent upon the portal to inspect recent trading performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Realizing that this is an opportunity to better understand the issue, you ask,
+    "Hi, I'm from the engineering team. I thought I would sit in today to learn more
+    about our clients. Can you share more about the reporting performance problem?
+    I'd like to help address the concern." Through conversation with the sales team,
+    you learn that the PDF report is a first step towards a real-time streaming web
+    app. The PDF report allows MVT to quickly give trading performance insight to
+    clients. Each time the client clicks **View Performance**, a report is generated
+    that summarizes the performance trend by displaying whether or not the client
+    has realized a profit or a loss in the last hour, day, and seven days. Particularly
+    when the market is volatile, you learn that clients are more likely to generate
+    reports. The sales team thinks this exacerbates the issue because reports generate
+    even slower when everyone is trying to see recent trading performance. In some
+    of the worst cases, the performance report takes about a dozen minutes to generate,
+    which is totally unacceptable to clients that expect near real-time results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Diving into the reporting code
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Eager to dig into the problem, you find the repository that is responsible
+    for working with reporting data. You explore the domain model to understand the
+    concerns represented in this scope:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the reporting context, linking orders to executions is important to build
+    the performance trend report because this association allows MVT to identify the
+    profit or loss realized from the trade. `ClientId` is a concept that you have
+    not worked with before when working on the order book or performing data analysis.
+    The client ID is used to identify an MVT client's account. As trades are executed
+    on behalf of clients, the client ID allows us to link an executed order to a client
+    account.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Scanning the code base, you spot the representation of a performance trend
+    report before it is converted into PDF format:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The **profit and loss** (**PnL**) trend is represented by distinct ADTs for
+    each supported time period: the last hour, last day, and last seven days. For
+    each stock ticker, these three time periods are included in`TradingPerformanceTrend`.
+    Across multiple tickers, you infer a client can identify whether or not MVT is
+    generating a profit or a loss over time. Inspecting the signature of the `trend`
+    method which is responsible for computing `TradingPerformanceTrend`, you confirm
+    your thinking:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Computing the performance trend requires a way to determine the current time
+    in order to determine how far to look back to compute each time period''s trend.
+    The `findOrders` and `findExecutions` arguments are functions that query the reporting
+    data store for orders and executions that were created within a time interval
+    for a particular ticker. The final argument contains the client''s ID and the
+    tickers to report on. Each period''s trend is computed by a generalized inner-method
+    named `periodPnL`, which looks like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `periodPnL` method is an involved method that contains several logical steps.
+    For each client-provided ticker, the associated orders and executions for the
+    provided time period are retrieved. In order to correlate orders with executions,
+    a map of `OrderId` to `Execution` is built by using `groupBy`. To simplify later
+    calculations, the average execution price of each executed order is computed to
+    reduce multiple executions for a single order to a single value.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With the `idToExecPrice` lookup table built, the next logical step is to filter
+    out orders for other clients. Once only the client''s orders remain, `idToExecution`
+    is used to identify the orders that executed. The final two steps compute the
+    performance trend by tabulating the client''s absolute return (that is, profit
+    and loss). The steps involve two additions to the domain model, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `PnL` value is a value class that is used to represent the client's dollar
+    return. `PeriodPnL` is analogous to the previously introduced ADT that can be
+    applied to any time period of data. This allows `PeriodPnL` to be reused for the
+    last hour, last day, and last seven days trend computations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When the trade represents a buy, the execution price is negated because the
+    transaction represents cash being exchanged for stock. When the trade represents
+    a sell, the execution price remains positive because the transaction represents
+    exchanging stock for cash. After computing the performance trend for each ticker,
+    the `List` of the `Ticker` and `PeriodPnL` tuples is converted to a `Map`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Digesting this implementation, you can start to imagine why generating this
+    PDF is time-consuming. There is no sign of caching results, which means that the
+    trend report is recomputed each time a client makes a request. As the number of
+    clients requesting reports increases, there is an increased wait time while reports
+    are computed. Re-architecting the reporting infrastructure to cache reports is
+    too large a near-term change. Instead, you try to identify incremental changes
+    that can improve report generation performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using views to speed up report generation time
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: When working on the order book, we learned that `List` eagerly evaluates results.
+    This property means that, in `periodPnL`, the de-sugared for-comprehension `filter`
+    and `map` operations performed on `orders` produce new lists. That is, each transformation
+    produces a new collection. For customers with large order counts, it can be costly
+    in terms of CPU time to iterate over an order set three times, in addition to
+    incurring garbage collection costs due to repeated `List` creation. To ameliorate
+    this concern, Scala provides a way to defer transforming elements until an element
+    is needed by a downstream computation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Conceptually, this is done by adding a view on top of the eagerly evaluated
+    collection that allows transformations to be defined with deferred evaluation
+    semantics. A lazily evaluated view of a collection can be constructed from any
+    Scala collection by invoking `view`. For example, this snippet creates a view
+    from a `List` of integers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'From this snippet, we learn that Scala represents a view into a collection
+    with a different `SeqView` type that is parameterized by two types: the collection
+    element, and the collection type. Seeing a view in use makes it easier to understand
+    its runtime differences with an eagerly evaluated collection. Consider the following
+    snippet performing the same operations on a `List` and a view over a `List`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This snippet performs simple arithmetic and then filters to find the even elements.
+    For the sake of deepening our understanding, the snippet breaks the functional
+    paradigm by adding the `println` side effect. The output of the list evaluation
+    is as expected:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'With eager evaluation, each transformation is applied to each element before
+    moving to the next transformation. Now, consider the following output from view
+    evaluation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: As we discussed earlier, with lazy evaluation no transformations are applied
+    until an element is needed. In this example, this means that the addition and
+    filtering do not occur until the invocation of `toList`. The absence of output
+    after "view evaluation" is evidence that zero transformations occurred. Curiously,
+    we also see that only the first four of six elements are evaluated. When a view
+    applies transformations, it applies all transformations to each element rather
+    than applying each transformation to all elements. By applying all transformations
+    in one step, the view is able to return the first two elements without evaluating
+    the entire collection. Here, we see the potential performance gains from view
+    usage due to lazy evaluation. Before applying the concept of views to the performance
+    trend report, let's take a deeper look at view implementation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Constructing a custom view
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Views are able to defer evaluation by returning a data structure that composes
+    the previous transformation state with the next transformation. The Scala implementation
+    of views is admittedly complicated to digest because it provides a large number
+    of capabilities while retaining support for all Scala collections. To build an
+    intuition for how views are implemented, let''s construct our own lazily evaluated
+    view that works only for `List` and only supports `map` operations. To begin,
+    we define the operations that are supported by our implementation of a `PseudoView`
+    view:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `PseudoView` is defined as a trait that supports lazy application of a
+    transformation from `A` to `B` and also supports evaluating all transformations
+    to return a `List`. Next, we define two view types of view to support the initial
+    case when zero transformations have been applied and to support applying a transformation
+    to a previously transformed view. The signatures are shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: In both scenarios, the original `List` must be carried through to support eventually
+    applying the transformations. In the `InitialView` base case, there are zero transformations,
+    which is why there is no additional state. `ComposedView` supports chaining computations
+    by carrying the state of the previous `fa` transformation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Implementing `InitialView` is a straightforward delegation to `ComposedView`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `List` implementation shows how transformations are chained together using
+    function composition:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s construct a `PseudoView` companion object that provides view construction,
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can now exercise `PseudoView` with a simple program to demonstrate that
+    it defers evaluation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Running this program, we see output equivalent to usage of Scala''s view implementation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`PseudoView` helps build an intuition about how Scala implements views. From
+    here, you can begin considering how to support other operations. For example,
+    how can `filter` be implemented? The `filter` is interesting to consider because
+    it constrains the original collection. As defined, `PseudoView` is ill-equipped
+    to support the `filter` operations, which is one illustration of the complexity
+    that is handled by Scala views. Scala views tackles this challenge by defining
+    a trait named `Transformed`. The `Transformed` trait is the base trait for all
+    view operations. A partial definition is shown, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `underlying` lazy value is how the originally wrapped collection is accessed.
+    This is analogous to how `PseudoView` passed the `List` state into `ComposedView`.
+    `Transformed` defines a side-effecting `foreach` operation to support collection
+    operations in a lazy manner. Using `foreach` allows implementations of this trait
+    to modify the underlying collection. This is how `filter` is implemented:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`Transformed` is used within the view API to maintain the state of necessary
+    operations, while the external API supports interacting with `SeqView`. Following
+    another pattern that is commonly found in Scala collections, `SeqView` inherits
+    a number of operations by mixing in other traits. `SeqView` indirectly mixes in `TraversableViewLike`,
+    which provides access to the `Transformed` operations.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Applying views to improve report generation performance
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: With our newly-developed intuition for views, we may view (no pun intended!)
+    the construction of performance trend reports differently. Scala's implementation
+    of views makes it trivial to switch from eagerly evaluated collections to a lazily
+    evaluated version. If you recall, once the order ID to the average execution price
+    lookup table is constructed, a series of transformations are applied to the orders
+    that are retrieved for the duration and ticker. By converting `orders` to a view,
+    there is an opportunity to avoid unnecessary transformations and improve the speed
+    of the performance trend report.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'While it is trivial to convert to a view, it is less trivial to identify under
+    which conditions lazy evaluation out-performs eager evaluation. As a good performance
+    engineer, you want to benchmark your proposed change, but you do not have access
+    to historical order and execution data to build a benchmark. Instead, you write
+    a microbenchmark that simulates the problem that you are modeling. The question
+    that you are trying to answer is, "For what size collection and what number of
+    operations does it make sense to use a view over a `List`?" There is a cost to
+    constructing a view because it involves retaining information about the deferred
+    transformation, which implies it will not always be the most performant solution.
+    You come up with the following scenarios to help answer your question:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'For each collection type, a `List`, and a view over a `Vector`, you define
+    three tests that exercise an increasing number of transformations. `Vector` is
+    used instead of `List` because `toList` on a view is not specialized for `List`.
+    As we have previously seen, `List` operations are written to take advantage of
+    constant time and prepend performance. The `toList` performs linear time append
+    operations, which gives the false impression that views deliver lower performance.
+    Switching to `Vector` provides effectively constant time append operations. The
+    state for this benchmark looks like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`ViewState` sweeps different collection sizes to help identify how sensitive
+    view performance is to collection size. The benchmark is invoked via the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This invocation produces the following results:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Benchmark** | **Collection size** | **Throughput (ops per second)** | **Error
+    as percentage of throughput** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `singleTransformList` | 10 | 15,171,067.61 | ± 2.46 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `singleTransformView` | 10 | 3,175,242.06 | ± 1.37 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `singleTransformList` | 1,000 | 133,818.44 | ± 1.58 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `singleTransformView` | 1,000 | 52,688.80 | ± 1.11 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `singleTransformList` | 1,000,000 | 30.40 | ± 2.72 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `singleTransformView` | 1,000,000 | 86.54 | ± 1.17 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `twoTransformsList` | 10 | 5,008,830.88 | ± 1.12 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `twoTransformsView` | 10 | 4,564,726.04 | ± 1.05 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `twoTransformsList` | 1,000 | 44,252.83 | ± 1.08 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `twoTransformsView` | 1,000 | 80,674.76 | ± 1.12 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `twoTransformsList` | 1,000,000 | 22.85 | ± 3.78 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `twoTransformsView` | 1,000,000 | 77.59 | ± 1.46 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `threeTransformsList` | 10 | 3,360,399.58 | ± 1.11 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `threeTransformsView` | 10 | 3,438,977.91 | ± 1.27 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `threeTransformsList` | 1,000 | 36,226.87 | ± 1.65 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `threeTransformsView` | 1,000 | 58,981.24 | ± 1.80 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `threeTransformsList` | 1,000,000 | 10.33 | ± 3.58 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `threeTransformsView` | 1,000,000 | 49.01 | ± 1.36 |'
+  prefs: []
+  type: TYPE_TB
+- en: The results give us an interesting insight into the cases where using a view
+    yields better performance. For a small collection, such as 10 elements in our
+    benchmark, a `List` performs better, regardless of the amount of operations, although
+    this gap closes at 1,000,000 elements. When transforming a large collection, 1,000,000
+    elements in our benchmark, a view is more efficient with an increasing differential
+    as the number of transformations increases. For example, with 1,000,000 elements
+    and two transformations, views deliver approximately triple the throughput of `List`.
+    In the case of a medium size collection, such as 1,000 elements in this example,
+    this is not as clear-cut. When performing a single transformation, an eager `List`
+    performs better, while a view delivers better throughput when applying more than
+    one transformation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As the volume of your data and the transformation count increase, it becomes
+    more likely that a view offers better performance. Here, you see the tangible
+    benefit of avoiding intermediate collections. A second axis of performance to
+    consider is the nature of the transformation. Transformations that benefit from
+    early termination (for example, `find`), benefit strongly from lazy evaluation.
+    This benchmark illustrates that it is important to understand the size of your
+    data and the transformations that you intend to perform.
+  prefs: []
+  type: TYPE_NORMAL
+- en: View caveats
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Views offer a simple way to improve performance with minimally invasive changes
+    to your system. The ease of use is part of the allure of views, which may tempt
+    you to use them more frequently than you otherwise would. As our benchmarking
+    in the previous section shows, there is a nontrivial overhead to using views,
+    which means defaulting to views is a suboptimal choice. Looking past the pure
+    performance perspective, there are other reasons to tread carefully when using
+    views.
+  prefs: []
+  type: TYPE_NORMAL
+- en: SeqView extends Seq
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: As views mirror the collection API, it can be a challenge to identify when transformations
+    are being applied lazily. For this reason, we recommend setting well-defined boundaries
+    for view usage. When working on client reporting, we limited view usage to a single
+    inner-function and used a `List` eager collection type as the return type. Minimizing
+    the area of a system performing a lazy evaluation can reduce cognitive load when
+    building a runtime execution mental model.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'On a related note, we feel that it is important to be cautious about how a
+    view is transformed into an eagerly evaluated collection type. We showed conversion
+    by invoking `toList`, which makes the intent explicit. `SeqView` also provides
+    a `force` method to force evaluation. As a general rule, we avoid using `force`
+    because it typically returns `scala.collection.immutable.Seq`. `SeqView` retains
+    the collection type as its second generic parameter, which allows `force` to return
+    the original collection type when there is enough evidence. However, certain operations,
+    such as `map`, cause the view to lose evidence of the original collection type.
+    When this happens, `force` returns the more general `Seq` collection type. `Seq`
+    is a trait that is a super-type to all sequences in the collection library, including
+    views and another lazy data structure that we will discuss later, named `scala.collection.immutable.Stream`.
+    This inheritance scheme allows the following three statements to compile:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We believe this is undesirable because the `Seq` data type hides critical information
+    about the underlying implementation. It represents both lazy and eagerly evaluated
+    collections with the same type. Consider the following snippet example to understand
+    why this is undesirable:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this manufactured example, imagine that `shouldGenerateOrder` is invoked
+    with a `Vector`, but then later the `Vector` is swapped out for `SeqView`. With `Vector`,
+    identifying collection length is a constant time operation. With `SeqView`, you
+    cannot reason with certainty about the runtime of the operation, except to say
+    that it is definitely more expensive than `Vector.size`. `Seq` usage, and, therefore,
+    the usage of `force`, should be avoided because it is difficult to reason about
+    runtime behavior, and this can lead to unexpected side-effects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In a typical software system, areas of responsibility are separated into discrete
+    modules. Using the performance trend reporting example, you can imagine a separate
+    module containing the translation from `List[TradingPerformanceTrend]` to a PDF
+    report. You may be tempted to expose the view to other modules to extend the benefit
+    of lazy transformations. If benchmarks justify making this type of change, then
+    we encourage you to choose one of these options. Our preferred choice in this
+    scenario is to use `Stream`, which is a lazily evaluated version of `List`. We
+    explore `Stream` later in this chapter. Alternatively, if `Stream` cannot be used,
+    be strict in your use of the `SeqView` datatype to clearly demarcate that the
+    collection is lazily evaluated.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Views are not memoizers
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'One additional consideration when using views is to be cognizant of when transformations
+    are repeatedly applied. For example consider this manufactured example that focuses
+    on a use case where a view is used as a base for multiple computations:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this example, `xs` is a view on a list of integers. A `map` transformation
+    is lazily applied to multiply these integers by 2\. The view is then used to create
+    two `List` instances, one containing even elements, the other containing odd elements.
+    We observe that the transformation is applied to the view twice, each time we
+    turn the view into a list. This shows that the transformation is lazily applied,
+    but the results of the computation are not cached. This is a characteristic of
+    views to keep in mind, as expensive transformations applied several times can
+    cause significant slowdowns. This is also the reason why side-effects should be
+    avoided in transformations applied to views. If, for some reason, referential
+    transparency is not upheld, the combination of side-effects and multiple evaluations
+    due to view usage can lead to exceptionally difficult to maintain software.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This example is straightforward, and the misuse of views is easy to spot. However,
+    even methods that are provided by the standard library can lead to undesirable
+    results when used with views. Consider this snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: This example achieves the same results as the previous sample, but we rely on
+    the built-in `partition` method to split the original list into two distinct collections
+    each operating on the original view. Again, we see the `map` transformation applied
+    twice to the original view. This is due to the underlying implementation of `partition`
+    in `TraversableViewLike`. The main takeaway is that views and lazy evaluation
+    can help yield better performance, but they should be used carefully. It is a
+    good idea to experiment and try your algorithm in the REPL to confirm that you
+    are using views correctly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In our running example on reporting on trading performance trends, we saw an
+    easy-to-miss example of lazy evaluation when operating on a `Map`. Recall that
+    there was a lookup table built using the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The return type of `mapValues` is `Map[A, B]`, which does not suggest any difference
+    in evaluation strategy. Let''s run a simple example in the REPL:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: Notice how, each time we call `get` on `m_prime` to retrieve a value, we can
+    observe the transformation being applied, even when using the same key. The `mapValues`
+    is a lazily-evaluated transformation of each value in the map akin to a view operating
+    on the keys of a map. The types that are involved do not provide any insight,
+    and unless you inspect the implementation of `Map` or carefully read the documentation
+    that is associated with `mapValues`, you will likely miss this important detail.
+    Consider the caveats of views when working with `mapValues`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Zipping up report generation
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'While investigating the implementation of `TradingPerformanceTrend`, we took
+    a deep dive into views and found how they can improve performance. We now return
+    to the implementation of `trend` to complete the generation of the `List[radingPerformanceTrend]`.
+    The following snippet shows `trend` with the implementation of `periodPnL` hidden
+    because we thoroughly reviewed it:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This method focuses on marshaling the translation of PnL for a time period
+    to the appropriate time period''s performance trend. The final expression involving
+    two invocations of `zip` makes the transformation from three maps with keys of `Ticker`
+    and corresponding period PnL trend values to `List[TradingPerformanceTrend]` elegant.
+    `zip` iterates over two collections to yield a tuple for each index of both collections.
+    Here is a simple snippet to illustrate `zip` usage:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This yields the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: The result is that corresponding indexes are "zipped" together. For example,
+    at index one, the first list's value is three and the second list's value is four,
+    yielding the tuple, `(3, 4)`. The first list has four elements while the second
+    list only has three elements; this is silently omitted from the resulting collection.
+    This behavior is well-documented, but it might be unexpected at first glance.
+    In our reporting use case, we are certain that each key (that is, each `Ticker`),
+    appears in all three maps. In this use case, we are certain that all three maps
+    are of equal length.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, there is a subtle bug in our usage of `zip`. The `zip` uses a collection's
+    iterator to iterate over elements, which implies that usage of `zip` is sensitive
+    to ordering. Each of the three maps is constructed by invoking `toMap`, which
+    indirectly delegates to a `scala.collection.immutable.HashMap` implementation
+    of `Map`. Similar to `Set`, Scala provides several handwritten implementations
+    of `Map` (for example, `Map2`) for small collection sizes before constructing
+    a `HashMap`. By now, you may realize the flaw, `HashMap` does not guarantee ordering.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To fix this bug and retain usage of `zip`, we can leverage our earlier discovery
+    of `SortedMap`, the trait backed by `TreeMap` with sorted keys. Swapping out `Map`
+    for `SortedMap` and making appropriate changes to define an `Ordering` for `Ticker`,
+    we now have a bug-free, elegant solution to generating trading performance trend
+    reports. With a judicious usage of views, we found a way to deliver iterative
+    performance improvements with minimally invasive changes. This will give the sales
+    team something to ring the bell about! This gives us additional time to consider
+    other approaches to generating reports.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Rethinking reporting architecture
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: After deploying a new version of the web portal that generates the performance
+    report containing your view changes, you begin wondering what else can be done
+    to improve report generation performance. It strikes you that, for a particular
+    time interval, the report is immutable. The computed PnL trend for a particular
+    hour never changes once computed. Although the report is immutable, it is needlessly
+    being recomputed each time a client requests the report. Given this line of thinking,
+    you wonder how difficult it is to generate a new report each hour as new execution
+    data becomes available. On-the-fly, order and execution events can be transformed
+    as they are created into the inputs that are required for the client performance
+    trend report. With a pregenerated report, the web portal performance issues should
+    completely disappear because the responsibility of report generation no longer
+    belongs to the web portal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This new report generation strategy leads us to explore a new design paradigm,
+    called event sourcing. Event sourcing describes an architectural approach to designing
+    systems that relies on processing events over time instead of relying on a model
+    of the current state to answer different questions. The reporting system that
+    we worked on performs significant work to identify the subset of orders that executed
+    because current state rather than events is stored. Imagine that, instead of working
+    with data, such as `Order` and `Execution`, we instead worked with events that
+    represent things that happened in the system over time. One relevant event to
+    report could be the `OrderExecuted` event that can be modeled, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This event describes something that happened instead of representing a snapshot
+    of current state. To extend this example, imagine if `Order` also included an
+    optional `Price` to denote execution price:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: If this data model is mapped to a relational database, `executionPrice` would
+    be a nullable database value that is overwritten when an execution occurs. When
+    the domain model only reflects the current state, then immutability is lost. As
+    a functional programmer, this statement should concern you because you understand
+    the reasoning capabilities that immutability provides. Storing only the current
+    state of data may also lead to excessively large objects that are difficult to
+    program with. For example, how would you represent that an `Order` was canceled?
+    With the current approach, the most expedient method is to add a Boolean flag
+    named `isCanceled`. Over time, as your system's requirements become more complicated,
+    the `Order` object will grow and you will track more characteristics about the
+    current state. This means that loading a set of `Order` objects into memory from
+    a database will grow more unwieldy due to growing memory requirements. This is
+    a dilemma that you likely have experienced if you have extensive **Object Relational
+    Mapping** (**ORM**) experience.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To avoid bloating `Order`, you may try to deconstruct the concept of an order
+    to support multiple use cases. For example, if you are only interested in executed
+    orders, the model may change the `executionPrice` datatype from `Option[Price]`
+    to `Price`, and you may no longer require the canceled Boolean flag because, by
+    definition, an executed order could not have been canceled.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Identifying multiple definitions or representations for what you once thought
+    was a single concept is an important step toward addressing the shortcomings that
+    we walked through. Extending this approach, we come back to the topic of event
+    sourcing. We can replay a set of events to build `OrderExecuted`. Let''s slightly
+    modify the events emitted from the order book to look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: If all `OrderBookEvents` were persisted (for example, to disk), it is then possible
+    to write a program that reads all the events and constructs a set of `ExecutedOrders` by
+    correlating `BuyOrderSubmitted` and `SellOrderSubmitted` events with `OrderExecuted`
+    events. An advantage that we see with this approach is that, over time, we are
+    able to ask new questions about what happened in our system and then easily answer
+    them by reading the events. In contrast, if a model built on the current state
+    did not include executions when it was first designed, it is impossible to retroactively
+    answer the question, "Which orders executed last week?"
+  prefs: []
+  type: TYPE_NORMAL
+- en: Our new idea is exciting, and it has the potential to yield great improvements.
+    However, it comes with a set of challenges. The main difference with the previous
+    section is that our new use case does not load the `Order` and `Execution` collections
+    in memory from a data store. Instead, we are planning to process the incoming `OrderBookEvent`
+    as it is generated by the order book. Conceptually, this approach still involves
+    processing a sequence of data. However, with the previous approach, the entire
+    data set existed prior to beginning any transformations. Processing events on-the-fly
+    requires designing software that handles data that has not yet been generated.
+    Clearly, neither eager collections nor views are a good tool for our new system.
+    Luckily, the standard Scala library provides us with the right abstraction: `Stream`.
+    Let's take a closer look at this new collection type to better understand how `Stream`
+    can help us implement an event sourcing approach to the client performance reporting
+    architecture.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An overview of Stream
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A stream can be seen as a mix between a list and a view. Like a view, it is
+    lazily evaluated and transformations are applied only when its elements are accessed
+    or collected. Like a `List`, the elements of a `Stream` are only evaluated once.
+    A `Stream` is sometimes described as an unrealized `List`, meaning that it is
+    essentially a `List` that has not yet been fully evaluated, or realized.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Where a `List` can be constructed with the cons (`::`) operator, a `Stream`
+    can be similarly constructed with its own operator:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: The syntax to create a `Stream` is close to the one to create a `List`. One
+    difference is the returned value. Where a `List` is immediately evaluated, a `Stream`
+    is not. Only the first element (`"January"`) is computed; the remaining values
+    are still unknown (and denoted by a`?` character).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s observe what happens when we access part of the stream:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: We forced the evaluation of the first two elements of the `Stream` by turning
+    it into a `List` (see the following sidebar). The first two months are printed.
+    We then display the value of `months` to discover that the second element (`"February"`)
+    is now computed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'In the preceding example, `toList` is the call that forces the evaluation of
+    the `Stream`. `take(2)` is a lazily applied transformer that also returns an unevaluated `Stream`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To highlight the evaluation characteristics of a `Stream`, we look at another
+    example of creating a `Stream`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This short snippet defines a function that creates a `Stream` of powers of
+    2\. It is an infinite `Stream` initialized with the first value 1 and the tail
+    is defined as another `Stream`. We added a `println` statement to allow us to
+    study the evaluation of the elements:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note how the first eight elements are only evaluated when we perform the first
+    conversion to a `List`. In the second call, only elements 9 and 10 are computed;
+    the first eight are already realized and are part of the `Stream`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Based on the previous example, you may wonder if a `Stream` is an immutable
+    data structure. Its fully qualified name is `scala.collection.immutable.Stream`,
+    so this should give you a good hint. It is true that accessing the `Stream` and
+    realizing some of its elements causes a modification of the `Stream`. However,
+    the data structure is still considered immutable. The values it contains never
+    change once assigned; even before being evaluated, the values exist and have a
+    definition in the `Stream`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The previous example shows an interesting property of `Stream`: it is possible
+    to create a virtually infinite `Stream`. The `Stream` that is created by `powerOf2`
+    is unbounded and it is always possible to create one more element thanks to our `next`
+    method. Another useful technique is the creation of recursive streams. A recursive `Stream`
+    refers to itself in its definition. Let''s adapt our previous example. Instead
+    of returning the complete sequence of powers of 2, we will allow the caller to
+    set a starting value:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `math.pow` is used to compute *2^n*. Note that we calculate the first value
+    and define the rest of the `Stream` as `powerOf2(n+1)`, that is, the next power
+    of 2:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The companion object of `Stream` provides several factory methods to instantiate
+    a `Stream`. Let''s look at a few of them:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`Stream.apply`: This allows us to create a `Stream` for a finite sequence of
+    values:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`Stream.fill[A](n: Int)(a: => A)`: This produces a `Stream` containing the
+    element `a`, `n` times:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`Stream.from(start: Int)`: This creates an increasing sequence of integers
+    beginning with `start`:'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We invite you to look at the other methods that are available on the companion
+    object. Note that a `Stream` can also be constructed from a `List` directly, as
+    follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: The previous code may be misleading. Turning a `List` into a `Stream` does not
+    spare the price of evaluating the whole `List` in memory. Similarly, if we were
+    to apply transformations (such as `map` or `filter`) to the `List` before the
+    call to `toStream`, we would be performing these computations on the entire `List`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Just like a `List`, you can pattern match on a `Stream`, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: This pattern matching extracts the third element from the `s` stream. Pattern
+    matching on a stream forces the realization of the elements required to evaluate
+    the match expression. In the preceding case, the first three items are calculated.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: To pattern match on an empty stream, you can use the `Stream.Empty` object.
+    It is a singleton instance to represent an empty `Stream`. It works similarly
+    to `Nil` for `List`. Note that the object `Stream` contains an `empty` method
+    returning this singleton; however, pattern matching requires a stable identifier,
+    and it cannot use calls to a method as a valid `case`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Transforming events
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Returning to the reporting system, how can we apply the principles of event
+    sourcing and leverage `Stream` to change how reports are generated? To compute
+    `TradingPerformanceTrend` for a client, we need to compute PnL trend values for
+    three time periods: each hour, each day, and each seven days. We can write a method
+    with the following signature that gets us closer to identifying the PnL for each
+    trend:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The signature of `processPnl` accepts an `OrderBookEvent` and state in the
+    form of `TradeState` to produce a new `TradeState` and, optionally, a `PnlEvent`.
+    Let''s first inspect `PnlEvent` to understand the end result of this method before
+    inspecting `TradeState`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We see that `PnlEvent` models an ADT that expresses when a client''s PnL increased
+    or decreased. Using the past tense to name the event (for example, increased)
+    makes it clear that this is a fact or a record of something that has completed.
+    We have not yet looked at how `TradeState` is defined or the implementation of `processPnl`,
+    but we can already infer the behavior by studying the emitted events. We display
+    the definition of `TradeState`, which is needed to correlate submitted orders
+    with executions, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Next, we inspect the implementation of `processPnl` to view how `PnlEvents`
+    are created, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: This implementation shows that the `PnlEvent` is pattern matched to determine
+    the event type, and this is handled accordingly. When an order is submitted, `TradeState`
+    is updated to reflect that there is a new pending order that will be either canceled
+    or executed. When an order is canceled, the pending order is removed from `TradeState`.
+    When an execution occurs, the pending order is removed and, additionally, a `PnlEvent`
+    is emitted after computing the trade PnL. The trade PnL compares the execution
+    price to the pending order's original price.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`PnlEvent` provides enough information to compute PnL trend performance for
+    all three time periods (hour, day, and seven days) required by `TradingPerformanceTrend`.
+    The transformation from `OrderBookEvent` to `PnlEvent` is side-effect-free, and
+    the creation of a new event, instead of replacing current state, leads to an immutable
+    model. In the light of these characteristics, `processPnl` is easily unit-testable
+    and makes the intent explicit. By making the intent explicit, it is possible to
+    communicate with less technical stakeholders about how the system works.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Using `PnlEvent` as an input to a method that follows the analogous `(State,
+    InputEvent) => (State, Option[OutputEvent])` signature, we can now compute hourly
+    PnL trend, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This signature shows that, by maintaining state in `HourlyState`, it is possible
+    to emit the `HourlyPnlTrendCalculated` event. The emitted event is defined, as
+    follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'For a particular hour, client ID, and ticker, `HourlyPnlTrendCalculated` is
+    a record of whether the last hour PnL is positive or negative. The `HourInstant` class
+    is a value class with a companion object method that transforms an instant to
+    the start of the hour:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s have a look at how `HourlyState` is defined to better understand the
+    state that is needed to yield `HourlyPnlTrendCalculated`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'For a `ClientId` and a `Ticker`, the PnL for the current hour is stored in `HourlyState`.
+    Accumulating the PnL allows `processHourlyPnl` to determine the PnL trend at the
+    end of an hour. We now inspect the implementation of `processHourlyPnl` to see
+    how `PnlEvent` is transformed into `HourlyPnlTrendCalculated`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs: []
+  type: TYPE_PRE
+- en: Handling an increased and decreased PnL follows the same flow. The inner-method
+    named `processChange` handles the identical processing steps. The `processChange`
+    determines whether or not to emit `HourlyPnlTrendCalculated` by comparing the `HourInstant`
+    value that is added when an entry is first added to the state with the hour of
+    the timestamp provided by the event. When the comparison shows the hour has changed,
+    then the hourly PnL trend has been computed because the hour is completed. When
+    the hour is unchanged, the provided PnL is added to the state's PnL to continue
+    accumulating the hour's PnL.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'An obvious shortcoming of this approach is that, when a client or a ticker
+    does not have any executed orders, it will not be possible to determine that the
+    hour is completed. For simplicity, we are not treating time as a first-class event.
+    However, you can imagine how it is possible to model the passing of time as an
+    event that is a second input to `processHourlyPnl`. For example, the event might
+    be the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '`case class HourElapsed(hour: HourInstant)`'
+  prefs: []
+  type: TYPE_NORMAL
+- en: To use this event, we could change the signature of `processHourlyPnl` to receive
+    an event argument that is of the `Either[HourElapsed, PnlEvent]` type. Scheduling `HourElapsed`
+    on a timer enables us to modify the implementation of `processHourlyPnl` to emit
+    `HourlyPnlTrendCalculated` as soon as the hour elapses instead of when a trade
+    occurs in the next hour. This simple example shows how you can model time as an
+    explicit part of the domain when you consider your system from an event sourcing
+    point of view.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It is straightforward to imagine writing analogous methods that emit events
+    for the daily and seven day PnL trend events, and then a method that awaits all
+    three PnL trend events to produce the `TradingPerformanceTrendGenerated` event.
+    The final step is to write a side-effecting method that persists `TradingPerformanceTrend`
+    so that it can be read by the web portal. At this point, we have a collection
+    of methods that performs transformations on events, but they are not yet wired
+    together cohesively. Next, we take a look at how to create a pipeline to transform
+    events.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Note that, in this case study, we do not actually calculate a PnL. Performing
+    a real PnL calculation would involve more complicated algorithms and would force
+    us to introduce more domain concepts. We opted for a simpler approach with a report
+    that is closer to an exposure report. This allows us to focus on the code and
+    the programming practices that we want to illustrate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Building the event sourcing pipeline
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We use the term pipeline to refer to an arranged set of transformations that
+    may require multiple steps to yield a desired end result. This term brings to
+    mind an image of a set of pipes spanning multiple directions with twists and turns
+    along the way. Our goal is to write a program that receives `PnlEvents` traits
+    and prints the `HourlyPnlTrendCalculated` events to a standard output. In a true
+    production environment, you can imagine replacing printing to standard output
+    with writing to a persistent data store. In either case, we are building a pipeline
+    that performs a set of referentially transparent transformations and concludes
+    with a side-effect.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The pipeline must accumulate the intermediate state of each transformation
+    as new events are processed. In the functional programming paradigm, accumulation
+    is often associated with a `foldLeft` operation. Let''s look at a toy example
+    that sums a list of integers to better understand accumulation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, we see `foldLeft` applied to compute the sum of a list of integers by
+    providing an initial sum value of zero and currying a function to add the current
+    element to the accumulated sum. The `acc` value is an often used shorthand for
+    'accumulator'. In this example, the accumulator and the list elements share the
+    same data type, integer. This is merely a coincidence and is not a requirement
+    for `foldLeft` operations. This implies that the accumulator can be a different
+    type than the collection element.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can use `foldLeft` as the basis of our event sourcing pipeline to support
+    processing a list of `OrderBookEvents` while accumulating intermediate state.
+    From the implementation of the two processing methods, we saw the need to maintain `TradeState`
+    and `HourlyState`. We define `PipelineState` to encapsulate the required state,
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`PipelineState` serves as the accumulator when folding over the `OrderBookEvent`,
+    allowing us to store the intermediate state for both of the transformation methods.
+    Now, we are ready to define the signature of our pipeline:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `pipeline` accepts the initial state, a side-effecting function to be invoked
+    when an `HourlyPnlTrendCalculated` event is generated, and a set of `OrderBookEvents` to
+    source. The return value of the pipeline is the state of the pipeline once the
+    events are processed. Let''s look at how we can leverage `foldLeft` to implement `pipeline`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE57]'
+  prefs: []
+  type: TYPE_PRE
+- en: The implementation of `pipeline` is based on folding over the provided events
+    using the provided `PipelineState` as a starting point for accumulation. The curried
+    function provided to `foldLeft` is where the wiring of transformations takes place.
+    Stitching together the two transformation methods and the side-effecting event
+    handler requires handling several different scenarios. Let's walk through each
+    of the possible cases to better understand how the pipeline works. The `processPnl`
+    is invoked to produce a new `TradeState` and optionally yield a `PnlEvent`. If
+    no `PnlEvent` is generated, then `processHourlyPnl` is not invoked and the previous `HourlyState`
+    is returned.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If a `PnlEvent` is generated, then `processHourlyPnl` is evaluated to determine
+    whether an `HourlyPnlTrendCalculated` is created. When `HourlyPnlTrendCalculated`
+    is generated, then the side-effecting `HourlyPnlTrendCalculated` event handler
+    is invoked and the new `HourlyState` is returned. If no `HourlyPnlTrendCalculated`
+    is generated, then the existing `HourlyState` is returned.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We construct a simple example to prove that the pipeline works as intended,
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE58]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'At the start of the hour, a buy order is submitted for the stock, FOO. Within
+    the hour, the buy order is executed at a price lower than the buying price, indicating
+    the trade was profitable. As we know, the current implementation relies on executions
+    in the subsequent hour in order to produce `HourlyPnlTrendCalculated`.  To create
+    this event, a second buy order is submitted at the start of the second hour. Running
+    this snippet produces a single `HourlyPnlTrendCalculated` event that is written
+    to standard output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE59]'
+  prefs: []
+  type: TYPE_PRE
+- en: Although the wiring together of transformations is somewhat involved, we managed
+    to build a simple event sourcing pipeline using only the Scala standard library
+    and our existing knowledge of Scala collections. This example demonstrated the
+    power of `foldLeft` to help build an event sourcing pipeline. Using this implementation,
+    we can write a fully-featured program that is able to write a pregenerated version
+    of the performance report to a persistent data store that can be read by the web
+    portal. This new design allows us to shift the burden of report generation outside
+    the web portal's responsibilities, allowing the web portal to provide a responsive
+    user experience. Another benefit of this new approach is how it puts a domain-oriented
+    language at the center of the design. All our events use business terms and focus
+    on modeling domain concepts, making it easier for developers and stakeholders
+    to communicate with each other.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'You might be wondering about a data structure that shares some characteristics
+    of `Stream` that we did not yet mention: `Iterator`. As the name implies, `Iterator`
+    provides facilities to iterate over a sequence of data. Its simplified definition
+    boils down to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE60]'
+  prefs: []
+  type: TYPE_PRE
+- en: Like `Stream`, an `Iterator` is able to avoid loading an entire dataset into
+    memory, which enables programs to be written with constant memory usage. Unlike `Stream`,
+    an `Iterator` is mutable and intended for only a single iteration over a collection
+    (it extends the `TraversableOnce` trait). It should be noted that, according to
+    the standard library documentation, one should never use an iterator after calling
+    a method on it. For example, calling `size` on an `Iterator` returns the size
+    of the sequence, but it also consumes the entire sequence and renders the instance
+    of `Iterator` useless. The only exceptions to this rule are `next` and `hasNext`.
+    These properties lead to software that is difficult to reason with, which is the
+    antithesis of what we strive for as functional programmers. For this reason, we
+    omit an in-depth discussion about `Iterator`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We encourage you to further explore event sourcing by reading the documentation
+    of the Event Store database at [http://docs.geteventstore.com/introduction/event-sourcing-basics/](http://docs.geteventstore.com/introduction/event-sourcing-basics/).
+    Event Store is a database that is developed around the concept of event sourcing.
+    Event Store was created by Greg Young, a notable writer on the topic of event
+    sourcing. While enriching your understanding about event sourcing, reflect on
+    when you believe it is appropriate to apply the event sourcing technique. For
+    CRUD applications that have simple behavior, event sourcing may not be a worthwhile
+    time investment. When you model more complex behaviors or consider scenarios involving
+    strict performance and scaling requirements, the time investment for event sourcing
+    may become justified. For example, like we saw with performance trend reporting,
+    considering the performance challenges from the event sourcing paradigm exposed
+    an entirely different way of approaching the design.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As you continue exploring the world of stream processing, you will discover
+    that you wish to construct more complex transformations than our event sourcing
+    pipeline example. To continue digging deeper into the the topic of stream processing,
+    we suggest researching two relevant libraries: `akka streams` and `functional
+    streams` (formerly, `scalaz-stream`). These libraries provide tools to build more
+    sophisticated transformation pipelines using different abstractions than `Stream`.
+    In combination with learning about Event Store, you will deepen your understanding
+    of how event sourcing ties in with stream processing.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Streaming Markov chains
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: With the simple program at the end of the previous section, we demonstrated
+    that we can wire together a pipeline of transformations operating on events. As
+    a well-intentioned engineer, you wish to develop automated tests that prove the
+    pipeline works as intended. One approach is to add a sample of historical production
+    data into the repository to build tests. This is often a good choice, but you
+    are concerned that the sample is not large enough to represent a broad number
+    of scenarios. Another option is to write a generator of events that can create
+    production-like data. This approach requires more up-front effort, but it yields
+    a more dynamic way to exercise the pipeline.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A recent lunchtime conversation with Dave about Markov chains sparked the thought
+    about testing the event sourcing pipeline with generated data. Dave described
+    how a Markov chain is a statistical model of state transitions that only relies
+    on the current state to determine the next state. Dave is representing the states
+    of the stock market as a Markov chain, allowing him to build trading strategies
+    based on whether or not he perceives the stock market to be in an upswing, downswing,
+    or steady state. After reading through the Markov chain Wikipedia page, you envision
+    writing an event generator based on a Markov chain.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our end goal is to be able to generate an infinite number of `OrderBookEvent`s that
+    follows production-like patterns. For example, we know from previous experience
+    that proportionally there are often more cancelations than executions, particularly
+    during volatile markets. The event generator should be able to represent different
+    probabilities of events occurring. As a Markov chain only depends on its current
+    state to identify its next state, a `Stream` is a natural fit because we only
+    need to inspect the current element to determine the next element. For our representation
+    of a Markov chain, we need to identify the chance of transitioning from the current
+    state to any of the other possible states. The following table illustrates one
+    possible set of probabilities:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| **Current state** | **Chance of buy** | **Chance of sell** | **Chance of
+    execution** | **Chance of cancel** |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `BuyOrderSubmitted` | 10% | 15% | 40% | 40% |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `SellOrderSubmitted` | 25% | 10% | 35% | 25% |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `OrderCanceled` | 60% | 50% | 40% | 10% |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `OrderExecuted` | 30% | 30% | 55% | 30% |'
+  prefs: []
+  type: TYPE_TB
+- en: This table defines the likelihood of receiving an `OrderBookEvent` given the
+    current `OrderBookEvent`. For example, given that a sell order was submitted,
+    there is a 10% chance of seeing a second sell order next and a 35% chance that
+    an execution occurs next. We can develop state transition probabilities according
+    to the market conditions that we wish to simulate in the pipeline.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can model the transitions using the following domain:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE61]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this domain, `Step` is an ADT that models the possible states. For a given `Step`,
+    we will associate `StepTransitionWeights` to define the probability of transitioning
+    to different states based on provided weightings. `GeneratedWeight` is a value
+    class that defines the weight generated for the current `Step`. We will use `GeneratedWeight`
+    to drive the transition from one `Step` to the next `Step`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our next step, so-to-speak, is to make use of our domain to generate events
+    according to probabilities that we define. To make use of `Step`, we define a
+    representation of the Markov chain state that is required, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE62]'
+  prefs: []
+  type: TYPE_PRE
+- en: The Markov chain requires knowledge of the current state, which is represented
+    by `step`. Additionally, we put a twist on the Markov chain by maintaining the
+    set of orders that are submitted that are neither canceled nor executed in `pendingOrders`.
+    This additional state is needed for two reasons. First, generating cancel and
+    execution events requires linking to a known order ID. Second, we constrain our
+    representation of a Markov chain by requiring at least one pending order to exist
+    before creating a cancel or an execution. If there are no pending orders, it is
+    invalid to transition to a state that generates either `OrderCanceled` or `OrderExecuted`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Using `State`, we can write a method with the following signature to manage
+    transitions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE63]'
+  prefs: []
+  type: TYPE_PRE
+- en: Given a way to generate a weight from the current `StepTransitionWeights`, a
+    mapping of `Step` to `StepTransitionWeights`, and the current `State`, we are
+    able to produce a new `State` and an `OrderBookEvent`. For brevity, we omit the
+    implementation of `nextState` because we want to focus most intently on stream
+    processing. From the signature, we have enough insight to apply the method, but
+    we encourage you to inspect the repository to fill in any blanks in your understanding.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `nextState` method is the driver of state transitions in our Markov chain
+    representation. We can now generate an infinite `Stream` of `OrderBookEvent`s based
+    on transition probabilities using the convenience `Stream` method, `iterate`.
+    From the Scala documentation, `iterate` produces an infinite stream by repeatedly
+    applying a function to the start value. Let''s see how we can use `iterate`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE64]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This snippet creates a Markov chain to generate various `OrderBookEvent`s by
+    providing a mapping of `Step` to `StepTransitionWeights` as the basis to invoke `State.nextState`.
+    `State.nextState` is partially applied, leaving the current state unapplied. The `next`
+    function has the `State => (State, OrderBookEvent)` signature. With the necessary
+    scaffolding in place, `Stream.iterate` is used to generate an infinite sequence
+    of multiple `OrderBookEvent`s by invoking `next`. Similar to `foldLeft`, we provide
+    an initial value to begin the `initialBuy` iteration, which is defined as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE65]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Running this snippet produces output that is similar to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE66]'
+  prefs: []
+  type: TYPE_PRE
+- en: Of course, each invocation differs depending upon the random values that are
+    created for `GeneratedWeight`, which is used to probabilistically select the next
+    transition. This snippet provides a base to compose larger-scale tests for the
+    reporting infrastructure. Through this example, we see an interesting application
+    of Markov chains to support generating representative events from various market
+    conditions without requiring access to volumes of production data. We are now
+    able to write tests to confirm whether or not the reporting infrastructure correctly
+    computes PnL trends in different market conditions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Stream caveats
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: For all their goodness, `Stream` should be used with caution. In this section,
+    we mention a few of the main caveats of `Stream`, and how to avoid them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Streams are memoizers
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: While views do not cache the result of a computation and, therefore, recalculate
+    and realize each element each time it is accessed, `Stream` does save the final
+    form of its elements. An element is only ever realized once, the first time it
+    is accessed. While this is a great characteristic to avoid computing the same
+    result several times, it can also lead to a large consumption of memory, to the
+    point where your program may eventually run out of memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To avoid `Stream` memoization, it is good practice to avoid storing a `Stream`
+    in a `val`. Using a `val` creates a permanent reference to the head of the `Stream`,
+    ensuring that every element that is realized will be cached. If a `Stream` is
+    defined as a `def`, it can be garbage collected as soon as it is no longer needed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Memoization can happen when calling certain methods that are defined on `Stream`.
+    For example, `drop` or `dropWhile` will evaluate and memoize all the intermediate
+    elements to be dropped. The elements are memoized as the methods are defined on
+    an instance of `Stream` (and `Stream` has a reference on its own head). We can
+    implement our own `drop` function to avoid caching the intermediate elements in
+    memory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE67]'
+  prefs: []
+  type: TYPE_PRE
+- en: We pattern match on the value of `count` to know whether we can return the given `Stream`
+    or need to perform a recursive call on the tail. Our method is tail-recursive.
+    This makes sure that we do not keep a reference to the head of the `Stream`, since
+    a tail-recursive function recycles its reference each time that it loops. Our `s`
+    reference will only point to the remaining part of the `Stream`, not the head.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Another example of a problematic method is `max`. Calling `max` will memoize
+    all the elements of the `Stream` to determine which one is the greatest. Let''s
+    implement a safe version of `max`, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE68]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This time, we used an internal tail recursive function to be able to expose
+    a friendly API. We represent the current max value as an `Option[Int]` to handle
+    the case where the method is called with an empty `Stream`. Note that `max` accepts `s`
+    as a by-name parameter. This is important because, otherwise, we would be keeping
+    a reference to the head of the `Stream` before calling the internal tail-recursive
+    `loop` method. Another possible implementation is as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE69]'
+  prefs: []
+  type: TYPE_PRE
+- en: This implementation is arguably simpler. We check in the `max` function whether
+    the `Stream` is empty or not; this allows us to either return right away (with `None`),
+    or call `loop` with a valid default value (the first element in the `Stream`).
+    The `loop` does not have to deal with `Option[Int]` anymore. However, this example
+    does not achieve the goal of avoiding memoization. The pattern matching will cause `rest`
+    to keep a reference on the entire tail of the original `Stream`, which will prevent
+    garbage collection of the intermediate elements. A good practice is to only pattern
+    match on a `Stream` inside a consuming, tail-recursive method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Stream can be infinite
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'We saw during our overview that it is possible to define an infinite `Stream`.
+    However, you need to be careful when working with an infinite `Stream`. Some methods
+    may cause the evaluation of the entire `Stream`, leading to `OutOfMemoryError`.
+    Some are obvious, such as `toList`, which will try to store the entire `Stream`
+    into a `List`, causing the realization of all the elements. Others are more subtle.
+    For example, `Stream` has a `size` method that is similar to the one defined on `List`.
+    Calling `size` on an infinite `Stream` will cause the program to run out of memory.
+    Similarly, `max` and `sum` will attempt to realize the entire sequence and crash
+    your system. This behavior is particularly dangerous as `Stream` extends `Seq`,
+    the base trait for sequences. Consider the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE70]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This short method takes a `Seq[Int]` as single parameter, and returns its range,
+    that is, the difference between the greatest and lowest elements. As `Stream`
+    extends `Seq` the following call is valid:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE71]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The compiler will happily and promptly generate the bytecode for this snippet.
+    However, `s` could be defined as an infinite `Stream`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE72]'
+  prefs: []
+  type: TYPE_PRE
+- en: The call to `range` never returns due to the implementation of `max` and `min`.
+    This example illustrates a good practice that we mentioned earlier in this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Throughout this chapter, we explored two lazily evaluated collections that
+    are provided by the standard Scala library: views and streams. We explored their
+    characteristics and implementation details, as well as the limitations to bear
+    in mind when using these abstractions. Leveraging your newly-acquired knowledge,
+    you addressed a critical performance problem affecting MVT clients trying to view
+    their performance trend.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the *Stream* sections, we took the opportunity to tie the concept of stream
+    processing to event sourcing. We briefly explored the event sourcing paradigm
+    and introduced a simple event-driven transformation pipeline to improve the architecture
+    of the reporting system and to define a stronger domain model. Lastly, we built
+    a Markov chain event generator to exercise our new approach to generating reports.
+  prefs: []
+  type: TYPE_NORMAL
+- en: By exploring both eager and lazy collections, you now possess a strong working
+    knowledge of the collections that are provided by the Scala standard library.
+    In the next chapter, we will continue our exploration of Scala concepts viewed
+    through the functional paradigm by diving into concurrency.
+  prefs: []
+  type: TYPE_NORMAL

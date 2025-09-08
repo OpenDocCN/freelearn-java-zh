@@ -1,0 +1,1732 @@
+- en: Chapter 10.  Reactors
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '|   | *"Simplicity is prerequisite for reliability."* |   |'
+  prefs: []
+  type: TYPE_TB
+- en: '|   | --*Edsger W. Dijkstra* |'
+  prefs: []
+  type: TYPE_TB
+- en: Location-transparency, serializable event-handling, and non-blocking semantics
+    of sends, make the actor model a powerful foundation for building distributed
+    systems. However, the actor model has several important limitations, which only
+    become apparent when building larger systems. First, actors cannot simultaneously
+    contain multiple message entry points. All messages must arrive through the same
+    `receive` block. Consequently, two different protocols cannot reuse the same message
+    type, and must be aware of each other. The main example where we saw this was
+    the `Identify` message, which required users to incorporate a unique token into
+    the message. Second, actors cannot await specific combinations of messages. For
+    example, it is cumbersome to simultaneously send a request message to two target
+    actors, and proceed after both replies arrive. Third, the `receive` statement
+    is not a first-class citizen. Event streams, which we saw in the Rx framework,
+    are first-class citizens, and this improves program composition, modularity, and
+    separation of concerns.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we study the reactor programming model for distributed computing,
+    which retains the advantages of the actor model, but overcomes the above limitations.
+    This framework allows creating complex concurrent and distributed applications
+    more easily, by providing correct, robust, and composable abstractions for distributed
+    programming. Similar to the actor model, the reactor model allows writing location-transparent
+    programs. Clear separation between units of concurrency is achieved through special
+    entities called reactors. This separation makes it easier to reason about concurrent
+    programs, as was the case with actors. However, computations and message exchange
+    patterns can be more easily subdivided into modular components in the reactor
+    model. The improved composition at the core of the reactor model is the result
+    of a careful integration of the traditional actor model and functional reactive
+    programming concepts.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We use the Reactors framework throughout this chapter to learn about the reactor
+    programming model. We will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Utilizing and composing event-streams to structure logic within a reactor
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Defining reactors and starting reactor instances
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Customizing reactor instances and using custom schedulers
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using reactor system services to access non-standard events, and defining custom
+    services
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The basics of protocol composition, along with several concrete protocol examples
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We start by recounting what we learned about concurrent and distributed programming,
+    and explaining why the reactor model is important.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The need for reactors
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'As you may have concluded by reading this book, writing concurrent and distributed
+    programs is not easy. Ensuring program correctness, scalability, and fault-tolerance
+    is harder than in a sequential program. Here, we recall some of the reasons for
+    this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: First of all, most concurrent and distributed computations are, by their nature,
+    non-deterministic. This non-determinism is not a consequence of poor programming
+    abstractions, but is inherent in systems that need to react to external events.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Data races are a basic characteristic of most shared-memory multicore systems.
+    Combined with inherent non-determinism, these lead to subtle bugs that are hard
+    to detect or reproduce.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: When it comes to distributed computing, things get even more complicated. Random
+    faults, network outages, or interruptions, present in distributed programming,
+    compromise correctness and robustness of distributed systems.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Furthermore, shared-memory programs do not work in distributed environments,
+    and existing shared-memory programs are not easily ported to a distributed setup.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: There is one more reason why concurrent and distributed programming is hard.
+    When building large systems, we would like to compose simpler program components
+    into larger entities. However, it is often hard to correctly compose concurrent
+    and distributed programs. Correctness of specific components is no guarantee for
+    global program correctness when those components are used together. Deadlocks
+    inherent to locks are one such example, and potential race conditions in actors
+    are another.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Frameworks that we have seen in this book strive to address the aforementioned
+    problems in concurrent and distributed programming. Different concurrency models
+    try to address these issues from different angles. The intent of the reactor model,
+    described in this chapter, is to borrow some of the best characteristics of existing
+    frameworks, such as location-transparency, serializability and data-race freedom,
+    and especially address the issue of composability.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To achieve these goals, the reactor model employs several minimalist abstractions,
+    which can compose into complex protocols, algorithms, and program components.
+    In particular, the model is based on the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Location-transparent **reactors**, lightweight entities that execute concurrently
+    with each other, but are internally always single-threaded, and can be ported
+    from a single machine to a distributed setting. Every reactor is created with
+    one main event stream. A reactor is a generalization of an actor from the traditional
+    actor model.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Asynchronous first-class **event streams** that can be reasoned about in a declarative,
+    functional manner, and are the basis for composing components. An event stream
+    is the reading end of a channel. Only the reactor that owns the channel can read
+    from the corresponding event stream. Event streams cannot be shared between different
+    reactors. To borrow the analogy from the actor model, an event stream is a counterpart
+    of the `receive` statement.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Channels** that can be shared between reactors, and are used to send events
+    asynchronously. A channel is the writing end of the corresponding event stream,
+    and any number of reactors can write to a channel. A channel is a close equivalent
+    of the actor reference that we saw in the actor model.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: These three unique abstractions are the core prerequisite for building powerful
+    distributed computing abstractions. Most other utilities in the Reactors framework,
+    which we study in this chapter, are built in terms of reactors, channels, and
+    event streams.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Getting started with Reactors
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This section contains instructions on how to get Reactors working in your project.
+    The Reactors framework has multiple languages frontend, and works on multiple
+    platforms. At the time of writing this book, Reactors can be used with Scala and
+    Java as a JVM library, or alternatively on NodeJS or inside the browser if you
+    are using the `Scala.js` frontend of Reactors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you are developing with SBT, the easiest way is to include Reactors into
+    your project as a library dependency. To get started with `Reactors.IO`, you should
+    grab the latest snapshot version distributed on **Maven**. If you are using SBT,
+    add the following to your project definition:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: At the time of writing this, the latest version is `0.8` for Scala `2.11`. After
+    a version of Reactors is released for Scala `2.12`, you might have to replace
+    the `0.8` version in the preceding code.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The "Hello World" program
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this section, we go through a simple, working Hello World program. We will
+    not go into too much, yet we will provide deeper information in the subsequent
+    sections. For now, we will just define a reactor that waits for one incoming event,
+    prints a message to the standard output once this event arrives, and then terminate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We start by importing the contents of the `io.reactors` package:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This allows us to use the facilities provided by the Reactors framework. In
+    the following snippet, we declare a simple reactor-based program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: The program above declares an anonymous reactor called `welcomeReactor`, which
+    waits for a name to arrive on its main event stream, prints that name, and then
+    seals its main channel, therefore terminating itself. The main program then creates
+    a new reactor system, uses the reactor template to start a new running instance
+    of the previously defined `welcomeReactor`, and sends an event `"Alan"` to it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'By analyzing the previous program, we conclude the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A reactor is defined using the `Reactor[T]` constructor, where `T` is the type
+    of the events that can be sent to the reactor on its main channel.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A reactor reacts to incoming events as specified in the callback function passed
+    to the `onEvent` method. We can call `onEvent`, for example, on the main event
+    stream of the reactor, which is obtained with the expression `main.events`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Calling `main.seal()` terminates the reactor.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A reactor with a specific definition is started with the `spawn` method, which
+    returns the reactor's main channel.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Events are sent to the reactor by calling the `!` operator on one of its channels.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The subsequent sections will explain each of these features in greater depth.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Event streams
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In this section, we study the basic data-type that drives most computations
+    in the Reactors framework: an event stream. Event streams represent special program
+    values that can occasionally produce events. Event streams are represented by
+    the `Event[T]` type.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Semantically, an event stream is very similar to the `Observable` type, which
+    we saw in [Chapter 6](ch06.html "Chapter 6. Concurrent Programming with Reactive
+    Extensions"), *Concurrent Programming with Reactive Extensions*. As we will see,
+    the main difference between `Observable` and `Events` is that an `Observable`
+    object can generally be used from different threads, and even emit events across
+    different threads when the `observeOn` method is used. An `Events` object, by
+    contrast, can only be used inside the reactor that owns that event stream.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Never share an event stream between two reactors. An event stream can only be
+    used by the reactor that owns the corresponding channel.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following, we show an example event stream called `myEvents`, which
+    produces events of type `String`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: For now, we assume that the method `createEventStreamOfStrings` is already defined,
+    and that it returns an event stream of type `Events[String]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To be useful, an event stream must allow the users to somehow manipulate the
+    events it produces. For this purpose, every event stream has a method called `onEvent`,
+    which takes a user callback function and invokes it every time an event arrives:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `onEvent` method is similar to what most callback-based frameworks expose:
+    a way to provide an executable snippet of code that is invoked later, once an
+    event becomes available. However, just like the `Observable` object in Reactive
+    Extensions, the receiver of the `onEvent` method, that is, the event stream, is
+    a first-class value. This subtle difference allows passing the event stream as
+    an argument to other methods, and consequently allows writing more general abstractions.
+    For example, we can implement a reusable `trace` method as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `onEvent` method returns a special `Subscription` object. Events are propagated
+    to the user-specified callback until the user decides to call the `unsubscribe`
+    method of that `Subscription` object. These `Subscription` objects have similar
+    semantics as those seen in the **Reactive Extensions** framework.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before we continue, we note that event streams are entirely a single-threaded
+    entity. The same event stream will never concurrently produce two events at the
+    same time, so the `onEvent` method will never be invoked by two different threads
+    at the same time on the same event stream. As we will see, this property simplifies
+    the programming model and makes event-based programs easier to reason about.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To understand this better, let''s study a concrete event stream called an emitter,
+    represented by the `Events.Emitter[T]` type. In the following, we instantiate
+    an emitter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: An emitter is simultaneously an event stream and an event source. We can imperatively
+    tell the emitter to produce an event by calling its `react` method. When we do
+    that, the emitter invokes the callbacks previously registered with the `onEvent`
+    method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: By running the above snippet, we convince ourselves that the `react` call really
+    forces the emitter to produce an event. Furthermore, the call `emitter.react(8)`
+    will always execute after `emitter.react(7)`, and the callback will be first invoked
+    with `7`, and then with `8`, but not concurrently. Event propagation will occur
+    on the same thread on which `react` was called.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Lifecycle of an event stream
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We now take a closer look at the events that an event stream can produce. An
+    event stream of type `Events[T]` usually emits events of type `T`. However, type `T`
+    is not the only type of events that an event stream can produce. Some event streams
+    are finite. After they emit all their events, they emit a special event that denotes
+    that there will be no further events. Sometimes, event streams run into exceptional
+    situations, and emit exceptions instead of normal events.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `onEvent` method that we saw earlier can only react to normal events. To
+    listen to other event kinds, event streams have the more general `onReaction`
+    method. The `onReaction` method takes an `Observer` object as an argument. An
+    `Observer` object has three different methods used to react to different event
+    types. In the following code snippet, we instantiate an emitter and listen to
+    all its events:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The type  `Observer[T]` has three methods:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `react` method, which is invoked when a normal event gets emitted. The second,
+    optional hint argument may contain an additional value, but is usually set to
+    `null`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `except` method, which is invoked when the event stream produces an exception.
+    An event stream can produce multiple exceptions. An exception, however, does not
+    terminate the stream, and many exceptions can be emitted by the same event stream.
+    This is one big difference with respect to the type `Observable` from Reactive
+    Extensions.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The `unreact` method, which is invoked when the event stream stops producing
+    events. After this method is invoked on the observer, no further events or exceptions
+    will be produced by the event stream.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Let''s assert that this contract is correct for `Events.Emitter`. We already
+    learned that we can produce events with emitters by calling the `react` method.
+    We can similarly call `except` to produce exceptions, or the `unreact` method
+    to signal that there will be no more events. For example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: If you run the preceding code snippet, you will see that, after calling the `unreact`
+    method, subsequent calls to the `react` or `except` methods have no effect, and
+    the `unreact` call effectively terminates the emitter. Not all event streams are
+    as imperative as emitters, however. Most other event streams are created by functionally
+    composing different event streams.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Functional composition of event streams
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Using event stream methods such as `onEvent` and `onReaction` can easily result
+    in a callback hell: a program composed of a large number of unstructured `onXYZ`
+    calls, which is hard to understand and maintain. Having first-class event streams
+    is a step in the right direction, but it is not sufficient.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Event streams support functional composition, seen in the earlier chapters.
+    This pattern allows declaratively forming complex values by composing simpler
+    ones. Consider the following example, in which we compute the sum of squares of
+    incoming events:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The example is fairly straightforward, but what if we want to make `squareSum`
+    an event stream so that another part of the program can react to its changes?
+    We would have to create another emitter and have our `onEvent` callback invoke
+    the `react` method on that new emitter, passing it the value of `squareSum`. This
+    could work, but it is not elegant, as shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: We now rewrite the previous snippet using event stream combinators. Concretely,
+    we use the `map` and `scanPast` combinators. The `map` combinator transforms events
+    in one event stream into events for a derived event stream. We use the `map` combinatory
+    to produce a square of each integer event. The `scanPast` combinator combines
+    the last and the current event to produce a new event for the derived event stream.
+    We use `scanPast` to add the previous value of the sum to the current one. For
+    example, if an input event stream produces numbers `0`, `1`, and `2`, the event
+    stream produced by `scanPast(0)(_ + _)` would produce numbers `0`, `1`, and `3`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here is how we can rewrite the previous example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The type `Events[T]` comes with a large number of predefined combinators. You
+    can find other combinators in the online API documentation. A set of event streams
+    composed using functional combinators forms a dataflow graph. Emitters are usually
+    source nodes in this graph, event streams created by various combinators are inner
+    nodes, and callback methods, such as `onEvent`, are sink nodes. Combinators such
+    as `union` take several input event streams. Such event streams correspond to
+    graph nodes with multiple input edges. Here is one example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: Dataflow graphs induced by event streams are similar in nature to dataflow graphs
+    induced by Scala futures and `Observable` objects from Reactive Extensions, so
+    we will not study them further in this chapter. The most important thing to remember
+    about event streams in the reactor model is that they are single-threaded entities.
+    As we will see in the next section, each event stream can only belong to a single
+    reactor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reactors
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: As we learned previously, event streams always propagate events on a single
+    thread. This is useful from the standpoint of program comprehension, but we still
+    need a way to express concurrency in our programs. In this section, we will see
+    how to achieve concurrency by using entities called reactors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A reactor is the basic unit of concurrency. While actors receive messages, we
+    will adopt the terminology in which reactors receive events, in order to disambiguate.
+    However, while an actor a in particular state has only a single point where it
+    can receive a message, namely, the `receive` statement, a reactor can receive
+    an event from many different sources at any time. Despite this flexibility, one
+    reactor will always process, at most, one event at any time. We say that events
+    received by a reactor are **serialized**, similar to how messages received by
+    an actor are serialized.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To be able to create new reactors, we need a `ReactorSystem` object, which
+    tracks reactors in a single machine:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Before we can start a reactor instance, we need to define its template. One
+    way to do this is to call `Reactor.apply[T]` method, which returns a `Proto` object
+    for the reactor. The `Proto` object is a reactor prototype, which can be used
+    to start the reactor. The following reactor prints all the events it receives
+    to the standard output:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: Let's examine this code more closely. The `Reactor.apply` method is called with
+    the type argument `String`. This means that the reactor encoded in the resulting
+    `Proto` object by default receives events whose type is `String`. This is the
+    first difference with respect to the standard actor model, in which actors can
+    receive messages of any type. Events received by reactors are well typed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the reactor model, every reactor can access a special event stream called
+    `main.events`, which emits events that the reactor receives from other reactors.
+    Since we are declaring an anonymous reactor with the `Reactor.apply` method, we
+    need to add a prefix `self` to access members of the reactor. We previously learned
+    that we can call `onEvent` to register callbacks to event streams, and we used
+    it in this example to print the events using `println`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After defining a reactor template, the next step is to spawn a new reactor.
+    We do this by calling the `spawn` method on the reactor system:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `spawn` method takes a `Proto` object as a parameter. The `Proto` object
+    can generally encode the reactor's constructor arguments, scheduler, name, and
+    other options. In our example, we created a `Proto` object for an anonymous reactor
+    with the `Reactor.apply` method, so we do not have access to any constructor arguments.
+    We will later see alternative ways of declaring reactors and configuring prototypes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `spawn` method does two things. First, it registers and starts a new reactor
+    instance. Second, it returns a `Channel` object, which is used to send events
+    to the newly created reactor. We show the relationship between a reactor, its
+    event stream, and the channel in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Reactors](img/image_10_001.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The only way for the outside world to access the inside of a reactor is to send
+    events to its channel. These events are eventually delivered to the corresponding
+    event stream, which the reactor can listen to. The channel and event stream can
+    only pass events whose type corresponds to the type of the reactor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s send an event to our reactor. We do this by calling the bang operator
+    `!` on the channel:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running the last statement should print the string `"Hola!"` to the standard
+    output.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Defining and configuring reactors
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In earlier sections, we saw how to define a reactor using the `Reactor.apply`
+    method. In this section, we take a look at an alternative way of defining a reactor--by
+    extending the `Reactor` base class. Recall that the `Reactor.apply` method defines
+    an anonymous reactor template. Extending the `Reactor` class declares a named
+    reactor template.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following, we declare the `HelloReactor` class, which must be top-level:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To run this reactor, we first create a prototype to configure it. The method
+    `Proto.apply` takes the type of the reactor and returns a prototype for that reactor
+    type. We then call the `spawn` method with that `Proto` object to start the reactor:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can also use the prototype to, for example, set the scheduler that the reactor
+    instance should use. If we want the reactor instance to run on its own dedicated
+    thread to give it more priority, we can do the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that if you are running Reactors on `Scala.js`, you will need to use a
+    `Scala.js` specific scheduler. The reason for this is because the JavaScript runtime,
+    which `Scala.js` compiles to, is not multi-threaded. Asynchronous executions are
+    placed on a single queue, and executed one after another. On `Scala.js`, you will
+    need to use the `JsScheduler.Key.default` scheduler.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are several other configuration options for `Proto` objects, and you
+    can find out more about them in the online API documentation. We can summarize
+    this section as follows. Starting a reactor is generally a three-step process:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: A named reactor template is created by extending the `Reactor` class.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: A reactor configuration object is created with the `Proto.apply` method.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: A reactor instance is started with the `spawn` method of the reactor system.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: For convenience, we can fuse the first two steps by using the `Reactor.apply`
+    method, which creates an anonymous reactor template and directly returns a prototype
+    object of type `Proto[I]`, for some reactor type `I`. Typically, this is what
+    we do in the tests, or when trying things out in the Scala REPL.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using channels
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Now that we understand how to create and configure reactors in different ways,
+    we can take a closer look at channels, which are the reactor's means of communicating
+    with its environment. As noted before, every reactor is created with a default
+    channel called `main`, which is often sufficient. But sometimes a reactor needs
+    to be able to receive more than just one type of an event, and needs additional
+    channels for this purpose.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s declare a reactor that stores key-value pairs. The reactor must react
+    to requests for storing key-value pairs, and for retrieving a value under a specific
+    key. Since the reactor''s input channel will have to serve two purposes, we need
+    the following data type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `Op` datatype has two type parameters called `K` and `V`, which denote the
+    types of keys and values being stored. The `Put` case class is used to store a
+    value into the reactor, so it contains the new key and value. The `Get` case class
+    is used to retrieve the value that was previously stored with some key, so it
+    encodes the key and the channel of type `V`. When the reactor receives the `Get`
+    event, it must look up the value associated with the key, and send the value along
+    the channel.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With the `Op[K, V]` data type, we can define `MapReactor`, shown in the following
+    snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s start `MapReactor` and test it. We will use the `MapReactor` to store
+    some DNS aliases. We will map each alias `String` key to a URL, where the URLs
+    are represented with the `List[String]` type. We first initialize as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We then send a couple of `Put` messages to store some alias values:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Next, we create a client reactor that we control by sending it `String` events.
+    This means that the reactor''s type will be `Reactor[String]`. However, the client
+    reactor will also have to contact the `MapReactor` and ask it for one of the URLs.
+    Since the `MapReactor` can only send it back `List[String]` events that do not
+    correspond to the client''s default channel type, the client''s default channel
+    is not be able to receive the reply. Therefore, the client will have to provide
+    the `MapReactor` with a different channel. The following expression is used to
+    create a new channel:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: The expression `system.channels` returns a channel builder object, which provides
+    methods such as `named` or `daemon`, used to customize the channel (see the online
+    API docs for more details). In this example, we will create **daemon channel**,
+    to indicate that the channel does not need to be closed (more on that a bit later).
+    To create a new channel, we call the `open` method on the channel builder with
+    the appropriate type parameter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The resulting `Connector` object contains two members: the `channel` field,
+    which is the newly created channel, and the `events` field, which is the event
+    stream corresponding to that channel. The event stream propagates all events that
+    were sent and delivered on the channel, and can only be used by the reactor that
+    created it. The channel, on the other hand, can be shared with other reactors.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the `open` operation on the `system.channels` object to create new connectors.
+    Each connector holds a pair of a channel and its event stream.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s define a client reactor that waits for a `"start"` message, and then
+    checks a DNS entry. This reactor will use the `onMatch` handler instead of `onEvent`,
+    to listen only to certain `String` events and ignore others:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code snippet, when the reactor receives the `"start"` event
+    from the main program, it opens a new `reply` channel that accepts `List[String]`
+    events. It then sends a `Get` event to the `MapReactor` with the `"dns-main"`
+    key and the `reply` channel. Finally, the reactor listens to events sent back
+    along the `reply` channel, and prints the URL to the standard output. In the `"end"`
+    case of the main pattern match, the reactor calls the `seal` method on the main
+    channel to indicate that it will not receive any further events on that channel.
+    Once all non-daemon channels become sealed, the reactor terminates.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: A reactor terminates either when all its non-daemon channels are sealed, or
+    when its constructor or some event handler throws an exception.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s start the client reactor and see what happens:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: At this point, we should witness the URL on the standard output. Finally, we
+    can send the `"end"` message to the client reactor to stop it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the next section, we will see how to customize reactors with custom scheduling
+    policies.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Schedulers
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Each reactor template can be used to start multiple reactor instances, and each
+    reactor instance can be started with a different reactor scheduler. Different
+    schedulers have different characteristics in terms of execution priority, frequency,
+    latency, and throughput. In this section, we take a look at how to use a non-default
+    scheduler, and how to define custom schedulers when necessary.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We start by defining a reactor that logs incoming events, reports every time
+    it gets scheduled, and ends after being scheduled three times. We will use the
+    `sysEvents` stream of the reactor, which will be explained in the next section.
+    For now, all you need to know is that the system event stream produces events
+    when the reactor gets some execution time (that is, gets scheduled), and pauses
+    its execution (that is, gets pre-empted).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `Logger` reactor is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Before starting an instance of the `Logger` reactor, we need to create a reactor
+    system, as we learned in the earlier sections:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Every reactor system is bundled with a default scheduler and some additional
+    predefined schedulers. When a reactor is started, it uses the default scheduler,
+    unless specified otherwise. In the following, we override the default scheduler
+    with the one using Scala''s global execution context, that is, Scala''s own default
+    thread pool:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Running the snippet above should start the `Logger` reactor and print the `"scheduled"`
+    string once, because starting a reactor schedules it even before any events arrive.
+    If we now send an event to the main channel, we will see the `"scheduled"` string
+    printed again, followed by the event itself. We do this as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Sending the event again decrements the reactor''s counter. The main channel
+    gets sealed, leaving the reactor in a state without non-daemon channels, and the
+    reactor terminates:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Reactor systems also allow registering custom scheduler instances. In the following,
+    we create and register a custom `Timer` scheduler, which schedules the `Logger`
+    reactor for execution once every 1,000 milliseconds:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: By running the code above, we can see that the reactor gets scheduled even if
+    no events were sent to it. The `Timer` scheduler ensures that the reactor gets
+    scheduled exactly once every N seconds, and then processes some of its pending
+    events.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reactor lifecycle
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Every reactor goes through a certain set of stages during its lifetime, which
+    are jointly called a **reactor lifecycle**. When the reactor enters a specific
+    stage, it emits a lifecycle event. These lifecycle events are dispatched on a
+    special daemon event stream called `sysEvents`. Every reactor is created with
+    this special event stream.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The reactor lifecycle can be summarized as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: After calling the `spawn` method, the reactor is scheduled for execution. Its
+    constructor is started asynchronously, and immediately after that, a `ReactorStarted`
+    event is dispatched.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Then, whenever the reactor gets execution time, the `ReactorScheduled` event
+    gets dispatched. After that, events get dispatched on normal event streams.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: When the scheduling system decides to pre-empt the reactor, the `ReactorPreempted`
+    event is dispatched. This scheduling cycle can be repeated any number of times.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Eventually, the reactor terminates, either by normal execution or exceptionally.
+    If a user code exception terminates execution, a `ReactorDied` event is dispatched.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In either normal or exceptional execution, a `ReactorTerminated` event gets
+    emitted.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'This reactor lifecycle is shown in the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Reactor lifecycle](img/image_10_002.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'To test this, we define the following reactor:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: Upon creating the lifecycle reactor, the reactor gets the `ReactorStarted` event,
+    and then the `ReactorStarted` and `ReactorScheduled` events. The reactor then
+    gets suspended, and remains that way until the scheduler gives it more execution
+    time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: The scheduler executes the reactor again when it detects that there are pending
+    messages for that reactor. If we send an event to the reactor now, we will see
+    the same cycle of `ReactorScheduled` and `ReactorPreempted` events from the standard
+    output. However, the `ReactorPreempted` handler this time throws an exception.
+    The exception gets caught, and a `ReactorDied` event is emitted, followed by the
+    mandatory `ReactorTerminated` event.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: At this point, the reactor is fully removed from the reactor system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reactor system services
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the earlier sections, we learned that reactors delimit concurrent executions,
+    and that event streams allow routing events within each reactor. This is already
+    a powerful set of abstractions, and we can use reactors and event streams to write
+    all kinds of distributed programs. However, such a model is restricted to reactor
+    computations only. We cannot, for example, start blocking I/O operations, read
+    from a temperature sensor implemented in hardware, wait until a GPU computation
+    completes, or react to temporal events. In some cases, we need to interact with
+    the native capabilities of the OS, or tap into a rich ecosystem of existing libraries.
+    For this purpose, every reactor system has a set of **services**: protocols that
+    relate event streams to the outside world.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this section, we will take a closer look at various services that are available
+    by default, and also show how to implement custom services and plug them into
+    reactor systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The logging service
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'We start with the simplest possible service called `Log`. This service is used
+    to print logging messages to the standard output. In the following, we create
+    an anonymous reactor that uses the `Log` service. We start by importing the `Log`
+    service:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: Next, we create a reactor system, and start a reactor instance. The reactor
+    invokes the `service` method on the reactor system, which returns the service
+    singleton with the specified type. The reactor then calls the `apply` method on
+    the `log` object to print a message, and seals itself.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Running the above snippet prints the timestamped message to the standard output.
+    This example is very simple, but we use it to describe some important properties
+    of services:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reactor system's method `service[S]` returns a service of type `S`.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The service obtained this way is a lazily initialized singleton instance. There
+    exists at most one instance of the service per reactor system, and it is created
+    only after being requested by some reactor.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some standard services are eagerly initialized when the reactor system gets
+    created. Such services are usually available as a standalone method on the `ReactorSystem`
+    class. For example, `system.log` is an alternative way to obtain the `Log` service.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The clock service
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Having seen a trivial service example, let's take a look at a more involved
+    service that connects reactors with the outside world of events, namely, the `Clock`
+    service. The `Clock` service is capable of producing time-driven events, for example,
+    timeouts, countdowns, or periodic counting. This service is standard, so it is
+    available by calling either `system.clock` or `system.service[Clock]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following, we create an anonymous reactor that uses the `Clock` service
+    to create a timeout event after one second. The `timeout` method of the clock
+    service returns an event stream of the `Unit` type that always produces at most
+    one event. We install a callback to the `timeout` event stream, which seals the
+    main channel of this reactor. This is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `Clock` service uses a separate timer thread under-the-hood, which sends
+    events to the reactor when the timer thread decides it is time to do so. The events
+    are sent on a special channel created by the `timeout` method, so they are seen
+    only on the corresponding event stream combinator. This is summarized in the following
+    figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![The clock service](img/image_10_003.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: When the main channel gets sealed, the reactor terminates. This is because the
+    `timeout` event stream creates a daemon channel under-the-hood, which does not
+    prevent our anonymous reactor from terminating after non-daemon channels are gone.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The `Clock` service shows a general pattern: when a native entity or an external
+    event needs to communicate with a reactor, it creates a new channel, and then
+    asynchronously sends events to it.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The channels service
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Some services provide event streams that work with reactor system internals.
+    The `Channels` service is one such example--it provides an event-driven view over
+    all channels that exist in the current reactor system. This allows polling the
+    channels that are currently available, or waiting until a channel with a specific
+    name becomes available. Awaiting a channel is particularly useful, as it allows
+    easier handling of asynchrony between reactors, which is inherent to distributed
+    systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As a side-note, we actually saw and used the `Channels` service earlier, when
+    we opened a second channel in a reactor. The expression `system.channels.open`
+    actually calls the `open` method on the standard channel service. The channels
+    service thus not only allows querying channels that exist in the reactor system,
+    but also creating new channels within existing reactors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To show basic usage of the `Channels` service, we construct two reactors. The
+    first reactor will create a channel named `"hidden"` after some delay, and the
+    second reactor will wait for that channel. When the channel appears, the second
+    reactor will send an event to that channel. The first reactor prints the string
+    `"event received"` after it receives the message, sealing its main channel. This
+    is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding program, we use the `Clock` service seen earlier to introduce
+    a delay in the first reactor. In the second reactor, we use the `Channels` service
+    to wait for the channel named `"hidden"` of the reactor named `"first"`. Both
+    reactors start at approximately the same time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After one second, the first reactor uses the `Channels` service to open a new
+    daemon channel named `"hidden"`. The first reactor then installs a callback: when
+    the first event arrives on the hidden channel, it prints a message to the standard
+    output, and the main channel is sealed, to ensure that the reactor terminates.
+    The second reactor gets an event from the `Channels` service, since a channel
+    with the desired name now exists. This reactor sends a value `7` to the hidden
+    channel, and terminates.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: To conclude, waiting for channels to appear is important when establishing temporal
+    order in an asynchronous system. In general, the creation of the hidden channel
+    in the first reactor could have been delayed by an arbitrary amount by the reactor
+    system, and the `Channels` service allows the computation to proceed only after
+    specific channels in other reactors get created.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Custom services
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Having seen a few existing services, we now show how to create a custom service.
+    To do this, we must implement the `Protocol.Service` trait, which has a single
+    member method called `shutdown`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `shutdown` method is called when the corresponding reactor system gets shut
+    down, and is used to free any resources that the service potentially has. Any
+    custom service must additionally have a single parameter constructor that takes
+    a `ReactorSystem` object, which allows the service to interact with and use the
+    reactor system during its existence.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As noted earlier, a service is a mechanism that gives access to events that
+    a reactor normally cannot obtain from other reactors. Let's implement a service
+    that notifies a reactor when the enclosing reactor system gets shut down. For
+    this, we will need to keep a map of the channels that subscribed to the shutdown
+    event and a lock to protect access to that state. Finally, we will expose a method
+    `state`, which creates an event stream that emits an event when the reactor system
+    is shut down.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `state` method will return a special kind of event stream called a `Signal`.
+    The `Signal` type extends the `Events` type, and a signal object emits events
+    whenever its value changes. Additionally, a `Signal` caches the value of the previously
+    emitted event, which can be accessed with the signal's `apply` method. Any event
+    stream can be converted into a signal by calling the `toSignal` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `state` method, called by a specific reactor, must create a new daemon channel
+    called `shut`. This channel is added to the `subscribers` set of the shutdown
+    service. The event stream associated with this channel is converted into a signal
+    with the initial value `false`, and returned to the caller.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The implementation of the `Shutdown` service is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can now use the `Shutdown` service in user programs. This is shown in the
+    following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Later, when we shut down the system, we expect that the code in the callback
+    runs and completes the promise:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Note that, when implementing a custom service, we are no longer in the same
+    ballpark as when writing normal reactor code. A service may be invoked by multiple
+    reactors concurrently, and this is why we had to synchronize access to the subscribers
+    map in the `Shutdown` implementation. In general, when implementing a custom service,
+    we have to take care to:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Never block or acquire a lock in the service constructor
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Ensure that access to shared state of the service is properly synchronized
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In conclusion, you should use custom services when you have a native event-driven
+    API that must deliver events to reactors in your program, or wish to expose access
+    to internals of the reactor system, the OS or the underlying hardware. Often the
+    implementation of a reactor system service will employ some lower-level concurrency
+    primitives, but will expose a high-level API that relies on event streams and
+    channels.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Protocols
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Reactors, event streams, and channels form the cornerstone of the reactor programming
+    model. These basic primitives allow composing powerful communication abstractions.
+    In this section, we go through some of the basic communication protocols that
+    the Reactors framework implements in terms of its basic primitives. What these
+    protocols have in common is that they are not artificial extensions of the basic
+    model. Rather, they are composed from basic abstractions and other simpler protocols.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We start with one of the simplest protocols, namely the **server-client** protocol.
+    First, we show how to implement a simple server-client protocol ourselves. After
+    that, we show how to use the standard server-client implementation provided by
+    the Reactors framework. In the later sections on protocols, we will not dive into
+    the implementation, but instead immediately show how to use the protocol predefined
+    in the framework.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This approach will serve several purposes. First, you should get an idea of
+    how to implement a communication pattern using event streams and channels. Second,
+    you will see that there is more than one way to implement a protocol and expose
+    it to clients. Finally, you will see how protocols are structured and exposed
+    in the Reactors framework.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Custom server-client protocol
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In this subsection, we implement the server-client protocol ourselves. Before
+    we start, we have to create a default reactor system:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Let''s now consider the server-client protocol more closely. This protocol
+    proceeds as follows: first, the client sends a request value to the server. Then,
+    the server uses the request to compute a response value and send it to the client.
+    But to do that, the server needs a response channel, which serves as the destination
+    to send the response value to. This means that the client must not only send the
+    request value to the server, but also send a channel used for the reply. The request
+    sent by the client is thus a tuple with a value and the reply channel. The server
+    channel used by the server must accept such tuples. We capture these relationships
+    with the following two types:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Here, `T` is the type of the request value, and `S` is the type of the response
+    value. The `Req` type represents the request: a tuple of the request value `T`
+    and the reply channel for responses of type `S`. The `Server` type is then just
+    a channel that accepts request objects.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Next, we ask ourselves--how do we create a `Server` channel? There are several
+    requirements that a factory method for the `Server` channel should satisfy. First,
+    the server method should be generic in the request and the response type. Second,
+    it should be generic in how the request type is mapped to the response type. Third,
+    when a request is sent to the server, the mapped response should be sent back
+    to the server. Putting these requirements together, we arrive at the following
+    implementation of the `server` method, which instantiates a new server:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `server` method starts by creating a connector for `Req[T, S]` type. It
+    then adds a callback to the event stream of the newly created connector. The callback
+    decomposes the request tuple into the request value `x` of type `T` and the `reply`
+    channel, then maps the input value using the specified mapping function `f`, and
+    finally sends the mapped value of type `S` back along the `reply` channel. The
+    `server` method returns the channel associated with this connector. We can use
+    this method to start a server that maps request strings to uppercase strings,
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Next, we will implement the client protocol. We will define a new method called
+    `?` on the `Channel` type, which sends the request to the server. This method
+    cannot immediately return the server''s response, because the response arrives
+    asynchronously. Instead, method `?` must return an event stream with the server''s
+    reply. So, the `?` method must create a reply channel, send the `Req` object to
+    the server, and then return the event stream associated with the reply channel.
+    This is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE50]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the code above, we defined an extension method `?` for objects of the `Server`
+    type by declaring an implicit class `ServerOps`. The `Arrayable` context bound
+    on type `S` is required in the Reactors framework to enable the creation of arrays.
+    The Reactors framework requires the `Arrayable` type class whenever we want to
+    open a channel of a generic type, which is in this case the type `S`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We now show the interaction between the server and the client by instantiating
+    the two protocols within the same reactor. The server just returns an uppercase
+    version of the input string, while the client sends the request with the content
+    `"hello"`, and prints the response to the standard output. This is shown in the
+    following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE51]'
+  prefs: []
+  type: TYPE_PRE
+- en: Our implementation works, but it is not very useful to start the server-client
+    protocol inside a single reactor. Normally, the server and the client are separated
+    by the network, or are at least different reactors running inside the same reactor
+    system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It turns out that, with our toy implementation of the server-client protocol,
+    it is not straightforward to instantiate the protocol in two different reactors.
+    The main reason for this is that once the server channel is instantiated within
+    one reactor, we have no way of *seeing* it in another reactor. The server channel
+    is hidden inside the lexical scope of the server reactor. We will see how to easily
+    overcome this problem with the standard server-client implementation that the
+    Reactors framework provides.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Standard server-client protocol
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: We have just seen an example implementation of the server-client protocol, which
+    relies only on the basic primitives provided by the Reactors framework. However,
+    the implementation that was presented is very simplistic, and it ignores several
+    important concerns. For example, how do we stop the server protocol? Also, we
+    instantiated the server-client protocol in a single reactor, but is it possible
+    to instantiate server-client in two different reactors?
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this section, we take a closer look at how the server-client protocol is
+    exposed in the Reactors framework, and explain how some of the above concerns
+    are addressed. Most predefined protocols can be instantiated in several ways:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: By installing the protocol on the existing connector inside an existing reactor,
+    which has an appropriate type for that protocol. The main benefit of this is that
+    you can install the protocol on, for example, the main channel of a reactor. This
+    also makes the protocol accessible to other reactors that are aware of that respective
+    channel.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: By creating a new connector for the protocol, and then installing the protocol
+    to that connector. The main benefit of this is that you can fully customize the
+    protocol's connector (for example, name it), but you will need to find some way
+    of sharing the protocol's channel with other reactors, for example, by using it
+    on the `Channels` service, or by sending the channel to specific reactors.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: By creating a new `Proto` object for a reactor that exclusively runs a specific
+    protocol. The main benefit of this is being able to fully configure the reactor
+    that you wish to start (for example, specify a scheduler, reactor name, or transport).
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: By immediately spawning a reactor that runs a specific protocol. This is the
+    most concise option.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: These approaches are mostly equivalent, but they represent different trade-offs
+    between convenience and customization. Let's take a look at the predefined server-client
+    protocol to study these approaches in turn.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using an existing connector
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'When using an existing connector, we need to ensure that the connector''s type
+    matches the type needed by the protocol. In the case of a server, the connector''s
+    event type must be `Server.Req`. In the following, we define a server prototype
+    that multiplies the request integer by `2` to compute a response. To install the
+    server-client protocol, we call the `serve` method on the connector:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE52]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The client can then query the `server` channel using the `?` operator. For
+    convenience, we use the `spawnLocal` method, which simultaneously defines an anonymous
+    reactor template and uses it to spawn a new client reactor. This is shown in the
+    following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE53]'
+  prefs: []
+  type: TYPE_PRE
+- en: Creating a new connector
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Let's say that the main channel is already used for something else. For example,
+    the main channel could be accepting termination requests. Consequently, the main
+    channel cannot be shared with the server protocol, as protocols usually need exclusive
+    ownership of the respective channel. In such cases, we want to create a new connector
+    for the protocol.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This approach is very similar to using an existing connector. The only difference
+    is that we must first create the connector itself, giving us an opportunity to
+    customize it. In particular, we will make the server a `daemon` channel, and we
+    will assign it a specific name `"server"`, so that other reactors can find it.
+    We will name the reactor itself `"Multiplier"`. To create a server connector,
+    we use the convenience method called `server` on the channel builder object, to
+    get a new connector of the appropriate type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can then call the `serve` method on the connector to start the protocol.
+    This is shown in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE54]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The client must now query the name service to find the server channel, and
+    from there on it proceeds as before, as shown in the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE55]'
+  prefs: []
+  type: TYPE_PRE
+- en: Creating a protocol-specific reactor prototype
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'When we are sure that the reactor will exist only, or mainly, for the purposes
+    of the server protocol, we can directly create a reactor server. To do this, we
+    use the `server` method on the `Reactor` companion object. The `server` method
+    returns the `Proto` object for the server, which can then be further customized
+    before spawning the reactor. The `server` method takes a user function that is
+    invoked each time a request arrives. This user function takes the state of the
+    server and the request event, and returns the response event. This is shown in
+    the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE56]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `state` object for the server contains a `Subscription` object, which allows
+    the users to stop the server if, for example, an unexpected event arrives.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Spawning a protocol-specific reactor directly
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Finally, we can immediately start a server reactor, without any customization.
+    This is done by passing a server function to the `server` method on the `ReactorSystem`,
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE57]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the subsequent sections, we will take a look at some other predefined protocols,
+    which have similar API as the server-client protocol.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Router protocol
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In this section, we take a look at a simple router protocol. Here, events coming
+    to a specific channel are routed between a set of target channels, according to
+    some user-specified policy. In practice, there are a number of applications of
+    this protocol, ranging from data replication and sharding, to load-balancing and
+    multicasting. The protocol is illustrated in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Router protocol](img/image_10_004.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: To show the router protocol in action, we will instantiate a master reactor
+    that will route the incoming requests between two workers. In a real system, requests
+    typically represent workloads, and workers execute computations based on those
+    requests. For simplicity, requests will be just strings, and the workers will
+    just print those strings to the standard output.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As was the case with the server-client protocol, there are several ways to instantiate
+    the router protocol. First, the protocol can be started within an existing reactor,
+    in which case it is just one of the protocols running inside that reactor. Alternatively,
+    the protocol can be started as a standalone reactor, in which case that reactor
+    is dedicated to the router protocol. In our example, we create an instance of
+    the router protocol in an existing reactor.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We first start two workers, called `worker1` and `worker2`. These two reactors
+    will print incoming events to the standard output. We use a shorthand method `spawnLocal`,
+    to concisely start the reactors without creating the `Proto` object:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE58]'
+  prefs: []
+  type: TYPE_PRE
+- en: Next, we declare a reactor whose main channel takes `Unit` events, since we
+    will not be using the main channel for anything special. Inside that reactor,
+    we first call the `router` method on the `channels` service to open a connector
+    with the appropriate type for the router. By just calling the `router` method,
+    the router protocol does not yet start. We need to call the `route` method on
+    the newly created connector to actually start routing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `route` method expects a `Router.Policy` object as an argument. The policy
+    object contains a function that returns a channel for an event that we want to
+    route. This function of type `T => Channel[T]` represents the routing logic for
+    the router protocol.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In our example, we will use the simple round-robin policy. This policy can
+    be instantiated with the `Router.roundRobin` factory method, which expects a list
+    of channels for the round-robin policy, so we will pass a list with `worker1`
+    and `worker2` channels. We show this in the following snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE59]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After starting the router protocol and sending the events `"one"` and `"two"`
+    to the router channel, the two strings are delivered to the two different workers.
+    The `roundRobin` policy does not specify which of the target channels is chosen
+    first, so the output can either contain `"1: one"` and `"2: two"`, or `"1: two"`
+    and `"2: one"`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The round-robin routing policy does not have any knowledge about the two target
+    channels, so it just picks one after another in succession, and then the first
+    one again when it reaches the end of the target list. Effectively, this policy
+    constitutes a very simple form of load-balancing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are other predefined policies that can be used with the router protocol.
+    For example, the `Router.random` policy uses a random number generator to route
+    events to different channels, which is more robust in scenarios when a high-load
+    event gets sent periodically. Another policy is `Router.hash`, which computes
+    the hash code of the event, and uses it to find the target channel. If either
+    of these are not satisfactory, `deficitRoundRobin` strategy tracks the expected
+    cost of each event, and biases its routing decisions to balance the total cost
+    sent to each target. Users can also create custom routing policies for other use-cases.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Two-way protocol
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In this section, we show a two-way communication protocol. In two-way communication,
+    two parties obtain a connection handle of type `TwoWay`, which allows them to
+    simultaneously send and receive an unlimited number of events until they decide
+    to close this connection. One party initiates the connection, so we call that
+    party the client, and the other party the server. The `TwoWay` type has two type
+    parameters `I` and `O`, which describe the types of input and output events, respectively,
+    from the client''s point of view. This is illustrated in the following figure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Two-way protocol](img/image_10_005.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Note that these types are reversed depending on whether you are looking at
+    the connection from the server-side or from the client-side. The type of the client-side
+    two-way connection is:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE60]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Whereas the type of the server sees the two-way connection as:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE61]'
+  prefs: []
+  type: TYPE_PRE
+- en: Accordingly, the `TwoWay` object contains an output channel `output`, and an
+    input event stream `input`. To close the connection, the `TwoWay` object contains
+    a subscription object called `subscription`, which is used to close the connection
+    and free the associated resources.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Let's create an instance of the two-way protocol. This protocol works in two
+    phases. First, a client asks a two-way connection server to establish a two-way
+    connection. After that, the client and the server use the two-way channel to communicate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In what follows, we declare a reactor, and instantiate a two-way connection
+    server within that reactor. For each established two-way connection, the two-way
+    server will receive strings, and send back the length of those strings.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE62]'
+  prefs: []
+  type: TYPE_PRE
+- en: The two lines above declare a reactor `Proto` object, which instantiates a two-way
+    server called `lengthServer`. We first called the `twoWayServer` method on the
+    `Channels` service, and specified the input and the output type (from the point
+    of view of the client). Then, we called the `serverTwoWay` method to start the
+    protocol. In our case, we set the input type `I` to `Int`, meaning that the client
+    will receive integers from the server, and the output type `O` to `String`, meaning
+    that the client will be sending strings to the server.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The resulting object `lengthServer` represents the state of the connection.
+    It contains an event stream called `connections`, which emits an event every time
+    a client requests a connection. If we do nothing with this event stream, the server
+    will remain silent - it will start new connections, but ignore events coming from
+    the clients. How exactly the client and server communicate over the two-way connection
+    (and when to terminate this connection) is up to the user to specify. To customize
+    the two-way communication protocol with our own logic, we need to react to the
+    `TwoWay` events emitted by the `connections` event stream, and install callbacks
+    to the `TwoWay` objects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In our case, for each incoming two-way connection, we want to react to `input`
+    strings by computing the length of the string, and then sending that length back
+    along the `output` channel. We can do this as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE63]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We now have a working instance of the two-way connection server. The current
+    state of the reactor can be illustrated with the following figure, where our new
+    channel appears alongside standard reactor channels:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Two-way protocol](img/image_10_006.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Next, let's start the client-side part of the protocol. The client must use
+    the two-way server channel to request a connection. The `lengthServer` object
+    that we saw earlier has a field called `channel` that must be used for this purpose.
+    The client must know about this channel to start the connection. Note that only
+    the `channel` must be shared, not the complete `lengthServer` object. To make
+    things simple, we will instantiate the client-side part of the protocol inside
+    the same reactor as the server-side part.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To connect to the server, the client must invoke the `connectTwoWay` extension
+    method on the `channel`. This method is only available when the package `io.reactors.protocol`
+    is imported, and works on two-way server channels. The `connect` method returns
+    an event stream that emits a `TwoWay` object once the connection gets established.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following, we connect to the server. Once the server responds, we use
+    the `TwoWay[Int, String]` object to send a string event, and then print the length
+    event that we get back:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE64]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After the connection is established, the state of the reactor and its connectors
+    is as shown in the following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Two-way protocol](img/image_10_007.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Note that, in this case, the two-way channel has both endpoints in the same
+    reactor. This is because we called `twoWayServe` and `connect` in the same reactor,
+    for the purposes of demonstration. In real scenarios, we would typically invoke
+    these two operations on separate reactors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we learned about the reactor model, and its implementation
+    in the Reactors framework. We saw how to define and instantiate reactors, compose
+    event streams, customize reactor names and assign schedulers, use reactor system
+    services, and define custom ones. Importantly, we saw how to use a few basic low-level
+    protocols such as the server-client, router, and the two-way connection protocol.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To learn more about reactors, you can find a lot of information on the website
+    of the Reactors framework, at [http://reactors.io](http://reactors.io/). The Reactors
+    framework is relatively new, but it is under constant development. As the framework
+    matures and gains more features, you will find more and more information on the
+    website. To learn more about the reactor programming model itself, the paper *Reactors,
+    Channels, and Event Streams for Composable Distributed Programming* is worth taking
+    a look at.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exercises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the following exercises, you are expected to define several reactor protocols.
+    In some cases, the task is to first investigate a specific algorithm online on
+    your own, and then implement it using the Reactors framework. The exercises are
+    ordered by their difficulty, and range from simple tasks to more complex ones.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Define a method called `twice`, which takes a target channel, and returns a
+    channel that forwards every event twice to the target.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE65]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Define a method called `throttle`, which throttles the rate at which events
+    are forwarded to the target channel.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE66]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: '**Hint**: you will have to use the `Clock` service and the functional event
+    stream composition.'
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: The `Shutdown` service shown in this chapter can run out of memory if there
+    are a lot of reactors subscribing to it. This is because the current implementation
+    never removes entries from the service's `subscribers` map. Modify the custom
+    `Shutdown` service so that the clients of the `state` signals can unsubscribe
+    from listening to shutdown events. Additionally, ensure that when a reactor terminates,
+    it unsubscribes from the `Shutdown` service if it was subscribed to it. Use the
+    `sysEvents` event stream for this purpose.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Assume that normal `Channel` objects can occasionally lose some events or reorder
+    them, but never duplicate or corrupt events. Implement a reliable channel protocol,
+    which ensures that every event sent through a channel is delivered to its destination
+    in the order it was sent. Define two methods `reliableServer` and `openReliable`,
+    which are used to start the reliable connection server and open the reliable connection
+    on the client, respectively. The methods must have the following signatures, where
+    it is up to you to determine the types:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE67]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: 'Implement the *best-effort broadcast protocol*, which delivers events to multiple
+    targets. The broadcast method must implement the following interface, where events
+    sent to the resulting channel must be forwarded to all the targets:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE68]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Investigate and learn about how the CRDT counter algorithm works. Then, use
+    the best-effort broadcast protocol from an earlier exercise to implement the CRDT
+    counter algorithm. Define a method called `crdt` to allow users to create the
+    CRDT counter.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'Implement a `failureDetector` method, which takes a heartbeat server of `Unit`
+    request and response types, and returns a `Signal` object that denotes whether
+    the server is suspected to have failed:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE69]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: The protocol started by this method must regularly send heartbeat signals to
+    the server, and expect replies within a certain time period. The server is suspected
+    to have failed when its response does not arrive before that time period elapses.
+    Implement a unit test to validate that the resulting signal correctly detects
+    server failure.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Implement the *reliable broadcast algorithm*, which has the same interface as
+    the best-effort broadcast from an earlier exercise, but guarantees delivery to
+    either all or none of the targets even if the sender dies halfway during the send
+    operation. Implement unit tests to validate the correctness of your implementation.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL

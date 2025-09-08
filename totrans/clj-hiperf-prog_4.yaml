@@ -1,0 +1,737 @@
+- en: Chapter 4. Host Performance
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the previous chapters, we noted how Clojure interoperates with Java. In
+    this chapter we will go a bit deeper to understand the internals better. We will
+    touch upon several layers of the entire stack, but our major focus will be the
+    JVM, in particular the Oracle HotSpot JVM, though there are several JVM vendors
+    to choose from ([http://en.wikipedia.org/wiki/List_of_Java_virtual_machines](http://en.wikipedia.org/wiki/List_of_Java_virtual_machines)).
+    At the time of writing this, Oracle JDK 1.8 is the latest stable release and early
+    OpenJDK 1.9 builds are available. In this chapter we will discuss:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: How the hardware subsystems function from the performance viewpoint
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Organization of the JVM internals and how that is related to performance
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to measure the amount of space occupied by various objects in the heap
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Profile Clojure code for latency using Criterium
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The hardware
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: There are various hardware components that may impact the performance of software
+    in different ways. The processors, caches, memory subsystem, I/O subsystems, and
+    so on, all have varying degrees of performance impact depending upon the use cases.
+    In the following sections we look into each of those aspects.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Processors
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Since about the late 1980s, microprocessors have been employing pipelining
+    and instruction-level parallelism to speed up their performance. Processing an
+    instruction at the CPU level consists of typically four cycles: **fetch**, **decode**,
+    **execute**, and **writeback**. Modern processors optimize the cycles by running
+    them in parallel—while one instruction is executed, the next instruction is being
+    decoded, and the one after that is being fetched, and so on. This style is called
+    **instruction pipelining**.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: In practice, in order to speed up execution even further, the stages are subdivided
+    into many shorter stages, thus leading to deeper super-pipeline architecture.
+    The length of the longest stage in the pipeline limits the clock speed of the
+    CPU. By splitting stages into substages, the processor can be run at a higher
+    clock speed, where more cycles are required for each instruction, but the processor
+    still completes one instruction per cycle. Since there are more cycles per second
+    now, we get better performance in terms of throughput per second even though the
+    latency of each instruction is now higher.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Branch prediction
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The processor must fetch and decode instructions in advance even when it encounters
+    instructions of the conditional `if-then` form. Consider an equivalent of the
+    (`if (test a) (foo a) (bar a)`) Clojure expression. The processor must choose
+    a branch to fetch and decode, the question is should it fetch the `if` branch
+    or the `else` branch? Here, the processor makes a guess as to which instruction
+    to fetch/decode. If the guess turns out to be correct, it is a performance gain
+    as usual; otherwise, the processor has to throw away the result of the fetch/decode
+    process and start on the other branch afresh.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Processors deal with branch prediction using an on-chip branch prediction table.
+    It contains recent code branches and two bits per branch, indicating whether or
+    not the branch was taken, while also accommodating one-off, not-taken occurrences.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Today, branch prediction is extremely important in processors for performance,
+    so modern processors dedicate hardware resources and special predication instructions
+    to improve the prediction accuracy and lower the cost of a mispredict penalty.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Instruction scheduling
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: High-latency instructions and branching usually lead to empty cycles in the
+    instruction pipeline known as **stalls** or **bubbles**. These cycles are often
+    used to do other work by the means of instruction reordering. Instruction reordering
+    is implemented at the hardware level via out of order execution and at the compiler
+    level via compile time instruction scheduling (also called **static instruction
+    scheduling**).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The processor needs to remember the dependencies between instructions when carrying
+    out the out-of-order execution. This cost is somewhat mitigated by using renamed
+    registers, wherein register values are stored into / loaded from memory locations,
+    potentially on different physical registers, so that they can be executed in parallel.
+    This necessitates that out-of-order processors always maintain a mapping of instructions
+    and corresponding registers they use, which makes their design complex and power
+    hungry. With a few exceptions, almost all high-performance CPUs today have out-of-order
+    designs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Good compilers are usually extremely aware of processors, and are capable of
+    optimizing the code by rearranging processor instructions in a way that there
+    are fewer bubbles in the processor instruction pipeline. A few high-performance
+    CPUs still rely on only static instruction reordering instead of out-of-order
+    instruction reordering and, in turn, save chip area due to simpler design—the
+    saved area is used to accommodate extra cache or CPU cores. Low-power processors,
+    such as those from the ARM and Atom family, use in-order design. Unlike most CPUs,
+    the modern GPUs use in-order design with deep pipelines, which is compensated
+    by very fast context switching. This leads to high latency and high throughput
+    on GPUs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Threads and cores
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Concurrency and parallelism via context switches, hardware threads, and cores
+    are very common today and we have accepted them as a norm to implement in our
+    programs. However, we should understand why we needed such a design in the first
+    place. Most of the real-world code we write today does not have more than a modest
+    scope for instruction-level parallelism. Even with hardware-based, out-of-order
+    execution and static instruction reordering, no more than two instructions per
+    cycle are truly parallel. Hence, another potential source of instructions that
+    can be pipelined and executed in parallel are the programs other than the currently
+    running one.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The empty cycles in a pipeline can be dedicated to other running programs, which
+    assume that there are other currently running programs that need the processor's
+    attention. **Simultaneous multithreading** (**SMT**) is a hardware design that
+    enables such kinds of parallelism. Intel implements SMT named as **HyperThreading**
+    in some of its processors. While SMT presents a single physical processor as two
+    or more logical processors, a true multiprocessor system executes one thread per
+    processor, thus achieving simultaneous execution. A multicore processor includes
+    two or more processors per chip, but has the properties of a multiprocessor system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In general, multicore processors significantly outperform SMT processors. Performance
+    on SMT processors can vary by the use case. It peaks in those cases where code
+    is highly variable or threads do not compete for the same hardware resources,
+    and dips when the threads are cache-bound on the same processor. What is also
+    important is that some programs are simply not inherently parallel. In such cases
+    it may be hard to make them go faster without the explicit use of threads in the
+    program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Memory systems
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: It is important to understand the memory performance characteristics to know
+    the likely impact on the programs we write. Data-intensive programs that are also
+    inherently parallel, such as audio/video processing and scientific computation,
+    are largely limited by memory bandwidth, not by the processor. Adding processors
+    would not make them faster unless the memory bandwidth is also increased. Consider
+    another class of programs, such as 3D graphics rendering or database systems that
+    are limited mainly by memory latency but not the memory bandwidth. SMT can be
+    highly suitable for such programs, where threads do not compete for the same hardware
+    resources.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Memory access roughly constitutes a quarter of all instructions executed by
+    a processor. A code block typically begins with memory-load instructions and the
+    remainder portion depends on the loaded data. This stalls the instructions and
+    prevents large-scale, instruction-level parallelism. As if that was not bad enough,
+    even superscalar processors (which can issue more than one instruction per clock
+    cycle) can issue, at most, two memory instructions per cycle. Building fast memory
+    systems is limited by natural factors such as the speed of light. It impacts the
+    signal round trip to the RAM. This is a natural hard limit and any optimization
+    can only work around it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Data transfer between the processor and motherboard chipset is one of the factors
+    that induce memory latency. This is countered using a **faster front-side bus**
+    (**FSB**). Nowadays, most modern processors fix this problem by integrating the
+    memory controller directly at the chip level. The significant difference between
+    the processor versus memory latencies is known as the **memory wall**. This has
+    plateaued in recent times due to processor clock speeds hitting power and heat
+    limits, but notwithstanding this, memory latency continues to be a significant
+    problem.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Unlike CPUs, GPUs typically realize a sustained high-memory bandwidth. Due to
+    latency hiding, they utilize the bandwidth even during a high number-crunching
+    workload.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cache
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'To overcome the memory latency, modern processors employ a special type of
+    very fast memory placed onto the processor chip or close to the chip. The purpose
+    of the cache is to store the most recently used data from the memory. Caches are
+    of different levels: **L1** cache is located on the processor chip; **L2** cache
+    is bigger and located farther away from the processor compared to L1\. There is
+    often an **L3** cache, which is even bigger and located farther from the processor
+    than L2\. In Intel''s Haswell processor, the L1 cache is generally 64 kilobytes
+    (32 KB instruction plus 32 KB data) in size, L2 is 256 KB per core, and L3 is
+    8 MB.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: While memory latency is very bad, fortunately caches seem to work very well.
+    The L1 cache is much faster than accessing the main memory. The reported cache
+    hit rates in real-world programs is 90 percent, which makes a strong case for
+    caches. A cache works like a dictionary of memory addresses to a block of data
+    values. Since the value is a block of memory, the caching of adjacent memory locations
+    has mostly no additional overhead. Note that L2 is slower and bigger than L1,
+    and L3 is slower and bigger than L2\. On Intel Sandybridge processors, register
+    lookup is instantaneous; L1 cache lookup takes three clock cycles, L2 takes nine,
+    L3 takes 21, and main memory access takes 150 to 400 clock cycles.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Interconnect
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'A processor communicates with the memory and other processors via interconnect
+    that are generally of two types of architecture: **Symmetric multiprocessing**
+    (**SMP**) and **Non-uniform memory access** (**NUMA**). In SMP, a bus interconnects
+    processors and memory with the help of bus controllers. The bus acts as a broadcast
+    device for the end points. The bus often becomes a bottleneck with a large number
+    of processors and memory banks. SMP systems are cheaper to build and harder to
+    scale to a large number of cores compared to NUMA. In a NUMA system, collections
+    of processors and memory are connected point to point to other such groups of
+    processors and memory. Every such group is called a node. Local memory of a node
+    is accessible by other nodes and vice versa. Intel''s **HyperTransport** and **QuickPath**
+    interconnect technologies support NUMA.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Storage and networking
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Storage and networking are the most commonly used hardware components besides
+    the processor, cache, and memory. Many of the real-world applications are more
+    often I/O bound than execution-bound. Such I/O technologies are continuously advancing
+    and there is a wide variety of components available in the market. The consideration
+    of such devices should be based on the exact performance and reliability characteristics
+    for the use case. Another important criterion is to know how well they are supported
+    by the target operating system drivers. Current day storage technologies mostly
+    build upon hard disks and solid state drives. The applicability of network devices
+    and protocols vary widely as per the business use case. A detailed discussion
+    of I/O hardware is beyond the scope of this book.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Java Virtual Machine
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The Java Virtual Machine is a bytecode-oriented, garbage-collected virtual machine
+    that specifies its own instruction set. The instructions have equivalent bytecodes
+    that are interpreted and compiled to the underlying OS and hardware by the **Java
+    Runtime Environment** (**JRE**). Objects are referred to using symbolic references.
+    The data types in the JVM are fully standardized as a single spec across all JVM
+    implementations on all platforms and architectures. The JVM also follows the network
+    byte order, which means communication between Java programs on different architectures
+    can happen using the big-endian byte order. **Jvmtop** ([https://code.google.com/p/jvmtop/](https://code.google.com/p/jvmtop/))
+    is a handy JVM monitoring tool similar to the top command in Unix-like systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The just-in-time compiler
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The **just-in-time** (**JIT**) compiler is part of the JVM. When the JVM starts
+    up, the JIT compiler knows hardly anything about the running code so it simply
+    interprets the JVM bytecodes. As the program keeps running, the JIT compiler starts
+    profiling the code by collecting statistics and analyzing the call and bytecode
+    patterns. When a method call count exceeds a certain threshold, the JIT compiler
+    applies a number of optimizations to the code. Most common optimizations are inlining
+    and native code generating. The final and static methods and classes are great
+    candidates for inlining. JIT compilation does not come without a cost; it occupies
+    memory to store the profiled code and sometimes it has to revert the wrong speculative
+    optimization. However, JIT compilation is almost always amortized over a long
+    duration of code execution. In rare cases, turning off JIT compilation may be
+    useful if either the code is too large or there are no hotspots in the code due
+    to infrequent execution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A JRE has typically two kinds of JIT compilers: client and server. Which JIT
+    compiler is used by default depends on the type of hardware and platform. The
+    client JIT compiler is meant for client programs such as command-line and desktop
+    applications. We can start the JRE with the `-server` option to invoke the server
+    JIT compiler, which is really meant for long-running programs on a server. The
+    threshold for JIT compilation is higher in the server than the client. The difference
+    in the two kinds of JIT compilers is that the client targets upfront, visible
+    lower latency, and the server is assumed to be running on a high-resource hardware
+    and tries to optimize for throughput.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The JIT compiler in the Oracle HotSpot JVM observes the code execution to determine
+    the most frequently invoked methods, which are hotspots. Such hotspots are usually
+    just a fraction of the entire code that can be cheap to focus on and optimize.
+    The **HotSpot JIT** compiler is lazy and adaptive. It is lazy because it compiles
+    only those methods to native code that have crossed a certain threshold, and not
+    all the code that it encounters. Compiling to native code is a time-consuming
+    process and compiling all code would be wasteful. It is adaptive to gradually
+    increasing the aggressiveness of its compilation on frequently called code, which
+    implies that the code is not optimized only once but many times over as the code
+    gets executed repeatedly. After a method call crosses the first JIT compiler threshold,
+    it is optimized and the counter is reset to zero. At the same time, the optimization
+    count for the code is set to one. When the call exceeds the threshold yet again,
+    the counter is reset to zero and the optimization count is incremented; and this
+    time a more aggressive optimization is applied. This cycle continues until the
+    code cannot be optimized anymore.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The HotSpot JIT compiler does a whole bunch of optimizations. Some of the most
+    prominent ones are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Inlining**: Inlining of methods—very small methods, the static and final
+    methods, methods in final classes, and small methods involving only primitive
+    numerics are prime candidates for inlining.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Lock elimination**: Locking is a performance overhead. Fortunately, if the
+    lock object monitor is not reachable from other threads, the lock is eliminated.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Virtual call elimination**: Often, there is only one implementation for an
+    interface in a program. The JIT compiler eliminates the virtual call and replaces
+    that with a direct method call on the class implementation object.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Non-volatile memory write elimination**: The non-volatile data members and
+    references in an object are not guaranteed to be visible by the threads other
+    than the current thread. This criterion is utilized not to update such references
+    in memory and rather use hardware registers or the stack via native code.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Native code generation**: The JIT compiler generates native code for frequently
+    invoked methods together with the arguments. The generated native code is stored
+    in the code cache.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Control flow and local optimizations**: The JIT compiler frequently reorders
+    and splits the code for better performance. It also analyzes the branching of
+    control and optimizes code based on that.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: There should rarely be any reason to disable JIT compilation, but it can be
+    done by passing the `-Djava.compiler=NONE` parameter when starting the JRE. The
+    default compile threshold can be changed by passing `-XX:CompileThreshold=9800`
+    to the JRE executable where `9800` is the example threshold. The `XX:+PrintCompilation`
+    and `-XX:-CITime` options make the JIT compiler print the JIT statistics and time
+    spent on JIT.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Memory organization
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'The memory used by the JVM is divided into several segments. JVM, being a stack-based
+    execution model, one of the memory segments is the stack area. Every thread is
+    given a stack where the stack frames are stored in **Last-in-First-out** (**LIFO**)
+    order. The stack includes a **program counter** (**PC**) that points to the instruction
+    in the JVM memory currently being executed. When a method is called, a new stack
+    frame is created containing the local variable array and the operand stack. Contrary
+    to conventional stacks, the operand stack holds instructions to load local variable
+    / field values and computation results—a mechanism that is also used to prepare
+    method parameters before a call and to store the return value. The stack frame
+    itself may be allocated on the heap. The easiest way to inspect the order of stack
+    frames in the current thread is to execute the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: When a thread requires more stack space than what the JVM can provide, `StackOverflowError`
+    is thrown.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The heap is the main memory area where the object and array allocations are
+    done. It is shared across all JVM threads. The heap may be of a fixed size or
+    expanding, depending on the arguments passed to the JRE on startup. Trying to
+    allocate more heap space than what the JVM can make room for results in `OutOfMemoryError`
+    to be thrown. The allocations in the heap are subject to garbage collection. When
+    an object is no more reachable via any reference, it is garbage collected, with
+    the notable exception of weak, soft, and phantom references. Objects pointed to
+    by non-strong references take longer to GC.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The method area is logically a part of the heap memory and contains per-class
+    structures such as the field and method information, runtime constant pool, code
+    for method, and constructor bodies. It is shared across all JVM threads. In the
+    Oracle HotSpot JVM (up to Version 7), the method area is found in a memory area
+    called the **permanent generation**. In HotSpot Java 8, the permanent generation
+    is replaced by a native memory area called **Metaspace**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Memory organization](img/3642_04_01.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The JVM contains the native code and the Java bytecode to be provided to the
+    Java API implementation and the JVM implementation. The native code call stack
+    is maintained separately for each thread stack. The JVM stack contains the Java
+    method calls. Please note that the JVM spec for Java SE 7 and 8 does not imply
+    a native method stack, but for Java SE 5 and 6, it does.
+  prefs: []
+  type: TYPE_NORMAL
+- en: HotSpot heap and garbage collection
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The Oracle HotSpot JVM uses a generational heap. The three main generations
+    are **Young**, **Tenured** (old), and **Perm** (permanent) (up to HotSpot JDK
+    1.7 only). As objects survive garbage collection, they move from **Eden** to **Survivor**
+    and from **Survivor** to **Tenured** spaces. The new instances are allocated in
+    the **Eden** segment, which is a very cheap operation (as cheap as a pointer bump,
+    and faster than a C `malloc` call), if it already has sufficient free space. When
+    the Eden area does not have enough free space, a minor GC is triggered. This copies
+    the live objects from **Eden** into the **Survivor** space. In the same operation,
+    live objects are checked in **Survivor-1** and copied over to **Survivor-2**,
+    thus keeping the live objects only in **Survivor-2**. This scheme keeps **Eden**
+    and **Survivor-1** empty and unfragmented to make new allocations, and is known
+    as **copy collection**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![HotSpot heap and garbage collection](img/3642_04_02.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'After a certain survival threshold in the young generation, the objects are
+    moved to the tenured/old generation. If it is not possible to do a minor GC, a
+    major GC is attempted. The major GC does not use copying, but rather relies on
+    mark-and-sweep algorithms. We can use throughput collectors (**Serial**, **Parallel**,
+    and **ParallelOld**) or low-pause collectors (**Concurrent** and **G1**) for the
+    old generation. The following table shows a non-exhaustive list of options to
+    be used for each collector type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| Collector name | JVM flag |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Serial | -XX:+UseSerialGC |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Parallel | -XX:+UseParallelGC |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Parallel Compacting | -XX:+UseParallelOldGC |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Concurrent | -XX:+UseConcMarkSweepGC-XX:+UseParNewGC-XX:+CMSParallelRemarkEnabled
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| G1 | -XX:+UseG1GC |'
+  prefs: []
+  type: TYPE_TB
+- en: 'The previously mentioned flags can be used to start the Java runtime. For example,
+    in the following command, we start the server JVM with a 4 GB heap using Parallel
+    compacting GC:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: Sometimes, due to running full GC multiple times, the tenured space may have
+    become so fragmented that it may not be feasible to move objects from Survivor
+    to Tenured spaces. In those cases, a full GC with compaction is triggered. During
+    this period, the application may appear unresponsive due to the full GC in action.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Measuring memory (heap/stack) usage
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: One of the prime reasons for a performance hit in the JVM is garbage collection.
+    It certainly helps to know how heap memory is used by the objects we create and
+    how to reduce the impact on GC by means of a lower footprint. Let's inspect how
+    the representation of an object may lead to heap space.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Every (uncompressed) object or array reference on a 64-bit JVM is 16 bytes
+    long. On a 32-bit JVM, every reference is 8 bytes long. As the 64-bit architecture
+    is becoming more commonplace now, the 64-bit JVM is more likely to be used on
+    servers. Fortunately, for a heap size of up to 32 GB, the JVM (Java 7) can use
+    compressed pointers (default behavior) that are only 4 bytes in size. Java 8 VMs
+    can address up to 64 GB heap size via compressed pointers as seen in the following
+    table:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '|   | Uncompressed | Compressed | 32-bit |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- | --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Reference (pointer) | 8 | 4 | 4 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Object header | 16 | 12 | 8 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Array header | 24 | 16 | 12 |'
+  prefs: []
+  type: TYPE_TB
+- en: '| Superclass padding | 8 | 4 | 4 |'
+  prefs: []
+  type: TYPE_TB
+- en: 'This table illustrates pointer sizes in different modes (reproduced with permission
+    from Attila Szegedi: [http://www.slideshare.net/aszegedi/everything-i-ever-learned-about-jvm-performance-tuning-twitter/20](http://www.slideshare.net/aszegedi/everything-i-ever-learned-about-jvm-performance-tuning-twitter/20)).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We saw in the previous chapter how many bytes each primitive type takes. Let''s
+    see how the memory consumption of the composite types looks with compressed pointers
+    (a common case) on a 64-bit JVM with a heap size smaller than 32 GB:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| Java Expression | 64-bit memory usage | Description (b = bytes, padding toward
+    memory word size in approximate multiples of 8) |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `new Object()` | 16 bytes | 12 b header + 4 b padding |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `new byte[0]` | 16 bytes | 12 b `obj` header + 4 b `int` length = 16 b array
+    header |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `new String("foo")` | 40 bytes (interned for literals) | 12 b header + (12
+    b array header + 6 b char-array content + 4 b length + 2 b padding = 24 b) + 4
+    b hash |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `new Integer(3)` | 16 bytes (boxed integer) | 12 b header + 4 b `int` value
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `new Long(4)` | 24 bytes (boxed long) | 12 b header + 8 b `long` value +
+    4 b padding |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `class A { byte x; }``new A();` | 16 bytes | 12 b header + 1 b value + 3
+    b padding |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `class B extends A {byte y;}``new B();` | 24 bytes (subclass padding) | 12
+    b reference + (1 b value + 7 b padding = 8 b) for A + 1 b for value of `y` + 3
+    b padding |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `clojure.lang.Symbol.intern("foo")``// clojure ''foo` | 104 bytes (40 bytes
+    interned) | 12 b header + 12 b ns reference + (12 b name reference + 40 b interned
+    chars) + 4 b `int` hash + 12 b meta reference + (12 b `_str` reference + 40 b
+    interned chars) – 40 b interned `str` |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `clojure.lang.Keyword.intern("foo")``// clojure :foo` | 184 bytes (fully
+    interned by factory method) | 12 b reference + (12 b symbol reference + 104 b
+    interned value) + 4 b `int` hash + (12 b `_str` reference + 40 b interned `char`)
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: A comparison of space taken by a symbol and a keyword created from the same
+    given string demonstrates that even though a keyword has slight overhead over
+    a symbol, the keyword is fully interned and would provide better guard against
+    memory consumption and thus GC over time. Moreover, the keyword is interned as
+    a weak reference, which ensures that it is garbage collected when no keyword in
+    memory is pointing to the interned value anymore.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Determining program workload type
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: We often need to determine whether a program is CPU/cache bound, memory bound,
+    I/O bound or contention bound. When a program is I/O or contention bound, the
+    CPU usage is generally low. You may have to use a profiler (we will see this in
+    [Chapter 7](ch07.html "Chapter 7. Performance Optimization"), *Performance Optimization*)
+    to find out whether threads are stuck due to resource contention. When a program
+    is CPU/cache or memory bound, CPU usage may not be a clear indicator of the source
+    of the bottleneck. In such cases, you may want to make an educated guess by inspecting
+    cache misses in the program. On Linux systems tools such as **perf** ([https://perf.wiki.kernel.org/](https://perf.wiki.kernel.org/)),
+    **cachegrind** ([http://valgrind.org/info/tools.html#cachegrind](http://valgrind.org/info/tools.html#cachegrind))
+    and **oprofile** ([http://oprofile.sourceforge.net/](http://oprofile.sourceforge.net/))
+    can help determine the volume of cache misses—a higher threshold may imply that
+    the program is memory bound. However, using these tools with Java is not straightforward
+    because Java's JIT compiler needs a warm-up until meaningful behavior can be observed.
+    The project **perf-map-agent** ([https://github.com/jrudolph/perf-map-agent](https://github.com/jrudolph/perf-map-agent))
+    can help generate method mappings that you can correlate using the `perf` utility.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tackling memory inefficiency
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In earlier sections in this chapter we discussed that unchecked memory access
+    may become a bottleneck. As of Java 8, due to the way the heap and object references
+    work, we cannot fully control the object layout and memory access patterns. However,
+    we can take care of the frequently executed blocks of code to consume less memory
+    and attempt to make them cache-bound instead of memory-bound at runtime. We can
+    consider a few techniques to lower memory consumption and randomness in access:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Primitive locals (long, double, boolean, char, etc) in the JVM are created on
+    the stack. The rest of the objects are created on the heap and only their references
+    are stored in the stack. Primitives have a low overhead and do not require memory
+    indirection for access, and are hence recommended.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Data laid out in the main memory in a sequential fashion is faster to access
+    than randomly laid out data. When we use a large (say more than eight elements)
+    persistent map, the data stored in tries may not be sequentially laid out in memory,
+    rather they would be randomly laid out in the heap. Moreover both keys and values
+    are stored and accessed. When you use records (`defrecord`) and types (`deftype`),
+    not only do they provide array/class semantics for the layout of fields within
+    them, they do not store the keys, which is very efficient compared to regular
+    maps.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Reading large content from a disk or the network may have an adverse impact
+    on performance due to random memory roundtrips. In [Chapter 3](ch03.html "Chapter 3. Leaning
+    on Java"), *Leaning on Java*, we briefly discussed memory-mapped byte buffers.
+    You can leverage memory-mapped buffers to minimize fragmented object allocation/access
+    on the heap. While libraries such as `nio` ([https://github.com/pjstadig/nio/](https://github.com/pjstadig/nio/))
+    and `clj-mmap` ([https://github.com/thebusby/clj-mmap](https://github.com/thebusby/clj-mmap))
+    help us deal with memory-mapped buffers, `bytebuffer` ([https://github.com/geoffsalmon/bytebuffer](https://github.com/geoffsalmon/bytebuffer)),
+    and `gloss` ([https://github.com/ztellman/gloss](https://github.com/ztellman/gloss))
+    let us work with byte buffers. There are also alternate abstractions such as iota
+    ([https://github.com/thebusby/iota](https://github.com/thebusby/iota)) that help
+    us deal with large files as collections.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Given that memory bottleneck is a potential performance issue in data-intensive
+    programs, lowering memory overhead goes a long way in avoiding performance risk.
+    Understanding low-level details of the hardware, the JVM and Clojure's implementation
+    helps us choose the appropriate techniques to tackle the memory bottleneck issue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Measuring latency with Criterium
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Clojure has a neat little macro called `time` that evaluates the body of code
+    passed to it, and then prints out the time it took and simply returns the value.
+    However, we can note that often the time taken to execute the code varies quite
+    a bit across various runs:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: There are several reasons associated to this variance in behavior. When cold
+    started, the JVM has its heap segments empty and is unaware of the code path.
+    As the JVM keeps running, the heap fills up and the GC patterns start becoming
+    noticeable. The JIT compiler gets a chance to profile the different code paths
+    and optimize them. Only after quite some GC and JIT compilation rounds, does the
+    JVM performance become less unpredictable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Criterium ([https://github.com/hugoduncan/criterium](https://github.com/hugoduncan/criterium))
+    is a Clojure library to scientifically measure the latency of Clojure expressions
+    on a machine. A summary of how it works can be found at the Criterium project
+    page. The easiest way to use Criterium is to use it with Leiningen. If you want
+    Criterium to be available only in the REPL and not as a project dependency, add
+    the following entry to the `~/.lein/profiles.clj` file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Another way is to include `criterium` in your project in the `project.clj`
+    file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Once done with the editing of the file, launch REPL using `lein repl`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: Now, we can see that, on average, the expression took 31.6 ms on a certain test
+    machine.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Criterium and Leiningen
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'By default, Leiningen starts the JVM in a low-tiered compilation mode, which
+    causes it to start up faster but impacts the optimizations that the JRE can perform
+    at runtime. To get the best effects when running tests with Criterium and Leiningen
+    for a server-side use case, be sure to override the defaults in `project.clj`
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `^:replace` hint causes Leiningen to replace its own defaults with what
+    is provided under the `:jvm-opts` key. You may like to add more parameters as
+    needed, such as a minimum and maximum heap size to run the tests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The performance of a software system is directly impacted by its hardware components,
+    so understanding how the hardware works is crucial. The processor, caches, memory,
+    and I/O subsystems have different performance behaviors. Clojure, being a hosted
+    language, understanding the performance properties of the host, that is, the JVM,
+    is equally important. The Criterium library is useful for measuring the latency
+    of the Clojure code—we will discuss Criterium again in [Chapter 6](ch06.html "Chapter 6. Measuring
+    Performance"), *Measuring Performance*. In the next chapter we will look at the
+    concurrency primitives in Clojure and their performance characteristics.
+  prefs: []
+  type: TYPE_NORMAL

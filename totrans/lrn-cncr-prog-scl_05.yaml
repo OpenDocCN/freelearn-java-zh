@@ -1,0 +1,1370 @@
+- en: Chapter 5. Data-Parallel Collections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: '|   | *"Premature optimization is the root of all evil."* |   |'
+  prefs: []
+  type: TYPE_TB
+- en: '|   | --*Donald Knuth* |'
+  prefs: []
+  type: TYPE_TB
+- en: So far, we have been composing multiple threads of computation into safe concurrent
+    programs. In doing so, we focused on ensuring their correctness. We saw how to
+    avoid blocking in concurrent programs, react to the completion of asynchronous
+    computations, and how to use concurrent data structures to communicate information
+    between threads. All these tools made organizing the structure of concurrent programs
+    easier. In this chapter, we will focus mainly on achieving good performance. We
+    require minimal or no changes in the organization of existing programs, but we
+    will study how to reduce their running time using multiple processors. Futures
+    from the previous chapter allowed doing this to a certain extent, but they are
+    relatively heavyweight and inefficient when the asynchronous computation in each
+    future is short.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Data parallelism** is a form of computation where the same computation proceeds
+    in parallel on different data elements. Rather than having concurrent computation
+    tasks that communicate through the use of synchronization, in data-parallel programming,
+    independent computations produce values that are eventually merged together in
+    some way. An input to a data-parallel operation is usually a dataset such as a
+    collection, and the output can be a value or another dataset.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will study the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Starting a data-parallel operation
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Configuring the parallelism level of a data-parallel collection
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Measuring performance and why it is important
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Differences between using sequential and parallel collections
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using parallel collections together with concurrent collections
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Implementing a custom parallel collection, such as a parallel string
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Alternative data-parallel frameworks
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: In Scala, data-parallel programming was applied to the standard collection framework
+    to accelerate bulk operations that are, by their nature, declarative and fit data
+    parallelism well. Before studying data-parallel collections, we will present a
+    brief overview of the Scala collection framework.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Scala collections in a nutshell
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The Scala collections module is a package in the Scala standard library that
+    contains a variety of general-purpose collection types. Scala collections provide
+    a general and easy-to-use way of declaratively manipulating data using functional
+    combinators. For example, in the following program, we use the `filter` combinator
+    on a range of numbers to return a sequence of palindromes between 0 and 100,000;
+    that is, numbers that are read in the same way in both the forward and reverse
+    direction:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Scala collections define three basic types of collections: **sequences**, **maps**,
+    and **sets**. Elements stored in sequences are ordered and can be retrieved using
+    the `apply` method and an integer index. Maps store key-value pairs and can be
+    used to retrieve a value associated with a specific key. Sets can be used to test
+    the element membership with the `apply` method.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Scala collection library makes a distinction between immutable collections,
+    which cannot be modified after they are created, and mutable collections which
+    can be updated after they are created. Commonly used immutable sequences are `List`
+    and `Vector`, while `ArrayBuffer` is the mutable sequence of choice in most situations.
+    Mutable `HashMap` and `HashSet` collections are maps and sets implemented using
+    hash tables, while immutable `HashMap` and `HashSet` collections are based on
+    the less widely known hash trie data structure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Scala collections can be transformed into their parallel counterparts by calling
+    the `par` method. The resulting collection is called a **parallel collection**,
+    and its operations are accelerated by using multiple processors simultaneously.
+    The previous example can run in parallel, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding code line, the filter combinator is a data-parallel operation.
+    In this chapter, we will study parallel collections in more detail. We will see
+    when and how to create parallel collections, study how they can be used together
+    with sequential collections, and conclude by implementing a custom parallel collection
+    class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using parallel collections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Most of the concurrent programming utilities we have studied so far are used
+    in order to enable different threads of computation to exchange information. Atomic
+    variables, the `synchronized` statement, concurrent queues, futures, and promises
+    are focused on ensuring the correctness of a concurrent program. On the other
+    hand, the parallel collection programming model is designed to be largely identical
+    to that of sequential Scala collections; parallel collections exist solely in
+    order to improve the running time of the program. In this chapter, we will measure
+    the relative speedup of programs using parallel collections. To make this task
+    easier, we will introduce the `timed` method to the package object used for the
+    examples in this chapter. This method takes a block of code body, and returns
+    the running time of the executing block of code `body`. It starts by recording
+    the current time with the `nanoTime` method from the JDK `System` class. It then
+    runs the body, records the time after the body executes, and computes the time
+    difference:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: Certain runtime optimizations in the JVM, such as dead-code elimination, can
+    potentially remove the invocation of the `body` block, causing us to measure an
+    incorrect running time. To prevent this, we assign the return value of the `body`
+    block to a volatile field named `dummy`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Program performance is subject to many factors, and it is very hard to predict
+    in practice. Whenever you can, you should validate your performance assumptions
+    with measurements. In the following example, we use the Scala `Vector` class to
+    create a vector with five million numbers and then shuffle that vector using the
+    `Random` class from the `scala.util` package. We then compare the running time
+    of the sequential and parallel `max` methods, which both find the greatest integer
+    in the `numbers` collection:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running this program on an Intel i7-4900MQ quad-core processor with hyper-threading
+    and Oracle JVM Version 1.7.0_51, we find that the sequential `max` method takes
+    244 milliseconds, while its parallel version takes 35 milliseconds. This is partly
+    because parallel collections are optimized better than their sequential counterparts,
+    and partly because they use multiple processors. However, on different processors
+    and JVM implementations, results will vary.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Always validate assumptions about performance by measuring the execution time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `max` method is particularly well-suited for parallelization. Worker threads
+    can independently scan subsets of the collection, such as `numbers`. When a worker
+    thread finds the greatest integer in its own subset, it notifies the other processors
+    and they agree on the greatest result. This final step takes much less time than
+    searching for the greatest integer in a collection subset. We say that the `max`
+    method is **trivially parallelizable**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In general, data-parallel operations require more inter-processor communication
+    than the `max` method. Consider the `incrementAndGet` method on atomic variables
+    from [Chapter 3](ch03.html "Chapter 3. Traditional Building Blocks of Concurrency"),
+    *Traditional Building Blocks of Concurrency*. We can use this method once again
+    to compute unique identifiers. This time, we will use parallel collections to
+    compute a large number of unique identifiers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This time, we use parallel collections in a `for` loop; recall that every occurrence
+    of a `for` loop is desugared into the `foreach` call by the compiler. The parallel
+    `for` loop from the preceding code is equivalent to the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: When the `foreach` method is called on a parallel collection, collection elements
+    are processed concurrently. This means that separate worker threads simultaneously
+    invoke the specified function, so proper synchronization must be applied. In our
+    case, this synchronization is ensured by the atomic variable, as explained in
+    [Chapter 3](ch03.html "Chapter 3. Traditional Building Blocks of Concurrency"),
+    *Traditional Building Blocks of Concurrency*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Running this program on our machine reveals that there is no increase in speed.
+    In fact, the parallel version of the program is even slower; our program prints
+    320 milliseconds for the sequential `foreach` call, and 1,041 milliseconds for
+    the parallel `foreach` call.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You might be surprised to see this; shouldn't a program be running at least
+    four times faster on a quad-core processor with hyper-threading? As shown by the
+    preceding example, this is not always the case. The parallel `foreach` call is
+    slower because the worker threads simultaneously invoke the `incrementAndGet`
+    method on the atomic variable, `uid`, and write to the same memory location at
+    once.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Memory writes do not go directly to **Random Access Memory** (**RAM**) in modern
+    architectures, as this would be too slow. Instead, modern computer architectures
+    separate the CPU from the RAM with multiple levels of caches: smaller, more expensive,
+    and much faster memory units that hold copies of parts of the RAM that the processor
+    is currently using. The cache level closest to the CPU is called the L1 cache.
+    The L1 cache is divided into short contiguous parts called **cache lines**. Typically,
+    a cache-line size is 64 bytes. Although multiple cores can read the same cache
+    line simultaneously, in standard multicore processors, the cache line needs to
+    be in exclusive ownership when a core writes to it. When another core requests
+    to write to the same cache line, the cache line needs to be copied to that core''s
+    L1 cache. The cache coherence protocol that enables this is called **Modified
+    Exclusive Shared Invalid** (**MESI**), and its specifics are beyond the scope
+    of this book. All you need to know is that exchanging cache-line ownership can
+    be relatively expensive in terms of the processor''s time scale.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Since the `uid` variable is atomic, the JVM needs to ensure a happens-before
+    relationship between the writes and reads of the `uid` variable, as we know from
+    [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory Model"),
+    *Concurrency on the JVM and the Java Memory Model*. To ensure the happens-before
+    relationship, memory writes have to be visible to other processors. The only way
+    to ensure this is to obtain the cache line in exclusive mode before writing to
+    it. In our example, different processor cores repetitively exchange the ownership
+    of the cache line in which the `uid` variable is allocated, and the resulting
+    program becomes much slower than its sequential version. This is shown in the
+    following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Using parallel collections](img/image_05_001.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: If different processors only read a shared memory location, then there is no
+    slowdown. Writing to the same memory location is, on the other hand, an obstacle
+    to scalability.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Writing to the same memory location with proper synchronization leads to performance
+    bottlenecks and contention; avoid this in data-parallel operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Parallel programs share other resources in addition to computing power. When
+    different parallel computations request more resources than are currently available,
+    an effect known as **resource contention** occurs. The specific kind of resource
+    contention that occurs in our example is called a **memory contention**, a conflict
+    over exclusive rights to write to a specific part of memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can expect the same kind of performance degradation when using multiple threads
+    to concurrently start the `synchronized` statement on the same object, repetitively
+    modifying the same key in a concurrent map or simultaneously enqueueing elements
+    to a concurrent queue; all these actions require writes to the same memory location.
+    Nonetheless, this does not mean that threads should never write to the same memory
+    locations. In some applications, concurrent writes occur very infrequently; the
+    ratio between the time spent writing to contended memory locations and the time
+    spent doing other work determines whether parallelization is beneficial or not.
+    It is difficult to predict this ratio by just looking at the program; the `ParUid`
+    example serves to illustrate that we should always measure in order to see the
+    impact of contention.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Parallel collection class hierarchy
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As we saw, parallel collection operations execute on different worker threads
+    simultaneously. At any point during the execution of a parallel operation, an
+    element in a parallel collection can be processed by at most one worker thread
+    executing that operation. The block of code associated with the parallel operation
+    is executed on each of the elements separately; in the `ParUid` example, the `incrementAndGet`
+    method is called concurrently many times. Whenever a parallel operation executes
+    any side-effects, it must take care to use proper synchronization; the naive approach
+    of using `var` to store `uid` causes data races as it did in [Chapter 2](ch02.html
+    "Chapter 2. Concurrency on the JVM and the Java Memory Model"), *Concurrency on
+    the JVM and the Java Memory Model*. This is not the case with sequential Scala
+    collections.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The consequence is that a parallel collection cannot be a subtype of a sequential
+    collection. If it were, then the *Liskov substitution principle* would be violated.
+    The Liskov substitution principle states that if type `S` is a subtype of `T`,
+    then the object of type `T` can be replaced with objects of type `S` without affecting
+    the correctness of the program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In our case, if parallel collections are subtypes of sequential collections,
+    then some methods can return a sequential sequence collection with the static
+    type `Seq[Int]`, where the sequence object is a parallel sequence collection at
+    runtime. Clients can call methods such as `foreach` on the collection without
+    knowing that the body of the `foreach` method needs synchronization, and their
+    programs would not work correctly. For these reasons, parallel collections form
+    a hierarchy that is separate from the sequential collections, as shown in the
+    following diagram:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Parallel collection class hierarchy](img/image_05_002.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Scala collection hierarchy
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The preceding diagram shows the simplified Scala collection hierarchy with
+    sequential collections on the left. The most general collection type is called
+    `Traversable`. Different collection operations such as `find`, `map`, `filter`,
+    or `reduceLeft` are implemented in terms of its abstract `foreach` method. Its
+    `Iterable[T]` subtype offers additional operations such as `zip`, `grouped`, `sliding`,
+    and `sameElements`, implemented using its `iterator` method. The `Seq`, `Map`,
+    and `Set` traits are iterable collections that represent Scala sequences, maps,
+    and sets, respectively. These traits are used to write code that is generic in
+    the type of the concrete Scala collection. The following `nonNull` method copies
+    elements from an `xs` collection that are different from `null`. Here, the `xs`
+    collection can be a `Vector[T]`, `List[T]`, or some other sequence:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Parallel collections form a separate hierarchy. The most general parallel collection
+    type is called `ParIterable`. Methods such as `foreach`, `map`, or `reduce` on
+    a `ParIterable` object execute in parallel. The `ParSeq`, `ParMap`, and `ParSet`
+    collections are parallel collections that correspond to `Seq`, `Map`, and `Set`,
+    but are not their subtypes. We can rewrite the `nonNull` method to use parallel
+    collections:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Although the implementation is identical, we can no longer pass a sequential
+    collection to the `nonNull` method. We can call `.par` on the sequential `xs`
+    collection before passing it to the `nonNull` method, but then the `filter` method
+    will execute in parallel. Can we instead write code that is agnostic in the type
+    of the collection? The generic collection types: `GenTraversable`, `GenIterable`,
+    `GenSeq`, `GenMap`, and `GenSet` exist for this purpose. Each of them represents
+    a supertype of the corresponding sequential or parallel collection type. For example,
+    the `GenSeq` generic sequence type allows us to rewrite the `nonNull` method as
+    follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: When using generic collection types, we need to remember that they might be
+    implemented either as a sequential collection or as a parallel collection. Thus,
+    as a precaution, if operations invoked on a generic collection execute any side
+    effects, you should use synchronization.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Treat operations invoked on a generic collection type as if they are parallel.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Configuring the parallelism level
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Parallel collections use all the processors by default; their underlying executor
+    has as many workers as there are processors. We can change this default behavior
+    by changing the `TaskSupport` object of the parallel collection. The basic `TaskSupport`
+    implementation is the `ForkJoinTaskSupport` class. It takes a `ForkJoinPool` collection
+    and uses it to schedule parallel operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Therefore, to change the parallelism level of a parallel collection, we instantiate
+    a `ForkJoinPool` collection with the desired parallelism level:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: Once a `TaskSupport` object is created, we can use it with different parallel
+    collections. Every parallel collection has a `tasksupport` field that we use to
+    assign the `TaskSupport` object to it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Measuring the performance on the JVM
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: To correctly measure the running time on the JVM is not an easy task. Under
+    the hood, the JVM does a lot more than meets the eye. The Scala compiler does
+    not produce machine code directly runnable on the CPU. Instead, the Scala compiler
+    produces a special intermediate instruction code called **Java bytecode**. When
+    bytecode from the Scala compiler gets run inside the JVM, at first it executes
+    in so-called **interpreted mode**; the JVM interprets each bytecode instruction
+    and simulates the execution of the program. Only when the JVM decides that the
+    bytecode in a certain method was run often enough does it compile the bytecode
+    to machine code, which can be executed directly on the processor. This process
+    is called **just-in-time compilation**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The JVM needs standardized bytecode to be cross-platform; the same bytecode
+    can be run on any processor or operating system that supports the JVM. However,
+    the entire bytecode of a program cannot be translated to the machine code as soon
+    as the program runs; this would be too slow. Instead, the JVM translates parts
+    of the programs, such as specific methods, incrementally, in short compiler runs.
+    In addition, the JVM can decide to additionally optimize certain parts of the
+    program that execute very frequently. As a result, programs running on the JVM
+    are usually slow immediately after they start, and eventually reach their optimal
+    performance. Once this happens, we say that the JVM reached its steady state.
+    When evaluating the performance on the JVM, we are usually interested in the **steady
+    state**; most programs run long enough to achieve it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To witness this effect, assume that you want to find out what the `TEXTAREA`
+    tag means in HTML. You write the program that downloads the HTML specification
+    and searches for the first occurrence of the `TEXTAREA` string. Having mastered
+    asynchronous programming in [Chapter 4](ch04.html "Chapter 4.  Asynchronous Programming
+    with Futures and Promises"), *Asynchronous Programming with Futures and Promises*,
+    you can implement the `getHtmlSpec` method, which starts an asynchronous computation
+    to download the HTML specification and returns a future value with the lines of
+    the HTML specification. You then install a callback; once the HTML specification
+    is available, you can call the `indexWhere` method on the lines to find the line
+    that matches the regular expression `.*TEXTAREA.*`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running this example several times from SBT shows that the times vary. At first,
+    the sequential and parallel versions execute for 45 and 16 milliseconds, respectively.
+    Next time, they take 36 and 10 milliseconds, and subsequently 10 and 4 milliseconds.
+    Note that we only observe this effect when running the examples inside the same
+    JVM process as SBT itself.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can draw a false conclusion that the steady state was reached at this point.
+    In truth, we should run this program many more times before the JVM properly optimizes
+    it. Therefore, we add the `warmedTimed` method to our package object. This method
+    runs the block of code `n` times before measuring its running time. We set the
+    default value for the `n` variable to `200`; although there is no way to be sure
+    that the JVM will reach a steady state after executing the block of code 200 times,
+    this is a reasonable default:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can now call the `warmedTimed` method instead of the `timed` method in the
+    `ParHtmlSearch` example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: Doing so changes the running times on our machine to 1.5 and 0.5 milliseconds
+    for the sequential and parallel versions of the program, respectively.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Make sure that the JVM is in the steady state before drawing any premature conclusions
+    about the running time of a program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are other reasons why measuring performance on the JVM is hard. Even if
+    the JVM reached a steady state for the part of the program we measure, the **Just-In-Time**
+    (**JIT**) compiler can at any point pause the execution and translate some other
+    part of the program, effectively slowing down our measurement. Then, the JVM provides
+    automatic memory management. In languages such as C++, an invocation of the `new`
+    keyword, which is used to allocate an object, must be accompanied by the corresponding
+    `delete` call that frees the memory occupied by the object so that it can be reused
+    later. In languages such as Scala and Java, however, there is no `delete` statement;
+    objects are eventually freed automatically during the process called **Garbage
+    Collection** (**GC**). Periodically, the JVM stops the execution, scans the heap
+    for all objects no longer used in the program, and frees the memory they occupy.
+    If we measure the running time of code that frequently causes GC cycles, the chances
+    are that GC will skew the measurements. In some cases, the performance of the
+    same program can vary from one JVM process to the other because the objects get
+    allocated in a way that causes a particular memory access pattern, impacting the
+    program's performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To get really reliable running time values, we need to run the code many times
+    by starting separate JVM processes, making sure that the JVM reached a steady
+    state, and taking the average of all the measurements. Frameworks such as **ScalaMeter**,
+    introduced in [Chapter 9](ch09.html "Chapter 9. Concurrency in Practice"), *Concurrency
+    in Practice*, go a long way toward automating this process.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Caveats with parallel collections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Parallel collections were designed to provide a programming API similar to sequential
+    Scala collections. Every sequential collection has a parallel counterpart and
+    most operations have the same signature in both sequential and parallel collections.
+    Still, there are some caveats when using parallel collections, and we will study
+    them in this section.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Non-parallelizable collections
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Parallel collections use **splitters**, represented with the `Splitter[T]`
+    type, in order to provide parallel operations. A splitter is a more advanced form
+    of an iterator; in addition to the iterator''s `next` and `hasNext` methods, splitters
+    define the `split` method, which divides the splitter `S` into a sequence of splitters
+    that traverse parts of the `S` splitter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: This method allows separate processors to traverse separate parts of the input
+    collection. The `split` method must be implemented efficiently, as this method
+    is invoked many times during the execution of a parallel operation. In the vocabulary
+    of computational complexity theory, the allowed asymptotic running time of the
+    `split` method is **O**(log (*N*)), where *N* is the number of elements in the
+    splitter. Splitters can be implemented for flat data structures such as arrays
+    and hash tables, and tree-like data structures such as immutable hash maps and
+    vectors. Linear data structures such as the Scala `List` and `Stream` collections
+    cannot efficiently implement the `split` method. Dividing a long linked list of
+    nodes into two parts requires traversing these nodes, which takes a time that
+    is proportionate to the size of the collection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Operations on Scala collections such as `Array`, `ArrayBuffer`, mutable `HashMap`
+    and `HashSet`, `Range`, `Vector`, immutable `HashMap` and `HashSet`, and concurrent
+    `TrieMap` can be parallelized. We call these collections *parallelizable*. Calling
+    the `par` method on these collections creates a parallel collection that shares
+    the same underlying dataset as the original collection. No elements are copied
+    and the conversion is fast.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Other Scala collections need to be converted to their parallel counterparts
+    upon calling `par`. We can refer to them as *non-parallelizable collections*.
+    Calling the `par` method on non-parallelizable collections entails copying their
+    elements into a new collection. For example, the `List` collection needs to be
+    copied to a `Vector` collection when the `par` method is called, as shown in the
+    following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: Calling `par` on `List` takes 55 milliseconds on our machine, whereas calling
+    `par` on `Vector` takes 0.025 milliseconds. Importantly, the conversion from a
+    sequential collection to a parallel one is not itself parallelized, and is a possible
+    sequential bottleneck.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Converting a non-parallelizable sequential collection to a parallel collection
+    is not a parallel operation; it executes on the caller thread.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Sometimes, the cost of converting a non-parallelizable collection to a parallel
+    one is acceptable. If the amount of work in the parallel operation far exceeds
+    the cost of converting the collection, then we can bite the bullet and pay the
+    cost of the conversion. Otherwise, it is more prudent to keep the program data
+    in parallelizable collections and benefit from fast conversions. When in doubt,
+    measure!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Non-parallelizable operations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'While most parallel collection operations achieve superior performance by executing
+    on several processors, some operations are inherently sequential, and their semantics
+    do not allow them to execute in parallel. Consider the `foldLeft` method from
+    the Scala collections API:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This method visits elements of the collection going from left to right and
+    adds them to the accumulator of type `S`. The accumulator is initially equal to
+    the zero value `z`, and is updated with the function `f` that uses the accumulator
+    and a collection element of type `T` to produce a new accumulator. For example,
+    given a list of integers `List(1, 2, 3)`, we can compute the sum of its integers
+    with the following expression:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: This `foldLeft` method starts by assigning `0` to `acc`. It then takes the first
+    element in the list `1` and calls the function `f` to evaluate `0 + 1`. The `acc`
+    accumulator then becomes `1`. This process continues until the entire list of
+    elements is visited, and the `foldLeft` method eventually returns the result `6`.
+    In this example, the `S` type of the accumulator is set to the `Int` type. In
+    general, the accumulator can have any type. When converting a list of elements
+    to a string, the zero value is an empty string and the function `f` concatenates
+    a string and a number.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The crucial property of the `foldLeft` operation is that it traverses the elements
+    of the list by going from left to right. This is reflected in the type of the
+    function `f`; it accepts an accumulator of type `S` and a list value of type `T`.
+    The function `f` cannot take two values of the accumulator type `S` and merge
+    them into a new accumulator of type `S`. As a consequence, computing the accumulator
+    cannot be implemented in parallel; the `foldLeft` method cannot merge two accumulators
+    from two different processors. We can confirm this by running the following program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding program, we use the `getHtmlSpec` method introduced earlier
+    to obtain the lines of the HTML specification. We install a callback using the
+    `foreach` call to process the HTML specification once it arrives; the `allMatches`
+    method calls the `foldLeft` operation to accumulate the lines of the specification
+    that contain the `TEXTAREA` string. Running the program reveals that both the
+    sequential and parallel `foldLeft` operations take 5.6 milliseconds.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To specify how the accumulators produced by different processors should be
+    merged together, we need to use the `aggregate` method. The `aggregate` method
+    is similar to the `foldLeft` operation, but it does not specify that the elements
+    are traversed from left to right. Instead, it only specifies that subsets of elements
+    are visited going from left to right; each of these subsets can produce a separate
+    accumulator. The `aggregate` method takes an additional function of type `(S,
+    S) => S`, which is used to merge multiple accumulators:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running the example again shows the difference between the sequential and parallel
+    versions of the program; the parallel `aggregate` method takes 1.4 milliseconds
+    to complete on our machine.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When doing these kinds of reduction operation in parallel, we can alternatively
+    use the `reduce` or `fold` methods, which do not guarantee going from left to
+    right. The `aggregate` method is more expressive, as it allows the accumulator
+    type to be different from the type of the elements in the collection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Use the `aggregate` method to execute parallel reduction operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Other inherently sequential operations include `foldRight`, `reduceLeft`, `reduceRight`,
+    `reduceLeftOption`, `reduceRightOption`, `scanLeft`, `scanRight`, and methods
+    that produce non-parallelizable collections such as the `toList` method.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Side effects in parallel operations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'As their name implies, parallel collections execute on multiple threads concurrently.
+    We have already learned in [Chapter 2](ch02.html "Chapter 2. Concurrency on the
+    JVM and the Java Memory Model"), *Concurrency on the JVM and the Java Memory Model*,
+    that multiple threads cannot correctly modify shared memory locations without
+    the use of synchronization. Assigning to a mutable variable from a parallel collection
+    operation may be tempting, but it is almost certainly incorrect. This is best
+    illustrated by the following example, in which we construct two sets, `a` and
+    `b`, where `b` is the subset of the elements in `a`, and then uses the `total`
+    mutable variable to count the size of the intersection:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Instead of returning `250`, the parallel version nondeterministically returns
+    various wrong results. Note that you might have to change the sizes of the sets
+    `a` and `b` to witness this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To ensure that the parallel version returns the correct results, we can use
+    an atomic variable and its `incrementAndGet` method. However, this leads to the
+    same scalability problems we had before. A better alternative is to use the parallel
+    `count` method:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: If the amount of work executed per element is low and the matches are frequent,
+    the parallel `count` method will result in better performance than the `foreach`
+    method with an atomic variable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: To avoid the need for synchronization and ensure better scalability, favor declarative-style
+    parallel operations instead of the side effects in parallel `for` loops.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Similarly, we must ensure that the memory locations read by a parallel operation
+    are protected from concurrent writes. In the last example, the `b` set should
+    not be concurrently mutated by some thread while the parallel operation is executing;
+    this leads to the same incorrect results as using mutable variables from within
+    the parallel operation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Nondeterministic parallel operations
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In [Chapter 2](ch02.html "Chapter 2. Concurrency on the JVM and the Java Memory
+    Model"), *Concurrency on the JVM and the Java Memory Model*, we saw that multithreaded
+    programs can be nondeterministic; given the same inputs, they can produce different
+    outputs depending on the execution schedule. The `find` collection operation returns
+    an element matching a given predicate. The parallel `find` operation returns whichever
+    element was found first by some processor. In the following example, we use `find`
+    to search the HTML specification for occurrences of the `TEXTAREA` string; running
+    the example several times gives different results, because the `TEXTAREA` string
+    occurs in many different places in the HTML specification:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If we want to retrieve the first occurrence of the `TEXTAREA` string, we need
+    to use `indexWhere` instead:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Parallel collection operations other than `find` are deterministic as long
+    as their operators are **pure functions**. A pure function is always evaluated
+    to the same value, given the same inputs, and does not have any side effects.
+    For example, the function `(x: Int) => x + 1` is a pure function. By contrast,
+    the following function `f` is not pure, because it changes the state of the `uid`
+    value:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Even if a function does not modify any memory locations, it is not pure if
+    it reads memory locations that might change. For example, the following `g` function
+    is not pure:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'When used with a non-pure function, any parallel operation can become nondeterministic.
+    Mapping the range of values to unique identifiers in parallel gives a nondeterministic
+    result, as illustrated by the following call:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: The resulting sequence, `uids`, is different in separate executions. The parallel
+    `map` operation retains the relative order of elements from the range `0 until
+    10000`, so the tuples in `uids` are ordered by their first elements from 0 until
+    10,000\. On the other hand, the second element in each tuple is assigned nondeterministically;
+    in one execution, the `uids` sequence can start with the `(0, 0), (1, 2), (2,
+    3), ...` and in another, with `(0, 0), (1, 4), (2, 9), ...`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Commutative and associative operators
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Parallel collection operations such as `reduce`, `fold`, `aggregate`, and `scan`
+    take binary operators as part of their input. A binary operator is a function  `op`
+    that takes two arguments, `a` and `b`. We can say that the binary operator `op`
+    is **commutative** if changing the order of its arguments returns the same result,
+    that is, `op(a, b) == op(b, a)`. For example, adding two numbers together is a
+    commutative operation. Concatenating two strings is not a commutative operation;
+    we get different strings depending on the concatenation order.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Binary operators for the parallel `reduce`, `fold`, `aggregate`, and `scan`
+    operations never need to be commutative. Parallel collection operations always
+    respect the relative order of the elements when applying binary operators, provided
+    that the underlying collections have any ordering. Elements in sequence collections,
+    such as `ArrayBuffer` collections, are always ordered. Other collection types
+    can order their elements but are not required to do so.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the following example, we can concatenate the strings inside an `ArrayBuffer`
+    collection into one long string by using the sequential `reduceLeft` operation
+    and the parallel `reduce` operation. We then convert the `ArrayBuffer` collection
+    into a set, which does not have an ordering:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see that the string is concatenated correctly when the parallel `reduce`
+    operation is invoked on a parallel array, but the order of the pages is mangled
+    both for the `reduceLeft` and `reduce` operations when invoked on a set; the default
+    Scala set implementation does not order the elements.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Binary operators used in parallel operations do not need to be commutative.
+  prefs: []
+  type: TYPE_NORMAL
+- en: An `op` binary operator is **associative** if applying `op` consecutively to
+    a sequence of values `a`, `b`, and `c` gives the same result regardless of the
+    order in which the operator is applied, that is, `op(a, op(b, c)) == op(op(a,
+    b), c)`. Adding two numbers together or computing the larger of the two numbers
+    is an associative operation. Subtraction is not associative, as `1 - (2 - 3)`
+    is different from `(1 - 2) - 3`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Parallel collection operations usually require associative binary operators.
+    While using subtraction with the `reduceLeft` operation means that all the numbers
+    in the collection should be subtracted from the first number, using subtraction
+    in the `reduce`, `fold`, or `scan` methods gives nondeterministic and incorrect
+    results, as illustrated by the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: While the `reduceLeft` operation consistently returns `-435`, the `reduce` operation
+    returns meaningless results at random.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Make sure that binary operators used in parallel operations are associative.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Parallel operations such as `aggregate` require the multiple binary operators,
+    `sop` and `cop`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `sop` operator is of the same type as the operator required by the `reduceLeft`
+    operation. It takes an accumulator and the collection element. The `sop` operator
+    is used to fold elements within a subset assigned to a specific processor. The
+    `cop` operator is used to merge the subsets together and is of the same type as
+    the operators for `reduce` and `fold`. The `aggregate` operation requires that
+    `cop` is associative and that `z` is the **zero element** for the accumulator,
+    that is, `cop(z, a) == a`. Additionally, the `sop` and `cop` operators must give
+    the same result irrespective of the order in which element subsets are assigned
+    to processors, that is, `cop(sop(z, a), sop(z, b)) == cop(z, sop(sop(z, a), b))`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using parallel and concurrent collections together
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'We have already seen that parallel collection operations are not allowed to
+    access mutable states without the use of synchronization. This includes modifying
+    sequential Scala collections from within a parallel operation. Recall that we
+    used a mutable variable in the section on side effects to count the size of the
+    intersection. In the following example, we will download the URL and HTML specifications,
+    convert them to sets of words, and try to find an intersection of their words.
+    In the `intersection` method, we use a `HashSet` collection and update it in parallel.
+    Collections in the `scala.collection.mutable` package are not thread-safe. The
+    following example nondeterministically drops elements, corrupts the buffer state,
+    or throws exceptions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We learned in [Chapter 3](ch03.html "Chapter 3. Traditional Building Blocks
+    of Concurrency"), *Traditional Building Blocks of Concurrency*, that concurrent
+    collections can be safely modified by multiple threads without the risk of data
+    corruption. We use the concurrent skip list collection from the JDK to accumulate
+    words that appear in both specifications. The `decorateAsScala` object is used
+    to add the `asScala` method to Java collections:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: Weakly consistent iterators
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As we saw in [Chapter 3](ch03.html "Chapter 3. Traditional Building Blocks of
+    Concurrency"), *Traditional Building Blocks of Concurrency*, iterators on most
+    concurrent collections are weakly consistent. This means that they are not guaranteed
+    to correctly traverse the data structure if some thread concurrently updates the
+    collection during traversal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'When executing a parallel operation on a concurrent collection, the same limitation
+    applies; the traversal is weakly consistent and might not reflect the state of
+    the data structure at the point when the operation started. The Scala `TrieMap`
+    collection is an exception to this rule. In the following example, we will create
+    a `TrieMap` collection called `cache` containing numbers between 0 and 100, mapped
+    to their string representation. We will then start a parallel operation that traverses
+    these numbers and adds the mappings for their negative values to the map:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: The parallel `foreach` operation does not traverse entries added after the parallel
+    operation started; only positive numbers are reflected in the traversal. The `TrieMap`
+    collection is implemented using the Ctrie concurrent data structure, which atomically
+    creates a snapshot of the collection when the parallel operation starts. Snapshot
+    creation is efficient and does not require you to copy the elements; subsequent
+    update operations incrementally rebuild parts of the `TrieMap` collection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Whenever program data needs to be simultaneously modified and traversed in parallel,
+    use the `TrieMap` collection.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Implementing custom parallel collections
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Parallel collections in the Scala standard library are sufficient for most tasks,
+    but in some cases we want to add parallel operations to our own collections. The
+    Java `String` class does not have a direct parallel counterpart in the parallel
+    collections framework. In this section, we will study how to implement a custom
+    `ParString` class that supports parallel operations. We will then use our custom
+    parallel collection class in several example programs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The first step in implementing a custom parallel collection is to extend the
+    correct parallel collection trait. A parallel string is a sequence of characters,
+    so we need to extend the `ParSeq` trait with the `Char` type argument. Once a
+    string is created, it can no longer be modified; we say that the string is an
+    immutable collection. For this reason, we extend a subtype of the `scala.collection.parallel.ParSeq`
+    trait, the `ParSeq` trait from the `scala.collection.parallel.immutable` package:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: When we extend a parallel collection, we need to implement its `apply`, `length`,
+    `splitter`, and `seq` methods. The `apply` method returns an element at position
+    `i` in the sequence, and the `length` method returns the total number of elements
+    in the sequence. These methods are equivalent to the methods on sequential collections,
+    so we use the `String` class's `charAt` and `length` methods to implement them.
+    Where defining a custom regular sequence requires implementing its `iterator`
+    method, custom parallel collections need a `splitter` method. Calling `splitter`
+    returns an object of the `Splitter[T]` type, a special iterator that can be split
+    into subsets. We implement the `splitter` method to return a `ParStringSplitter`
+    object, which we will show you shortly. Finally, parallel collections need a `seq`
+    method, which returns a sequential Scala collection. Since `String` itself comes
+    from Java and is not a Scala collection, we will use its `WrappedString` wrapper
+    class from the Scala collections library.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Our custom parallel collection class is almost complete; we only need to provide
+    the implementation for the `ParStringSplitter` object. We will study how to do
+    this next.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Splitters
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: A splitter is an iterator that can be efficiently split into disjoint subsets.
+    Here, efficient means that the splitter's `split` method must have **O**(*log*(*N*))
+    running time, where *N* is the number of elements in the splitter. Stated informally,
+    a splitter is not allowed to copy large parts of the collection when split; if
+    it did, the computational overhead from splitting would overcome any benefits
+    from parallelization and become a serial bottleneck.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The easiest way to define a new `Splitter` class for the Scala parallel collection
+    framework is to extend the `IterableSplitter[T]` trait, which has the following
+    simplified interface:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: The splitter interface declares the `dup` method which duplicates the current
+    splitter. This method simply returns a new splitter pointing to the same subset
+    of the collection. Splitters also define the `remaining` method, which returns
+    the number of elements that the splitter can traverse by calling `next` before
+    the `hasNext` method returns `false`. The `remaining` method does not change the
+    state of the splitter and can be called as many times as necessary.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, the `split` method can be called only once and it invalidates the splitter;
+    none of the splitter's methods should be called after calling the `split` method.
+    The `split` method returns a sequence of splitters that iterate over the disjoint
+    subsets of the original splitter. If the original splitter has two or more elements
+    remaining, then none of the resulting splitters should be empty, and the `split`
+    method should return at least two splitters. If the original splitter has a single
+    element or no elements remaining, then `split` is allowed to return empty splitters.
+    Importantly, the splitters returned by `split` should be approximately equal in
+    size; this helps the parallel collection scheduler achieve good performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To allow sequence-specific operations such as `zip`, `sameElements`, and `corresponds`,
+    parallel sequence collections use a more refined subtype of the `IterableSplitter`
+    trait, called the `SeqSplitter` trait:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: Sequence splitters declare an additional method, `psplit`, which takes the list
+    of sizes for the splitter partitions and returns as many splitters and elements
+    as specified by the `sizes` parameter. If `sizes` specifies more elements than
+    there are available in the splitter, additional empty splitters are returned at
+    the end of the resulting sequence. For example, calling `s.psplit(10, 20, 15)`
+    on a splitter with only 15 elements yields three splitters with sizes 10, five,
+    and zero.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Similarly, if the `sizes` parameter specifies fewer elements than there are
+    in the splitter, an additional splitter with the remaining elements is appended
+    at the end.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our parallel string class is a parallel sequence, so we need to implement a
+    sequence splitter. We can start by extending the `SeqSplitter` class with the
+    `Char` type parameter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: We add the `s` field pointing to the underlying `String` object in the `ParStringSplitter`
+    constructor. A parallel string splitter must represent a subset of the elements
+    in the string, so we add an `i` field to represent the position of the next character
+    that will be traversed by the splitter. Note that `i` does not need to be synchronized;
+    the splitter is only used by one processor at a time. The `limit` field contains
+    the position after the last character in the splitter. This way, our splitter
+    class represents substrings of the original string.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Implementing methods inherited from the `Iterator` trait is easy. As long as
+    `i` is less than `limit`, `hasNext` must return `true`. The `next` method uses
+    `i` to read the character at that position, increment `i`, and return the character:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `dup` and `remaining` methods are straightforward; the `dup` method creates
+    a new parallel string splitter using the state of the current splitter, and the
+    `remaining` method uses `limit` and `i` to compute the number of remaining elements:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The main parts of a splitter are its `split` and `psplit` methods. Luckily,
+    `split` can be implemented in terms of `psplit`. If there is more than one element
+    remaining, we call the `psplit` method. Otherwise, if there are no elements to
+    split, we return the `this` splitter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `psplit` method uses `sizes` to peel off parts of the original splitter.
+    It does so by incrementing the `i` variable and creating a new splitter for each
+    size `sz` in the `sizes` parameter. Recall that the current splitter is considered
+    invalidated after calling the `split` or `psplit` method, so we are allowed to
+    mutate its `i` field:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note that we never copy the string underlying the splitter; instead, we update
+    the indices that mark the beginning and the end of the splitter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We have now completed our `ParString` class; we can use it to execute parallel
+    operations on strings. We can also use it to count the number of uppercase characters
+    in the string as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE41]'
+  prefs: []
+  type: TYPE_PRE
+- en: On our machine, the sequential `foldLeft` call takes 57 milliseconds, and the
+    parallel `aggregate` call takes 19 milliseconds. This is a good indication that
+    we have implemented parallel strings efficiently.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Combiners
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Collection methods in the Scala standard library are divided into two major
+    groups: **accessor** and **transformer** methods. Accessor methods, such as `foldLeft`,
+    `find`, or `exists`, return a single value from the collection. By contrast, transformer
+    methods, such as `map`, `filter`, or `groupBy`, create new collections and return
+    them as results.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To generically implement transformer operations, the Scala collection framework
+    uses an abstraction called a **builder**, which has roughly the following interface:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE42]'
+  prefs: []
+  type: TYPE_PRE
+- en: Here, the `Repr` type is of a collection that a specific builder can produce,
+    and `T` is the type of its elements. A builder is used by repetitively calling
+    its `+=` method to add more elements, and eventually calling the `result` method
+    to obtain the collection. After the `result` method is called, the contents of
+    the builder are undefined. The `clear` method can be used to reset the state of
+    the builder.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Every collection defines a custom builder used in various transformer operations.
+    For example, the `filter` operation is defined in the `Traversable` trait, roughly
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE43]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding example, the `filter` implementation relies on the abstract
+    `newBuilder` method, which is implemented in subclasses of the `Traversable` trait.
+    This design allows defining all collection methods once, and only provide the
+    `foreach` method (or the iterator) and the `newBuilder` method when declaring
+    a new collection type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Combiners** are a parallel counterpart of standard builders, and are represented
+    with the `Combiner[T, Repr]` type, which subtypes the `Builder[T, Repr]` type:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE44]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `size` method is self-explanatory. The `combine` method takes another combiner
+    called `that`, and produces a third combiner that contains the elements of the
+    `this` and `that` combiners. After the `combine` method returns, the contents
+    of both the `this` and `that` combiners are undefined, and should not be used
+    again. This constraint allows reusing the `this` or `that` combiner object as
+    the resulting combiner. Importantly, if that combiner is the same runtime object
+    as the `this` combiner, the `combine` method should just return the `this` combiner.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There are three ways to implement a custom combiner, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Merging**: Some data structures have an efficient merge operation that can
+    be used to implement the `combine` method.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Two-phase evaluation**: Here, elements are first partially sorted into buckets
+    that can be efficiently concatenated, and placed into the final data structure
+    once it is allocated.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Concurrent data structure**: The `+=` method is implemented by modifying
+    a concurrent data structure shared between different combiners, and the `combine`
+    method does not do anything.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Most data structures do not have an efficient merge operation, so we usually
+    have to use two-phase evaluation in the combiner implementation. In the following
+    example, we implement the combiners for parallel strings using two-phase evaluation.
+    The `ParStringCombiner` class contains a resizable array, called `chunks`, containing
+    `StringBuilder` objects. Invoking the `+=` method adds a character to the rightmost
+    `StringBuilder` object in this array:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE45]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `combine` method takes the `StringBuilder` objects of the `that` combiner,
+    and adds them to the `chunks` array of the `this` combiner. It then returns a
+    reference to the `this` combiner:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE46]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Finally, the `result` method allocates a new `StringBuilder` object and adds
+    the characters from all the chunks into the resulting string:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE47]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We test the performance of the parallel `filter` method with the following
+    snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE48]'
+  prefs: []
+  type: TYPE_PRE
+- en: Running this snippet on our machine takes 11 milliseconds for the sequential
+    version, and 6 milliseconds for the parallel one.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we learned how to use parallel collections to improve program
+    performance. We have seen that sequential operations on large collections can
+    be easily parallelized and learned the difference between parallelizable and non-parallelizable
+    collections. We investigated how mutability and side effects impact correctness
+    and determinism of parallel operations and saw the importance of using associative
+    operators for parallel operations. Finally, we studied how to implement our custom
+    parallel collection class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We also found, however, that tuning program performance is tricky. Effects such
+    as memory contention, garbage collection, and dynamic compilation may impact the
+    performance of the program in ways that are hard to predict by looking at the
+    source code. Throughout this section, we urged you to confirm suspicions and claims
+    about program performance by experimentally validating them. Understanding the
+    performance characteristics of your program is the first step toward optimizing
+    it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Even when you are sure that parallel collections improve program performance,
+    you should think twice before using them. Donald Knuth once coined the phrase
+    *Premature optimization is the root of all evil*. It is neither desirable nor
+    necessary to use parallel collections wherever possible. In some cases, parallel
+    collections give negligible or no increase in speed. In other situations, they
+    could be speeding up a part of the program that is not the real bottleneck. Before
+    using parallel collections, make sure to investigate which part of the program
+    takes the most time, and whether it is worth parallelizing. The only practical
+    way of doing so is by correctly measuring the running time of the parts of your
+    application. In [Chapter 9](ch09.html "Chapter 9. Concurrency in Practice"), *Concurrency
+    in Practice*, we will introduce a framework called ScalaMeter, which offers a
+    more robust way to measure program performance than what we saw in this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This chapter briefly introduced concepts such as Random Access Memory, cache
+    lines, and the MESI protocol. If you would like to learn more about this, you
+    should read the article, *What Every Programmer Should Know About Memory*, by
+    Ulrich Drepper. To gain a more in-depth knowledge about the Scala collections
+    hierarchy, we recommend you to search for the document entitled *The Architecture
+    of Scala Collections*, by Martin Odersky and Lex Spoon, or the paper *Fighting
+    Bit Rot with Types*, by Martin Odersky and Adriaan Moors. To understand how data-parallel
+    frameworks work under the hood, consider reading the doctoral thesis entitled
+    *Data Structures and Algorithms for Data-Parallel Computing in a Managed Runtime*,
+    by Aleksandar Prokopec.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So far, we've assumed that all the collection elements are available when the
+    data-parallel operation starts. A collection does not change its contents during
+    the data-parallel operation. This makes parallel collections ideal in situations
+    where we already have the dataset, and we want to process it in bulk. In other
+    applications, data elements are not immediately available, but arrive asynchronously.
+    In the next chapter, we will learn about an abstraction called an event stream,
+    which is used when asynchronous computations produce multiple intermediate results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Exercises
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In the following exercises, you will use data-parallel collections in several
+    concrete parallel collection use cases, and implement custom parallel collections.
+    In all examples, a special emphasis is put on measuring the performance gains
+    from parallelization. Even when it is not asked for explicitly, you should ensure
+    that your program is not only correct but also faster than a corresponding sequential
+    program:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Measure the average running time for allocating a simple object on the JVM.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Count the occurrences of the whitespace character in a randomly generated string,
+    where the probability of a whitespace at each position is determined by a `p`
+    parameter. Use the parallel `foreach` method. Plot a graph that correlates the
+    running time of this operation with the `p` parameter.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implement a program that renders the Mandelbrot set in parallel.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implement a program that simulates a cellular automaton in parallel.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implement a parallel *Barnes-Hut N-body* simulation algorithm.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Explain how you can improve the performance of the `result` method in the `ParStringCombiner`
+    class, as shown in this chapter. Can you parallelize this method?
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implement a custom splitter for the binary heap data structure.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: 'The binomial heap, described in the doctoral thesis of Chris Okasaki entitled
+    *Purely Functional Data Structures*, is an immutable data structure that efficiently
+    implements a priority queue with four basic operations: insert the element, find
+    the smallest element, remove the smallest element, and merge two binomial heaps:'
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE49]'
+  prefs:
+  - PREF_IND
+  type: TYPE_PRE
+- en: Implement the `BinomialHeap` class. Then, implement splitters and combiners
+    for the binomial heap, and override the `par` operation.
+  prefs:
+  - PREF_IND
+  type: TYPE_NORMAL
+- en: Implement the `Combiner` trait for the Red-Black tree from the Scala standard
+    library. Use it to provide a parallel version of the `SortedSet` trait.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Implement a `parallelBalanceParentheses` method, which returns `true` if the
+    parentheses in a string are properly balanced, or `false` otherwise. Parentheses
+    are balanced if, going from left to right, the count of left parenthesis occurrences
+    is always larger than, or equal to, the count of right parenthesis occurrences,
+    and the total count of the left parentheses is equal to the total count of the
+    right parentheses. For example, string `0(1)(2(3))4` is balanced, but strings
+    `0)2(1(3)` and `0((1)2` are not. You should use the `aggregate` method.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
