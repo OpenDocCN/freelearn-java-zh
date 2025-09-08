@@ -1,0 +1,869 @@
+<html><head></head><body><div id="sbo-rt-content" class="calibre1"><div class="calibre2" title="Chapter 5. Making Use of New APIs to Improve Your Code"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title"><a id="ch05" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Chapter 5. Making Use of New APIs to Improve Your Code</h1></div></div></div><p class="calibre11">In the previous lessons, we talked about possible ways to improve the performance of your Java application--from using the new command and monitoring tools to adding multithreading and introducing reactive programming and even to radically re-architecting your current solution into an unruly and flexible bunch of small independent deployment units and microservices. Without knowing your particular situation, there is no way for us to guess which of the provided recommendations can be helpful to you. That's why, in this lesson, we will describe a few recent additions to the JDK that can be helpful to you too. As we mentioned in the previous lesson, the gain in performance and overall code improvement does not always require us to radically redesign it. Small incremental changes can sometimes bring more significant improvements than we could have expected.</p><p class="calibre11">To bring back our analogy of a pyramid building, instead of trying to change the logistics of the delivery of the stones to the final destination--in order to shorten the construction time--it is often prudent to look closer at the tools the builders are using first. If each operation can be completed in half the time, the overall time of the project's delivery can be shortened accordingly, even if each of the stone blocks travels the same, if not a larger, distance.</p><p class="calibre11">These are the improvements of the programming tools we will discuss in this lesson:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem">Using filters on streams as a way to find what you need and to decrease workload</li><li class="listitem">A new stack-walking API as the way analyze the stack trace programmatically in order to apply an automatic correction</li><li class="listitem">New convenient static factory methods that create compact, unmodifiable collection instances</li><li class="listitem">The new <code class="literal">CompletableFuture</code> class as a way to access the results of asynchronous processing</li><li class="listitem">The JDK 9 stream API improvements that can speed up processing while making your code more readable</li></ul></div><div class="calibre2" title="Filtering Streams"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title1"><a id="ch05lvl1sec35" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Filtering Streams</h1></div></div></div><p class="calibre11">The <code class="literal">java.util.streams.Stream</code> interface was introduced in Java 8. It emits elements and supports a variety of operations that perform computations based on these elements. A stream can be finite or infinite, slow or fast emitting. Naturally, there is always a concern that the rate of the newly emitted elements may be higher than the rate of the processing. Besides, the ability to keep up with the input reflects the application's performance. The <code class="literal">Stream</code> implementations address the backpressure (when the rate of the element processing is lower than their emitting rate) by adjusting the emitting and processing rates using a buffer and various other techniques. In addition, it is always helpful if an application developer makes sure that the decision about processing or skipping each particular element is made as early as possible so that the processing resources are not wasted. Depending on the situation, different operations can be used for filtering the data.</p><div class="calibre2" title="Basic Filtering"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec11" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Basic Filtering</h2></div></div></div><p class="calibre11">The first and the most straightforward way to do filtering is using the <code class="literal">filter()</code> operation. To demonstrate all the following capabilities, we will use the <code class="literal">Senator</code> class:</p><div class="calibre2"><pre class="programlisting">public class Senator {
+    private int[] voteYes, voteNo;
+    private String name, party;
+    public Senator(String name, String party, 
+                     int[] voteYes, int[] voteNo) {
+        this.voteYes = voteYes;
+        this.voteNo = voteNo;
+        this.name = name;
+        this.party = party;
+    }
+    public int[] getVoteYes() { return voteYes; }
+    public int[] getVoteNo() { return voteNo; }
+    public String getName() { return name; }
+    public String getParty() { return party; }
+    public String toString() {
+        return getName() + ", P" + 
+          getParty().substring(getParty().length() - 1);
+    }
+}</pre></div><p class="calibre11">As you can see, this class captures a senator's name, party, and how they voted for each of the issues (<code class="literal">0</code> means <code class="literal">No</code> and <code class="literal">1</code> means <code class="literal">Yes</code>). If for a particular issue <code class="literal">i</code>, <code class="literal">voteYes[i]=0</code> , and <code class="literal">voteNo[i]=0</code>, it means that the senator was not present. It is not possible to have <code class="literal">voteYes[i]=1</code> and <code class="literal">voteNo[i]=1</code> for the same issue.</p><p class="calibre11">Let's assume that there are 100 senators, each belonging to one of the two parties: <code class="literal">Party1</code> or <code class="literal">Party2</code>. We can use these objects to collect statistics of how senators voted for the last 10 issues using the <code class="literal">Senate</code> class:</p><div class="calibre2"><pre class="programlisting">public class Senate {
+  public static List&lt;Senator&gt; getSenateVotingStats(){
+     List&lt;Senator&gt; results = new ArrayList&lt;&gt;();
+     results.add(new Senator("Senator1", "Party1", 
+                       new int[]{1,0,0,0,0,0,1,0,0,1}, 
+                       new int[]{0,1,0,1,0,0,0,0,1,0}));
+     results.add(new Senator("Senator2", "Party2", 
+                       new int[]{0,1,0,1,0,1,0,1,0,0}, 
+                       new int[]{1,0,1,0,1,0,0,0,0,1}));
+     results.add(new Senator("Senator3", "Party1", 
+                       new int[]{1,0,0,0,0,0,1,0,0,1}, 
+                       new int[]{0,1,0,1,0,0,0,0,1,0}));
+     results.add(new Senator("Senator4", "Party2", 
+                       new int[]{1,0,1,0,1,0,1,0,0,1}, 
+                       new int[]{0,1,0,1,0,0,0,0,1,0}));
+     results.add(new Senator("Senator5", "Party1", 
+                       new int[]{1,0,0,1,0,0,0,0,0,1}, 
+                       new int[]{0,1,0,0,0,0,1,0,1,0}));
+     IntStream.rangeClosed(6, 98).forEach(i -&gt; {
+       double r1 = Math.random();
+       String name = "Senator" + i;
+       String party = r1 &gt; 0.5 ? "Party1" : "Party2";
+       int[] voteNo = new int[10];
+       int[] voteYes = new int[10];
+       IntStream.rangeClosed(0, 9).forEach(j -&gt; {
+         double r2 = Math.random();
+         voteNo[j] = r2 &gt; 0.4 ? 0 : 1;
+         voteYes[j] = r2 &lt; 0.6 ? 0 : 1;
+       });
+       results.add(new Senator(name,party,voteYes,voteNo));
+     });
+     results.add(new Senator("Senator99", "Party1", 
+                       new int[]{0,0,0,0,0,0,0,0,0,0}, 
+                       new int[]{1,1,1,1,1,1,1,1,1,1}));
+        results.add(new Senator("Senator100", "Party2",
+                       new int[]{1,1,1,1,1,1,1,1,1,1}, 
+                       new int[]{0,0,0,0,0,0,0,0,0,0}));
+        return results;
+    }
+    public static int timesVotedYes(Senator senator){
+        return Arrays.stream(senator.getVoteYes()).sum();
+    }
+}</pre></div><p class="calibre11">We hardcoded statistics for the first five senators so we can get predictable results while testing our filters and verify that the filters work. We also hardcoded voting statistics for the last two senators so we can have a predictable count while looking for senators who voted only <code class="literal">Yes</code> or only <code class="literal">No</code> for each of the ten issues. And we added the <code class="literal">timesVotedYes()</code> method, which provides the count of how many times the given <code class="literal">senator</code> voted <code class="literal">Yes</code>.</p><p class="calibre11">Now we can collect some data from the <code class="literal">Senate</code> class. For example, let's see how many members of each party comprise the <code class="literal">Senate</code> class:</p><div class="calibre2"><pre class="programlisting">List&lt;Senator&gt; senators = Senate.getSenateVotingStats();
+long c1 = senators.stream()
+   .filter(s -&gt; s.getParty() == "Party1").count();
+System.out.println("Members of Party1: " + c1);
+
+long c2 = senators.stream()
+   .filter(s -&gt; s.getParty() == "Party2").count();
+System.out.println("Members of Party2: " + c2);
+System.out.println("Members of the senate: " + (c1 + c2));</pre></div><p class="calibre11">The result of the preceding code differs from run to run because of the random value generator we used in the <code class="literal">Senate</code> class, so do not expect to see exactly the same numbers if you try to run the examples. What is important is that the total of the two party members should be equal 100--the total number of the senators in the <code class="literal">Senate</code> class:</p><div class="mediaobject"><img src="Images/05_01.jpg" alt="Basic Filtering" class="calibre94"/></div><p class="calibre11">The expression <code class="literal">s -&gt; s.getParty()=="Party1"</code> is the predicate that filters out only those senators who are members of <code class="literal">Party1</code>. So, the elements (<code class="literal">Senator</code> objects) of <code class="literal">Party2</code> do not get through and are not included in the count. That was pretty straightforward.</p><p class="calibre11">Now let's look at a more complex example of filtering. Let's count how many senators of each party voted on <code class="literal">issue 3</code>:</p><div class="calibre2"><pre class="programlisting">int issue = 3;
+c1 = senators.stream()
+  .filter(s -&gt; s.getParty() == "Party1")
+  .filter(s -&gt; s.getVoteNo()[issue] != s.getVoteYes()[issue])
+  .count();
+System.out.println("Members of Party1 who voted on Issue" + 
+                                          issue + ": " + c1);
+
+c2 = senators.stream()
+  .filter(s -&gt; s.getParty() == "Party2" &amp;&amp;
+               s.getVoteNo()[issue] != s.getVoteYes()[issue])
+  .count();
+System.out.println("Members of Party2 who voted on Issue" + 
+                                          issue + ": " + c2);
+System.out.println("Members of the senate who voted on Issue" 
+                                 + issue + ": " + (c1 + c2));</pre></div><p class="calibre11">For <code class="literal">Party1</code>, we used two filters. For <code class="literal">Party2</code>, we combined them just to show another possible solution. The important point here is to use the filter by a party (<code class="literal">s -&gt; s.getParty() == "Party1"</code>) first before the filter that selects only those who voted. This way, the second filter is used only for approximately half of the elements. Otherwise, if the filter that selects only those who voted were placed first, it would be applied to all 100 of <code class="literal">Senate</code> members.</p><p class="calibre11">The result looks like this:</p><div class="mediaobject"><img src="Images/05_02.jpg" alt="Basic Filtering" class="calibre95"/></div><p class="calibre11">Similarly, we can calculate how many members of each party voted <code class="literal">Yes</code> on <code class="literal">issue 3</code>:</p><div class="calibre2"><pre class="programlisting">c1 = senators.stream()
+        .filter(s -&gt; s.getParty() == "Party1" &amp;&amp;
+                     s.getVoteYes()[issue] == 1)
+        .count();
+System.out.println("Members of Party1 who voted Yes on Issue"
+                                        + issue + ": " + c1);
+
+c2 = senators.stream()
+        .filter(s -&gt; s.getParty() == "Party2" &amp;&amp;
+                     s.getVoteYes()[issue] == 1)
+        .count();
+System.out.println("Members of Party2 who voted Yes on Issue"
+                                        + issue + ": " + c2);
+System.out.println("Members of the senate voted Yes on Issue"
+                                 + issue + ": " + (c1 + c2));</pre></div><p class="calibre11">The result of the preceding code is as follows:</p><div class="mediaobject"><img src="Images/05_03.jpg" alt="Basic Filtering" class="calibre96"/></div><p class="calibre11">We can refactor the preceding examples by taking advantage of the Java functional programming capability (using lambda expressions) and creating the <code class="literal">countAndPrint()</code> method:</p><div class="calibre2"><pre class="programlisting">long countAndPrint(List&lt;Senator&gt; senators, 
+       Predicate&lt;Senator&gt; pred1, Predicate&lt;Senator&gt; pred2, 
+                                           String prefix) {
+    long c = senators.stream().filter(pred1::test)
+                              .filter(pred2::test).count();
+    System.out.println(prefix + c);
+    return c;
+}</pre></div><p class="calibre11">Now all the earlier code can be expressed in a more compact way:</p><div class="calibre2"><pre class="programlisting">int issue = 3;
+
+Predicate&lt;Senator&gt; party1 = s -&gt; s.getParty() == "Party1";
+Predicate&lt;Senator&gt; party2 = s -&gt; s.getParty() == "Party2";
+Predicate&lt;Senator&gt; voted3 = 
+       s -&gt; s.getVoteNo()[issue] != s.getVoteYes()[issue];
+Predicate&lt;Senator&gt; yes3 = s -&gt; s.getVoteYes()[issue] == 1;
+
+long c1 = countAndPrint(senators, party1, s -&gt; true, 
+                                   "Members of Party1: ");
+long c2 = countAndPrint(senators, party2, s -&gt; true, 
+                                   "Members of Party2: ");
+System.out.println("Members of the senate: " + (c1 + c2));
+
+c1 = countAndPrint(senators, party1, voted3, 
+   "Members of Party1 who voted on Issue" + issue + ": ");
+c2 = countAndPrint(senators, party2, voted3, 
+   "Members of Party2 who voted on Issue" + issue + ": ");
+System.out.println("Members of the senate who voted on Issue"
+                                 + issue + ": " + (c1 + c2));
+
+c1 = countAndPrint(senators, party1, yes3, 
+  "Members of Party1 who voted Yes on Issue" + issue + ": ");
+c2 = countAndPrint(senators, party2, yes3, 
+  "Members of Party2 who voted Yes on Issue" + issue + ": ");
+System.out.println("Members of the senate voted Yes on Issue" 
+                                 + issue + ": " + (c1 + c2));</pre></div><p class="calibre11">We created four predicates, <code class="literal">party1</code>, <code class="literal">party2</code>, <code class="literal">voted3</code>, and <code class="literal">yes3</code>, and we used each of them several times as parameters of the <code class="literal">countAndPrint()</code> method. The output of this code is the same as that of the earlier examples:</p><div class="mediaobject"><img src="Images/05_04.jpg" alt="Basic Filtering" class="calibre97"/></div><p class="calibre11">Using the <code class="literal">filter()</code> method of the <code class="literal">Stream</code> interface is the most popular way of filtering. But it is possible to use other <code class="literal">Stream</code> methods to accomplish the same effect.</p><div class="calibre2" title="Using Other Stream Operations for Filtering"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h3 class="title4"><a id="ch05lvl3sec06" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Using Other Stream Operations for Filtering</h3></div></div></div><p class="calibre11">Alternatively, or in addition to the basic filtering described in the previous section, other operations (methods of the <code class="literal">Stream</code> interface) can be used for selection and filtering emitted stream elements.</p><p class="calibre11">For example, let's use the <code class="literal">flatMap()</code> method to filter out the members of the Senate by their party membership:</p><div class="calibre2"><pre class="programlisting">long c1 = senators.stream()
+        .flatMap(s -&gt; s.getParty() == "Party1" ? 
+                      Stream.of(s) : Stream.empty())
+        .count();
+System.out.println("Members of Party1: " + c1);</pre></div><p class="calibre11">This method takes advantage of the <code class="literal">Stream.of()</code> (produces a stream of one element) and <code class="literal">Stream.empty()</code>factory methods (it produces a stream without elements, so nothing is emitted further downstream). Alternatively, the same effect can be achieved using a new factory method (introduced in Java 9) called <code class="literal">Stream.ofNullable()</code>:</p><div class="calibre2"><pre class="programlisting">c1 = senators.stream().flatMap(s -&gt; 
+  Stream.ofNullable(s.getParty() == "Party1" ? s : null))
+                                                 .count();
+System.out.println("Members of Party1: " + c1);</pre></div><p class="calibre11">The <code class="literal">Stream.ofNullable()</code> method creates a stream of one element if not <code class="literal">null</code>; otherwise, it creates an empty stream, as in the previous example. Both the preceding code snippets--produce the same output if we run them for the same senate composition:</p><div class="mediaobject"><img src="Images/05_05.jpg" alt="Using Other Stream Operations for Filtering" class="calibre98"/></div><p class="calibre11">However, the same result can be achieved using a <code class="literal">java.uti.Optional</code> class that may or may not contain a value. If a value is present (and not <code class="literal">null</code>), its <code class="literal">isPresent()</code> method returns <code class="literal">true</code> and the <code class="literal">get()</code> method returns the value. Here is how we can use it to filter out the members of one party:</p><div class="calibre2"><pre class="programlisting">long c2 = senators.stream()
+  .map(s -&gt; s.getParty() == "Party2" ? 
+                         Optional.of(s) : Optional.empty())
+  .flatMap(o -&gt; o.map(Stream::of).orElseGet(Stream::empty))
+  .count();
+System.out.println("Members of Party2: " + c2);</pre></div><p class="calibre11">First, we map (transform) an element (the <code class="literal">Senator</code> object) to an <code class="literal">Optional</code> object with or without the value. Next, we use the <code class="literal">flatMap()</code> method to either generate a stream of a single element or else an empty stream, and then we count the elements that made it through. In Java 9, the <code class="literal">Optional</code> class acquired a new factory <code class="literal">stream()</code> method that produces a stream of one element if the <code class="literal">Optional</code> object carries a non-null value; otherwise, it produces an empty stream. Using this new method, we can rewrite the previous code as follows:</p><div class="calibre2"><pre class="programlisting">long c2 = senators.stream()
+  .map(s -&gt; s.getParty() == "Party2" ? 
+                         Optional.of(s) : Optional.empty())
+  .flatMap(Optional::stream)
+  .count();
+System.out.println("Members of Party2: " + c2);</pre></div><p class="calibre11">Both the previous examples produce the same output if we run them for the same senate composition:</p><div class="mediaobject"><img src="Images/05_06.jpg" alt="Using Other Stream Operations for Filtering" class="calibre99"/></div><p class="calibre11">We can apply another kind of filtering when we need to capture the first element emitted by the stream. This means that we terminate the stream after the first element is emitted. For example, let's find the first senator of <code class="literal">Party1</code>who voted <code class="literal">Yes</code> on <code class="literal">issue 3</code>:</p><div class="calibre2"><pre class="programlisting">senators.stream()
+  .filter(s -&gt; s.getParty() == "Party1" &amp;&amp;
+                            s.getVoteYes()[3] == 1)    
+  .findFirst()
+  .ifPresent(s -&gt; System.out.println("First senator "
+         "of Party1 found who voted Yes on issue 3: " 
+                                     + s.getName()));</pre></div><p class="calibre11">In the preceding code snippet, we highlighted the <code class="literal">findFirst()</code> method, which does the described job. It returns the <code class="literal">Optional</code> object, so we have added another <code class="literal">ifPresent()</code> operator that is invoked only if the <code class="literal">Optional</code>object contains a non-null value. The resulting output is as follows:</p><div class="mediaobject"><img src="Images/05_07.jpg" alt="Using Other Stream Operations for Filtering" class="calibre100"/></div><p class="calibre11">This was exactly what we expected when we seeded data in the <code class="literal">Senate</code> class.</p><p class="calibre11">Similarly, we can use the <code class="literal">findAny()</code> method to find any <code class="literal">senator</code> who voted <code class="literal">Yes</code> on <code class="literal">issue 3</code>:</p><div class="calibre2"><pre class="programlisting">senators.stream().filter(s -&gt; s.getVoteYes()[3] == 1)
+        .findAny()
+        .ifPresent(s -&gt; System.out.println("A senator " +
+                 "found who voted Yes on issue 3: " + s));</pre></div><p class="calibre11">The result is also as we expected:</p><div class="mediaobject"><img src="Images/05_08.jpg" alt="Using Other Stream Operations for Filtering" class="calibre101"/></div><p class="calibre11">It is typically (but not necessarily) the first element of the stream. But one should not rely on this assumption, especially in the case of parallel processing.</p><p class="calibre11">The <code class="literal">Stream</code> interface also has three <code class="literal">match</code> methods that, although they return a Boolean value, can be used for filtering too if the specific object is not required and we only need to establish the fact that such an object exists or not. The names of these methods are <code class="literal">anyMatch()</code>, <code class="literal">allMatch()</code>, and <code class="literal">noneMatch()</code>. Each of them takes a predicate and returns a Boolean. Let's start by demonstrating the <code class="literal">anyMatch()</code> method. We will use it to find out if there is at least one <code class="literal">senator</code> of <code class="literal">Party1</code> who voted <code class="literal">Yes</code> on <code class="literal">issue 3</code>:</p><div class="calibre2"><pre class="programlisting">boolean found = senators.stream()
+       .anyMatch(s -&gt; (s.getParty() == "Party1" &amp;&amp; 
+                             s.getVoteYes()[3] == 1));
+String res = found ? 
+  "At least one senator of Party1 voted Yes on issue 3"
+  : "Nobody of Party1 voted Yes on issue 3";
+System.out.println(res);</pre></div><p class="calibre11">The result of running the previous code should look like the following:</p><div class="mediaobject"><img src="Images/05_09.jpg" alt="Using Other Stream Operations for Filtering" class="calibre102"/></div><p class="calibre11">To demonstrate the <code class="literal">allMatch()</code> method, we will use it to find out if all the members of <code class="literal">Party1</code> in the <code class="literal">Senate</code> class have voted <code class="literal">Yes</code> on <code class="literal">issue 3</code>:</p><div class="calibre2"><pre class="programlisting">boolean yes = senators.stream()
+    .allMatch(s -&gt; (s.getParty() == "Party1" &amp;&amp;
+                           s.getVoteYes()[3] == 1));
+String res = yes ? 
+  "All senators of Party1 voted Yes on issue 3"
+  : "Not all senators of Party1 voted Yes on issue 3";
+System.out.println(res);</pre></div><p class="calibre11">The result of the previous code may look like this:</p><div class="mediaobject"><img src="Images/05_10.jpg" alt="Using Other Stream Operations for Filtering" class="calibre103"/></div><p class="calibre11">And the last of the three <code class="literal">match</code> methods--the <code class="literal">noneMatch()</code> method--will be used to figure out if some senators of <code class="literal">Party1</code> have voted <code class="literal">Yes</code> on <code class="literal">issue 3</code>:</p><div class="calibre2"><pre class="programlisting">boolean yes = senators.stream()
+   .noneMatch(s -&gt; (s.getParty() == "Party1" &amp;&amp; 
+                            s.getVoteYes()[3] == 1));
+String res = yes ? 
+  "None of the senators of Party1 voted Yes on issue 3"
+  : "Some of senators of Party1 voted Yes on issue 3";
+System.out.println(res);</pre></div><p class="calibre11">The result of the earlier example is as follows:</p><div class="mediaobject"><img src="Images/05_11.jpg" alt="Using Other Stream Operations for Filtering" class="calibre104"/></div><p class="calibre11">However, in real life, it could be very different because quite a few issues in the <code class="literal">Senate</code> class are voted for along party lines.</p><p class="calibre11">Yet another type of filtering is required when we need to skip all the duplicate elements in a stream and select only unique ones. The <code class="literal">distinct()</code> method is designed for the purpose. We will use it to find the names of the parties that have their members in the <code class="literal">Senate</code> class:</p><div class="calibre2"><pre class="programlisting">senators.stream().map(s -&gt; s.getParty())
+        .distinct().forEach(System.out::println);</pre></div><p class="calibre11">The result, as expected, is as follows:</p><div class="mediaobject"><img src="Images/05_12.jpg" alt="Using Other Stream Operations for Filtering" class="calibre105"/></div><p class="calibre11">Well, no surprise there?</p><p class="calibre11">We can also filter out all the elements of the <code class="literal">stream</code> except the certain count of the first ones, using the <code class="literal">limit()</code> method:</p><div class="calibre2"><pre class="programlisting">System.out.println("These are the first 3 senators " 
+                          + "of Party1 in the list:");
+senators.stream()
+        .filter(s -&gt; s.getParty() == "Party1")
+.limit(3)
+        .forEach(System.out::println);
+
+System.out.println("These are the first 2 senators "
+                           + "of Party2 in the list:");
+senators.stream().filter(s -&gt; s.getParty() == "Party2")
+.limit(2)
+        .forEach(System.out::println);</pre></div><p class="calibre11">If you remember how we have set up the first five senators in the list, you could predict that the result will be as follows:</p><div class="mediaobject"><img src="Images/05_13.jpg" alt="Using Other Stream Operations for Filtering" class="calibre106"/></div><p class="calibre11">Now let's find only one element in a stream--the biggest one. To do this, we can use the <code class="literal">max()</code> method of the <code class="literal">Stream</code> interface and the <code class="literal">Senate.timeVotedYes()</code> method (we will apply it on each senator):</p><div class="calibre2"><pre class="programlisting">senators.stream()
+   .max(Comparator.comparing(Senate::timesVotedYes))
+   .ifPresent(s -&gt; System.out.println("A senator voted "
+        + "Yes most of times (" + Senate.timesVotedYes(s) 
+                                            + "): " + s));</pre></div><p class="calibre11">In the preceding snippet, we use the result of the <code class="literal">timesVotedYes()</code> method to select the senator who voted <code class="literal">Yes</code> most often. You might remember, we have assigned all instances of <code class="literal">Yes</code> to <code class="literal">Senator100</code>. Let's see if that would be the result:</p><div class="mediaobject"><img src="Images/05_14.jpg" alt="Using Other Stream Operations for Filtering" class="calibre107"/></div><p class="calibre11">Yes, we got <code class="literal">Senator100</code> filtered as the one who voted <code class="literal">Yes</code> on all 10 issues.</p><p class="calibre11">Similarly, we can find the senator who voted <code class="literal">No</code> on all 10 issues:</p><div class="calibre2"><pre class="programlisting">senators.stream()
+  .min(Comparator.comparing(Senate::timesVotedYes))
+  .ifPresent(s -&gt; System.out.println("A senator voted "
+       + "Yes least of times (" + Senate.timesVotedYes(s) 
+                                            + "): " + s));</pre></div><p class="calibre11">We expect it to be <code class="literal">Senator99</code>, and here is the result:</p><div class="mediaobject"><img src="Images/05_15.jpg" alt="Using Other Stream Operations for Filtering" class="calibre108"/></div><p class="calibre11">That's why we hardcoded several stats in the <code class="literal">Senate</code> class, so we can verify that our queries work correctly.</p><p class="calibre11">As the last two methods can help us with filtering, we will demonstrate the <code class="literal">takeWhile()</code> and <code class="literal">dropWhile()</code>methods introduced in JDK 9. We will first print the data of all the first five senators and then use the <code class="literal">takeWhile()</code>method to print the first senators until we encounter the one who voted <code class="literal">Yes</code> more than four times, and then stop printing:</p><div class="calibre2"><pre class="programlisting">System.out.println("Here is count of times the first "
+                            + "5 senators voted Yes:");
+senators.stream().limit(5)
+  .forEach(s -&gt; System.out.println(s + ": " 
+                           + Senate.timesVotedYes(s)));
+System.out.println("Stop printing at a senator who "
+                     + "voted Yes more than 4 times:");
+senators.stream().limit(5)
+        .takeWhile(s -&gt; Senate.timesVotedYes(s) &lt; 5)
+        .forEach(s -&gt; System.out.println(s + ": " 
+                           + Senate.timesVotedYes(s)));</pre></div><p class="calibre11">The result for the previous code is as follows:</p><div class="mediaobject"><img src="Images/05_16.jpg" alt="Using Other Stream Operations for Filtering" class="calibre109"/></div><p class="calibre11">The <code class="literal">dropWhile()</code> method can be used for the opposite effect, that is, to filter away, to skip the first senators until we encounter the one who voted <code class="literal">Yes</code> more than four times, then continue printing all the rest of the senators:</p><div class="calibre2"><pre class="programlisting">System.out.println("Here is count of times the first " 
+                             + "5 senators voted Yes:");
+senators.stream().limit(5)
+        .forEach(s -&gt; System.out.println(s + ": " 
+                            + Senate.timesVotedYes(s)));
+System.out.println("Start printing at a senator who "
+                      + "voted Yes more than 4 times:");
+senators.stream().limit(5)
+        .dropWhile(s -&gt; Senate.timesVotedYes(s) &lt; 5)
+        .forEach(s -&gt; System.out.println(s + ": " 
+                            + Senate.timesVotedYes(s)));
+System.out.println("...");</pre></div><p class="calibre11">The result will be as follows:</p><div class="mediaobject"><img src="Images/05_17.jpg" alt="Using Other Stream Operations for Filtering" class="calibre110"/></div><p class="calibre11">This concludes our demonstration of the ways in which a stream of elements can be filtered. We hope you have learned enough to be able to find a solution for any of your filtering needs. Nevertheless, we encourage you to study and experiment with the Stream API on your own, so you can retain what you have learned so far and acquire your own view on the rich APIs of Java 9.</p></div></div></div></div></div>
+
+
+
+  
+<div id="sbo-rt-content" class="calibre1"><div class="calibre2" title="Stack-Walking APIs"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title1"><a id="ch05lvl1sec36" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Stack-Walking APIs</h1></div></div></div><p class="calibre11">Exceptions do happen, especially during development or the period of software stabilization. But in a big complex system, the chance of getting an exception is possible even in production, especially when several third-party systems are brought together and the need arises to analyze the stack trace programmatically in order to apply an automatic correction. In this section, we will discuss how it can be done.</p><div class="calibre2" title="Stack Analysis before Java 9"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec12" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Stack Analysis before Java 9</h2></div></div></div><p class="calibre11">The traditional reading of the stack trace, using objects of the <code class="literal">java.lang.Thread</code> and <code class="literal">java.lang.Throwable</code>classes, was accomplished by capturing it from the standard output. For example, we can include this line in any section of the code:</p><div class="calibre2"><pre class="programlisting">Thread.currentThread().dumpStack();</pre></div><p class="calibre11">The previous line will produce the following output:</p><div class="mediaobject"><img src="Images/05_18.jpg" alt="Stack Analysis before Java 9" class="calibre111"/></div><p class="calibre11">Similarly, we can include this line in the code:</p><div class="calibre2"><pre class="programlisting">new Throwable().printStackTrace();</pre></div><p class="calibre11">The output will then look like this:</p><div class="mediaobject"><img src="Images/05_19.jpg" alt="Stack Analysis before Java 9" class="calibre112"/></div><p class="calibre11">This output can be captured, read, and analyzed programmatically, but requires quite a bit of custom code writing.</p><p class="calibre11">JDK 8 made this easier via the usage of streams. Here is the code that allows reading the stack trace from the stream:</p><div class="calibre2"><pre class="programlisting">Arrays.stream(Thread.currentThread().getStackTrace())
+        .forEach(System.out::println);</pre></div><p class="calibre11">The previous line produces the following output:</p><div class="mediaobject"><img src="Images/05_20.jpg" alt="Stack Analysis before Java 9" class="calibre113"/></div><p class="calibre11">Alternatively, we could use this code:</p><div class="calibre2"><pre class="programlisting">Arrays.stream(new Throwable().getStackTrace())
+        .forEach(System.out::println);</pre></div><p class="calibre11">The output of the previous code shows the stack trace in a similar way:</p><div class="mediaobject"><img src="Images/05_21.jpg" alt="Stack Analysis before Java 9" class="calibre114"/></div><p class="calibre11">If, for example, you would like to find the fully qualified name of the caller class, you can use one of these approaches:</p><div class="calibre2"><pre class="programlisting">new Throwable().getStackTrace()[1].getClassName();
+
+Thread.currentThread().getStackTrace()[2].getClassName();</pre></div><p class="calibre11">Such coding is possible because the <code class="literal">getStackTrace()</code> method returns an array of objects of the <code class="literal">java.lang.StackTraceElement</code> class, each representing a stack frame in a stack trace. Each object carries stack trace information accessible by the <code class="literal">getFileName()</code>, <code class="literal">getClassName()</code>, <code class="literal">getMethodName()</code>, and <code class="literal">getLineNumber()</code> methods.</p><p class="calibre11">To demonstrate how it works, we have created three classes, <code class="literal">Clazz01</code>, <code class="literal">Clazz02</code>, and <code class="literal">Clazz03</code>, that call each other:</p><div class="calibre2"><pre class="programlisting">public class Clazz01 {
+  public void method(){ new Clazz02().method(); }
+}
+public class Clazz02 {
+  public void method(){ new Clazz03().method(); }
+}
+public class Clazz03 {
+  public void method(){
+    Arrays.stream(Thread.currentThread()
+                        .getStackTrace()).forEach(ste -&gt; {
+      System.out.println();
+      System.out.println("ste=" + ste);
+      System.out.println("ste.getFileName()=" + 
+                                     ste.getFileName());
+      System.out.println("ste.getClassName()=" +
+                                    ste.getClassName());
+      System.out.println("ste.getMethodName()=" + 
+                                   ste.getMethodName());
+      System.out.println("ste.getLineNumber()=" + 
+                                   ste.getLineNumber());
+    });
+  }
+}</pre></div><p class="calibre11">Now, let's call the <code class="literal">method()</code> method of <code class="literal">Clazz01</code>:</p><div class="calibre2"><pre class="programlisting">public class Demo02StackWalking {
+    public static void main(String... args) {
+        demo_walking();
+    }
+    private static void demo_walking(){
+        new Clazz01().method();
+    }
+}</pre></div><p class="calibre11">Here are two (the second and the third) of the six stack trace frames printed out by the preceding code:</p><div class="mediaobject"><img src="Images/05_22.jpg" alt="Stack Analysis before Java 9" class="calibre115"/></div><p class="calibre11">In principle, every called class has access to this information. But to find out which class called the current class may not be so easy because you need to figure out which frame represents the caller. Also, in order to provide this info, JVM captures the entire stack (except for the hidden stack frames), and it may affect performance.</p><p class="calibre11">That was the motivation for introducing the <code class="literal">java.lang.StackWalker</code> class, its nested <code class="literal">Option</code> class, and the <code class="literal">StackWalker.StackFrame</code> interface in JDK 9.</p></div><div class="calibre2" title="New Better Way to Walk the Stack"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec13" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>New Better Way to Walk the Stack</h2></div></div></div><p class="calibre11">The <code class="literal">StackWalker</code> class has four <code class="literal">getInstance()</code> static factory methods:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem"><code class="literal">getInstance()</code>: This returns a <code class="literal">StackWalker</code> class instance configured to skip all hidden frames and the caller class reference</li><li class="listitem"><code class="literal">getInstance(StackWalker.Option option)</code>: This creates a <code class="literal">StackWalker</code> class instance with the given option specifying the stack frame information it can access</li><li class="listitem"><code class="literal">getInstance(Set&lt;StackWalker.Option&gt; options)</code>: This creates a <code class="literal">StackWalker</code> class instance with the given set of options</li><li class="listitem"><code class="literal">getInstance(Set&lt;StackWalker.Option&gt; options, int estimatedDepth)</code>: This allows you to pass in the <code class="literal">estimatedDepth</code> parameter that specifies the estimated number of stack frames this instance will traverse so that the Java machine can allocate the appropriate buffer size it might need</li></ul></div><p class="calibre11">The value passed as an option can be one of the following:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem"><code class="literal">StackWalker.Option.RETAIN_CLASS_REFERENCE</code></li><li class="listitem"><code class="literal">StackWalker.Option.SHOW_HIDDEN_FRAMES</code></li><li class="listitem"><code class="literal">StackWalker.Option.SHOW_REFLECT_FRAMES</code></li></ul></div><p class="calibre11">The other three methods of the <code class="literal">StackWalker</code> class are as follows:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem"><code class="literal">T walk(Function&lt;Stream&lt;StackWalker.StackFrame&gt;, T&gt; function)</code>: This applies the passed in function to the stream of stack frames, the first frame representing the method that called this <code class="literal">walk()</code> method</li><li class="listitem"><code class="literal">void forEach(Consumer&lt;StackWalker.StackFrame&gt; action)</code>: This performs the passed in action on each element (of the <code class="literal">StalkWalker.StackFrame</code> interface type) of the stream of the current thread</li><li class="listitem"><code class="literal">Class&lt;?&gt; getCallerClass()</code>: This gets objects of the <code class="literal">Class</code> class of the caller class</li></ul></div><p class="calibre11">As you can see, it allows much more straightforward stack trace analysis. Let's modify our demo classes using the following code and access the caller name in one line:</p><div class="calibre2"><pre class="programlisting">public class Clazz01 {
+  public void method(){ 
+    System.out.println("Clazz01 was called by " +
+      StackWalker.getInstance(StackWalker
+        .Option.RETAIN_CLASS_REFERENCE)
+        .getCallerClass().getSimpleName());
+    new Clazz02().method(); 
+  }
+}
+public class Clazz02 {
+  public void method(){ 
+    System.out.println("Clazz02 was called by " +
+      StackWalker.getInstance(StackWalker
+        .Option.RETAIN_CLASS_REFERENCE)
+        .getCallerClass().getSimpleName());
+    new Clazz03().method(); 
+  }
+}
+public class Clazz03 {
+  public void method(){
+    System.out.println("Clazz01 was called by " +
+      StackWalker.getInstance(StackWalker
+        .Option.RETAIN_CLASS_REFERENCE)
+        .getCallerClass().getSimpleName());
+  }
+}</pre></div><p class="calibre11">The previous code will produce this output:</p><div class="mediaobject"><img src="Images/05_23.jpg" alt="New Better Way to Walk the Stack" class="calibre116"/></div><p class="calibre11">You can appreciate the simplicity of the solution. If we need to see the entire stack trace, we can add the following line to the code in <code class="literal">Clazz03</code>:</p><div class="calibre2"><pre class="programlisting">StackWalker.getInstance().forEach(System.out::println);</pre></div><p class="calibre11">The resulting output will be as follows:</p><div class="mediaobject"><img src="Images/05_24.jpg" alt="New Better Way to Walk the Stack" class="calibre117"/></div><p class="calibre11">Again, with only one line of code, we have achieved much more readable output. We could achieve the same result by using the <code class="literal">walk()</code> method:</p><div class="calibre2"><pre class="programlisting">StackWalker.getInstance().walk(sf -&gt; { 
+  sf.forEach(System.out::println); return null; 
+});</pre></div><p class="calibre11">Instead of just printing <code class="literal">StackWalker.StackFrame</code>, we also could run a deeper analysis on it, if need be, using its API, which is more extensive than the API of <code class="literal">java.lang.StackTraceElement</code>. Let's run the code example that prints every stack frame and its information:</p><div class="calibre2"><pre class="programlisting">StackWalker stackWalker = 
+   StackWalker.getInstance(Set.of(StackWalker
+                   .Option.RETAIN_CLASS_REFERENCE), 10);
+stackWalker.forEach(sf -&gt; {
+    System.out.println();
+    System.out.println("sf="+sf);
+    System.out.println("sf.getFileName()=" + 
+                                       sf.getFileName());
+    System.out.println("sf.getClass()=" + sf.getClass());
+    System.out.println("sf.getMethodName()=" + 
+                                     sf.getMethodName());
+    System.out.println("sf.getLineNumber()=" + 
+                                     sf.getLineNumber());
+    System.out.println("sf.getByteCodeIndex()=" +
+                                  sf.getByteCodeIndex());
+    System.out.println("sf.getClassName()=" + 
+                                      sf.getClassName());
+    System.out.println("sf.getDeclaringClass()=" + 
+                                 sf.getDeclaringClass());
+    System.out.println("sf.toStackTraceElement()=" +
+                               sf.toStackTraceElement());
+});</pre></div><p class="calibre11">The output of the previous code is as follows:</p><div class="mediaobject"><img src="Images/05_25.jpg" alt="New Better Way to Walk the Stack" class="calibre118"/></div><p class="calibre11">Note the <code class="literal">StackFrameInfo</code> class that implements the <code class="literal">StackWalker.StackFrame</code> interface and actually does the job. The API also allows converting back to the familiar <code class="literal">StackTraceElement</code> object for backward compatibility and for the enjoyment of those who are used to it and do not want to change their code and habits.</p><p class="calibre11">In contrast, with the full stack trace generated and stored in the array in the memory (like in the case of the traditional stack trace implementation), the <code class="literal">StackWalker</code> class brings only the requested elements. This is another motivation for its introduction in addition to the demonstrated simplicity of use. More details about the <code class="literal">StackWalker</code> class API and its usage can be found at <a class="calibre4 pcalibre3 pcalibre pcalibre1 pcalibre2" href="https://docs.oracle.com/javase/9/docs/api/java/lang/StackWalker.html">https://docs.oracle.com/javase/9/docs/api/java/lang/StackWalker.html</a>.</p></div></div></div>
+
+
+
+  
+<div id="sbo-rt-content" class="calibre1"><div class="calibre2" title="Convenience Factory Methods for Collections"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title1"><a id="ch05lvl1sec37" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Convenience Factory Methods for Collections</h1></div></div></div><p class="calibre11">With the introduction of functional programming in Java, the interest in and need for immutable objects increased. The functions passed into the methods may be executed in substantially different contexts than the one they were created in, so the need to decrease the chances of unexpected side effects made the case for immutability stronger. Besides, the Java way of creating an unmodifiable collection was quite verbose anyway, so the issue was addressed in Java 9. Here is an example of the code that creates an immutable collection of the <code class="literal">Set</code> interface in Java 8:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; set = new HashSet&lt;&gt;();
+set.add("Life");
+set.add("is");
+set.add("good!");
+set = Collections.unmodifiableSet(set); </pre></div><p class="calibre11">After one does it several times, the need for a convenience method comes up naturally as the basic refactoring consideration that always lingers in the background thinking of any software professional. In Java 8, the previous code could be changed to the following:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet = 
+  Collections.unmodifiableSet(new HashSet&lt;&gt;(Arrays
+                          .asList("Life", "is", "good!")));</pre></div><p class="calibre11">Alternatively, if streams are your friends, you could write the following:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet = Stream.of("Life","is","good!")
+  .collect(Collectors.collectingAndThen(Collectors.toSet(),
+                             Collections::unmodifiableSet));</pre></div><p class="calibre11">Another version of the previous code is as follows:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet =
+  Collections.unmodifiableSet(Stream.of("Life","is","good!")
+                               .collect(Collectors.toSet()));</pre></div><p class="calibre11">However, it has more boilerplate code than the values you are trying to encapsulate. So, in Java 9, a shorter version of the previous code became possible:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet = Set.of("Life","is","good!");</pre></div><p class="calibre11">Similar factories were introduced to generate immutable collections of <code class="literal">List</code> interfaces and <code class="literal">Map</code> interfaces:</p><div class="calibre2"><pre class="programlisting">List&lt;String&gt; immutableList = List.of("Life","is","good!");
+
+Map&lt;Integer,String&gt; immutableMap1 = 
+                   Map.of(1, "Life", 2, "is", 3, "good!");
+
+Map&lt;Integer,String&gt; immutableMap2 = 
+       Map.ofEntries(entry(1, "Life "), entry(2, "is"), 
+                                        entry(3, "good!");
+
+Map.Entry&lt;Integer,String&gt; entry1 = Map.entry(1,"Life");
+Map.Entry&lt;Integer,String&gt; entry2 = Map.entry(2,"is");
+Map.Entry&lt;Integer,String&gt; entry3 = Map.entry(3,"good!");
+Map&lt;Integer,String&gt; immutableMap3 = 
+                    Map.ofEntries(entry1, entry2, entry3);</pre></div><div class="calibre2" title="Why New Factory Methods?"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec14" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Why New Factory Methods?</h2></div></div></div><p class="calibre11">The ability to express the same functionality in more compact manner is very helpful, but it would probably not be enough motivation to introduce these new factories. It was much more important to address the weakness of the existing implementation of <code class="literal">Collections.unmodifiableList()</code>, <code class="literal">Collections.unmodifiableSet()</code>, and <code class="literal">Collections.unmodifiableMap()</code>. Although the collections created using these methods throw an <code class="literal">UnsupportedOperationException</code> class when you try to modify or add/remove their elements, they are just wrappers around the traditional modifiable collections and can thus be susceptible to modifications, depending on the way you construct them. Let's walk through examples to illustrate the point. By the way, another weakness of the existing unmodifiable implementation is that it does not change how the source collection is constructed, so the difference between <code class="literal">List</code>, <code class="literal">Set</code>, and <code class="literal">Map</code>--the ways in which they can be constructed--remains in place, which may be a source of bugs or even frustration when a programmer uses them. The new factory methods address this issue too, providing a more unified approach using the <code class="literal">of()</code> factory method (and the additional <code class="literal">ofEntries()</code> method for <code class="literal">Map</code>) only. Having said that, let's get back to the examples. Look at the following code snippet:</p><div class="calibre2"><pre class="programlisting">List&lt;String&gt; list = new ArrayList&lt;&gt;();
+list.add("unmodifiableList1: Life");
+list.add(" is");
+list.add(" good! ");
+list.add(null);
+list.add("\n\n");
+List&lt;String&gt; unmodifiableList1 = 
+                      Collections.unmodifiableList(list);
+//unmodifiableList1.add(" Well..."); //throws exception
+//unmodifiableList1.set(2, " sad."); //throws exception
+unmodifiableList1.stream().forEach(System.out::print);
+
+list.set(2, " sad. ");
+list.set(4, " ");
+list.add("Well...\n\n");
+unmodifiableList1.stream().forEach(System.out::print);</pre></div><p class="calibre11">Attempts of direct modification of the elements of <code class="literal">unmodifiableList1</code> lead to <code class="literal">UnsupportedOperationException</code>. Nevertheless, we can modify them via the underlying <code class="literal">list</code> object. If we run the previous example, the output will be as follows:</p><div class="mediaobject"><img src="Images/05_26.jpg" alt="Why New Factory Methods?" class="calibre119"/></div><p class="calibre11">Even if we use <code class="literal">Arrays.asList()</code> for the source list creation, it will only protect the created collection from adding a new element, but not from modifying the existing one. Here is a code example:</p><div class="calibre2"><pre class="programlisting">List&lt;String&gt; list2 = 
+           Arrays.asList("unmodifiableList2: Life", 
+                        " is", " good! ", null, "\n\n");
+List&lt;String&gt; unmodifiableList2 = 
+                    Collections.unmodifiableList(list2);
+//unmodifiableList2.add(" Well..."); //throws exception
+//unmodifiableList2.set(2, " sad."); //throws exception
+unmodifiableList2.stream().forEach(System.out::print);
+
+list2.set(2, " sad. ");
+//list2.add("Well...\n\n");  //throws exception
+unmodifiableList2.stream().forEach(System.out::print);</pre></div><p class="calibre11">If we run the previous code, the output will be as follows:</p><div class="mediaobject"><img src="Images/05_27.jpg" alt="Why New Factory Methods?" class="calibre120"/></div><p class="calibre11">We also included a <code class="literal">null</code> element to demonstrate how the existing implementation treats them, because, by contrast, the new factories of immutable collections do not allow <code class="literal">null</code> to be included. By the way, they do not allow duplicate elements in <code class="literal">Set</code> either (while the existing implementation just ignores them), but we will demonstrate this aspect later while using the new factory methods in code examples.</p><p class="calibre11">To be fair, there is a way to create a truly immutable collection of <code class="literal">List</code> interfaces with the existing implementation too. Look at the following code:</p><div class="calibre2"><pre class="programlisting">List&lt;String&gt; immutableList1 =
+        Collections.unmodifiableList(new ArrayList&lt;&gt;() {{
+            add("immutableList1: Life");
+            add(" is");
+            add(" good! ");
+            add(null);
+            add("\n\n");
+        }});
+//immutableList1.set(2, " sad.");     //throws exception
+//immutableList1.add("Well...\n\n");  //throws exception
+immutableList1.stream().forEach(System.out::print);</pre></div><p class="calibre11">Another way to create an immutable list is as follows:</p><div class="calibre2"><pre class="programlisting">List&lt;String&gt; immutableList2 =
+  Collections.unmodifiableList(Stream
+   .of("immutableList2: Life"," is"," good! ",null,"\n\n")
+   .collect(Collectors.toList()));
+//immutableList2.set(2, " sad.");     //throws exception
+//immutableList2.add("Well...\n\n");  //throws exception
+immutableList2.stream().forEach(System.out::print);</pre></div><p class="calibre11">The following is a variation of the earlier code:</p><div class="calibre2"><pre class="programlisting">List&lt;String&gt; immutableList3 = 
+  Stream.of("immutableList3: Life",
+                             " is"," good! ",null,"\n\n")
+  .collect(Collectors.collectingAndThen(Collectors.toList(),
+                             Collections::unmodifiableList));
+//immutableList3.set(2, " sad.");     //throws exception
+//immutableList3.add("Well...\n\n");  //throws exception
+immutableList3.stream().forEach(System.out::print);</pre></div><p class="calibre11">If we run the previous three examples, we will see the following output:</p><div class="mediaobject"><img src="Images/05_28.jpg" alt="Why New Factory Methods?" class="calibre121"/></div><p class="calibre11">Note that although we cannot modify the content of these lists, we can put <code class="literal">null</code> in them.</p><p class="calibre11">The situation with <code class="literal">Set</code> is quite similar to what we have seen with the lists earlier. Here is the code that shows how an unmodifiable collection of <code class="literal">Set</code> interfaces can be modified:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; set = new HashSet&lt;&gt;();
+set.add("unmodifiableSet1: Life");
+set.add(" is");
+set.add(" good! ");
+set.add(null);
+Set&lt;String&gt; unmodifiableSet1 = 
+                       Collections.unmodifiableSet(set);
+//unmodifiableSet1.remove(" good! "); //throws exception
+//unmodifiableSet1.add("...Well..."); //throws exception
+unmodifiableSet1.stream().forEach(System.out::print);
+System.out.println("\n");
+
+set.remove(" good! ");
+set.add("...Well...");
+unmodifiableSet1.stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">The resulting collection of <code class="literal">Set</code> interfaces can be modified even if we convert the original collection from an array to a list and then to a set, as follows:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; set2 = 
+   new HashSet&lt;&gt;(Arrays.asList("unmodifiableSet2: Life", 
+                                " is", " good! ", null));
+Set&lt;String&gt; unmodifiableSet2 = 
+                       Collections.unmodifiableSet(set2);
+//unmodifiableSet2.remove(" good! "); //throws exception
+//unmodifiableSet2.add("...Well..."); //throws exception
+unmodifiableSet2.stream().forEach(System.out::print);
+System.out.println("\n");
+
+set2.remove(" good! ");
+set2.add("...Well...");
+unmodifiableSet2.stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">Here is the output of running the previous two examples:</p><div class="mediaobject"><img src="Images/05_29.jpg" alt="Why New Factory Methods?" class="calibre122"/></div><p class="calibre11">If you have not worked with sets in Java 9, you may be surprised to see the unusually messed up order of the set elements in the output. In fact, it is another new feature of set and maps introduced in JDK 9. In the past, <code class="literal">Set</code> and <code class="literal">Map</code> implementations did not guarantee to preserve the elements' order. But more often than not, the order was preserved and some programmers wrote code that relied on it, thus introducing an annoyingly inconsistent and not easily reproducible defect into an application. The new <code class="literal">Set</code> and <code class="literal">Map</code> implementations change the order more often, if not at every new run of the code. This way, it exposes potential defects early in development and decreases the chance of its propagation into production.</p><p class="calibre11">Similar to the lists, we can create immutable sets even without using Java 9's new immutable set factory. One way to do it is as follows:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet1 =
+     Collections.unmodifiableSet(new HashSet&lt;&gt;() {{
+            add("immutableSet1: Life");
+            add(" is");
+            add(" good! ");
+            add(null);
+        }});
+//immutableSet1.remove(" good! "); //throws exception
+//immutableSet1.add("...Well..."); //throws exception
+immutableSet1.stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">Also, as in the case with lists, here is another way to do it:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet2 =
+     Collections.unmodifiableSet(Stream
+        .of("immutableSet2: Life"," is"," good! ", null)
+                           .collect(Collectors.toSet()));
+//immutableSet2.remove(" good!");  //throws exception
+//immutableSet2.add("...Well..."); //throws exception
+immutableSet2.stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">Another variant of the previous code is as follows:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet3 = 
+  Stream.of("immutableSet3: Life"," is"," good! ", null)
+  .collect(Collectors.collectingAndThen(Collectors.toSet(),
+                            Collections::unmodifiableSet));
+//immutableList5.set(2, "sad.");  //throws exception
+//immutableList5.add("Well...");  //throws exception
+immutableSet3.stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">If we run all three examples of creating an immutable collection of <code class="literal">iSet</code> interfaces that we have just introduced, the result would be as follows:</p><div class="mediaobject"><img src="Images/05_30.jpg" alt="Why New Factory Methods?" class="calibre123"/></div><p class="calibre11">With <code class="literal">Map</code> interfaces, we were able to come up with only one way to modify the <code class="literal">unmodifiableMap</code> object:</p><div class="calibre2"><pre class="programlisting">Map&lt;Integer, String&gt; map = new HashMap&lt;&gt;();
+map.put(1, "unmodifiableleMap: Life");
+map.put(2, " is");
+map.put(3, " good! ");
+map.put(4, null);
+map.put(5, "\n\n");
+Map&lt;Integer, String&gt; unmodifiableleMap = 
+                       Collections.unmodifiableMap(map);
+//unmodifiableleMap.put(3, " sad.");   //throws exception
+//unmodifiableleMap.put(6, "Well..."); //throws exception
+unmodifiableleMap.values().stream()
+                             .forEach(System.out::print);
+map.put(3, " sad. ");
+map.put(4, "");
+map.put(5, "");
+map.put(6, "Well...\n\n");
+unmodifiableleMap.values().stream()
+                             .forEach(System.out::print);</pre></div><p class="calibre11">The output of the previous code is as follows:</p><div class="mediaobject"><img src="Images/05_31.jpg" alt="Why New Factory Methods?" class="calibre124"/></div><p class="calibre11">We found four ways to create an immutable collection of <code class="literal">Map</code> interfaces without using Java 9 enhancements. Here is the first example:</p><div class="calibre2"><pre class="programlisting">Map&lt;Integer, String&gt; immutableMap1 =
+        Collections.unmodifiableMap(new HashMap&lt;&gt;() {{
+            put(1, "immutableMap1: Life");
+            put(2, " is");
+            put(3, " good! ");
+            put(4, null);
+            put(5, "\n\n");
+        }});
+//immutableMap1.put(3, " sad. ");   //throws exception
+//immutableMap1.put(6, "Well...");  //throws exception
+immutableMap1.values().stream().forEach(System.out::print);</pre></div><p class="calibre11">The second example has a bit of a complication:</p><div class="calibre2"><pre class="programlisting">String[][] mapping = 
+       new String[][] {{"1", "immutableMap2: Life"}, 
+                       {"2", " is"}, {"3", " good! "}, 
+                          {"4", null}, {"5", "\n\n"}};
+
+Map&lt;Integer, String&gt; immutableMap2 =
+  Collections.unmodifiableMap(Arrays.stream(mapping)
+    .collect(Collectors.toMap(a -&gt; Integer.valueOf(a[0]), 
+                          a -&gt; a[1] == null? "" : a[1])));
+immutableMap2.values().stream().forEach(System.out::print);</pre></div><p class="calibre11">We tried first to use <code class="literal">Collectors.toMap(a -&gt; Integer.valueOf(a[0]), a -&gt; a[1])</code>, but the <code class="literal">toMap()</code> method uses the <code class="literal">merge()</code> functions which does not allow <code class="literal">null</code> as a value. So, we had to add a check for <code class="literal">null</code> and replace it with an empty <code class="literal">String</code> value. This, in effect, brought us to the next version of the previous code snippet--without a <code class="literal">null</code> value in the source array:</p><div class="calibre2"><pre class="programlisting">String[][] mapping = 
+    new String[][]{{"1", "immutableMap3: Life"}, 
+       {"2", " is"}, {"3", " good! "}, {"4", "\n\n"}};
+Map&lt;Integer, String&gt; immutableMap3 =
+   Collections.unmodifiableMap(Arrays.stream(mapping)
+     .collect(Collectors.toMap(a -&gt; Integer.valueOf(a[0]), 
+a -&gt; a[1])));
+//immutableMap3.put(3, " sad.");   //throws Exception
+//immutableMap3.put(6, "Well..."); //throws exception
+immutableMap3.values().stream().forEach(System.out::print);</pre></div><p class="calibre11">A variant of the previous code is as follows:</p><div class="calibre2"><pre class="programlisting">mapping[0][1] = "immutableMap4: Life";
+Map&lt;Integer, String&gt; immutableMap4 = Arrays.stream(mapping)
+           .collect(Collectors.collectingAndThen(Collectors
+             .toMap(a -&gt; Integer.valueOf(a[0]), a -&gt; a[1]),
+                             Collections::unmodifiableMap));
+//immutableMap4.put(3, " sad.");    //throws exception
+//immutableMap4.put(6, "Well...");  //throws exception
+immutableMap4.values().stream().forEach(System.out::print);</pre></div><p class="calibre11">After we run all the four last examples, the output is as follows:</p><div class="mediaobject"><img src="Images/05_32.jpg" alt="Why New Factory Methods?" class="calibre125"/></div><p class="calibre11">With that revision of the existing collections implementations, we can now discuss and appreciate the new factory methods of collections in Java 9.</p></div><div class="calibre2" title="The New Factory Methods in Action"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec15" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>The New Factory Methods in Action</h2></div></div></div><p class="calibre11">After revisiting the existing methods of collection creation, we can now review and enjoy the related API introduced in Java 9. As in a previous section, we start with the <code class="literal">List</code> interface. Here is how simple and consistent the immutable list creation can be using the new <code class="literal">List.of()</code> factory method:</p><div class="calibre2"><pre class="programlisting">List&lt;String&gt; immutableList = 
+  List.of("immutableList: Life", 
+      " is", " is", " good!\n\n"); //, null);
+//immutableList.set(2, "sad.");    //throws exception
+//immutableList.add("Well...");    //throws exception
+immutableList.stream().forEach(System.out::print);</pre></div><p class="calibre11">As you can see from the previous code comments, the new factory method does not allow including <code class="literal">null</code> as the list value.</p><p class="calibre11">The <code class="literal">immutableSet</code> creation looks similar to this:</p><div class="calibre2"><pre class="programlisting">Set&lt;String&gt; immutableSet = 
+    Set.of("immutableSet: Life", " is", " good!");
+                                      //, " is" , null);
+//immutableSet.remove(" good!\n\n");  //throws exception
+//immutableSet.add("...Well...\n\n"); //throws exception
+immutableSet.stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">As you can see from the previous code comments, the <code class="literal">Set.of()</code> factory method does not allow adding <code class="literal">null</code> or a duplicate element when creating an immutable collection of <code class="literal">Set</code> interfaces.</p><p class="calibre11">The immutable collection of <code class="literal">Map</code> interfaces has similar format too:</p><div class="calibre2"><pre class="programlisting">Map&lt;Integer, String&gt; immutableMap = 
+   Map.of(1&lt;/span&gt;, "immutableMap: Life", 2, " is", 3, " good!");
+                                    //, 4, null);
+//immutableMap.put(3, " sad.");    //throws exception
+//immutableMap.put(4, "Well...");  //throws exception
+immutableMap.values().stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">The <code class="literal">Map.of()</code> method does not allow <code class="literal">null</code> as a value either. Another feature of the <code class="literal">Map.of()</code> method is that it allows a compile-time check of the element type, which decreases the chances of a runtime problem.</p><p class="calibre11">For those who prefer more compact code, here is another way to express the same functionality:</p><div class="calibre2"><pre class="programlisting">Map&lt;Integer, String&gt; immutableMap3 = 
+            Map.ofEntries(entry(1, "immutableMap3: Life"), 
+                      entry(2, " is"), entry(3, " good!"));
+immutableMap3.values().stream().forEach(System.out::print);
+System.out.println("\n");</pre></div><p class="calibre11">And here is the output if we run all the previous examples of the usage of the new factory methods:</p><div class="mediaobject"><img src="Images/05_33.jpg" alt="The New Factory Methods in Action" class="calibre126"/></div><p class="calibre11">As we mentioned already, the ability to have immutable collections, including empty ones, is very helpful for functional programming as this feature makes sure that such a collection cannot be modified as a side effect and cannot introduce unexpected and difficult to trace defects. The full variety of the new factories methods includes up to 10 explicit entries plus one with an arbitrary number of elements. Here's how it looks for <code class="literal">List</code> interface:</p><div class="calibre2"><pre class="programlisting">static &lt;E&gt; List&lt;E&gt; of()
+static &lt;E&gt; List&lt;E&gt; of(E e1)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3, E e4)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9)
+static &lt;E&gt; List&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9, E e10)
+static &lt;E&gt; List&lt;E&gt; of(E... elements)</pre></div><p class="calibre11">The <code class="literal">Set</code> factory methods look similar:</p><div class="calibre2"><pre class="programlisting">static &lt;E&gt; Set&lt;E&gt; of()
+static &lt;E&gt; Set&lt;E&gt; of(E e1)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3, E e4)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9)
+static &lt;E&gt; Set&lt;E&gt; of(E e1, E e2, E e3, E e4, E e5, E e6, E e7, E e8, E e9, E e10)
+static &lt;E&gt; Set&lt;E&gt; of(E... elements)</pre></div><p class="calibre11">Also, the <code class="literal">Map</code> factory methods follow suit:</p><div class="calibre2"><pre class="programlisting">static &lt;K,V&gt; Map&lt;K,V&gt; of()
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1)
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2)
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3)
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3, K k4, V v4)
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3, K k4, V v4, K k5, V   v5
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3, K k4, V v4, K k5, V v5, K k6, V v6)
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3, K k4, V v4, K k5, V v5, K k6, V v6, K k7, V v7
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3, K k4, V v4, K k5, V v5, K k6, V v6, K k7, V v7,
+K k8, V v8)
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3, K k4, V v4, K k5, V v5, K k6, V v6, K k7, V v7,
+K k8, V v8, K k9, V v9)
+static &lt;K,V&gt; Map&lt;K,V&gt; of(K k1, V v1, K k2, V v2, K k3, V v3, K k4, V v4, K k5, V v5, K k6, V v6, K k7, V v7,
+K k8, V v8, K k9, V v9, K k10, V v10)
+static &lt;K,V&gt; Map&lt;K,V&gt; ofEntries(Map.Entry&lt;? extends K,? extends V&gt;... entries</pre></div><p class="calibre11">The decision not to add new interfaces for immutable collections left them susceptible to causing occasional confusion when programmers assumed they could call <code class="literal">add()</code> or <code class="literal">put()</code> on them. Such an assumption, if not tested, will cause a runtime error that throws an <code class="literal">UnsupportedOperationException</code>. Despite this potential pitfall, the new factory methods for immutable collection creation are very useful additions to Java.</p></div></div></div>
+
+
+
+  
+<div id="sbo-rt-content" class="calibre1"><div class="calibre2" title="CompletableFuture in Support of Asynchronous Processing"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title1"><a id="ch05lvl1sec38" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>CompletableFuture in Support of Asynchronous Processing</h1></div></div></div><p class="calibre11">The <code class="literal">java.util.concurrent.CompletableFuture&lt;T&gt;</code> class was first introduced in Java 8. It is the next level of asynchronous call control over <code class="literal">java.util.concurrent.Future&lt;T&gt;</code> interface. It actually implements <code class="literal">Future</code>, as well as <code class="literal">java.util.concurrent.CompletionStage&lt;T&gt;</code>. In Java 9, <code class="literal">CompletableFuture</code> was enhanced by adding new factory methods, support for delays and timeouts, and improved subclassing--we will discuss these features in more details in the sections to follow. But first, let's have an overview of the <code class="literal">CompletableFuture</code> API.</p><div class="calibre2" title="The CompletableFuture API Overview"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec16" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>The CompletableFuture API Overview</h2></div></div></div><p class="calibre11">The <code class="literal">CompletableFuture</code> API consists of more than 70 methods, 38 of which are implementations of the <code class="literal">CompletionStage</code> interface, and five are the implementations of <code class="literal">Future</code>. Because the <code class="literal">CompletableFuture</code>class implements the <code class="literal">Future</code> interface, it can be treated as <code class="literal">Future</code> and will not break the existing functionality based on the <code class="literal">Future</code> API.</p><p class="calibre11">So, the bulk of the API comes from <code class="literal">CompletionStage</code>. Most of the methods return <code class="literal">CompletableFuture</code> (in the <code class="literal">CompletionStage</code> interface, they return <code class="literal">CompletionStage</code>, but they are converted to <code class="literal">CompletableFuture</code>when implemented in <code class="literal">CompletableFuture</code> class), which means that they allow chaining the operations similar to how the <code class="literal">Stream</code> methods do when only one element goes through a pipe. Each method has a signature that accepts a function. Some methods accept <code class="literal">Function&lt;T,U&gt;</code>, which is going to be applied to the passed-in value <code class="literal">T</code> and return the result <code class="literal">U</code>. Other methods accept <code class="literal">Consumer&lt;T&gt;</code>, which takes the passed-in value and returns <code class="literal">void</code>. Yet other methods accept <code class="literal">Runnable</code>, which does not take any input and returns <code class="literal">void</code>. Here is one group of these methods:</p><div class="calibre2"><pre class="programlisting">thenRun(Runnable action)
+thenApply(Function&lt;T,U&gt; fn)
+thenAccept(Consumer&lt;T&gt; action)</pre></div><p class="calibre11">They all return <code class="literal">CompletableFuture</code>, which carries the result of the function or void (in the case of <code class="literal">Runnable</code>and <code class="literal">Consumer</code>). Each of them has two companion methods that perform the same function asynchronously. For example, let's take the <code class="literal">thenRun(Runnable action)</code> method. The following are its companions:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem">The <code class="literal">thenRunAsync(Runnable action)</code> method, which runs the action in another thread from the default <code class="literal">ForkJoinPool.commonPool()</code> pool</li><li class="listitem">The <code class="literal">thenRun(Runnable action, Executor executor)</code> method, which runs the action in another thread from the pool passed in as the parameter executor</li></ul></div><p class="calibre11">With that, we have covered nine methods of the <code class="literal">CompletionStage</code> interface.</p><p class="calibre11">Another group of methods consists of the following:</p><div class="calibre2"><pre class="programlisting">thenCompose(Function&lt;T,CompletionStage&lt;U&gt;&gt; fn)
+applyToEither(CompletionStage other, Function fn)
+acceptEither(CompletionStage other, Consumer action)
+runAfterBoth(CompletionStage other, Runnable action)
+runAfterEither(CompletionStage other, Runnable action)
+thenCombine(CompletionStage&lt;U&gt; other, BiFunction&lt;T,U,V&gt; fn)
+thenAcceptBoth(CompletionStage other, BiConsumer&lt;T,U&gt; action)</pre></div><p class="calibre11">These methods execute the passed in action after one or both the <code class="literal">CompletableFuture</code> (or <code class="literal">CompletionStage</code>) objects produce a result that is used as an input to the action. By both, we mean the <code class="literal">CompletableFuture</code> that provides the method and the one that is passed in as a parameter of the method. From the name of these methods, you can quite reliably guess what their intent is. We will demonstrate some of them in the following examples. Each of these seven methods has two companions for asynchronous processing, too. This means that we have already described 30 (out of 38) methods of the <code class="literal">CompletionStage</code> interface.</p><p class="calibre11">There is a group of two methods that are typically used as terminal operations because they can handle either the result of the previous method (passed in as <code class="literal">T</code>) or an exception (passed in as <code class="literal">Throwable</code>):</p><div class="calibre2"><pre class="programlisting">handle(BiFunction&lt;T,Throwable,U&gt; fn)
+whenComplete(BiConsumer&lt;T,Throwable&gt; action)</pre></div><p class="calibre11">We will see an example of the use of these methods later. When an exception is thrown by a method in the chain, all the rest of the chained methods are skipped until the first <code class="literal">handle()</code> method or <code class="literal">whenComplete()</code> is encountered. If neither of these two methods are present in the chain, then the exception will bubble up as any other Java exception. These two also have asynchronous companions, which means that we talked about 36 (out of 38) methods of <code class="literal">CompletionStage</code> interface already.</p><p class="calibre11">There is also a method that handles exceptions only (similar to a catch block in the traditional programming):</p><div class="calibre2"><pre class="programlisting">exceptionally(Function&lt;Throwable,T&gt; fn)</pre></div><p class="calibre11">This method does not have asynchronous companions, just like the last remaining method:</p><div class="calibre2"><pre class="programlisting">toCompletableFuture()</pre></div><p class="calibre11">It just returns a <code class="literal">CompletableFuture</code> object with the same properties as this stage. With that, we have described all 38 methods of the <code class="literal">CompletionStage</code> interface.</p><p class="calibre11">There are also some 30 methods in the <code class="literal">CompletableFuture</code> class that do not belong to any of the implemented interfaces. Some of them return the <code class="literal">CompletableFuture</code> object after asynchronously executing the provided function:</p><div class="calibre2"><pre class="programlisting">runAsync(Runnable runnable)
+runAsync(Runnable runnable, Executor executor)
+supplyAsync(Supplier&lt;U&gt; supplier)
+supplyAsync(Supplier&lt;U&gt; supplier, Executor executor)</pre></div><p class="calibre11">Others execute several objects of <code class="literal">CompletableFuture</code> in parallel:</p><div class="calibre2"><pre class="programlisting">allOf(CompletableFuture&lt;?&gt;... cfs)
+anyOf(CompletableFuture&lt;?&gt;... cfs)</pre></div><p class="calibre11">There is also a group of the methods that generate completed futures, so the <code class="literal">get()</code> method on the returned <code class="literal">CompletableFuture</code> object will not block any more:</p><div class="calibre2"><pre class="programlisting">complete(T value)
+completedStage(U value)
+completedFuture(U value)
+failedStage(Throwable ex)
+failedFuture(Throwable ex)
+completeAsync(Supplier&lt;T&gt; supplier)
+completeExceptionally(Throwable ex)
+completeAsync(Supplier&lt;T&gt; supplier, Executor executor)
+completeOnTimeout(T value, long timeout, TimeUnit unit)</pre></div><p class="calibre11">The rest of the methods perform various other functions that can be helpful:</p><div class="calibre2"><pre class="programlisting">join()
+defaultExecutor()
+newIncompleteFuture()
+getNow(T valueIfAbsent)
+getNumberOfDependents()
+minimalCompletionStage()
+isCompletedExceptionally()
+obtrudeValue(T value)
+obtrudeException(Throwable ex)
+orTimeout(long timeout, TimeUnit unit)
+delayedExecutor(long delay, TimeUnit unit)</pre></div><p class="calibre11">Refer to the official Oracle documentation, which describes these and other methods of the <code class="literal">CompletableFuture</code> API at <a class="calibre4 pcalibre3 pcalibre pcalibre1 pcalibre2" href="http://download.java.net/java/jdk9/docs/api/index.html?java/util/concurrent/CompletableFuture.html">http://download.java.net/java/jdk9/docs/api/index.html?java/util/concurrent/CompletableFuture.html</a>.</p></div><div class="calibre2" title="The CompletableFuture API Enhancements in Java 9"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec17" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>The CompletableFuture API Enhancements in Java 9</h2></div></div></div><p class="calibre11">Java 9 introduces several enhancements to <code class="literal">CompletableFuture</code>:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem">The <code class="literal">CompletionStage&lt;U&gt; failedStage(Throwable ex)</code> factory method returns the <code class="literal">CompletionStage</code> object completed with the given exception</li><li class="listitem">The <code class="literal">CompletableFuture&lt;U&gt; failedFuture(Throwable ex)</code> factory method returns the <code class="literal">CompletableFuture</code>object completed with the given exception</li><li class="listitem">The new <code class="literal">CompletionStage&lt;U&gt; completedStage(U value)</code> factory method returns the <code class="literal">CompletionStage </code>object completed with the given <code class="literal">U</code> value</li><li class="listitem"><code class="literal">CompletableFuture&lt;T&gt; completeOnTimeout(T value, long timeout, TimeUnit unit)</code> completes <code class="literal">CompletableFuture</code> task with the given <code class="literal">T</code> value if not otherwise completed before the given timeout</li><li class="listitem"><code class="literal">CompletableFuture&lt;T&gt; orTimeout(long timeout, TimeUnit unit)</code> completes <code class="literal">CompletableFuture</code> with <code class="literal">java.util.concurrent.TimeoutException</code> if not completed before the given timeout</li><li class="listitem">It is possible now to override the <code class="literal">defaultExecutor()</code> method to support another default executor</li><li class="listitem">A new method, <code class="literal">newIncompleteFuture()</code>, makes it easier to subclass the <code class="literal">CompletableFuture</code> class</li></ul></div></div><div class="calibre2" title="The Problem and the Solution using Future"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec18" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>The Problem and the Solution using Future</h2></div></div></div><p class="calibre11">To demonstrate and appreciate the power of <code class="literal">CompletableFuture</code>, let's start with a problem implemented using just <code class="literal">Future</code> and then see how much more effectively it can be solved with <code class="literal">CompletableFuture</code>. Let's imagine that we are tasked with modeling a building that consists of four stages:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem">Collecting materials for the foundation, walls, and roof</li><li class="listitem">Installing the foundation</li><li class="listitem">Raising up the walls</li><li class="listitem">Constructing and finishing the roof</li></ul></div><p class="calibre11">In the traditional sequential programming for the single thread, the model would look like this:</p><div class="calibre2"><pre class="programlisting">StopWatch stopWatch = new StopWatch();
+Stage failedStage;
+String SUCCESS = "Success";
+
+stopWatch.start();
+String result11 = doStage(Stage.FoundationMaterials);
+String result12 = doStage(Stage.Foundation, result11);
+String result21 = doStage(Stage.WallsMaterials);
+String result22 = doStage(Stage.Walls, 
+                       getResult(result21, result12));
+String result31 = doStage(Stage.RoofMaterials);
+String result32 = doStage(Stage.Roof, 
+                       getResult(result31, result22));
+System.out.println("House was" + 
+       (isSuccess(result32)?"":" not") + " built in " 
+                + stopWatch.getTime()/1000. + " sec");</pre></div><p class="calibre11">Here, <code class="literal">Stage</code> is an enumeration:</p><div class="calibre2"><pre class="programlisting">enum Stage {
+    FoundationMaterials,
+    WallsMaterials,
+    RoofMaterials,
+    Foundation,
+    Walls,
+    Roof
+}</pre></div><p class="calibre11">The <code class="literal">doStage()</code> method has two overloaded versions. Here is the first one:</p><div class="calibre2"><pre class="programlisting">String doStage(Stage stage) {
+    String result = SUCCESS;
+    boolean failed = stage.equals(failedStage);
+    if (failed) {
+        sleepSec(2);
+        result = stage + " were not collected";
+        System.out.println(result);
+    } else {
+        sleepSec(1);
+        System.out.println(stage + " are ready");
+    }
+    return result;
+}</pre></div><p class="calibre11">The second version is as follows:</p><div class="calibre2"><pre class="programlisting">String doStage(Stage stage, String previousStageResult) {
+  String result = SUCCESS;
+  boolean failed = stage.equals(failedStage);
+  if (isSuccess(previousStageResult)) {
+    if (failed) {
+      sleepSec(2);
+      result = stage + " stage was not completed";
+      System.out.println(result);
+    } else {
+      sleepSec(1);
+      System.out.println(stage + " stage is completed");
+    }
+  } else {
+      result = stage + " stage was not started because: " 
+                                    + previousStageResult;
+      System.out.println(result);
+  }
+  return result;
+}</pre></div><p class="calibre11">The <code class="literal">sleepSec()</code>, <code class="literal">isSuccess()</code>, and <code class="literal">getResult()</code> methods look like this:</p><div class="calibre2"><pre class="programlisting">private static void sleepSec(int sec) {
+    try {
+        TimeUnit.SECONDS.sleep(sec);
+    } catch (InterruptedException e) {
+    }
+}
+boolean isSuccess(String result) {
+    return SUCCESS.equals(result);
+}
+String getResult(String result1, String result2) {
+    if (isSuccess(result1)) {
+        if (isSuccess(result2)) {
+            return SUCCESS;
+        } else {
+            return result2;
+        }
+    } else {
+        return result1;
+    }
+}</pre></div><p class="calibre11">The successful house construction (if we run the previous code without assigning any value to the <code class="literal">failedStage </code>variable) looks like this:</p><div class="mediaobject"><img src="Images/05_34.jpg" alt="The Problem and the Solution using Future" class="calibre127"/></div><p class="calibre11">If we set <code class="literal">failedStage=Stage.Walls</code>, the result will be as follows:</p><div class="mediaobject"><img src="Images/05_35.jpg" alt="The Problem and the Solution using Future" class="calibre128"/></div><p class="calibre11">Using <code class="literal">Future</code>, we can shorten the time it takes to build the house:</p><div class="calibre2"><pre class="programlisting">ExecutorService execService = Executors.newCachedThreadPool();
+Callable&lt;String&gt; t11 = 
+                     () -&gt; doStage(Stage.FoundationMaterials);
+Future&lt;String&gt; f11 = execService.submit(t11);
+List&lt;Future&lt;String&gt;&gt; futures = new ArrayList&lt;&gt;();
+futures.add(f11);
+
+Callable&lt;String&gt; t21 = () -&gt; doStage(Stage.WallsMaterials);
+Future&lt;String&gt; f21 = execService.submit(t21);
+futures.add(f21);
+
+Callable&lt;String&gt; t31 = () -&gt; doStage(Stage.RoofMaterials);
+Future&lt;String&gt; f31 = execService.submit(t31);
+futures.add(f31);
+
+String result1 = getSuccessOrFirstFailure(futures);
+
+String result2 = doStage(Stage.Foundation, result1);
+String result3 = 
+       doStage(Stage.Walls, getResult(result1, result2));
+String result4 = 
+        doStage(Stage.Roof, getResult(result1, result3));</pre></div><p class="calibre11">Here, the <code class="literal">getSuccessOrFirstFailure()</code> method looks like this:</p><div class="calibre2"><pre class="programlisting">String getSuccessOrFirstFailure(
+                      List&lt;Future&lt;String&gt;&gt; futures) {
+    String result = "";
+    int count = 0;
+    try {
+        while (count &lt; futures.size()) {
+            for (Future&lt;String&gt; future : futures) {
+                if (future.isDone()) {
+                    result = getResult(future);
+                    if (!isSuccess(result)) {
+                        break;
+                    }
+                    count++;
+                } else {
+                    sleepSec(1);
+                }
+            }
+            if (!isSuccess(result)) {
+                break;
+            }
+        }
+    } catch (Exception ex) {
+        ex.printStackTrace();
+    }
+    return result;
+}</pre></div><p class="calibre11">The successful building of the house now is faster because material collection happens in parallel:</p><div class="mediaobject"><img src="Images/05_36.jpg" alt="The Problem and the Solution using Future" class="calibre129"/></div><p class="calibre11">By taking advantage of Java functional programming, we can change the second half of our implementation to the following:</p><div class="calibre2"><pre class="programlisting">Supplier&lt;String&gt; supplier1 = 
+                 () -&gt; doStage(Stage.Foundation, result1);
+Supplier&lt;String&gt; supplier2 = 
+                () -&gt; getResult(result1, supplier1.get());
+Supplier&lt;String&gt; supplier3 = 
+              () -&gt; doStage(Stage.Walls, supplier2.get());
+Supplier&lt;String&gt; supplier4 = 
+                () -&gt; getResult(result1, supplier3.get());
+Supplier&lt;String&gt; supplier5 = 
+               () -&gt; doStage(Stage.Roof, supplier4.get());
+System.out.println("House was" + 
+              (isSuccess(supplier5.get()) ? "" : " not") + 
+      " built in " + stopWatch.getTime() / 1000. + " sec");</pre></div><p class="calibre11">The chain of the previous nested functions is triggered by <code class="literal">supplier5.get()</code> in the last line. It blocks until all the functions are completed sequentially, so there is no performance improvement:</p><div class="mediaobject"><img src="Images/05_38.jpg" alt="The Problem and the Solution using Future" class="calibre130"/></div><p class="calibre11">And that is as far as we can go with <code class="literal">Future</code>. Now let's see if we can improve the previous code using <code class="literal">CompletableFuture</code>.</p></div><div class="calibre2" title="The Solution with CompletableFuture"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec19" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>The Solution with CompletableFuture</h2></div></div></div><p class="calibre11">Here's how we can chain the same operations using the <code class="literal">CompletableFuture</code> API:</p><div class="calibre2"><pre class="programlisting">stopWatch.start();
+ExecutorService pool = Executors.newCachedThreadPool();
+CompletableFuture&lt;String&gt; cf1 =
+   CompletableFuture.supplyAsync(() -&gt; 
+           doStageEx(Stage.FoundationMaterials), pool);
+CompletableFuture&lt;String&gt; cf2 =
+   CompletableFuture.supplyAsync(() -&gt; 
+                doStageEx(Stage.WallsMaterials), pool);
+CompletableFuture&lt;String&gt; cf3 =
+   CompletableFuture.supplyAsync(() -&gt; 
+                 doStageEx(Stage.RoofMaterials), pool);
+CompletableFuture.allOf(cf1, cf2, cf3)
+  .thenComposeAsync(result -&gt; 
+      CompletableFuture.supplyAsync(() -&gt; SUCCESS), pool)
+  .thenApplyAsync(result -&gt; 
+                 doStage(Stage.Foundation, result), pool)
+  .thenApplyAsync(result -&gt; 
+                      doStage(Stage.Walls, result), pool)
+  .thenApplyAsync(result -&gt; 
+                       doStage(Stage.Roof, result), pool)
+  .handleAsync((result, ex) -&gt; {
+       System.out.println("House was" +
+         (isSuccess(result) ? "" : " not") + " built in " 
+                 + stopWatch.getTime() / 1000. + " sec");
+       if (result == null) {
+         System.out.println("Because: " + ex.getMessage());
+         return ex.getMessage();
+       } else {
+         return result;
+       }
+  }, pool);
+System.out.println("Out!!!!!");</pre></div><p class="calibre11">To make it work, we had to change the implementation of one of the <code class="literal">doStage()</code> to <code class="literal">doStageEx()</code> methods:</p><div class="calibre2"><pre class="programlisting">String doStageEx(Stage stage) {
+  boolean failed = stage.equals(failedStage);
+  if (failed) {
+    sleepSec(2);
+    throw new RuntimeException(stage + 
+                          " stage was not completed");
+  } else {
+    sleepSec(1);
+    System.out.println(stage + " stage is completed");
+  }
+  return SUCCESS;
+}</pre></div><p class="calibre11">The reason we do this is because the <code class="literal">CompletableFuture.allOf()</code> method returns <code class="literal">CompletableFuture&lt;Void&gt;</code>, while we need to communicate to the further stages the result of the first three stages of collecting materials. The result looks now as follows:</p><div class="mediaobject"><img src="Images/05_38.jpg" alt="The Solution with CompletableFuture" class="calibre130"/></div><p class="calibre11">There are two points to note:</p><div class="calibre2"><ul class="itemizedlist"><li class="listitem">We used a dedicated pool of threads to run all the operations asynchronously; if there were several CPUs or some operations use IO while others do not, the result could be even better</li><li class="listitem">The last line of the code snippet (<code class="literal">Out!!!!!</code>) came out first, which means that all the chains of the operations related to building the house were executed asynchronously</li></ul></div><p class="calibre11">Now, let's see how the system behaves if one of the first stages of collecting materials fails (<code class="literal">failedStage = Stage.WallsMaterials</code>):</p><div class="mediaobject"><img src="Images/05_39.jpg" alt="The Solution with CompletableFuture" class="calibre131"/></div><p class="calibre11">The exception was thrown by the <code class="literal">WallsMaterials</code> stage and caught by the <code class="literal">handleAsync()</code> method, as expected. And, again, the processing was done asynchronously after the <code class="literal">Out!!!!!</code> message was printed.</p></div><div class="calibre2" title="Other Useful Features of CompletableFuture"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h2 class="title2"><a id="ch05lvl2sec20" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Other Useful Features of CompletableFuture</h2></div></div></div><p class="calibre11">One of the great advantages of <code class="literal">CompletableFuture</code> is that it can be passed around as an object and used several times to start different chains of operations. To demonstrate this capability, let's create several new operations:</p><div class="calibre2"><pre class="programlisting">String getData() {
+  System.out.println("Getting data from some source...");
+  sleepSec(1);
+  return "Some input";
+}
+SomeClass doSomething(String input) {
+  System.out.println(
+    "Doing something and returning SomeClass object...");
+  sleepSec(1);
+  return new SomeClass();
+}
+AnotherClass doMore(SomeClass input) {
+  System.out.println("Doing more of something and " +
+                    "returning AnotherClass object...");
+  sleepSec(1);
+  return new AnotherClass();
+}
+YetAnotherClass doSomethingElse(AnotherClass input) {
+  System.out.println("Doing something else and " +
+                "returning YetAnotherClass object...");
+  sleepSec(1);
+  return new YetAnotherClass();
+}
+int doFinalProcessing(YetAnotherClass input) {
+  System.out.println("Processing and finally " +
+                                "returning result...");
+  sleepSec(1);
+  return 42;
+}
+AnotherType doSomethingAlternative(SomeClass input) {
+  System.out.println("Doing something alternative " +
+               "and returning AnotherType object...");
+  sleepSec(1);
+  return new AnotherType();
+}
+YetAnotherType doMoreAltProcessing(AnotherType input) {
+  System.out.println("Doing more alternative and " +
+                  "returning YetAnotherType object...");
+  sleepSec(1);
+  return new YetAnotherType();
+}
+int doFinalAltProcessing(YetAnotherType input) {
+  System.out.println("Alternative processing and " +
+                         "finally returning result...");
+  sleepSec(1);
+  return 43;
+}</pre></div><p class="calibre11">The results of these operations are going to be handled by the <code class="literal">myHandler()</code> method:</p><div class="calibre2"><pre class="programlisting">int myHandler(Integer result, Throwable ex) {
+    System.out.println("And the answer is " + result);
+    if (result == null) {
+        System.out.println("Because: " + ex.getMessage());
+        return -1;
+    } else {
+        return result;
+    }
+}</pre></div><p class="calibre11">Note all the different types returned by the operations. Now we can build a chain that forks in two at some point:</p><div class="calibre2"><pre class="programlisting">ExecutorService pool = Executors.newCachedThreadPool();
+CompletableFuture&lt;SomeClass&gt; completableFuture =
+   CompletableFuture.supplyAsync(() -&gt; getData(), pool)
+     .thenApplyAsync(result -&gt; doSomething(result), pool);
+
+completableFuture
+   .thenApplyAsync(result -&gt; doMore(result), pool)
+   .thenApplyAsync(result -&gt; doSomethingElse(result), pool)
+   .thenApplyAsync(result -&gt; doFinalProcessing(result), pool)
+   .handleAsync((result, ex) -&gt; myHandler(result, ex), pool);
+
+completableFuture
+   .thenApplyAsync(result -&gt; doSomethingAlternative(result), pool)
+   .thenApplyAsync(result -&gt; doMoreAltProcessing(result), pool)
+   .thenApplyAsync(result -&gt; doFinalAltProcessing(result), pool)
+   .handleAsync((result, ex) -&gt; myHandler(result, ex), pool);
+
+System.out.println("Out!!!!!");</pre></div><p class="calibre11">The result of this example is as follows:</p><div class="mediaobject"><img src="Images/05_40.jpg" alt="Other Useful Features of CompletableFuture" class="calibre132"/></div><p class="calibre11">The <code class="literal">CompletableFuture</code> API provides a very rich and well-thought-through API that supports, among other things, the latest trends in reactive microservices because it allows processing data fully asynchronously as it comes in, splitting the flow if needed, and scaling to accommodate the increase of the input. We encourage you to study the examples (many more are provided in the code that accompanies this book) and look at the API at <a class="calibre4 pcalibre3 pcalibre pcalibre1 pcalibre2" href="http://download.java.net/java/jdk9/docs/api/index.html?java/util/concurrent/CompletableFuture.html">http://download.java.net/java/jdk9/docs/api/index.html?java/util/concurrent/CompletableFuture.html</a>.</p></div></div></div>
+
+
+
+  
+<div id="sbo-rt-content" class="calibre1"><div class="calibre2" title="Stream API Improvements"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title1"><a id="ch05lvl1sec39" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Stream API Improvements</h1></div></div></div><p class="calibre11">Most of the new <code class="literal">Stream</code> API features in Java 9 have already been demonstrated in the section that describes <code class="literal">Stream</code> filtering. To remind you, here are the examples we have demonstrated based on the <code class="literal">Stream</code> API improvements in JDK 9:</p><div class="calibre2"><pre class="programlisting">long c1 = senators.stream()
+        .flatMap(s -&gt; Stream.ofNullable(s.getParty() 
+                              == "Party1" ? s : null))
+        .count();
+System.out.println("OfNullable: Members of Party1: " + c1);
+
+long c2 = senators.stream()
+        .map(s -&gt; s.getParty() == "Party2" ? Optional.of(s) 
+                                        : Optional.empty())
+        .flatMap(Optional::stream)
+        .count();
+System.out.println("Optional.stream(): Members of Party2: "
+                                                      + c2);
+
+senators.stream().limit(5)
+        .takeWhile(s -&gt; Senate.timesVotedYes(s) &lt; 5)
+        .forEach(s -&gt; System.out.println("takeWhile(&lt;5): " 
+                     + s + ": " + Senate.timesVotedYes(s)));
+
+senators.stream().limit(5)
+         .dropWhile(s -&gt; Senate.timesVotedYes(s) &lt; 5)
+        .forEach(s -&gt; System.out.println("dropWhile(&lt;5): " 
+                     + s + ": " + Senate.timesVotedYes(s)));</pre></div><p class="calibre11">The only one we have not mentioned yet is the new overloaded <code class="literal">iterate()</code> method:</p><div class="calibre2"><pre class="programlisting">static &lt;T&gt; Stream&lt;T&gt; iterate(T seed, UnaryOperator&lt;T&gt; f)</pre></div><p class="calibre11">An example of its usage is as follows:</p><div class="calibre2"><pre class="programlisting">String result = 
+    IntStream.iterate(1, i -&gt; i + 2)
+             .limit(5)
+             .mapToObj(i -&gt; String.valueOf(i))
+             .collect(Collectors.joining(", "));
+System.out.println("Iterate: " + result);</pre></div><p class="calibre11">We had to add <code class="literal">limit(5)</code> because this version of the <code class="literal">iterate()</code> method creates an unlimited stream of integer numbers. The result of the previous code is as follows:</p><div class="mediaobject"><img src="Images/05_41.jpg" alt="Stream API Improvements" class="calibre133"/></div><p class="calibre11">In Java 9, an overloaded <code class="literal">iterate()</code> method was added:</p><div class="calibre2"><pre class="programlisting">static &lt;T&gt; Stream&lt;T&gt; iterate(T seed, 
+     Predicate&lt;? super T&gt; hasNext, UnaryOperator&lt;T&gt; next)</pre></div><p class="calibre11">As you see, it has now a <code class="literal">Predicate</code> functional interface as a parameter that allows limiting the stream as needed. For example, the following code produces exactly the same result as the previous example with <code class="literal">limit(5)</code>:</p><div class="calibre2"><pre class="programlisting">String result = 
+   IntStream.iterate(1, i -&gt; i &lt; 11, i -&gt; i + 2)
+            .mapToObj(i -&gt; String.valueOf(i))
+            .collect(Collectors.joining(", "));
+System.out.println("Iterate: " + result);</pre></div><p class="calibre11">Note that the type of the stream element does not need to be an integer. It can be any type produced by the source. So, the new <code class="literal">iterate()</code> method can be used to provide criteria for the termination of the stream of any type of data.</p></div></div>
+
+
+
+  
+<div id="sbo-rt-content" class="calibre1"><div class="calibre2" title="Summary"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title1"><a id="ch05lvl1sec40" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Summary</h1></div></div></div><p class="calibre11">In this lesson, we covered a lot of ground in the area of the new features introduced with Java 9. First, we looked at many ways to stream filtering, starting with the basic <code class="literal">filter()</code> method and ending up using the <code class="literal">Stream</code> API additions of JDK 9. Then, you learned a better way to analyze the stack trace using the new <code class="literal">StackWalker</code> class. The discussion was illustrated by specific examples that help you to see the real working code.</p><p class="calibre11">We used the same approach while presenting new convenient factory methods for creating immutable collections and new capabilities for asynchronous processing that came with the <code class="literal">CompletableFuture</code> class and its enhancements in JDK 9.</p><p class="calibre11">We ended this lesson by enumerating the improvements to the <code class="literal">Stream</code> API--those we have demonstrated in the filtering code examples and the new <code class="literal">iterate()</code> method.</p><p class="calibre11">With this, we come to the end of this book. You can now try and apply the tips and techniques you have learned to your project or, if it is not suitable for that, to build your own Java project for high performance. While doing that, try to solve real problems. That will force you to learn new skills and frameworks instead of just applying the knowledge you have already, although the latter is helpful too--it keeps your knowledge fresh and practical.</p><p class="calibre11">The best way to learn is to do it yourself. As Java continues to improve and expand, watch out for new editions of this and similar books by Packt.</p></div></div>
+
+
+
+  
+<div id="sbo-rt-content" class="calibre1"><div class="calibre2" title="Assessments"><div class="titlepage"><div class="calibre2"><div class="calibre2"><h1 class="title1"><a id="ch05lvl1sec41" class="pcalibre pcalibre3 pcalibre1 calibre8 pcalibre2"/>Assessments</h1></div></div></div><div class="calibre2"><ol class="orderedlist"><li class="listitem1">The _______ interface was introduced in Java 8 to emit elements and supports a variety of operations that perform computations based on stream elements.</li><li class="listitem1">Which of the following factory methods of the <code class="literal">StackWalker</code> class creates a <code class="literal">StackWalker</code> class instance with the given option of specifying the stack frame information that it can access?<div class="calibre2"><ol class="orderedlist1"><li class="listitem1"><code class="literal">getInstance()</code></li><li class="listitem1"><code class="literal">getInstance(StackWalker.Option option)</code></li><li class="listitem1"><code class="literal">getInstance(Set&lt;StackWalker.Option&gt; options)</code></li><li class="listitem1"><code class="literal">getInstance(Set&lt;StackWalker.Option&gt; options, int estimatedDepth)</code></li></ol></div></li><li class="listitem1">State whether True or False: The <code class="literal">CompletableFuture</code> API consists of many methods which are implementations of the <code class="literal">CompletionStage</code> interface, and are the implementations of <code class="literal">Future</code>.</li><li class="listitem1">Which among the following methods is used when a type of filtering is required to skip all the duplicate elements in a stream and select only unique element.<div class="calibre2"><ol class="orderedlist1"><li class="listitem1"><code class="literal">distinct()</code></li><li class="listitem1"><code class="literal">unique()</code></li><li class="listitem1"><code class="literal">selectall()</code></li><li class="listitem1"><code class="literal">filtertype()</code></li></ol></div></li><li class="listitem1">State whether True or False: One of the great advantages of <code class="literal">CompletableFuture</code> is that it can be passed around as an object and used several times to start different chains of operations.</li></ol></div></div></div>
+
+
+
+  </body></html>
