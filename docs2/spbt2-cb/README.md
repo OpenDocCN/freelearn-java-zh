@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# SpringBoot2 秘籍
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/85b33110c9d4ae1a18b28a4c4651ada1`](https://zh.annas-archive.org/md5/85b33110c9d4ae1a18b28a4c4651ada1)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

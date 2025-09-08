@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Spring5 项目
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/f612f4826ccbf1c2840de1bc530d1904`](https://zh.annas-archive.org/md5/f612f4826ccbf1c2840de1bc530d1904)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
