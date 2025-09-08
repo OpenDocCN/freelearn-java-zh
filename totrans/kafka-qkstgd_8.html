@@ -1,0 +1,296 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Kafka Connect</h1>
+                </header>
+            
+            <article>
+                
+<p><span>In this chapter, instead of using the Kafka Java API for producers and consumers, Kafka Streams, or KSQL as in previous chapters, we are going to connect Kafka with Spark Structured Streaming, the Apache Spark solution to process streams with its Datasets API.</span></p>
+<p>This chapter covers the following topics:</p>
+<ul>
+<li>Spark Streaming processor</li>
+<li>Reading Kafka from Spark</li>
+<li>Data conversion</li>
+<li>Data processing</li>
+<li>Writing to Kafka from Spark</li>
+<li>Running the <kbd>SparkProcessor</kbd></li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Kafka Connect in a nutshell</h1>
+                </header>
+            
+            <article>
+                
+<p><span>Kafka Connect is an open source framework, part of Apache Kafka; it is used to connect Kafka with other systems, such as structured databases, column stores, key-value stores, filesystems, and search engines. </span></p>
+<p>Kafka Connect has a wide range of built-in connectors. If we are reading from the external system, it is called a <strong>data source</strong>; if we are writing to the external system, it is called a <strong>data sink</strong>.</p>
+<p>In previous chapters, we created a Java Kafka Producer that sends JSON data to a topic called <kbd>healthchecks</kbd> in messages like these three:</p>
+<pre>{"event":"HEALTH_CHECK","factory":"Lake Anyaport","serialNumber":"EW05-HV36","type":"WIND","status":"STARTING","lastStartedAt":"2018-09-17T11:05:26.094+0000","temperature":62.0,"ipAddress":"15.185.195.90"}<br/>{"event":"HEALTH_CHECK","factory":"Candelariohaven","serialNumber":"BO58-SB28","type":"SOLAR","status":"STARTING","lastStartedAt":"2018-08-16T04:00:00.179+0000","temperature":75.0,"ipAddress":"151.157.164.162"}{"event":"HEALTH_CHECK","factory":"Ramonaview","serialNumber":"DV03-ZT93","type":"SOLAR","status":"RUNNING","lastStartedAt":"2018-07-12T10:16:39.091+0000","temperature":70.0,"ipAddress":"173.141.90.85"}<br/>...</pre>
+<p>Now, we are going to process this data to calculate the machine's uptime and to obtain a topic with messages like these three:</p>
+<pre><strong>EW05-HV36   33</strong><br/><strong>BO58-SB28   20</strong><br/><strong>DV03-ZT93   46</strong><br/><strong>...</strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Project setup</h1>
+                </header>
+            
+            <article>
+                
+<p>The first step is to modify our Kioto project. We have to add the dependencies to <kbd>build.gradle</kbd>, as shown in <em>Listing 8.1</em>:</p>
+<pre>apply plugin: 'java'<br/>apply plugin: 'application'<br/>sourceCompatibility = '1.8'<br/>mainClassName = 'kioto.ProcessingEngine'<br/>repositories {<br/>    mavenCentral()<br/>    maven { url 'https://packages.confluent.io/maven/' }<br/>}<br/>version = '0.1.0'<br/>dependencies {<br/>    compile 'com.github.javafaker:javafaker:0.15'<br/>    compile 'com.fasterxml.jackson.core:jackson-core:2.9.7'<br/>    compile 'io.confluent:kafka-avro-serializer:5.0.0'<br/>    compile 'org.apache.kafka:kafka_2.12:2.0.0'<br/>    compile 'org.apache.kafka:kafka-streams:2.0.0'<br/>    compile 'io.confluent:kafka-streams-avro-serde:5.0.0'<br/>    compile 'org.apache.spark:spark-sql_2.11:2.2.2'<br/>    compile 'org.apache.spark:spark-sql-kafka-0-10_2.11:2.2.2'<br/>}<br/>jar {<br/>    manifest {<br/>        attributes 'Main-Class': mainClassName<br/>    } from {<br/>        configurations.compile.collect {<br/>            it.isDirectory() ? it : zipTree(it)<br/>        }<br/>    }<br/>    exclude "META-INF/*.SF"<br/>    exclude "META-INF/*.DSA"<br/>    exclude "META-INF/*.RSA"<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 8.1:<span> Kioto gradle build file for Spark</span></div>
+<p>To use Apache Spark, we need the dependency, shown as follows:</p>
+<pre>compile 'org.apache.spark:spark-sql_2.11:2.2.2'</pre>
+<p>To connect Apache Spark with Kafka, we need the dependency, shown as follows<span>:</span></p>
+<pre>compile 'org.apache.spark:spark-sql-kafka-0-10_2.11:2.2.2'</pre>
+<p>We are using an old Spark version, 2.2.2, for the following two reasons:</p>
+<ul>
+<li>At the moment you are reading this, surely the Spark version will be superior. The reason why I chose this version (and not the last one at the time of writing) is because the connector with Kafka works perfectly with this version (in performance and with regard to bugs).</li>
+<li>The Kafka connector that works with this version is several versions behind the most modern version of the Kafka connector. You always have to consider this when upgrading production environments<strong>.</strong></li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Spark Streaming processor</h1>
+                </header>
+            
+            <article>
+                
+<p>Now, in the <kbd>src/main/java/kioto/spark</kbd> <span>directory,</span> create a file called <kbd>SparkProcessor.java</kbd> with the contents of <em>Listing 8.2</em>, shown as follows:</p>
+<pre>package kioto.spark;<br/>import kioto.Constants;<br/>import org.apache.spark.sql.*;<br/>import org.apache.spark.sql.streaming.*;<br/>import org.apache.spark.sql.types.*;<br/>import java.sql.Timestamp;<br/>import java.time.LocalDate;<br/>import java.time.Period;<br/><br/>public class SparkProcessor {<br/>  private String brokers;<br/>  public SparkProcessor(String brokers) {<br/>    this.brokers = brokers;<br/>  }<br/>  public final void process() {<br/>    //below is the content of this method<br/>  }<br/>  public static void main(String[] args) {<br/>    (new SparkProcessor("localhost:9092")).process();<br/>  }<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 8.2<span>: SparkProcessor.java</span></div>
+<p>Note that, as in previous examples, the main method invoked the <kbd>process()</kbd> method with the IP address and the port of the Kafka brokers.</p>
+<p>Now, let's fill the <kbd>process()</kbd> method. The first step is to initialize Spark, as demonstrated in the following block:</p>
+<pre>SparkSession spark = SparkSession.builder()<br/>    .appName("kioto")<br/>    .master("local[*]")<br/>    .getOrCreate();</pre>
+<p>In Spark, the application name must be the same for each member in the cluster, so here we call it Kioto (original, isn't it?).</p>
+<p>As we are going to run the application locally, we are setting the Spark master to <kbd>local[*]</kbd>, which means that we are creating a number of threads equivalent to the machine CPU cores.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Reading Kafka from Spark</h1>
+                </header>
+            
+            <article>
+                
+<p>There are several connectors for Apache Spark. In this case, we are using the Databricks Inc. (the company responsible for Apache Spark) connector for Kafka.</p>
+<p>Using this Spark Kafka connector, we can read data with Spark Structured Streaming from a Kafka topic:</p>
+<pre> Dataset&lt;Row&gt; inputDataset = spark<br/>    .readStream()<br/>    .format("kafka")<br/>    .option("kafka.bootstrap.servers", brokers)<br/>    .option("subscribe", Constants.getHealthChecksTopic())<br/>    .load();</pre>
+<p>Simply by saying Kafka format, we can read a stream from the topic specified in the <kbd>subscribe</kbd> option, running on the brokers specified.</p>
+<p>At this point in the code, if you invoke the <kbd>printSchema()</kbd> <span>method </span>on the <kbd>inputDataSet</kbd>, the result will be something similar to <em>Figure 8.1</em>:</p>
+<p> </p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/66bd4c3c-1dd9-45e3-b5e8-28a379cb8a5f.png" style=""/></div>
+<div class="packt_figref CDPAlignCenter CDPAlign">Figure 8.1: Print schema output</div>
+<p>We can interpret this as follows:</p>
+<ul>
+<li>The key and the value are binary data. Here in Spark, unfortunately, and<strong> </strong>u<span>nlike Kafka</span><span>,</span> it is not possible to specify deserializers for our data. So, it is necessary to use Dataframe operations to do the deserialization.</li>
+<li>For each message, we can know the topic, the partition, the offset, and the timestamp.</li>
+<li>The timestamp type is always zero.</li>
+</ul>
+<p>As with Kafka Streams, with Spark Streaming, in each step we have to generate a new data stream in order to apply transformations and get new ones.</p>
+<p>In each step, if we need to print our data stream (to debug the application), we can use the following code:</p>
+<pre>StreamingQuery consoleOutput =<br/>    streamToPrint.writeStream()<br/>    .outputMode("append")<br/>    .format("console")<br/>    .start();</pre>
+<p>The first line is optional, because we really don't need to assign the result to an object, just the code execution.</p>
+<p class="mce-root"/>
+<p>The output of this snippet is something like <em>Figure 8.2</em>. The message value is certainly binary data:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="assets/0e9880ca-2571-4043-86cc-1fa6ef189d25.png"/></div>
+<div class="CDPAlignCenter CDPAlign packt_figref">Figure 8.2: Data stream console output</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Data conversion</h1>
+                </header>
+            
+            <article>
+                
+<p><span>We know that when we produced the data, it was in JSON format, although Spark reads it in binary format. To convert the binary message to string, we use the following code:</span></p>
+<pre>Dataset&lt;Row&gt; healthCheckJsonDf =<br/>    inputDataset.selectExpr("CAST(value AS STRING)");</pre>
+<p>The <kbd>Dataset</kbd> console output is now human-readable, and is shown as follows:</p>
+<pre>+--------------------------+<br/>|                     value|<br/>+--------------------------+<br/>| {"event":"HEALTH_CHECK...|<br/>+--------------------------+</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p>The next step is to provide the fields list to specify the data structure of the JSON message, as follows:</p>
+<pre>StructType struct = new StructType()<br/>    .add("event", DataTypes.StringType)<br/>    .add("factory", DataTypes.StringType)<br/>    .add("serialNumber", DataTypes.StringType)<br/>    .add("type", DataTypes.StringType)<br/>    .add("status", DataTypes.StringType)<br/>    .add("lastStartedAt", DataTypes.StringType)<br/>    .add("temperature", DataTypes.FloatType)<br/>    .add("ipAddress", DataTypes.StringType);</pre>
+<p>Next, we deserialize the String in JSON format. The simplest way is to use the prebuilt <kbd>from_json()</kbd> <span>function </span>in the <kbd>org.apache.spark.sql.functions</kbd> <span>package, which </span>is demonstrated in the following block:</p>
+<pre>Dataset&lt;Row&gt; healthCheckNestedDs =<br/>    healthCheckJsonDf.select(<br/>        functions.from_json(<br/>            new Column("value"), struct).as("healthCheck"));</pre>
+<p>If we print the <kbd>Dataset</kbd> at this point, we can see the columns nested as we indicated in the schema:</p>
+<pre>root<br/> |-- healthcheck: struct (nullable = true)<br/> |    |-- event: string (nullable = true)<br/> |    |-- factory: string (nullable = true)<br/> |    |-- serialNumber: string (nullable = true)<br/> |    |-- type: string (nullable = true)<br/> |    |-- status: string (nullable = true)<br/> |    |-- lastStartedAt: string (nullable = true)<br/> |    |-- temperature: float (nullable = true)<br/> |    |-- ipAddress: string (nullable = true)</pre>
+<p>The next step is to flatten this <kbd>Dataset</kbd>, as follows:</p>
+<pre>Dataset&lt;Row&gt; healthCheckFlattenedDs = healthCheckNestedDs<br/>   .selectExpr("healthCheck.serialNumber", "healthCheck.lastStartedAt");</pre>
+<p>To visualize the flattening, if we print the <kbd>Dataset</kbd>, we get the following:</p>
+<pre>root<br/> |-- serialNumber: string (nullable = true)<br/> |-- lastStartedAt: string (nullable = true)</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p>Note that we read the startup time as a string. This is because internally the <kbd>from_json()</kbd> function uses the Jackson library. Unfortunately, there is no way to specify the format of the date to be read.</p>
+<p>For these purposes, fortunately there is the <kbd>to_timestamp()</kbd> function in the same functions package. There is also the <kbd>to_date()</kbd> function if it is necessary to read only a date, ignoring the time specification. Here, we are rewriting the <kbd>lastStartedAt</kbd> column, similar to this:</p>
+<pre>Dataset&lt;Row&gt; healthCheckDs = healthCheckFlattenedDs<br/>    .withColumn("lastStartedAt", functions.to_timestamp(<br/>        new Column ("lastStartedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ"));</pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Data processing</h1>
+                </header>
+            
+            <article>
+                
+<p>Now, what we are going to do is to calculate the <kbd>uptimes</kbd>. As is to be expected, Spark does not have a built-in function to calculate the number of days between two dates, so we are going to create a user-defined function.</p>
+<p>If we remember the KSQL chapter, it is also possible to build and use new UDFs in KSQL.</p>
+<p>To achieve this, the first thing we do is build a function that receives as input a <kbd>java.sql.Timestamp</kbd>, as shown in the following code (this is how timestamps are represented in the Spark DataSets) and returns an integer with the number of days from that date:</p>
+<pre>private final int uptimeFunc(Timestamp date) {<br/>    LocalDate localDate = date.toLocalDateTime().toLocalDate();<br/>    return Period.between(localDate, LocalDate.now()).getDays();<br/>}</pre>
+<p>The next step is to generate a Spark UDF as follows:</p>
+<pre>Dataset&lt;Row&gt; processedDs = healthCheckDs<br/>    .withColumn( "lastStartedAt", new Column("uptime"));</pre>
+<p>And finally, apply that UDF to the <kbd>lastStartedAt</kbd> column to create a new column in the <kbd>Dataset</kbd> called <kbd>uptime</kbd>.</p>
+<p class="mce-root"/>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Writing to Kafka from Spark</h1>
+                </header>
+            
+            <article>
+                
+<p>As we already processed the data and calculated the <kbd>uptime</kbd>, now all we need to do is to write these values in the Kafka topic called <kbd>uptimes</kbd>.</p>
+<p>Kafka's connector allows us to write values to Kafka. The requirement is that the <kbd>Dataset</kbd> to write must have a column called <kbd>key</kbd> and another column called <kbd>value</kbd>; each one can be of the type String or binary.</p>
+<p>Since we want the machine serial number to be the key, there is no problem if it is already of String type. Now, we just have to convert the <kbd>uptime</kbd> column from binary into String.</p>
+<p>We use the <kbd>select()</kbd> method of the <kbd>Dataset</kbd> class to calculate these two columns and assign them new names using the <kbd>as()</kbd> method, shown as follows (to do this, we could also use the <kbd>alias()</kbd> method of that class):</p>
+<pre>Dataset&lt;Row&gt; resDf = processedDs.select(<br/>    (new Column("serialNumber")).as("key"),<br/>    processedDs.col("uptime").cast(DataTypes.StringType).as("value"));</pre>
+<p>Our <kbd>Dataset</kbd> is ready and it has the format expected by the Kafka connector. The following code is to tell Spark to write these values to Kafka:</p>
+<pre>//StreamingQuery kafkaOutput =<br/>resDf.writeStream()<br/>   .format("kafka")<br/>   .option("kafka.bootstrap.servers", brokers)<br/>   .option("topic", "uptimes")<br/>   .option("checkpointLocation", "/temp")<br/>   .start();</pre>
+<p>Note that we added the checkpoint location in the options. This is to ensure the high availability of Kafka. However, this does not guarantee that messages are delivered in exactly once mode. Nowadays, Kafka can guarantee exactly once delivery; Spark for the moment, can only guarantee the at least once delivery mode.</p>
+<p>Finally, we call the <kbd>awaitAnyTermination()</kbd> method, shown as follows:</p>
+<pre>try {<br/>  spark.streams().awaitAnyTermination();<br/>} catch (StreamingQueryException e) {<br/>  // deal with the Exception<br/>}</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p class="mceNonEditable"/>
+<p>An important note is to mention that if Spark leaves a console output inside the code, it implies that all queries must call its <kbd>start()</kbd> method before calling any <kbd>awaitTermination()</kbd> method, shown as follows:</p>
+<pre>firstOutput = someDataSet.writeStream<br/>...<br/>    .start()<br/>...<br/> secondOutput = anotherDataSet.writeStream<br/>...<br/>    .start()<br/>firstOutput.awaitTermination()<br/>anotherOutput.awaitTermination()</pre>
+<p>Also note that we can replace all the <kbd>awaitTermination()</kbd> calls at the end with a single call to <kbd>awaitAnyTermination()</kbd>, as we did in the original code.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the SparkProcessor</h1>
+                </header>
+            
+            <article>
+                
+<p>To build the project, run this command from the <kbd>kioto</kbd> directory as follows:</p>
+<pre><strong>$ gradle jar</strong></pre>
+<p>If everything is OK, the output is something similar to the following:</p>
+<pre><strong>BUILD SUCCESSFUL in 3s</strong><br/><strong>1 actionable task: 1 executed</strong></pre>
+<ol>
+<li>From a command-line terminal, move to the <kbd>Confluent</kbd> directory and start it as follows:</li>
+</ol>
+<pre><strong>      $ ./bin/confluent start</strong></pre>
+<ol start="2">
+<li>Run a console consumer for the <kbd>uptimes</kbd> topic, shown as follows:</li>
+</ol>
+<pre><strong>      $ ./bin/kafka-console-consumer --bootstrap-server localhost:9092 <br/>      --topic uptimes</strong></pre>
+<ol start="3">
+<li>From our IDE, run the main method of the <kbd>PlainProducer</kbd> built in previous chapters</li>
+<li>The output on the console consumer of the producer should be similar to the following:</li>
+</ol>
+<pre style="padding-left: 60px">{"event":"HEALTH_CHECK","factory":"Lake Anyaport","serialNumber":"EW05-HV36","type":"WIND","status":"STARTING","lastStartedAt":"2017-09-17T11:05:26.094+0000","temperature":62.0,"ipAddress":"15.185.195.90"}<br/>{"event":"HEALTH_CHECK","factory":"Candelariohaven","serialNumber":"BO58-SB28","type":"SOLAR","status":"STARTING","lastStartedAt":"2017-08-16T04:00:00.179+0000","temperature":75.0,"ipAddress":"151.157.164.162"}<br/>{"event":"HEALTH_CHECK","factory":"Ramonaview","serialNumber":"DV03-ZT93","type":"SOLAR","status":"RUNNING","lastStartedAt":"2017-07-12T10:16:39.091+0000","temperature":70.0,"ipAddress":"173.141.90.85"}<br/>...</pre>
+<ol start="5">
+<li>From our IDE, run the main method of the <kbd>SparkProcessor</kbd></li>
+<li>The output on the console consumer for the <kbd>uptimes</kbd> topic should be similar to the following:</li>
+</ol>
+<pre><strong>      EW05-HV36   33</strong><br/><strong>      BO58-SB28   20</strong><br/><strong>      DV03-ZT93   46</strong><br/><strong>      ...</strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>If you are someone who uses Spark for batch processing, Spark Structured Streaming is a tool you should try, as its API is similar to its batch processing counterpart.</p>
+<p>Now, if we compare Spark to Kafka for stream processing, we must remember that Spark streaming is designed to handle throughput, not latency, and it becomes very complicated to handle streams with low latency.</p>
+<p>The Spark Kafka connector has always been a complicated issue. For example, we have to use previous versions of both, because with each new version, there are too many changes on both sides.</p>
+<p>In Spark, the deployment model is always much more complicated than with Kafka Streams. Although Spark, Flink, and Beam can perform tasks much more complex tasks, than Kafka Streams, the easiest to learn and implement has always been Kafka.</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

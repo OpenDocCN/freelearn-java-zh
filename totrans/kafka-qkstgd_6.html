@@ -1,0 +1,654 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Kafka Streams</h1>
+                </header>
+            
+            <article>
+                
+<p><span>In this chapter, instead of using the Kafka Java API for producers and consumers as in previous chapters, we are going to use Kafka Streams, the Kafka module for stream processing.</span></p>
+<p>This chapter covers the following topics:</p>
+<ul>
+<li class="mce-root">Kafka Streams in a nutshell</li>
+<li class="mce-root">Kafka Streams project setup</li>
+<li class="mce-root">Coding and running the Java <kbd>PlainStreamsProcessor</kbd></li>
+<li class="mce-root">Scaling out with Kafka Streams</li>
+<li class="mce-root">Coding and running the Java <kbd>CustomStreamsProcessor</kbd></li>
+<li class="mce-root">Coding and running the Java <kbd>AvroStreamsProcessor</kbd></li>
+<li class="mce-root">Coding and running the Late <kbd>EventProducer</kbd></li>
+<li class="mce-root">Coding and running the Kafka Streams processor</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Kafka Streams in a nutshell</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">Kafka Streams is a library and part of Apache Kafka, used to process streams into and from Kafka. In functional programming, there are several operations over collections, such as the following:</p>
+<ul>
+<li class="mce-root"><kbd>filter</kbd></li>
+<li class="mce-root"><kbd>map</kbd></li>
+<li class="mce-root"><kbd>flatMap</kbd></li>
+<li class="mce-root"><kbd>groupBy</kbd></li>
+<li class="mce-root"><kbd>join</kbd></li>
+</ul>
+<p class="mce-root"/>
+<p class="mce-root">The success of streaming platforms such as Apache Spark, Apache Flink, Apache Storm, and Akka Streams is to incorporate these stateless functions to process data streams. Kafka Streams provides a DSL to incorporate these functions to manipulate data streams.<br/>
+Kafka Streams also has stateful transformations; these are operations related to the aggregation that depend on the state of the messages as a group, for example, the windowing functions and support for late arrival data. Kafka Streams is a library, and this means that Kafka Streams applications can be deployed by executing your application jar. There is no need to deploy the application on a server, which means you can use any application to run a Kafka Streams application: Docker, Kubernetes, servers on premises, and so on. Something wonderful about Kafka Streams is that it allows horizontal scaling. That is, if it runs in the same JVM, it executes multiple threads, but if several instances of the application are started, it can run several JVMs to scale out.<br/>
+The Apache Kafka core is built in Scala; however, Kafka Streams and KSQL are built in Java 8. Kafka Streams is packaged in the open source distribution of Apache Kafka.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Project setup</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">The first step is to modify the <kbd>kioto</kbd> project. We have to add the dependencies to <kbd>build.gradle</kbd>, as shown in <em>Listing 6.1</em>:</p>
+<pre class="mce-root">apply plugin: 'java'<br/>apply plugin: 'application'<br/><br/>sourceCompatibility = '1.8'<br/><br/>mainClassName = 'kioto.ProcessingEngine'<br/><br/>repositories {<br/> mavenCentral()<br/> maven { url 'https://packages.confluent.io/maven/' }<br/>}<br/><br/>version = '0.1.0'<br/><br/>dependencies {<br/>  compile 'com.github.javafaker:javafaker:0.15'<br/>  compile 'com.fasterxml.jackson.core:jackson-core:2.9.7'<br/>  compile 'io.confluent:kafka-avro-serializer:5.0.0'<br/>  compile 'org.apache.kafka:kafka_2.12:2.0.0'<br/>  compile 'org.apache.kafka:kafka-streams:2.0.0'<br/>  compile 'io.confluent:kafka-streams-avro-serde:5.0.0'<br/>}<br/><br/>jar {<br/>  manifest {<br/>    attributes 'Main-Class': mainClassName<br/>  } from {<br/>    configurations.compile.collect {<br/>       it.isDirectory() ? it : zipTree(it)<br/>    }<br/>  }<br/>  exclude "META-INF/*.SF"<br/>  exclude "META-INF/*.DSA"<br/>  exclude "META-INF/*.RSA"<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 6.1:<span> Kioto Gradle build file for Kafka Streams</span></div>
+<p class="mce-root">For the examples in this chapter, we also need the dependencies for Jackson. To use Kafka Streams, we just need one dependency, which is given in the following code snippet:</p>
+<pre class="mce-root">compile 'org.apache.kafka:kafka-streams:2.0.0'</pre>
+<p class="mce-root">To use Apache Avro with Kafka Streams, we add the serializers and deserializers as given in the following code:</p>
+<pre class="mce-root">compile 'io.confluent:kafka-streams-avro-serde:5.0.0'</pre>
+<p class="mce-root">The following lines are needed to run a Kafka Streams application as a jar. The build generates a fat jar:</p>
+<pre class="mce-root">configurations.compile.collect {<br/>  it.isDirectory() ? it : zipTree(it)<br/>}</pre>
+<p>The directory tree structure of the project should be as follows:</p>
+<pre>src<br/>main<br/>--java<br/>----kioto<br/>------avro<br/>------custom<br/>------events<br/>------plain<br/>------serde<br/>--resources<br/>test</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Java PlainStreamsProcessor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">Now, in the <kbd>src/main/java/kioto/plain</kbd> <span>directory, </span>create a file called <kbd>PlainStreamsProcessor.java</kbd> with the contents of <em>Listing 6.2,</em> shown as follows:</p>
+<pre class="mce-root CDPAlignLeft CDPAlign">import ...<br/>public final class PlainStreamsProcessor {<br/>  private final String brokers;<br/>  public PlainStreamsProcessor(String brokers) {<br/>    super();<br/>    this.brokers = brokers;<br/>  }<br/>  public final void process() {<br/>    // below we will see the contents of this method <br/>  }<br/>  public static void main(String[] args) {<br/>    (new PlainStreamsProcessor("localhost:9092")).process();<br/>  }<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 6.2:<span> PlainStreamsProcessor.java</span></div>
+<p class="mce-root">All the magic happens inside the <kbd>process()</kbd> method. The first step in a Kafka Streams application is to get a <kbd>StreamsBuilder</kbd> instance, as shown in the following code:</p>
+<pre class="mce-root">StreamsBuilder streamsBuilder = new StreamsBuilder();</pre>
+<p class="mce-root">The <kbd>StreamsBuilder</kbd> is an object that allows building a topology. A topology in Kafka Streams is a structural description of a data pipeline. The topology is a succession of steps that involve transformations between streams. A topology is a very important concept in streams; it is also used in other technologies such as Apache Storm.</p>
+<p class="mce-root">The <kbd>StreamsBuilder</kbd> is used to consume data from a topic. There are other two important concepts in the context of Kafka Streams: a <kbd>KStream</kbd>, a representation of a stream of records, and a <kbd>KTable</kbd>, a log of the changes in a stream (we will see KTables in detail in <a href="cafc7e52-647d-4f97-8a42-965ff94e678c.xhtml" target="_blank">Chapter 7</a>, <em><span>KSQL</span></em>). To obtain a <kbd>KStream</kbd> from a topic, we use the <kbd>stream()</kbd> method of the <kbd>StreamsBuilder</kbd>, shown as follows:</p>
+<pre class="mce-root">KStream healthCheckJsonStream = <br/>  streamsBuilder.stream( Constants.getHealthChecksTopic(), <br/>    Consumed.with(Serdes.String(), Serdes.String()));</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p class="mce-root">There is an implementation of the <kbd>stream()</kbd> method that just receives the topic name as a parameter. But, it is good practice to use the implementation where we can also specify the serializers, as in this example we have to specify the Serializer for the key and the Serializer for the value for the <kbd>Consumed</kbd> class; in this case, both are strings.</p>
+<p class="mce-root">Don't let the serializers be specified through application-wide properties, because the same Kafka Streams application might read from several data sources with different data formats.</p>
+<p class="mce-root">We have obtained a JSON stream. The next step in the topology is to obtain the <kbd>HealthCheck</kbd> object stream, and we do so by building the following Stream:</p>
+<pre class="mce-root">KStream healthCheckStream = healthCheckJsonStream.mapValues((v -&gt; {<br/>  try {<br/>    return Constants.getJsonMapper().readValue(<br/>      (String) v, HealthCheck.class);<br/>  } catch (IOException e) {<br/>    // deal with the Exception<br/>  }<br/> }));</pre>
+<p class="mce-root">First, note that we are using the <kbd>mapValues()</kbd> method, so as in Java 8, the method receives a lambda expression. There are other implementations for the <kbd>mapValues()</kbd> method, but here we are using the lambda with just one argument (<kbd>v-&gt;</kbd>).</p>
+<p class="mce-root">The <kbd>mapValues()</kbd> here could be read as follows: for each element in the input Stream, we are applying a transformation from the JSON object to the <kbd>HealthCheck</kbd> object, and this transformation could raise an <kbd>IOException</kbd>, so we are catching it.</p>
+<p class="mce-root">Recapitulating until the moment, in the first transformation, we read from the topic a stream with (<kbd>String, String</kbd>) pairs. In the second transformation, we go from the value in JSON to the value in <kbd>HealthCheck</kbd> objects.</p>
+<p class="mce-root">In the third step, we are going to calculate the <kbd>uptime</kbd> and send it to the <kbd>uptimeStream</kbd>, as shown in the following block:</p>
+<pre class="mce-root">KStream uptimeStream = healthCheckStream.map(((KeyValueMapper)(k, v)-&gt; {<br/>  HealthCheck healthCheck = (HealthCheck) v;<br/>  LocalDate startDateLocal = healthCheck.getLastStartedAt().toInstant()<br/>              .atZone(ZoneId.systemDefault()).toLocalDate();<br/>  int uptime = Period.between(startDateLocal, LocalDate.now()).getDays();<br/>  return new KeyValue&lt;&gt;(<br/>    healthCheck.getSerialNumber(), String.valueOf(uptime));<br/> }));</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p class="mceNonEditable"/>
+<p class="mce-root">Note that we are using the <kbd>map()</kbd> method, also as in Java 8, the method receives a lambda expression. There are other implementations for the <kbd>map()</kbd> method; here, we are using a lambda with two arguments (<kbd>(k, v)-&gt;</kbd>)</p>
+<p class="mce-root">The <kbd>map()</kbd> here could be read as follows: for each element in the input stream, we extract the tuples (key, value). We are using just the value (anyway, the key is <kbd>null</kbd>), cast it to <kbd>HealthCheck</kbd>, extract two attributes (the start time and the <kbd>SerialNumber</kbd>), calculate the <kbd>uptime</kbd>, and return a new <kbd>KeyValue</kbd> pair with (<kbd>SerialNumber</kbd>, <kbd>uptime</kbd>).</p>
+<p class="mce-root">The last step is to write these values into the <kbd>uptimes</kbd> topic, shown as follows:</p>
+<pre class="mce-root">uptimeStream.to( Constants.getUptimesTopic(), <br/>  Produced.with(Serdes.String(), Serdes.String()));</pre>
+<p class="mce-root">Again, I will emphasize it until I get tired: it is widely recommended to declare the data types of our Streams. Always stating, in this case for example, that key value pairs are of type (<kbd>String, String</kbd>).</p>
+<p class="mce-root"><span>Here is a summary of the steps:</span></p>
+<ol>
+<li class="mce-root">Read from the input topic key value pairs of type (<kbd>String, String</kbd>)</li>
+<li class="mce-root">Deserialize each JSON object to <kbd>HealthCheck</kbd></li>
+<li class="mce-root">Calculate the <kbd>uptimes</kbd></li>
+<li class="mce-root">Write the <kbd>uptimes</kbd> to the output topic in key value pairs of type (<kbd>String, String</kbd>)</li>
+</ol>
+<p>Finally, it is time to start the Kafka Streams engine.</p>
+<p>Before starting it, we need to specify the topology and two properties, the broker and the application ID, shown as follows:</p>
+<pre class="mce-root">Topology topology = streamsBuilder.build();<br/>Properties props = new Properties();<br/>props.put("bootstrap.servers", this.brokers);<br/>props.put("application.id", "kioto");<br/>KafkaStreams streams = new KafkaStreams(topology, props);<br/>streams.start();</pre>
+<p class="mce-root">Note that the serializers and deserializers are just explicitly defined when reading from and writing to topics. So, we are not tied <span>application-wide to a single data type, and we can read from and write to topics with different data types, as happens continuously in practice.</span></p>
+<p class="mce-root">Also with this good practice, between different topics, there is no ambiguity about which Serde to use.</p>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the PlainStreamsProcessor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">To build the project, run this command from the <kbd>kioto</kbd> directory:</p>
+<pre class="mce-root"><strong>$ gradle build</strong></pre>
+<p class="mce-root">If everything is correct, the output is something like the following:</p>
+<pre class="mce-root"><strong>BUILD SUCCESSFUL in 1s</strong><br/><strong>6 actionable task: 6 up-to-date</strong></pre>
+<ol>
+<li>The first step is to run a console consumer for the <kbd>uptimes</kbd> topic, shown in the following code snippet:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$ ./bin/kafka-console-consumer --bootstrap-server localhost:9092 <br/>--topic uptimes --property print.key=true</strong></pre>
+<ol start="2">
+<li>From the IDE, run the main method of the <kbd>PlainStreamsProcessor</kbd></li>
+<li>From the IDE, run the main method of the <kbd>PlainProducer</kbd> (built in previous chapters)</li>
+<li>The output on the console consumer for the <kbd>uptimes</kbd> topic should be similar to the following:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>EW05-HV36 33</strong><br/><strong>BO58-SB28 20</strong><br/><strong>DV03-ZT93 46</strong><br/><strong>...</strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Scaling out with Kafka Streams</h1>
+                </header>
+            
+            <article>
+                
+<p>To scale out the architecture as promised, we must follow these steps:</p>
+<ol>
+<li class="mce-root">Run a console consumer for the <kbd>uptimes</kbd> topic, shown as follows:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$ ./bin/kafka-console-consumer --bootstrap-server localhost:9092 <br/>--topic uptimes --property print.key=true</strong></pre>
+<ol start="2">
+<li class="mce-root">Run the application jar from the command line, shown in the following code:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$ java -cp ./build/libs/kioto-0.1.0.jar <br/>kioto.plain.PlainStreamsProcessor</strong></pre>
+<p style="padding-left: 60px">This is when we verify that our application really scales out.</p>
+<p class="mce-root"/>
+<ol start="3">
+<li> From a new command-line window, we execute the same command, shown as follows:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$ java -cp ./build/libs/kioto-0.1.0.jar <br/>kioto.plain.PlainStreamsProcessor</strong></pre>
+<p class="mce-root" style="padding-left: 90px">The output should be something like the following:</p>
+<pre class="mce-root" style="padding-left: 60px"><strong>2017/07/05 15:03:18.045 INFO ... Setting newly assigned <br/>partitions [healthchecks-2, healthchecks -3]</strong></pre>
+<p class="mce-root">If we remember the theory of <a href="0bde3875-cd30-435c-9b32-b96fccb2e6d0.xhtml" target="_blank">Chapter 1</a>, <em>Configuring Kafka</em>, when we created our topic, we specified that it had four partitions. This nice message from Kafka Streams is telling us that the application was assigned to partitions two and three of our topic.</p>
+<p>Take a look at the following log:</p>
+<pre class="mce-root">...<br/>2017/07/05 15:03:18.045 INFO ... Revoking previously assigned partitions [healthchecks -0, healthchecks -1, healthchecks -2, healthchecks -3]<br/>2017/07/05 15:03:18.044 INFO ... State transition from RUNNING to PARTITIONS_REVOKED<br/>2017/07/05 15:03:18.044 INFO ... State transition from RUNNING to REBALANCING<br/>2017/07/05 15:03:18.044 INFO ... Setting newly assigned partitions [healthchecks-2, healthchecks -3]<br/>...</pre>
+<p class="mce-root">We can read that the first instance was using the four partitions, then when we ran the second instance, it entered a state where the partitions were reassigned to consumers; to the first instance was assigned two partitions: <kbd>healthchecks-0</kbd> and  <kbd>healthchecks-1</kbd>.</p>
+<p class="mce-root">And this is how Kafka Streams smoothly scale out. Remember that all this works because the consumers are part of the same consumer group and are controlled from Kafka Streams through the <kbd>application.id</kbd> property.</p>
+<p class="mce-root">We must also remember that the number of threads assigned to each instance of our application can also be modified by setting the <kbd>num.stream.threads</kbd> property. Thus, each thread would be independent, with its own producer and consumer. This ensures that the resources of our servers are used in a more efficient way.</p>
+<p class="mce-root"/>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Java CustomStreamsProcessor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">Summing up what has happened so far, in previous chapters we saw how to make a producer, a consumer, and a simple processor in Kafka. We also saw how to do the same with a custom SerDe, how to use Avro, and the Schema Registry. So far in this chapter, we have seen how to make a simple processor with Kafka Streams.</p>
+<p class="mce-root">In this section, we will use all our knowledge so far to build a <kbd>CustomStreamsProcessor</kbd> with Kafka Streams to use our own SerDe.</p>
+<p class="mce-root"><br/>
+Now, in the <kbd>src/main/java/kioto/custom</kbd> <span>directory,</span> create a file called <kbd>CustomStreamsProcessor.java</kbd> with the contents of <em>Listing 6.3</em>, shown as follows:</p>
+<pre class="mce-root">import ...<br/>public final class CustomStreamsProcessor {<br/>  private final String brokers;<br/>  public CustomStreamsProcessor(String brokers) {<br/>    super();<br/>    this.brokers = brokers;<br/>  }<br/>  public final void process() {<br/>    // below we will see the contents of this method<br/>  }<br/>  public static void main(String[] args) {<br/>    (new CustomStreamsProcessor("localhost:9092")).process();<br/>  }<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 6.3:<span> CustomStreamsProcessor.java</span></div>
+<p class="mce-root">All the magic happens inside the <kbd>process()</kbd> method.</p>
+<p class="mce-root">The first step in a Kafka Streams application is to get a <kbd>StreamsBuilder</kbd> instance, shown as follows:</p>
+<pre class="mce-root">StreamsBuilder streamsBuilder = new StreamsBuilder();</pre>
+<p class="mce-root">We can reuse the <kbd>Serdes</kbd> built <span><span>in </span></span>the previous chapters. The following code creates a <kbd>KStream</kbd> that deserializes the values of the messages as <kbd>HealthCheck</kbd> objects.</p>
+<pre class="mce-root">Serde customSerde = Serdes.serdeFrom(<br/>  new HealthCheckSerializer(), new HealthCheckDeserializer());</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p class="mceNonEditable"/>
+<p class="mce-root">The <kbd>serdeFrom()</kbd> method of the <kbd>Serde</kbd> class dynamically wraps our <kbd>HealthCheckSerializer</kbd> and <kbd>HealthCheckDeserializer</kbd> into a single <kbd>HealthCheck Serde</kbd>.</p>
+<p class="mce-root">We can reuse the <kbd>Serdes</kbd> built on the previous chapters. The following code creates a <kbd>KStream</kbd> that deserializes the values of the messages as <kbd>HealthCheck</kbd> objects.</p>
+<p class="mce-root">The <kbd>StreamsBuilder</kbd> is used to consume data from a topic. The same as in previous sections, to obtain a <kbd>KStream</kbd> from a topic, we use the <kbd>stream()</kbd> method of the <kbd>StreamsBuilder</kbd>, shown as follows:</p>
+<pre class="mce-root">KStream healthCheckStream =<br/>  streamsBuilder.stream( Constants.getHealthChecksTopic(),<br/>    Consumed.with(Serdes.String(), customSerde));</pre>
+<p class="mce-root">We use the implementation where we can also specify the serializers, as in this example, we have to specify the serializer for the key, and the serializer for the value for the <kbd>Consumed</kbd> class, in this case the key is a String (always <kbd>null</kbd>), and the serializer for the value is our new <kbd>customSerde</kbd>.</p>
+<p class="mce-root">The magic here is that the rest of the code of the <kbd>process()</kbd> method remains the same as in the previous section; it is also shown as follows:</p>
+<pre class="mce-root">KStream uptimeStream = healthCheckStream.map(((KeyValueMapper)(k, v)-&gt; {<br/>  HealthCheck healthCheck = (HealthCheck) v;<br/>  LocalDate startDateLocal = healthCheck.getLastStartedAt().toInstant()<br/>               .atZone(ZoneId.systemDefault()).toLocalDate();<br/>  int uptime =<br/>      Period.between(startDateLocal, LocalDate.now()).getDays();<br/>  return new KeyValue&lt;&gt;(<br/>      healthCheck.getSerialNumber(), String.valueOf(uptime));<br/>}));<br/>uptimeStream.to( Constants.getUptimesTopic(),<br/>      Produced.with(Serdes.String(), Serdes.String()));<br/>Topology topology = streamsBuilder.build();<br/>Properties props = new Properties();<br/>props.put("bootstrap.servers", this.brokers);<br/>props.put("application.id", "kioto");<br/>KafkaStreams streams = new KafkaStreams(topology, props);<br/>streams.start(); </pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the CustomStreamsProcessor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">To build the project, run this command from the <kbd>kioto</kbd> directory:</p>
+<pre class="mce-root"><strong>$ gradle build</strong></pre>
+<p class="mce-root">If everything is correct, the output is something like the following:</p>
+<pre class="mce-root"><strong>BUILD SUCCESSFUL in 1s</strong><br/><strong>6 actionable task: 6 up-to-date</strong></pre>
+<ol>
+<li>The first step is to run a console consumer for the <kbd>uptimes</kbd> topic, shown as follows:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$ ./bin/kafka-console-consumer --bootstrap-server localhost:9092 <br/>--topic uptimes --property print.key=true</strong></pre>
+<ol start="2">
+<li>From our IDE, run the main method of the <kbd>CustomStreamsProcessor</kbd></li>
+<li class="mce-root">From our IDE, run the main method of the <kbd>CustomProducer</kbd> (built in previous chapters)</li>
+<li class="mce-root">The output on the console consumer for the <kbd>uptimes</kbd> topic should be similar to the following:</li>
+</ol>
+<pre><strong>      EW05-HV36 33</strong><br/><strong>      BO58-SB28 20</strong><br/><strong>      DV03-ZT93 46</strong><br/><strong>      ...</strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Java AvroStreamsProcessor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">In this section we will see how to use all this power gathered together: Apache Avro, Schema Registry, and Kafka Streams.</p>
+<p class="mce-root">Now, we are going to use Avro format in our messages, as we did in previous chapters. We consumed this data by configuring the Schema Registry URL and using the Kafka Avro deserializer. For Kafka Streams, we need to use a Serde, so we added the dependency in the Gradle build file, given as follows:</p>
+<pre class="mce-root">compile 'io.confluent:kafka-streams-avro-serde:5.0.0'</pre>
+<p class="mce-root">This dependency has the <kbd>GenericAvroSerde</kbd> and specific <kbd>avroSerde</kbd> explained in previous chapters. Both Serde implementations allow us to work with Avro records.</p>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p class="mce-root">Now, in the <kbd>src/main/java/kioto/avro</kbd> <span>directory, </span>create a file called <kbd>AvroStreamsProcessor.java</kbd> with the contents of <em>Listing 6.4,</em> shown as follows:</p>
+<pre class="mce-root">import ...<br/>public final class AvroStreamsProcessor {<br/>  private final String brokers;<br/>  private final String schemaRegistryUrl;<br/>  public AvroStreamsProcessor(String brokers, String schemaRegistryUrl) {<br/>    super();<br/>    this.brokers = brokers;<br/>    this.schemaRegistryUrl = schemaRegistryUrl;<br/>  }<br/>  public final void process() {<br/>    // below we will see the contents of this method<br/>  }<br/>  public static void main(String[] args) {<br/>    (new AvroStreamsProcessor("localhost:9092", <br/>        "http://localhost:8081")).process();<br/>  }<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 6.4:<span> AvroStreamsProcessor.java</span></div>
+<p class="mce-root">One main difference with the previous code listings is the specification of the Schema Registry URL. The same as before, the magic happens inside the <kbd>process()</kbd> method.</p>
+<p class="mce-root">The first step in a Kafka Streams Application is to get a <kbd>StreamsBuilder</kbd> instance, given as follows:</p>
+<pre class="mce-root">StreamsBuilder streamsBuilder = new StreamsBuilder();</pre>
+<p class="mce-root">The seconds step is to get an instance of the <kbd>GenericAvroSerde</kbd> object, shown as follows:</p>
+<pre class="mce-root">GenericAvroSerde avroSerde = new GenericAvroSerde();</pre>
+<p class="mce-root">As we are using the <kbd>GenericAvroSerde</kbd>, we need to configure it with the Schema Registry URL (as in previous chapters); it is shown in the following code:</p>
+<pre class="mce-root">avroSerde.configure(<br/>  Collections.singletonMap("schema.registry.url", schemaRegistryUrl), false);</pre>
+<p class="mce-root">The <kbd>configure()</kbd> method of <kbd>GenericAvroSerde</kbd> receives a map as a parameter; as we just need a map with a single entry, we used the singleton map method.</p>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root">Now, we can create a <kbd>KStream</kbd> using this Serde. The following code generates an Avro Stream that contains <kbd>GenericRecord</kbd> objects:</p>
+<pre class="mce-root">KStream avroStream =<br/>  streamsBuilder.stream( Constants.getHealthChecksAvroTopic(),<br/>    Consumed.with(Serdes.String(), avroSerde));</pre>
+<p class="mce-root">Note how we request the name of the <kbd>AvroTopic</kbd>, and that we have to specify the serializer for the key and the serializer for the value for the <kbd>Consumed</kbd> class; in this case, the key is a <kbd>String</kbd> (always <kbd>null</kbd>), and the serializer for the value is our new <kbd>avroSerde</kbd>.</p>
+<p class="mce-root">To deserealize the values for the <kbd>HealthCheck</kbd> Stream, we apply the same methods used in previous chapters inside the lambda of the <kbd>mapValues()</kbd> method with one argument (<kbd>v-&gt;</kbd>), shown as follows:</p>
+<pre class="mce-root">KStream healthCheckStream = avroStream.mapValues((v -&gt; {<br/>  GenericRecord healthCheckAvro = (GenericRecord) v;<br/>  HealthCheck healthCheck = new HealthCheck(<br/>    healthCheckAvro.get("event").toString(),<br/>    healthCheckAvro.get("factory").toString(),<br/>    healthCheckAvro.get("serialNumber").toString(),<br/>    healthCheckAvro.get("type").toString(),<br/>    healthCheckAvro.get("status").toString(),<br/>    new Date((Long) healthCheckAvro.get("lastStartedAt")),<br/>    Float.parseFloat(healthCheckAvro.get("temperature").toString()),<br/>    healthCheckAvro.get("ipAddress").toString());<br/>  return healthCheck;<br/>}));</pre>
+<p>And again, the rest of the code of the <kbd>process()</kbd> method remains the same as in previous sections, shown as follows:</p>
+<pre class="mce-root">KStream uptimeStream = healthCheckStream.map(((KeyValueMapper)(k, v)-&gt; {<br/>  HealthCheck healthCheck = (HealthCheck) v;<br/>  LocalDate startDateLocal = healthCheck.getLastStartedAt().toInstant()<br/>               .atZone(ZoneId.systemDefault()).toLocalDate();<br/>  int uptime =<br/>     Period.between(startDateLocal, LocalDate.now()).getDays();<br/>  return new KeyValue&lt;&gt;(<br/>     healthCheck.getSerialNumber(), String.valueOf(uptime));<br/>}));<br/><br/>uptimeStream.to( Constants.getUptimesTopic(),<br/>      Produced.with(Serdes.String(), Serdes.String()));<br/><br/>Topology topology = streamsBuilder.build();<br/>Properties props = new Properties();<br/>props.put("bootstrap.servers", this.brokers);<br/>props.put("application.id", "kioto");<br/>KafkaStreams streams = new KafkaStreams(topology, props);<br/>streams.start();</pre>
+<p class="mce-root">Note that the code could be cleaner: we could create our own Serde that includes the deserialization code, so we can directly deserialize Avro Objects into <kbd>HealthCheck</kbd> Objects. To achieve this, this class has to extend the generic Avro deserializer. We leave this as an exercise for you.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the AvroStreamsProcessor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">To build the project, run this command from the <kbd>kioto</kbd> directory:</p>
+<pre class="mce-root"><strong>$ gradle build</strong></pre>
+<p class="mce-root">If everything is correct, the output is something like the following:</p>
+<pre class="mce-root"><strong>BUILD SUCCESSFUL in 1s</strong><br/><strong> 6 actionable task: 6 up-to-date</strong></pre>
+<ol>
+<li>The first step is to run a console consumer for the <kbd>uptimes</kbd> topic, shown as follows:</li>
+</ol>
+<pre><strong>      $ ./bin/kafka-console-consumer --bootstrap-server localhost:9092 <br/>      --topic uptimes --property print.key=true</strong></pre>
+<ol start="2">
+<li class="mce-root">From our IDE, run the main method of the <kbd>AvroStreamsProcessor</kbd></li>
+<li class="mce-root">From our IDE, run the main method of the <kbd>AvroProducer</kbd> (built in previous chapters)</li>
+<li class="mce-root">The output on the console consumer for the <kbd>uptimes</kbd> topic should be similar to the following:</li>
+</ol>
+<pre style="padding-left: 30px"><strong>       EW05-HV36 33</strong><br/><strong>       BO58-SB28 20</strong><br/><strong>       DV03-ZT93 46</strong><br/><strong>       ...</strong> </pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Late event processing</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">Previously, we talked about message processing, but now we will talk about events. An event in this context is something that happens at a particular time. An event is a message that happens at a point in time.</p>
+<p class="mce-root">In order to understand events, we have to know the timestamp semantics. An event always has two timestamps, shown as follows:</p>
+<ul>
+<li class="mce-root"><strong>Event time</strong>: The point in time when the event happened at the data source</li>
+<li class="mce-root"><strong>Processing time</strong>: The point in time when the event is processed in the data processor</li>
+</ul>
+<p>Due to limitations imposed by the laws of physics, the processing time will always be subsequent to and necessarily different from the event time, for the following reasons: </p>
+<ul>
+<li class="mce-root"><strong>There is always network latency</strong>: The time to travel from the data source to the Kafka broker cannot be zero.</li>
+<li class="mce-root"><strong>The client could have a cache</strong>: If the client cached some events before, send them to the data processor. As an example, think about a mobile device that is not always connected to the network because there are zones without network access, and the device holds some data before sending it.</li>
+<li class="mce-root"><strong>The existence of back pressure</strong>: Sometimes, the broker will not process the events as they arrive, because it is busy and there are too many.</li>
+</ul>
+<p>Having said the previous points, it is always important that our messages have a timestamp. Since version 0.10 of Kafka, the messages stored in Kafka always have an associated timestamp. The timestamp is normally assigned by the producer; if the producer sends a message without a timestamp, the broker assigns it one.</p>
+<p>As a professional tip, when generating messages, always assign a timestamp from the producer.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Basic scenario</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root packt_figref CDPAlignLeft CDPAlign">To explain late events, we need a system where the events arrive periodically and we want to know how many events are produced by unit of time. In <em>Figure 6.1</em>, we show this scenario:</p>
+<p class="mce-root packt_figref CDPAlignCenter CDPAlign"><br/>
+<img src="assets/e64ca6a4-d30b-4ff2-8794-c0c1222dcb37.png" style="width:35.25em;height:6.92em;"/></p>
+<div class="mce-root packt_figref CDPAlignCenter CDPAlign">Figure 6.1: The events as they were produced</div>
+<p class="mce-root">In the preceding figure, each marble represents an event. They are not supposed to have dimensions as they are at a specific point in time. Events are punctual, but for demonstration purposes, we represent them as balls. As we can see in <strong>t1</strong> and <strong>t2,</strong> two different events can happen at the same time.</p>
+<p class="mce-root">In our figure, tn represents the n<sup>th</sup> time unit. Each marble represents a single event. To differentiate between them, the events on <strong>t1</strong> have one stripe, the events on <strong>t2</strong> have two stripes, and the events on <strong>t3</strong> have three stripes.</p>
+<p class="mce-root">We want to count the events per unit of time, so we have the following:</p>
+<ul>
+<li><strong>t1</strong> has six events</li>
+<li><strong>t2</strong> has four events</li>
+<li><strong>t3</strong> has three events</li>
+</ul>
+<p>As systems have failures (such as network latency, shutdown of servers, network partitioning, power failures, voltage variations, and so on), suppose that an event that happened during <strong>t2</strong> has a delay and reached our system at <strong>t3,</strong> shown as follows in <em>Figure 6.2</em>:</p>
+<div class="CDPAlignCenter CDPAlign packt_figref"><img src="assets/4402dcaa-bf85-4335-9fda-37b380982e3c.png" style=""/></div>
+<div class="CDPAlignCenter CDPAlign packt_figref">Figure 6.2: The events as they were processed</div>
+<p>If we count our events using the <strong>processing time</strong>, we have the following results:</p>
+<ul>
+<li><strong>t1</strong> has six events</li>
+<li><strong>t2</strong> has three events</li>
+<li><strong>t3</strong> has four events</li>
+</ul>
+<p>If we have to calculate how many events were produced per time unit, our results would be incorrect.</p>
+<p>The event that arrived on <strong>t3</strong> instead of <strong>t2</strong> is called a late event. We just have two alternatives, they are given as follows:</p>
+<ul>
+<li>When <strong>t2</strong> ends, produce a preliminary result that the count for <strong>t2</strong> is three events. And then, during processing, when we find in another time an event belonging to <strong>t2</strong>, we update the result for <strong>t2</strong>: <strong>t2</strong> has four events.</li>
+<li>When each window ends, we wait a little after the end before we produce a result. For example, we could wait another time unit. In this case, the results for tn are obtained when t(n+1) ends. Remember, the time to wait to produce results might not be related to the time unit size.</li>
+</ul>
+<p>As you can guess, these scenarios are quite common in practice, and there are currently many interesting proposals. One of the most complete and advanced suites for handling late events is the Apache Beam proposal. However, Apache Spark, Apache Flink, and Akka Streams are also very powerful and attractive.</p>
+<p>As we want to see how it is solved with Kafka Streams here, let's see that.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Late event generation</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">To test the Kafka Streams solution for late events, the first thing we need is a late event generator.</p>
+<p class="mce-root">To simplify things, our generator will constantly send events at a fixed rate. And from time to time, it will generate a late event. The generator generates events with the following process:</p>
+<ul>
+<li class="mce-root">Each window is 10 seconds long</li>
+<li class="mce-root">It produces one event every second</li>
+<li class="mce-root">The event should be generated in 54<sup>th </sup>second of each minute, and will be delayed by 12 seconds; that is, it will arrive in the sixth second of the next minute (in the next window)</li>
+</ul>
+<p>When we say that the window is of 10 seconds, we mean that we will make aggregations every 10 seconds. Remember that the objective of the test is that the late events are counted in the correct window.</p>
+<p>Create the <kbd>src/main/java/kioto/events</kbd> directory and, inside it, create a file called <kbd>EventProducer.java</kbd> with the contents of <em>Listing 6.5</em>, shown as follows:</p>
+<pre class="mce-root">package kioto.events;<br/>import ...<br/>public final class EventProducer {<br/>  private final Producer&lt;String, String&gt; producer;<br/>  private EventProducer(String brokers) {<br/>    Properties props = new Properties();<br/>    props.put("bootstrap.servers", brokers);<br/>    props.put("key.serializer", StringSerializer.class);<br/>    props.put("value.serializer", StringSerializer.class);<br/>    producer = new KafkaProducer&lt;&gt;(props);<br/>  }<br/>  private void produce() {<br/>    // ...<br/>  }<br/>  private void sendMessage(long id, long ts, String info) {<br/>    // ...<br/>  }<br/>  public static void main(String[] args) {<br/>    (new EventProducer("localhost:9092")).produce();<br/>  }<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 6.5:<span> EventProducer.java</span></div>
+<p class="mce-root">The event generator is a Java <kbd>KafkaProducer</kbd>, so declare the same properties as all the Kafka Producers.</p>
+<p class="mce-root">The generator code is very simple, and the first thing that is required is a timer that generates an event every second. The timer triggers 0.3 seconds after every second to avoid messages sent at 0.998 seconds, for example. The <kbd>produce()</kbd> method is shown as follows:</p>
+<pre class="mce-root">private void produce() {<br/>  long now = System.currentTimeMillis();<br/>  long delay = 1300 - Math.floorMod(now, 1000);<br/>  Timer timer = new Timer();<br/>  timer.schedule(new TimerTask() {<br/>    public void run() {<br/>      long ts = System.currentTimeMillis();<br/>      long second = Math.floorMod(ts / 1000, 60);<br/>      if (second != 54) {<br/>        EventProducer.this.sendMessage(second, ts, "on time");<br/>      }<br/>      if (second == 6) {<br/>        EventProducer.this.sendMessage(54, ts - 12000, "late");<br/>      }<br/>    }<br/>  }, delay, 1000);<br/>}</pre>
+<p class="mce-root">When the timer is triggered, the run method is executed. We send one event each second except on second 54, where we delay this event by 12 seconds. Then, we send this late event in the sixth second of the next minute, modifying the timestamp.</p>
+<p class="mce-root">In the <kbd>sendMessage()</kbd> method, we just assign the timestamp of the event, shown as follows:</p>
+<pre class="mce-root">private void sendMessage(long id, long ts, String info) {<br/>  long window = ts / 10000 * 10000;<br/>  String value = "" + window + ',' + id + ',' + info;<br/>  Future futureResult = this.producer.send(<br/>     new ProducerRecord&lt;&gt;(<br/>          "events", null, ts, String.valueOf(id), value));<br/>  try {<br/>    futureResult.get();<br/>  } catch (InterruptedException | ExecutionException e) {<br/>    // deal with the exception<br/>  }<br/>}</pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the EventProducer</h1>
+                </header>
+            
+            <article>
+                
+<p>To run the <kbd>EventProducer</kbd>, we follow these steps:</p>
+<ol>
+<li>Create the events topic, as shown in the following block:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$. /bin/kafka-topics --zookeeper localhost:2181 --create --topic <br/>events --replication-factor 1 --partitions 4</strong></pre>
+<ol start="2">
+<li>Run a console consumer for the events topic using the following command:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$ ./bin/kafka-console-consumer --bootstrap-server localhost:9092 <br/>--topic events</strong></pre>
+<ol start="3">
+<li class="mce-root">From the IDE, run the main method of the <kbd>EventProducer</kbd>.</li>
+</ol>
+<ol start="4">
+<li class="mce-root">The output on the console consumer for the events topic should be similar to the following:</li>
+</ol>
+<pre class="mce-root" style="padding-left: 60px">1532529060000,47, on time<br/>1532529060000,48, on time<br/>1532529060000,49, on time<br/>1532529070000,50, on time<br/>1532529070000,51, on time<br/>1532529070000,52, on time<br/>1532529070000,53, on time<br/>1532529070000,55, on time<br/>1532529070000,56, on time<br/>1532529070000,57, on time<br/>1532529070000,58, on time <br/>1532529070000,59, on time<br/>1532529080000,0, on time<br/>1532529080000,1, on time<br/>1532529080000,2, on time<br/>1532529080000,3, on time<br/>1532529080000,4, on time<br/>1532529080000,5, on time<br/>1532529080000,6, on time<br/>1532529070000,54, late<br/>1532529080000,7, on time<br/>...</pre>
+<p class="mce-root">Note that each event window changes every 10 seconds. Also, note how the 54<sup>th</sup> event is not sent between the 53<sup>rd</sup> and 55<sup>th</sup> events. The 54<sup>th</sup> event, belonging to a previous window, arrives in the next minute between the sixth and seventh seconds.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Kafka Streams processor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">Now, let's solve the problem of counting how many events are in each window. For this, we will use Kafka Streams. When we do this type of analysis, it is said that we are doing <strong>streaming aggregation</strong>.</p>
+<p class="mce-root">In the <kbd>src/main/java/kioto/events</kbd> <span>directory, </span>create a file called <kbd>EventProcessor.java</kbd> with the contents of <em>Listing 6.6</em>, shown as follows:</p>
+<pre class="mce-root">package kioto.events;<br/>import ...<br/>public final class EventProcessor {<br/>  private final String brokers;<br/>  private EventProcessor(String brokers) {<br/>    this.brokers = brokers;<br/>  }<br/>  private void process() {<br/>    // ...<br/>  }<br/>  public static void main(String[] args) {<br/>    (new EventProcessor("localhost:9092")).process();<br/>  }<br/>}</pre>
+<div class="CDPAlignCenter CDPAlign packt_figref">Listing 6.6:<span> EventProcessor.java</span></div>
+<p class="mce-root">All the processing logic is contained in the <kbd>process()</kbd> method. The first step is to create a <kbd>StreamsBuilder</kbd> to create the <kbd>KStream</kbd>, shown as follows:</p>
+<pre class="mce-root">StreamsBuilder streamsBuilder = new StreamsBuilder();<br/>KStream stream = streamsBuilder.stream(<br/>  "events", Consumed.with(Serdes.String(), Serdes.String()));</pre>
+<p class="mce-root">As we know, we specify from topic we are reading the events in this case is called <strong>events</strong>, and then we always specify the <kbd>Serdes</kbd>, both keys and values of type <kbd>String</kbd>.</p>
+<p class="mce-root">If you remember, we have each step as a transformation from one stream to another.</p>
+<p class="mce-root">The next step is to build a <kbd>KTable</kbd>. To do so, we first use the <kbd>groupBy()</kbd> function, which receives a key-value pair, and we assign a key called <kbd>"foo"</kbd>, because it is not relevant but we need to specify one. Then, we apply the <kbd>windowedBy()</kbd> function, specifying that the window will be 10 seconds long. Finally, we use the <kbd>count()</kbd> function, so we are producing key-value pairs with <kbd>String</kbd> as keys and <kbd>long</kbd> as values. This number is the count of the events for each window (the key is the window start time):</p>
+<pre class="mce-root">KTable aggregates = stream<br/>  .groupBy( (k, v) -&gt; "foo", Serialized.with(Serdes.String(), Serdes.String()))<br/>  .windowedBy( TimeWindows.of(10000L) )<br/>  .count( Materialized.with( Serdes.String(), Serdes.Long() ) );</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p class="mce-root">If you have problems with the conceptual visualization of the <kbd>KTable</kbd>, which keys are of type <kbd>KTable&lt;Windowed&lt;String&gt;&gt;</kbd> and values are of type <kbd>long</kbd>, and printing it (in the KSQL chapter we will see how to do it), would be something like the one, as follows:</p>
+<pre class="mce-root">key | value<br/> ----------------- |-------<br/> 1532529050000:foo | 10<br/> 1532529060000:foo | 10<br/> 1532529070000:foo | 9<br/> 1532529080000:foo | 3<br/> ...</pre>
+<p class="mce-root">The key has the window ID and the utility aggregation key with value <kbd>"foo"</kbd>. The value is the number of elements counted in the window at a specific point of time.</p>
+<p class="mce-root">Next, as we need to output the <kbd>KTable</kbd> to a topic, we need to convert it to a <kbd>KStream</kbd> as follows:</p>
+<pre class="mce-root">aggregates<br/>  .toStream()<br/>  .map( (ws, i) -&gt; new KeyValue( ""+((Windowed)ws).window().start(), ""+i))<br/>  .to("aggregates", Produced.with(Serdes.String(), Serdes.String()));</pre>
+<p class="mce-root">The <kbd>toStream()</kbd> method of the <kbd>KTable</kbd> returns a <kbd>KStream</kbd>. We use a <kbd>map()</kbd> function that receives two values, the window and the count, then we extract the window start time as the key and the count as the value. The <kbd>to()</kbd> method specifies to which topic we want to output (always specifying the serdes as a good practice).</p>
+<p class="mce-root">Finally, as in previous sections, we need to start the topology and the application, shown as follows:</p>
+<pre class="mce-root">Topology topology = streamsBuilder.build();<br/>Properties props = new Properties();<br/>props.put("bootstrap.servers", this.brokers);<br/>props.put("application.id", "kioto");<br/>props.put("auto.offset.reset", "latest");<br/>props.put("commit.interval.ms", 30000);<br/>KafkaStreams streams = new KafkaStreams(topology, props);<br/>streams.start();</pre>
+<p class="mce-root">Remember that the <kbd>commit.interval.ms</kbd> property indicates how many milliseconds we will wait to write the results to the <kbd>aggregates</kbd> topic.</p>
+<p class="mce-root"/>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the Streams processor</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">To run the <kbd>EventProcessor</kbd>, follow these steps:</p>
+<ol>
+<li class="mce-root">Create the <kbd>aggregates</kbd> topic as follows:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$. /bin/kafka-topics --zookeeper localhost:2181 --create --topic <br/>aggregates --replication-factor 1 --partitions 4</strong></pre>
+<ol start="2">
+<li class="mce-root">Run a console consumer for the aggregates topic, as follows:</li>
+</ol>
+<pre style="padding-left: 60px"><strong>$ ./bin/kafka-console-consumer --bootstrap-server localhost:9092 <br/>--topic aggregates --property print.key=true</strong></pre>
+<ol start="3">
+<li class="mce-root">From the IDE, run the main method of the <kbd>EventProducer</kbd>.</li>
+<li class="mce-root">From the IDE, run the main method of the <kbd>EventProcessor</kbd>.</li>
+<li class="mce-root">Remember that it writes to the topic every 30 seconds. The output on the console consumer for the aggregates topic should be similar to the following:</li>
+</ol>
+<pre style="padding-left: 60px"><span>1532529050000 10<br/></span>1532529060000 10<br/>1532529070000 9<br/>1532529080000 3</pre>
+<p style="padding-left: 60px">After the second window, we can see that the values in the <kbd>KTable</kbd> are updated with fresh (and correct) data, shown as follows:</p>
+<pre class="mce-root" style="padding-left: 60px">1532529050000 10<br/>1532529060000 10<br/>1532529070000 10<br/>1532529080000 10<br/>1532529090000 10<br/>1532529100000 4</pre>
+<p class="mce-root">Note how in the first print, the value for the last window is 3, and the window started in <kbd>1532529070000</kbd> has a value of <kbd>9</kbd>. Then in the second print, the values are correct. This behavior is because in the first print, the delayed event had not arrived yet. When this finally arrived, the count values were corrected for all the windows.</p>
+<p class="mce-root"/>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Stream processor analysis</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">If you have a lot of questions here, it is normal.</p>
+<p class="mce-root">The first thought to consider is that in streaming aggregation, and in streaming in general, the Streams are unbounded. It is never clear when we will take the final results, that is, we as programmers have to decide when to consider a partial value of an aggregation as a final result.</p>
+<p class="mce-root">Recall that the print of the Stream is an instant photo of the <kbd>KTable</kbd> at a certain time. Therefore, the results of a <kbd>KTable</kbd> are only valid at the time of the output. It is important to remember that in the future, the values of the <kbd>KTable</kbd> may be different. Now, to see results more frequently, change the value of the commit interval to zero, shown as follows:</p>
+<pre class="mce-root">props.put("commit.interval.ms", 0);</pre>
+<p class="mce-root">This line says that the results of the <kbd>KTable</kbd> will be printed when they are modified, that is, it will print new values every second. If you run the program, the value of the <kbd>KTable</kbd> will be printed with each update (every second), shown as follows:</p>
+<pre class="mce-root" style="padding-left: 60px">1532529080000 6<br/>1532529080000 7<br/>1532529080000 8<br/>1532529080000 9<br/>1532529080000 10 &lt;-- Window end<br/>1532529090000 1  &lt;-- Window beginning<br/>1532529090000 2<br/>1532529090000 3<br/>1532529090000 5  &lt;-- The 4th didn't arrive<br/>1532529090000 6<br/>1532529090000 7<br/>1532529090000 8<br/>1532529090000 9  &lt;-- Window end<br/>1532529100000 1<br/>1532529100000 2<br/>1532529100000 3<br/>1532529100000 4<br/>1532529100000 5<br/>1532529100000 6<br/>1532529090000 10 &lt;-- The 4th arrived, so the count value is updated<br/>1532529100000 7<br/>1532529100000 8<br/>...</pre>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mce-root"/>
+<p class="mceNonEditable"/>
+<p class="mceNonEditable"/>
+<p>Keep a note of two effects:</p>
+<ul>
+<li class="mce-root">The aggregate result (the count) for the window stops at 9 when the window ends and the next window events begin to arrive</li>
+<li class="mce-root">When the late event finally arrives, it produces an update in the window's count</li>
+</ul>
+<p class="mce-root">Yes, Kafka Streams apply event time semantics in order to do the aggregation. It is important to remember that in order to visualize the data, we had to modify the commit interval. Leaving this value at zero would have negative repercussions on a production environment.</p>
+<p class="mce-root">As you may guess, processing an event stream is much more complex than processing a fixed dataset. The events usually arrive late, in disorder, and it is practically impossible to know when the totality of the data has arrived. How do you know when there are late events? If there is, how much should we expect for them? When should we discard a late event?</p>
+<p class="mce-root">The quality of a programmer is determined by the quality of their tools. The capabilities of the processing tool make a big difference when processing data. In this context, we have to reflect when the results are produced and when they arrived late.</p>
+<p class="mce-root">The process of discarding events has a special name: watermarking. In Kafka Streams, this is achieved through setting the aggregation windows' retention period.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p class="mce-root">Kafka Streams is a powerful library, and is the only option when building data pipelines with Apache Kafka. Kafka Streams removes much of the boilerplate work needed when implementing plain Java clients. Compared to Apache Spark or Apache Flink, the Kafka Streams applications are much simpler to build and manage.</p>
+<p class="mce-root">We also have seen how to improve a Kafka Streams application to deserialize data in JSON and Avro formats. The serialization part (writing to a topic) is very similar since we are using SerDes that are capable of both data serialization and deserialization.</p>
+<p class="mce-root">For those who work with Scala, there is a library for Kafka Streams called circe that offers SerDes to manipulate JSON data. The circe library is the equivalent in Scala of the Jackson library.</p>
+<p class="mce-root"/>
+<p class="mce-root">As mentioned earlier, Apache Beam has a more complex suite of tools, but is totally focused on Stream management. Its model is based on triggers and semantics between events. It also has a powerful model for watermark handling.</p>
+<p class="mce-root">One notable advantage of Kafka Streams over Apache Beam is that its deployment model is simpler. This leads many developers to adopt it. However, for more complex problems, Apache Beam may be a better tool.</p>
+<p class="mce-root">In the following chapters, we will talk about how to get the best of two worlds: Apache Spark and Kafka Streams.</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

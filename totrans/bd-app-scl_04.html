@@ -1,0 +1,405 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;4.&#xA0;Developing Reactive Backing Services"><div class="titlepage" id="aid-1P71O2"><div><div><h1 class="title"><a id="ch04"/>Chapter 4. Developing Reactive Backing Services</h1></div></div></div><p>In the previous chapter, you learned how to Bootstrap your application using Activator, and we developed our web application using Scala and the Play framework. Now we will enter into the reactive world of RxJava and RxScala.</p><p>In this chapter, we will cover the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem">Reactive programming principles and the Reactive Manifesto</li><li class="listitem">Understanding the importance of non-blocking IO</li><li class="listitem">Observables, functions, and error handling with Rx</li><li class="listitem">Refactoring our controllers and models to call our services</li><li class="listitem">Adding RxScala to our services</li><li class="listitem">Adding logging</li></ul></div><div class="section" title="Getting started with reactive programming"><div class="titlepage"><div><div><h1 class="title"><a id="ch04lvl1sec52"/>Getting started with reactive programming</h1></div></div></div><p>Building applications today is harder than it was before. Everything now is more complex: we have to use more cores in processors, and we have cloud-native applications with hundreds of machines for a single service. Concurrent programming has always been hard, and it will always be so, because it is difficult to model time. In order to address this, we need to have a reactive style of architecture. In order to be able to handle more users and scale our applications, we need to leverage Async and non-blocking IO. To help us with this task, we can rely on RxJava and RxScala. Being reactive is not only about code but also about architectural principles.</p><p>The Reactive Manifesto captures these principles very well, and there are a couple of technologies that follow these principles in order to be fully reactive.</p><p>The Reactive Manifesto can be shown as in the following diagram:</p><p>
+</p><div class="mediaobject"><img src="../Images/image00266.jpeg" alt="Getting started with reactive programming"/></div><p style="clear:both; height: 1em;"> </p><p>
+</p><p>For more information, you can visit <a class="ulink" href="http://www.reactivemanifesto.org/">http://www.reactivemanifesto.org/</a>.</p><p>The Reactive Manifesto describes what this reactive architecture/system looks like. Basically, there are the following four core principles underlining the reactive idea:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><span class="strong"><strong>Responsive</strong></span>: The system should respond in a timely manner. In other words, the system should detect problems quickly, and deal with them effectively, apart from providing rapid and consistent response time.</li><li class="listitem"><span class="strong"><strong>Resilient</strong></span>: The system should stay responsive even after failure. This is done via replication containment, isolation, and delegation (<a class="ulink" href="https://en.wikipedia.org/wiki/Delegation_pattern">https://en.wikipedia.org/wiki/Delegation_pattern</a>). Containment and isolation are ideas that come from the naval industry, and are defined by the bulkhead pattern (<a class="ulink" href="https://en.wikipedia.org/wiki/Bulkhead_(partition)">https://en.wikipedia.org/wiki/Bulkhead_(partition)</a>). Failures are contained at each component. Doing so makes sure that one system's failure does not affect other systems. Recovery is delegated to another system, and not to the client.</li><li class="listitem"><span class="strong"><strong>Elastic</strong></span>: The ability to increase and decrease resources for the system. This requires you design your system without <span class="strong"><strong>Single Point Of Failure</strong></span> (<span class="strong"><strong>SPOF</strong></span>), and design using shards and replication. Reactive systems are predictive and cost-effective.</li><li class="listitem"><span class="strong"><strong>Message-driven</strong></span>: Reactive systems rely on asynchronous message passing to ensure loose coupling, isolation, and location transparency. By doing so, we can delegate failures as messages. This gives us elasticity, load management, and flow control. It's even possible to apply back-pressure (also known as throttling) when needed. All this should be done with non-blocking communication for better resource utilization.</li></ul></div><p>Alright, let's use these principles practically in our application with RxScala. RxScala is just a Scala wrapper for RxJava, but it is better to use because it makes the code more functional, and you don't need to create objects such as <code class="literal">Action1</code>.</p><p>In our application, we have three major resources: products, reviews, and images. All products must have a price, so we will built a fully reactive price generator with the Play framework, RxScala, and Scala right now.</p><p>So first of all, we will play with RxScala in our Play application, then we will create a separate microservice, make reactive calls to that microservice, and retrieve our price suggestion for that service. All data flow transformations are using observables.</p><p>Let's create the routes for this controller at <code class="literal">ReactiveWebStore/conf/routes</code> , as follows:</p><pre class="programlisting">    # &#13;
+    # Services &#13;
+    # &#13;
+    GET   /rx/prices   controllers.RxController.prices &#13;
+    GET   /rx/aprices  controllers.RxController.pricesAsync &#13;
+</pre><p>We have two routes here: one for a regular action, and another for an Async action that will return a Scala Future. Let's create a new controller called <code class="literal">Rx Controller.scala</code>. This controller needs to be located at <code class="literal">ReactiveWebStore/app/controller</code>.</p><p>Let's have a look at <code class="literal">RxController</code>, which is our reactive RxScala simple controller:</p><pre class="programlisting">    @Singleton &#13;
+    class RxController @Inject()(priceService:IPriceSerice) extends &#13;
+    Controller { &#13;
+      def prices = Action { implicit request =&gt; &#13;
+        Logger.info("RX called. ") &#13;
+        import ExecutionContext.Implicits.global &#13;
+        val sourceObservable = priceService.generatePrices &#13;
+        val rxResult = Observable.create { sourceObservable.subscribe  &#13;
+      } &#13;
+      .subscribeOn(IOScheduler()) &#13;
+      .take(1) &#13;
+      .flatMap { x =&gt; println(x) ; Observable.just(x) } &#13;
+      .toBlocking &#13;
+      .first &#13;
+      Ok("RxScala Price suggested is = " + rxResult) &#13;
+    } &#13;
+ &#13;
+      def pricesAsync = Action.async { implicit request =&gt; &#13;
+        Logger.info("RX Async called. ") &#13;
+        import play.api.libs.concurrent.Execution.Implicits. &#13;
+        defaultContext &#13;
+        val sourceObservable = priceService.generatePrices &#13;
+        val rxResult = Observable.create { sourceObservable.subscribe  &#13;
+        } &#13;
+        .subscribeOn(IOScheduler()) &#13;
+        .take(1) &#13;
+        .flatMap { x =&gt; println(x) ; Observable.just(x) } &#13;
+        .toBlocking &#13;
+        .first &#13;
+        Future { Ok("RxScala Price sugested is = " + rxResult) } &#13;
+      } &#13;
+    } &#13;
+</pre><p>So, in the very first method called <code class="literal">prices</code>, we return a regular Play framework Action. We receive <code class="literal">IPriceService</code> via dependency injection. This <code class="literal">IPriceService</code> is a reactive service, because it uses observables. So we call a method, <code class="literal">generatePrices</code>, which will return <code class="literal">Observable[Double]</code>. This will be our source observable, that is, the data source of our computation. Moving forward, we create a new observable subscribing into the source observable, and then we apply some transformation. For instance, we take just one element, and then we can perform transformation using <code class="literal">flatMap</code>. For this case, we do not really apply transformations. We use <code class="literal">flatMap</code> to simply print what we got, and then continue the chain. The next step is to call <code class="literal">toBlocking</code>, which will block the thread until the data is back. Once the data is back, we get the first element, which will be a double, and we return <code class="literal">Ok</code>.</p><p>Blocking sounds bad and we don't want that. Alternatively, we can use the <code class="literal">async</code> controller in the Play framework, which won't block the thread and return a Future. So that's the second method, called <code class="literal">pricesAsync</code>. Here we have similar observable code. However, in the end, we return a Future which is not blocking. However, we call <code class="literal">toBlocking</code> from the observable that will block the call, thus making it the same as the previous method. To be clear, Action is not bad. By default, everything is Async in Play, because even if you don't return an explicit Future, the Play framework creates a promise for <code class="literal">y</code> and makes you code Async. Using HTTP, you will block the thread at some point. If you want to be 100% non-blocking from end to end, you need to consider a different protocol such as web sockets.</p><p>Let's take a look at the service now. This service, and other services, need to be located at <code class="literal">ReactiveWebStore/apps/services</code>. First we will create <code class="literal">trait</code> to define the service behavior.</p><div class="section" title="IPriceService - Scala trait"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec62"/>IPriceService - Scala trait</h2></div></div></div><p>As you can see in the following code, we defined <code class="literal">IPriceService</code> with just one operation, that is, <code class="literal">generatePrices</code>, which returns <code class="literal">Observable[Double]</code>. The next step now is to define the service implementation. This code needs to be located in the same services folder as the previous trait:</p><pre class="programlisting">    trait IPriceSerice{ &#13;
+      def generatePrices:Observable[Double] &#13;
+    } &#13;
+</pre></div><div class="section" title="PriceService - RxScala PriceService implementation"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec63"/>PriceService - RxScala PriceService implementation</h2></div></div></div><p>First we create <code class="literal">PublishSubject</code>, which is a way to generate data into observables. Scala has a nice way of generating infinite sequences using <code class="literal">Stream.continually</code>. So we pass a function which generates double random numbers from 0 to 1,000. This will happen forever and, because this is an expensive computation, we run it into a Future. The right thing to do will be to use a method after <code class="literal">Stream</code>, because this will finish the computation. For the sake of the exercise, we will keep it this way for now.</p><p>Each double random number is published into <code class="literal">PublishSubject</code> by the <code class="literal">onNext</code> method. Now let's move to the <code class="literal">generatePrices</code> method, which uses three observables to generate the number for us. To be clear, of course we could do a simpler solution here. However, we are doing it this way to illustrate the power of observables, and how you can use them in practice.</p><p>We have <code class="literal">Even</code> and <code class="literal">Odd</code> observables, both subscribing to <code class="literal">PublishSubject</code>, so they will receive infinite double numbers. There is a <code class="literal">flatMap</code> operation to add <code class="literal">10</code> to the number. Keep in mind that everything you do needs to be in an observable. So when you do transformations with <code class="literal">flatMap</code>, you always need to return an observable.</p><p>Finally, we apply the filter function to get only even numbers on the <code class="literal">Even</code> observable and only odd numbers on the <code class="literal">Odd</code> observable. All this happens in parallel. <code class="literal">Even</code> and <code class="literal">Odd</code> observables do not wait for each other.</p><p>The next step is to merge both observables. We create a third observable that starts empty and then merges the infinite doubles from the <code class="literal">Even</code> observable with the infinite doubles from the <code class="literal">Odd</code> observable. Now is the time to limit the computation to only 10 numbers. We don't know how many odd or how many even numbers will be there because of Async. If you wish to control the number of odds and evens, you need to apply the <code class="literal">take</code> function on each observable.</p><p>Finally, we apply <code class="literal">foldLeft</code> to sum all the numbers and get a total. However, when we do that, we get only 90% of the numbers. This last observable is what is returned to the controller. Nothing is blocked here, and it's all Async and reactive.</p><p>You maybe wondering why <code class="literal">Stream.Continuously</code> generates different values all the time. That happens because we use a Call-by-Name function in Scala. We import the <code class="literal">nextDouble</code> function, and pass a function instead of the value of the function:</p><pre class="programlisting">    @Singleton &#13;
+    class PriceService extends IPriceSerice{ &#13;
+      var doubleInfiniteStreamSubject = PublishSubject.apply[Double]() &#13;
+      Future { &#13;
+        Stream.continually(nextDouble * 1000.0 ).foreach { &#13;
+          x =&gt; Thread.sleep(1000);  &#13;
+          doubleInfiniteStreamSubject.onNext(x) &#13;
+        } &#13;
+      } &#13;
+      override def generatePrices:Observable[Double] = { &#13;
+        var observableEven = Observable.create {  &#13;
+        doubleInfiniteStreamSubject.subscribe } &#13;
+        .subscribeOn(IOScheduler()) &#13;
+        .flatMap { x =&gt; Observable.from( Iterable.fill(1)(x + 10) )  &#13;
+        } &#13;
+        .filter { x =&gt; x.toInt % 2 == 0 } &#13;
+        var observableOdd = Observable.create {  &#13;
+        doubleInfiniteStreamSubject.subscribe } &#13;
+        .subscribeOn(IOScheduler()) &#13;
+        .flatMap { x =&gt; Observable.from( Iterable.fill(1)(x + 10) )  &#13;
+        } &#13;
+        .filter { x =&gt; x.toInt % 2 != 0 } &#13;
+        var mergeObservable = Observable &#13;
+        .empty &#13;
+        .subscribeOn(IOScheduler()) &#13;
+        .merge(observableEven) &#13;
+        .merge(observableOdd) &#13;
+        .take(10) &#13;
+        .foldLeft(0.0)(_+_) &#13;
+        .flatMap { x =&gt; Observable.just( x - (x * 0.9) ) } &#13;
+         return mergeObservable &#13;
+      } &#13;
+    } &#13;
+</pre><p>We need to register this service in Guice in <code class="literal">Module.scala</code> located in the default package at <code class="literal">ReactiveWebStore/app</code>.</p></div><div class="section" title="Guice Injection - Module.scala"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec64"/>Guice Injection - Module.scala</h2></div></div></div><p>Your <code class="literal">Module.scala</code> file should look something like this:</p><pre class="programlisting">    class Module extends AbstractModule { &#13;
+      override def configure() = { &#13;
+        // Use the system clock as the default implementation of Clock &#13;
+        bind(classOf[Clock]).toInstance(Clock.systemDefaultZone) &#13;
+        // Ask Guice to create an instance of ApplicationTimer when  &#13;
+        //the &#13;
+        // application starts. &#13;
+        bind(classOf[ApplicationTimer]).asEagerSingleton() &#13;
+        bind(classOf[IProductService]).to(classOf[ProductService]). &#13;
+        asEagerSingleton() &#13;
+        bind(classOf[IReviewService]).to(classOf[ReviewService]). &#13;
+        asEagerSingleton() &#13;
+        bind(classOf[IImageService]).to(classOf[ImageService]). &#13;
+        asEagerSingleton() &#13;
+        bind(classOf[IPriceSerice]).to(classOf[PriceService]). &#13;
+        asEagerSingleton() &#13;
+      } &#13;
+    } &#13;
+</pre><p>In order to compile and run the preceding code, we need to add an extra SBT dependency. Open <code class="literal">build.sbt</code>, and add RxScala. We will also add another dependency, which is ws, a play library to make web service calls. We will use it later in this chapter.</p><p>Your <code class="literal">build.sbt</code> should look something like this:</p><pre class="programlisting"> &#13;
+    name := """ReactiveWebStore""" &#13;
+    version := "1.0-SNAPSHOT" &#13;
+    lazy val root = (project in file(".")).enablePlugins(PlayScala) &#13;
+    scalaVersion := "2.11.7" &#13;
+     &#13;
+    libraryDependencies ++= Seq( &#13;
+      jdbc, &#13;
+      cache, &#13;
+      ws, &#13;
+      "org.scalatestplus.play" %% "scalatestplus-play" % "1.5.1" %      &#13;
+      Test, &#13;
+      "com.netflix.rxjava" % "rxjava-scala" % "0.20.7" &#13;
+    ) &#13;
+ &#13;
+    resolvers += "scalaz-bintray" at &#13;
+    "http://dl.bintray.com/scalaz/releases" &#13;
+    resolvers += DefaultMavenRepository &#13;
+</pre><p>Now we can compile and run this code using <code class="literal">activator run</code>.</p><p>We can call this new route now using a CURL call. If you prefer, you can just open your browser and do it there.</p><pre class="programlisting">
+<span class="strong"><strong>curl -v http://localhost:9000/rx/prices &#13;
+curl -v http://localhost:9000/rx/aprices</strong></span>
+</pre><p>We will see the following result:</p><p>
+</p><div class="mediaobject"><img src="../Images/image00267.jpeg" alt="Guice Injection - Module.scala"/></div><p style="clear:both; height: 1em;"> </p><p>
+</p><p>Great! We have RxScala working with the Play framework. Now we will refactor our code to make it even more interesting. So we will create a microservice using the Play framework, and we will externalize this random number generator to the microservice.</p><p>We need to create a new Play framework application. We will pick the option number <code class="literal">6) play-scala</code> application template. Open your console, and then type the following command:</p><pre class="programlisting">
+<span class="strong"><strong>$ activator new ng-microservice</strong></span>
+</pre><p>You will see this result:</p><p>
+</p><div class="mediaobject"><img src="../Images/image00268.jpeg" alt="Guice Injection - Module.scala"/></div><p style="clear:both; height: 1em;"> </p><p>
+</p><p>Let's create the routes on <code class="literal">ng-microservice</code>. We won't have any UI here, since this will be a microservice. We need to add a route at <code class="literal">ng-microservice/conf/routes</code>:</p><pre class="programlisting">    # Routes &#13;
+    # This file defines all application routes (Higher priority routes &#13;
+    first) &#13;
+    # ~~~~ &#13;
+     &#13;
+    GET /double      controllers.NGServiceEndpoint.double &#13;
+    GET /doubles/:n  controllers.NGServiceEndpoint.doubles(n:Int) &#13;
+</pre><p>Now let's define the controller. This is not a regular controller, because this one won't serve UI views. Instead, it will serve JSON to the microservice consumers. Here we will have just one consumer, which will be <code class="literal">ReactiveWebStore</code>. However, it is possible to have as many consumers as you wish such as other microservices or even mobile applications.</p></div><div class="section" title="NGServiceEndpoint"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec65"/>NGServiceEndpoint</h2></div></div></div><p>For this controller, we just have two routes. The routes are <code class="literal">double</code> and <code class="literal">doubles</code>. The first route returns a double from the service, and the second one returns a list of doubles generated in a batch. For the second method, we get a list of doubles and transform that list in JSON using the Play framework utility library called <code class="literal">Json</code>:</p><pre class="programlisting">    class NGServiceEndpoint @Inject()(service:NGContract) extends &#13;
+    Controller { &#13;
+      def double = Action { &#13;
+        Ok(service.generateDouble.toString()) &#13;
+      } &#13;
+      def doubles(n:Int) = Action { &#13;
+        val json = Json.toJson(service.generateDoubleBatch(n)) &#13;
+        Ok(json) &#13;
+      } &#13;
+    } &#13;
+</pre><p>The next step is create <code class="literal">trait</code> for the microservice. This trait is also the service contract in <span class="strong"><strong>Service Oriented Architecture</strong></span> (<span class="strong"><strong>SOA</strong></span>) terms, that is, the capabilities that the microservice offers.</p><p>The <code class="literal">NGContract.scala</code> file should look something like this:</p><pre class="programlisting">    trait NGContract { &#13;
+       def generateDouble:Double &#13;
+       def generateDoubleBatch(n:Int):List[Double] &#13;
+    } &#13;
+</pre><p>Let's look at the Service implementation of this microservice:</p><pre class="programlisting">    package services &#13;
+    import scala.util.Random &#13;
+    import scala.util.Random.nextDouble &#13;
+    class NGServiceImpl extends NGContract{ &#13;
+      override def generateDouble:Double = { &#13;
+        Stream.continually(nextDouble * 1000.0 ) &#13;
+        .take(1) &#13;
+      } &#13;
+      override def generateDoubleBatch(n:Int):List[Double] = { &#13;
+        require(n &gt;= 1, "Number must be bigger than 0") &#13;
+        val nTimes:Option[Int] = Option(n) &#13;
+        nTimes match { &#13;
+          case Some(number:Int) =&gt; &#13;
+          Stream.continually(nextDouble * 1000.0 ) &#13;
+          .take(n) &#13;
+          .toList &#13;
+          case None =&gt; &#13;
+          throw new IllegalArgumentException("You need provide a valid  &#13;
+          number of doubles you want.") &#13;
+        } &#13;
+      } &#13;
+    } &#13;
+</pre><p>This service implementation does not have any RxScala code. However, it is very functional. We have two methods implemented here. The methods are <code class="literal">generateDouble</code> and <code class="literal">generateDoubleBatch</code>, which receive, through parameters, the number of doubles you want it to generate for you. For the first operation (<code class="literal">generateDouble</code>), we use <code class="literal">Stream.continually</code> to generate infinite random doubles, then we multiply these numbers by 1,000, and then take just 1 and return it.</p><p>The second operation is very similar. However, we have to add some validations to make sure that the numbers of double are present. There are a couple of ways to do it. One way use the assert method in Scala. The second way is the pattern matcher, which is nice because we don't need to write an <code class="literal">if</code> statement.</p><p>This technique is very common in the Scala community. So we create an option that takes the number, and then we pattern-match it. If there is a number present, the case <code class="literal">Some</code> method will be triggered, otherwise, the case <code class="literal">None</code> will be called.</p><p>After these validations, we can use <code class="literal">Stream</code> to generate as many numbers as requested. Before we run the code, we need to define the Guice injections. This file is located in the default package at <code class="literal">ng-microservice/app/</code>:</p><pre class="programlisting">    class Module extends AbstractModule { &#13;
+      override def configure() = { &#13;
+        // Use the system clock as the default implementation of Clock &#13;
+        bind(classOf[Clock]).toInstance(Clock.systemDefaultZone) &#13;
+        bind(classOf[NGContract]).to(classOf[NGServiceImpl]). &#13;
+        asEagerSingleton() &#13;
+      } &#13;
+    } &#13;
+</pre><p>Now its time to compile and run our microservice. Since we already have a play application called <code class="literal">ReactiveWebStore</code> running on <code class="literal">port 9000</code>, you will have trouble if you simply run the microservice. To fix this, we need to run it on a different port. Let's use <code class="literal"> 9090</code> for the microservice. Open the console, and execute the command <code class="literal">$ activator</code> followed by <code class="literal">$ run 9090</code>:</p><pre class="programlisting">
+<span class="strong"><strong>ng-microservice$ activator -Dsbt.task.forcegc=false &#13;
+[info] Loading global plugins from /home/diego/.sbt/0.13/plugins &#13;
+[info] Loading project definition from /home/diego/github/diegopacheco/Book_Building_Reactive_Functional_Scala_Applications/Chap4/ng-microservice/project &#13;
+[info] Set current project to ng-microservice (in build file:/home/diego/github/diegopacheco/Book_Building_Reactive_Functional_Scala_Applications/Chap4/ng-microservice/) &#13;
+[ng-microservice] $ run 9090 &#13;
+ &#13;
+--- (Running the application, auto-reloading is enabled) --- &#13;
+ &#13;
+[info] p.c.s.NettyServer - Listening for HTTP on /0:0:0:0:0:0:0:0:9090 &#13;
+ &#13;
+(Server started, use Ctrl+D to stop and go back to the console...)</strong></span>
+</pre><p>We can test our microservice by calling the two operations that we have. So let's open the web browser and do it.</p><p>The double microservice call at <code class="literal">http://localhost:9090/double</code> looks as follows:</p><p>
+</p><div class="mediaobject"><img src="../Images/image00269.jpeg" alt="NGServiceEndpoint"/></div><p style="clear:both; height: 1em;"> </p><p>
+</p><p>Every time you call this operation, you'll see a different random double number. Now we can try out the next operation: the one you pass for the number of doubles you want. This operation will return a list of doubles in the JSON format.</p><p>The call for double in batches microservice at <code class="literal">http://localhost:9090/doubles/100</code> looks like the following screenshot:</p><p>
+</p><div class="mediaobject"><img src="../Images/image00270.jpeg" alt="NGServiceEndpoint"/></div><p style="clear:both; height: 1em;"> </p><p>
+</p><p>It works! We have 100 doubles here. Now that we have a microservice working, we can go back to our <code class="literal">ReactiveWebStore</code> and change our RxScala code. We will create new controllers. We will also update the existing code for products to call our new code, and suggest a price for the user on the UI, all in a reactive manner. Keep in mind that you need to have <code class="literal">ng-microservice</code> running; otherwise, <code class="literal">ReactiveWebStore</code> won't be able to retrieve doubles.</p></div></div></div>
+<div class="section" title="Play framework and high CPU usage"><div class="titlepage" id="aid-1Q5IA2"><div><div><h1 class="title"><a id="ch04lvl1sec53"/>Play framework and high CPU usage</h1></div></div></div><p>If you notice your CPU usage going higher than it should, do not worry; there is a fix for it. Actually, the issue is related to SBT. Just make sure that, when you run Activator, you pass the following parameter:</p><p>
+<code class="literal">$ activator -Dsbt.task.forcegc=false</code>.</p><p>Going back to <code class="literal">ReactiveWebStore</code>, let's create new routes. Open <code class="literal">ReactiveWebStore/conf/routes</code>:</p><pre class="programlisting">    GET   /rnd/double  &#13;
+    controllers.RndDoubleGeneratorController.rndDouble &#13;
+    GET   /rnd/call    controllers.RndDoubleGeneratorController.rndCall &#13;
+    GET   /rnd/rx      controllers.RndDoubleGeneratorController.rxCall &#13;
+    GET   /rnd/rxbat      &#13;
+    controllers.RndDoubleGeneratorController.rxScalaCallBatch &#13;
+</pre><p>Once we have the new routes, we need to create the new controller. This controller needs to be located with the other controllers at <code class="literal">ReactiveWebStore/app/controllers</code>.</p><div class="section" title="RndDoubleGeneratorController"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec66"/>RndDoubleGeneratorController</h2></div></div></div><p>The <code class="literal">RndDoubleGeneratorController</code> class file should look like this:</p><pre class="programlisting">    @Singleton &#13;
+    class RndDoubleGeneratorController @Inject() (service:IRndService)     &#13;
+    extends Controller { &#13;
+      import play.api.libs.concurrent.Execution. &#13;
+      Implicits.defaultContext &#13;
+      def rndDouble = Action { implicit request =&gt; &#13;
+        Ok( service.next().toString() ) &#13;
+      } &#13;
+      def rndCall = Action.async { implicit request =&gt; &#13;
+        service.call().map { res =&gt; Ok(res) } &#13;
+      } &#13;
+      def rxCall = Action { implicit request =&gt; &#13;
+        Ok(service.rxScalaCall().toBlocking.first.toString()) &#13;
+      } &#13;
+      def rxScalaCallBatch = Action { implicit request =&gt; &#13;
+        Ok(service.rxScalaCallBatch().toBlocking.first.toString()) &#13;
+      } &#13;
+    } &#13;
+</pre><p>All methods in the preceding controller call the service <code class="literal">IRndService</code>. All operations in <code class="literal">RndService</code> call <code class="literal">ng-microservice</code>. Here we have some flavors of operations, which will be covered in great detail next when we explore the service implementation.</p><p>There are some interesting things here: for instance, for the second operation called <code class="literal">rndCall</code>, we see <code class="literal">Action.async</code> in use, which means our controller will return a Future, and this Future comes from the service. We also execute a <code class="literal">Map</code> to transform the result into an <code class="literal">Ok</code>.</p><p>The last operation called <code class="literal">rxScalaCallBatch</code> is the most interesting, and the one we will be using for our UI. However, you can use the other one if you wish, since they all return doubles, and that's good.</p></div><div class="section" title="IRndService.scala - Scala trait"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec67"/>IRndService.scala - Scala trait</h2></div></div></div><p>Let's look at the service definition. First of all, we need to define a trait for the service that will define the operations we need:</p><pre class="programlisting">    trait IRndService { &#13;
+      def next():Double &#13;
+      def call():Future[String] &#13;
+      def rxScalaCall():Observable[Double] &#13;
+      def rxScalaCallBatch():Observable[Double] &#13;
+    } &#13;
+</pre></div><div class="section" title="RndService.scala - RndService implementation"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec68"/>RndService.scala - RndService implementation</h2></div></div></div><p>Now we can move to the real service implementation. This needs to be located at <code class="literal">ReactiveWebStore/app/services</code>:</p><pre class="programlisting">    @Singleton &#13;
+    class RndService @Inject() (ws: WSClient) extends IRndService { &#13;
+      import play.api.libs.concurrent.Execution.Implicits. &#13;
+      defaultContext &#13;
+      override def next():Double = { &#13;
+        val future = ws.url("http://localhost:9090/double").get().map  &#13;
+        { res =&gt; res.body.toDouble } &#13;
+        Await.result(future, 5.seconds) &#13;
+      } &#13;
+      override def call():Future[String] = { &#13;
+        ws.url("http://localhost:9090/double").get().map  &#13;
+        { res =&gt; res.body } &#13;
+      } &#13;
+      override def rxScalaCall():Observable[Double] = { &#13;
+        val doubleFuture:Future[Double] =  &#13;
+        ws.url("http://localhost:9090/double").get().map { x =&gt;  &#13;
+          x.body.toDouble } &#13;
+        Observable.from(doubleFuture) &#13;
+      } &#13;
+     // Continue ... &#13;
+</pre><p>In order to call our microservice (<code class="literal">ng-microservice</code>), we need to inject a special Play framework library called <code class="literal">ws</code>, a utility library to call web services. We inject it by adding the code (<code class="literal">ws:WSClient</code>) into the class definition.</p><p>When you call something with <code class="literal">ws</code>, it returns a Future. We need to have the Future executors in place. That's why the import <code class="literal">defaultContext</code> is very important, and you cannot skip it.</p><p>For the method, as you can see, we next call our microservice at <code class="literal">http://localhost:9090/double</code> to get a single double. We map this result, and get the body of the result, which will be the double itself.</p><p>For this method, we use <code class="literal">Await.result</code>, which will block and wait for the result. If the result is not back in five seconds, this code will fail.</p><p>The second method called <code class="literal">call</code> does the same, but the main difference is that we are not blocking the service; instead, we are returning a Future to the controller.</p><p>Finally, the last method called <code class="literal">rxScalaCall</code> does the same: it calls our microservice using the <code class="literal">ws</code> library. However, we return an observable. Observables are great because they can used as a Future.</p><p>Now it is time to go check out the final operation and the most interesting one. For this same class, we need to add another method such as this one:</p><p>The method <code class="literal">rxScalaCallBatch</code> in <code class="literal">RndService.scala</code> is as follows:</p><pre class="programlisting">    override def rxScalaCallBatch():Observable[Double] = { &#13;
+      val doubleInfiniteStreamSubject = PublishSubject.apply[Double]() &#13;
+      val future = ws.url("http://localhost:9090/doubles/10") &#13;
+      .get() &#13;
+      .map { x =&gt; Json.parse(x.body).as[List[Double]] } &#13;
+      future.onComplete { &#13;
+        case Success(l:List[Double]) =&gt; l.foreach { e =&gt;  &#13;
+        doubleInfiniteStreamSubject.onNext(e) } &#13;
+        case Failure(e:Exception) =&gt;  &#13;
+        doubleInfiniteStreamSubject.onError(e) &#13;
+      } &#13;
+      var observableEven = Observable.create {  &#13;
+        doubleInfiniteStreamSubject.subscribe } &#13;
+      .onErrorReturn { x =&gt; 2.0 } &#13;
+      .flatMap { x =&gt; Observable.from( Iterable.fill(1)(x + 10) ) } &#13;
+      .filter { x =&gt; x.toInt % 2 == 0 } &#13;
+      .flatMap { x =&gt; println("ODD: " + x) ; Observable.just(x) } &#13;
+      var observableOdd = Observable.create {  &#13;
+        doubleInfiniteStreamSubject.subscribe } &#13;
+        .onErrorReturn { x =&gt; 1.0 } &#13;
+        .flatMap { x =&gt; Observable.from( Iterable.fill(1)(x + 10) ) } &#13;
+        .filter { x =&gt; x.toInt % 2 != 0 } &#13;
+        .flatMap { x =&gt; println("EVEN: " + x) ; Observable.just(x) } &#13;
+        var mergeObservable = Observable &#13;
+        .empty &#13;
+        .merge(observableEven) &#13;
+        .merge(observableOdd) &#13;
+        .take(10) &#13;
+        .foldLeft(0.0)(_+_) &#13;
+        .flatMap { x =&gt; Observable.just( x - (x * 0.9) ) } &#13;
+        mergeObservable &#13;
+      } &#13;
+</pre><p>So, first we create <code class="literal">PublishSubject</code> in order to be able to produce data for the observables. Then we make the <code class="literal">ws</code> call to our microservice. The main difference now is that we call the batches operation and order 10 doubles. This code happens in a future, so it is non-blocking.</p><p>We then use the <code class="literal">Map</code> function to transform the result. The <code class="literal">ng-microservice</code> function will return JSON, so we need to deserialize this JSON into Scala objects. Finally, we run a pattern matcher in the Future result. If the result is a success, it means everything is good. So, for each double, we publish into the observables using <code class="literal">PublishSubject</code>. If the service is down or we have a problem, we publish an error to the observables downstream.</p><p>Next we create three observables: one for odd numbers, one for even numbers, and a third one which will merge the other two and do extra computation. The way we did the conversion between Future and Observable is ideal, because it is non-blocking.</p><p>Here we have code very similar to what we had before for the Rx controller. The main difference is that we have error handling, because <code class="literal">ng-microservice</code> might never return, as it may be down or just not working. So we need to start working with fallbacks. Good fallbacks are key to error handling for Reactive applications. Fallbacks should be sort of static; in other words, they should not fail at all.</p><p>We provided two fallback methods: one for the <code class="literal">Odd</code> Observable and the other for the <code class="literal">Even</code> Observable. These fallbacks are done by setting the method <code class="literal">OnErrorReturn</code>. So for the even one, the fallback is static and the value is 2, and for the odd one the value is 1. This is great, because even with failure our application continues to work.</p><p>You might realize we are not using the take function this time. So will this code run forever? No, because <code class="literal">ng-microservice</code> just returns 10 doubles. Finally, we merge the observables into a single observable, add all the numbers, get 90% of the value, and return an observable.</p></div><div class="section" title="Module.scala - Guice Injections"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec69"/>Module.scala - Guice Injections</h2></div></div></div><p>Now hook this new service in Guice. Let's change the Guice <code class="literal">Module.scala</code> located at <code class="literal">ReactiveWebStore/apps/Module.scala</code>:</p><pre class="programlisting">    class Module extends AbstractModule { &#13;
+      override def configure() = { &#13;
+        bind(classOf[Clock]).toInstance(Clock.systemDefaultZone)  &#13;
+         bind(classOf[ApplicationTimer]).asEagerSingleton() &#13;
+         bind(classOf[IProductService]).to(classOf[ProductService]). &#13;
+         asEagerSingleton() &#13;
+         bind(classOf[IReviewService]).to(classOf[ReviewService]). &#13;
+         asEagerSingleton() &#13;
+         bind(classOf[IImageService]).to(classOf[ImageService]). &#13;
+         asEagerSingleton() &#13;
+         bind(classOf[IPriceSerice]).to(classOf[PriceService]). &#13;
+         asEagerSingleton() &#13;
+         bind(classOf[IRndService]).to(classOf[RndService]). &#13;
+         asEagerSingleton() &#13;
+      }} &#13;
+</pre><p>Next we need to create a JQuery function in JavaScript to call our new controller. This function needs to be located at <code class="literal">ReactiveWebStore/public/javascripts</code>.</p><p>The following is <code class="literal">price.js</code>, the JQuery function that calls our controller:</p><pre class="programlisting">    /** &#13;
+     * This functions loads the price in the HTML component. &#13;
+    */ &#13;
+    function loadPrice(doc){ &#13;
+      jQuery.get( "http://localhost:9000/rnd/rxbat", function(  &#13;
+      response ) { &#13;
+        doc.getElementById("price").value = parseFloat(response) &#13;
+      }).fail(function(e) { &#13;
+        alert('Wops! We was not able to call  &#13;
+        http://localhost:9000/rnd/rxba. Error: ' + e.statusText); &#13;
+      }); &#13;
+    } &#13;
+</pre><p>We just have a single function called <code class="literal">loadPrice</code>, which receives a document. We use the <code class="literal">JQuery.get</code> method to call our controller, and parse the response, adding to the HTML text box called <code class="literal">price</code>. If something goes wrong, we alert the user that it was not possible to load a price.</p></div><div class="section" title="main.scala.html"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec70"/>main.scala.html</h2></div></div></div><p>We need to change our <code class="literal">main.scala</code> code located at <code class="literal">ReactiveWebStore/app/views/main.scala.html</code> in order to import a new JavaScript function:</p><pre class="programlisting">    @(title: String)(content: Html)(implicit flash: Flash) &#13;
+    &lt;!DOCTYPE html&gt; &#13;
+    &lt;html lang="en"&gt; &#13;
+      &lt;head&gt; &#13;
+        &lt;title&gt;@title&lt;/title&gt; &#13;
+        &lt;link rel="shortcut icon" type="image/png"  &#13;
+        href="@routes.Assets.at("images/favicon.png")"&gt; &#13;
+        &lt;link rel="stylesheet" media="screen"  &#13;
+        href="@routes.Assets.at("stylesheets/main.css")"&gt; &#13;
+        &lt;link rel="stylesheet" media="screen"  &#13;
+        href="@routes.Assets.at("stylesheets/bootstrap.min.css")"&gt; &#13;
+        &lt;script src="@routes.Assets.at("javascripts/jquery- &#13;
+        1.9.0.min.js")" type="text/javascript"&gt;&lt;/script&gt; &#13;
+        &lt;script src="@routes.Assets.at("javascripts/bootstrap.js")"  &#13;
+        type="text/javascript"&gt;&lt;/script&gt; &#13;
+        &lt;script src="@routes.Assets.at("javascripts/image.js")"  &#13;
+        type="text/javascript"&gt;&lt;/script&gt; &#13;
+        &lt;script src="@routes.Assets.at("javascripts/price.js")"  &#13;
+        type="text/javascript"&gt;&lt;/script&gt; &#13;
+      &lt;/head&gt; &#13;
+      &lt;body&gt; &#13;
+        &lt;center&gt;&lt;a href='/'&gt;&lt;img height='42' width='42'  &#13;
+        src='@routes.Assets.at("images/rws.png")'&gt;&lt;/a&gt; &#13;
+        &lt;h3&gt;@title&lt;/h3&gt;&lt;/center&gt; &#13;
+        &lt;div class="container"&gt; &#13;
+          @alert(alertType: String) = { &#13;
+            @flash.get(alertType).map { message =&gt; &#13;
+              &lt;div class="alert alert-@alertType"&gt; &#13;
+                &lt;button type="button" class="close" data- &#13;
+                dismiss="alert"&gt;&amp;times;&lt;/button&gt; &#13;
+                @message &#13;
+              &lt;/div&gt; &#13;
+            } &#13;
+          }&#13;
+          @alert("error") &#13;
+          @alert("success") &#13;
+          @content &#13;
+          &lt;a href="/"&gt;&lt;/a&gt;&lt;BR&gt; &#13;
+          &lt;button type="submit" class="btn btn-primary"  &#13;
+            onclick="window.location.href='/'; " &gt; &#13;
+           Reactive Web Store - Home &#13;
+          &lt;/button&gt; &#13;
+        &lt;/div&gt; &#13;
+      &lt;/body&gt; &#13;
+    &lt;/html&gt; &#13;
+</pre></div><div class="section" title="product_details.scala.html"><div class="titlepage"><div><div><h2 class="title"><a id="ch04lvl2sec71"/>product_details.scala.html</h2></div></div></div><p>Finally, we need to change our product view in order to add a button to load the price from the controller. Let's change the <code class="literal">product_details</code> view at <code class="literal">ReactiveWebStore/app/views/product_details.scala.html</code>:</p><pre class="programlisting">    @(id: Option[Long],product:Form[Product])(implicit flash:Flash) &#13;
+    @import play.api.i18n.Messages.Implicits._ &#13;
+    @import play.api.Play.current &#13;
+    @main("Product: " + product("name").value.getOrElse("")){ &#13;
+      @if(product.hasErrors) { &#13;
+        &lt;div class="alert alert-error"&gt; &#13;
+          &lt;button type="button" class="close" data- &#13;
+          dismiss="alert"&gt;&amp;times;&lt;/button&gt; &#13;
+          Sorry! Some information does not look right. Could you  &#13;
+          review it please and re-submit? &#13;
+        &lt;/div&gt; &#13;
+      } &#13;
+ &#13;
+      @helper.form(action = if (id.isDefined)  &#13;
+      routes.ProductController.update(id.get) else  &#13;
+      routes.ProductController.insert) { &#13;
+        @helper.inputText(product("name"), '_label -&gt; "Product Name") &#13;
+        @helper.inputText(product("details"), '_label -&gt; "Product  &#13;
+        Details") &#13;
+        @helper.inputText(product("price"), '_label -&gt; "Price") &#13;
+        &lt;div class="form-actions"&gt; &#13;
+        &lt;button type="button" class="btn btn-primary"  &#13;
+        onclick="javascript:loadPrice(document);" &gt;Load Rnd  &#13;
+        Price&lt;/button&gt; &#13;
+        &lt;button type="submit" class="btn btn-primary"&gt; &#13;
+          @if(id.isDefined) { Update Product } else { New Product } &#13;
+        &lt;/button&gt; &#13;
+        &lt;/div&gt; &#13;
+      } &#13;
+    } &#13;
+</pre><p>Great! Now we have a button that loads the data from the controller using JQuery. You can realize that the button <code class="literal">Load Rnd Price</code> has an <code class="literal">onClick</code> property, which calls our JavaScript function.</p><p>Now you need to open your console and type <code class="literal">$ activator run</code> to compile and run the changes as we did to <code class="literal">ReactiveWebStore</code>.</p><p>This command will give the following result:</p><pre class="programlisting">
+<span class="strong"><strong>ReactiveWebStore$ activator -Dsbt.task.forcegc=false</strong></span>
+<span class="strong"><strong>[info] Loading global plugins from /home/diego/.sbt/0.13/plugins</strong></span>
+<span class="strong"><strong>[info] Loading project definition from /home/diego/github/diegopacheco/Book_Building_Reactive_Functional_Scala_Applications/Chap4/ReactiveWebStore/project</strong></span>
+<span class="strong"><strong>[info] Set current project to ReactiveWebStore (in build file:/home/diego/github/diegopacheco/Book_Building_Reactive_Functional_Scala_Applications/Chap4/ReactiveWebStore/)</strong></span>
+<span class="strong"><strong>[ReactiveWebStore] $ run</strong></span>
+<span class="strong"><strong>--- (Running the application, auto-reloading is enabled) ---</strong></span>
+<span class="strong"><strong>[info] p.c.s.NettyServer - Listening for HTTP on /0:0:0:0:0:0:0:0:9000</strong></span>
+<span class="strong"><strong>(Server started, use Ctrl+D to stop and go back to the console...)</strong></span>
+<span class="strong"><strong>[info] application - ApplicationTimer demo: Starting application at 2016-07-03T02:35:54.479Z.</strong></span>
+<span class="strong"><strong>[info] play.api.Play - Application started (Dev)</strong></span>
+</pre><p>So open you browser at <code class="literal">http://localhost:9000</code>, and go to the product page to see our need feature integrated and working like a charm. Keep in mind that you need to have <code class="literal">ng-microservice</code> working in another console window; otherwise, our application will use static fallbacks.</p><p>The new product feature will be shown at <code class="literal">http://localhost:9000/product/add</code> as seen in the following screenshot:</p><p>
+</p><div class="mediaobject"><img src="../Images/image00271.jpeg" alt="product_details.scala.html"/></div><p style="clear:both; height: 1em;"> </p><p>
+</p><p>So if you click on the <span class="strong"><strong>Load Rnd Price</strong></span> button, you will see something like this:</p><p>
+</p><div class="mediaobject"><img src="../Images/image00272.jpeg" alt="product_details.scala.html"/></div><p style="clear:both; height: 1em;"> </p><p>
+</p><p>If you take a look at the application log in the activator console, you will see something similar to this:</p><pre class="programlisting">
+<span class="strong"><strong>[info] application - ApplicationTimer demo: Starting application at 2016-07-03T02:35:54.479Z.</strong></span>
+<span class="strong"><strong>[info] play.api.Play - Application started (Dev)</strong></span>
+<span class="strong"><strong>[info] application - index called. Products: List()</strong></span>
+<span class="strong"><strong>[info] application - blank called. </strong></span>
+<span class="strong"><strong>ODD: 722.8017048639501</strong></span>
+<span class="strong"><strong>EVEN: 863.8229024202085</strong></span>
+<span class="strong"><strong>ODD: 380.5549208988492</strong></span>
+<span class="strong"><strong>EVEN: 947.6312814830953</strong></span>
+<span class="strong"><strong>ODD: 362.2984794191124</strong></span>
+<span class="strong"><strong>ODD: 676.978825910585</strong></span>
+<span class="strong"><strong>ODD: 752.7412673916701</strong></span>
+<span class="strong"><strong>EVEN: 505.3293481709368</strong></span>
+<span class="strong"><strong>EVEN: 849.9768444508936</strong></span>
+<span class="strong"><strong>EVEN: 99.56583617819769</strong></span>
+</pre><p>Alright, that's it. We have everything working!</p></div></div>
+<div class="section" title="Summary" id="aid-1R42S1"><div class="titlepage"><div><div><h1 class="title"><a id="ch04lvl1sec54"/>Summary</h1></div></div></div><p>In this chapter, you learned the core principles of reactive application guided by the Reactive Manifesto. You also learned how to create reactive applications using RxScala. We then explained how to call other internal and external web services using the ws library. Then you learned to serialize and deserialize JSON using the <code class="literal">Json</code> Library. Moving on, you learned how to create simple microservices using the Play framework support.</p><p>In the next chapter, we will continue building our application, and learn how to test our application with JUnit and ScalaTest.</p></div></body></html>

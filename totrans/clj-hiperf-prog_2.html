@@ -1,0 +1,327 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;2.&#xA0;Clojure Abstractions"><div class="titlepage"><div><div><h1 class="title"><a id="ch02"/>Chapter 2. Clojure Abstractions</h1></div></div></div><p>Clojure has four founding ideas. Firstly, it was set up to be a functional language. It is not pure (as in purely functional), but emphasizes immutability. Secondly, it is a dialect of Lisp; Clojure is malleable enough that users can extend the language without waiting for the language implementers to add new features and constructs. Thirdly, it was built to leverage concurrency for the new generation challenges. Lastly, it was designed to be a hosted language. As of today, Clojure implementations exist for the JVM, CLR, JavaScript, Python, Ruby, and Scheme. Clojure blends seamlessly with its host language.</p><p>Clojure is rich in abstractions. Though the syntax itself is very minimal, the abstractions are finely grained, mostly composable, and designed to tackle a wide variety of concerns in the least complicated way. In this chapter, we will discuss the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Performance characteristics of non-numeric scalars</li><li class="listitem" style="list-style-type: disc">Immutability and epochal time model paving the way for performance by isolation</li><li class="listitem" style="list-style-type: disc">Persistent data structures and their performance characteristics</li><li class="listitem" style="list-style-type: disc">Laziness and its impact on performance</li><li class="listitem" style="list-style-type: disc">Transients as a high-performance, short-term escape hatch</li><li class="listitem" style="list-style-type: disc">Other abstractions, such as tail recursion, protocols/types, multimethods, and many more</li></ul></div><div class="section" title="Non-numeric scalars and interning"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec13"/>Non-numeric scalars and interning</h1></div></div></div><p>Strings<a class="indexterm" id="id68"/> and<a class="indexterm" id="id69"/> characters<a class="indexterm" id="id70"/> in Clojure are the same as in Java. The string literals are<a class="indexterm" id="id71"/> implicitly interned. Interning is a way of storing only the unique values in the heap and sharing the reference everywhere it is required. Depending on the JVM vendor and the version of Java you use, the interned data may be stored in a string pool, Permgen, ordinary heap, or some special area in the heap marked for interned data. Interned data is subject to garbage collection when not in use, just like ordinary objects. Take a look at the following code:</p><div class="informalexample"><pre class="programlisting">user=&gt; (identical? "foo" "foo")  ; literals are automatically interned
+true
+user=&gt; (identical? (String. "foo") (String. "foo"))  ; created string is not interned
+false
+user=&gt; (identical? (.intern (String. "foo")) (.intern (String. "foo")))
+true
+user=&gt; (identical? (str "f" "oo") (str "f" "oo"))  ; str creates string
+false
+user=&gt; (identical? (str "foo") (str "foo"))  ; str does not create string for 1 arg
+true
+user=&gt; (identical? (read-string "\"foo\"") (read-string "\"foo\""))  ; not interned
+false
+user=&gt; (require '[clojure.edn :as edn])  ; introduced in Clojure 1.5
+nil
+user=&gt; (identical? (edn/read-string "\"foo\"") (edn/read-string "\"foo\""))
+false</pre></div><p>Note that <code class="literal">identical?</code> in Clojure is the same as <code class="literal">==</code> in Java. The benefit of interning a string is that <a class="indexterm" id="id72"/>there is no memory allocation overhead for duplicate <a class="indexterm" id="id73"/>strings. Commonly, applications on the JVM spend quite some time on string processing. So, it makes sense to have them interned whenever there is a chance of duplicate strings being simultaneously processed. Most of the JVM implementations today have an extremely fast intern operation; however, you should measure the overhead for your JVM if you have an older version.</p><p>Another benefit of string interning<a class="indexterm" id="id74"/> is that when you know that two string tokens are interned, you can compare them faster for equality using <code class="literal">identical?</code> than non-interned string tokens. The equivalence function <code class="literal">=</code> first checks for identical references before conducting a content check.</p><p>Symbols<a class="indexterm" id="id75"/> in Clojure always contain interned string references within them, so generating a symbol from a given string is nearly as fast as interning a string. However, two symbols created from the same string will not be identical:</p><div class="informalexample"><pre class="programlisting">user=&gt; (identical? (.intern "foo") (.intern "foo"))
+true
+user=&gt; (identical? (symbol "foo") (symbol "foo"))
+false
+user=&gt; (identical? (symbol (.intern "foo")) (symbol (.intern "foo")))
+false</pre></div><p>Keywords<a class="indexterm" id="id76"/> are, on the basis of their implementation, built on top of symbols and are designed to work with the <code class="literal">identical?</code> function for equivalence. So, comparing keywords for equality using <code class="literal">identical?</code> would be faster, just as with interned string tokens.</p><p>Clojure is increasingly <a class="indexterm" id="id77"/>being used for large-volume data processing, which includes text and composite data structures. In many cases, the data is either stored as JSON or <a class="indexterm" id="id78"/>EDN (<a class="ulink" href="http://edn-format.org">http://edn-format.org</a>). When processing such data, you can save memory by interning strings or using symbols/keywords. Remember that string tokens read from such data would not be automatically interned, whereas the symbols and keywords read from EDN data would invariably be interned. You may come across such situations when dealing with relational or NoSQL databases, web services, CSV or XML files, log parsing, and so on.</p><p>Interning is linked to the JVM <a class="indexterm" id="id79"/>
+<span class="strong"><strong>Garbage Collection</strong></span> (<span class="strong"><strong>GC</strong></span>), which, in <a class="indexterm" id="id80"/>turn, is closely linked to performance. When you do not intern the string data and let duplicates exist, they end up being allocated on the heap. More heap usage leads to GC overhead. Interning a string has a tiny but measurable and upfront performance overhead, whereas GC is often unpredictable and unclear. GC performance, in most JVM implementations, has not increased in a similar proportion to the performance advances in hardware. So, often, effective performance depends on preventing GC from becoming the bottleneck, which in most cases means minimizing it.</p></div></div>
+<div class="section" title="Identity, value, and epochal time model"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec14"/>Identity, value, and epochal time model</h1></div></div></div><p>One of the principal virtues of <a class="indexterm" id="id81"/>Clojure is its simple design that results in malleable, beautiful <a class="indexterm" id="id82"/>composability. Using symbols in place of pointers is a <a class="indexterm" id="id83"/>programming practice that has existed for several decades now. It has found widespread adoption in several imperative languages. Clojure dissects that notion in order to uncover the core concerns that need to be addressed. The following subsections illustrate this aspect of Clojure.</p><p>We program using logical entities to represent values. For example, a value of <code class="literal">30</code> means nothing unless it is associated with a logical entity, let's say <code class="literal">age</code>. The logical entity <code class="literal">age</code> is the identity here. Now, even though <code class="literal">age</code> represents a value, the value may change with time; this brings us to the notion of <code class="literal">state</code>, which represents the value of the identity at a certain time. Hence, <code class="literal">state</code> is a function of time and is causally related to what we do in the program. Clojure's power lies in binding an identity with its value that holds true at the time and the identity remains isolated from any new value it may represent later. We will discuss state management in <a class="link" href="ch05.html" title="Chapter 5. Concurrency">Chapter 5</a>, <span class="emphasis"><em>Concurrency</em></span>.</p><div class="section" title="Variables and mutation"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec20"/>Variables and mutation</h2></div></div></div><p>If you have previously worked with an imperative language (C/C++, Java, and so on), you may be familiar with the concept of a variable. A <span class="strong"><strong>variable</strong></span>
+<a class="indexterm" id="id84"/> is a reference to a block of memory. When we update its value, we essentially update the place in memory where the value is stored. The variable continues to point to the place where the older version of the value was stored. So, essentially, a variable is an alias for the place of storage of values.</p><p>A little analysis would reveal that variables are strongly linked to the processes that read or mutate their values. Every mutation is a state transition. The processes that read/update the variable should be aware of the possible states of the variable to make sense of the state. Can you see a problem here? It conflates identity and state! It is impossible to refer to a value or a state in time when dealing with a variable—the value could change at any time unless you have complete control over the process accessing it. The mutability model does not accommodate the concept of time that causes its state transition.</p><p>The issues with mutability<a class="indexterm" id="id85"/> do not stop here. When you have a composite data structure containing mutable variables, the entire data structure becomes mutable. How can we mutate it without potentially undermining the other processes that might be observing it? How can we share this data structure with concurrent processes? How can we use this data structure as a key in a hash-map? This data structure does not convey anything. Its meaning could change with mutation! How do we send such a thing to another process without also compensating for the time, which can mutate it in different ways?</p><p>Immutability<a class="indexterm" id="id86"/> is an important tenet of functional programming. It not only simplifies the programming model, but also paves the way for safety and concurrency. Clojure supports immutability throughout the language. Clojure also supports fast, mutation-oriented data structures as well as thread-safe state management via concurrency primitives. We will discuss these topics in the forthcoming sections and chapters.</p></div><div class="section" title="Collection types"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec21"/>Collection types</h2></div></div></div><p>There are a few types of collections<a class="indexterm" id="id87"/> in Clojure, which are categorized based on their properties. The following Venn diagram depicts this categorization on the basis of whether the collections are counted (so that <code class="literal">counted?</code> returns <code class="literal">true</code>) or associative (so that <code class="literal">associative?</code> returns <code class="literal">true</code>) or sequential (so that <code class="literal">sequential?</code> returns <code class="literal">true</code>):</p><div class="mediaobject"><img alt="Collection types" src="graphics/B04596_02_01.jpg"/></div><p>The previous diagram illustrates the characteristics that different kinds of data structures share. The sequential structures<a class="indexterm" id="id88"/> let us iterate over the items in the collection, the item count of counted structures can be found constant with respect to time, and associative structures can be looked at with keys for corresponding values. The <span class="strong"><strong>CharSequence</strong></span> box<a class="indexterm" id="id89"/> shows the character sequence Java types that can be converted to a Clojure sequence using (<code class="literal">seq charseq</code>).</p></div></div>
+<div class="section" title="Persistent data structures"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec15"/>Persistent data structures</h1></div></div></div><p>As we've noticed in the <a class="indexterm" id="id90"/>previous section, Clojure's data structures are not only immutable, but can produce new values without impacting the old version. Operations produce these new values in such a way that old values remain accessible; the new version is produced in compliance with the complexity guarantees of that data structure, and both the old and new versions continue to meet the complexity guarantees. The operations can be recursively applied and can still meet the complexity guarantees. Such immutable data structures as the ones provided by Clojure are called <span class="strong"><strong>persistent data structures</strong></span>. They are "persistent", as in, when a new version is created, both the old and new versions "persist" in terms of both the value and complexity guarantee. They have nothing to do with storage or durability of data. Making changes to the old version doesn't impede working with the new version and vice versa. Both versions persist in a similar way.</p><p>Among the publications that have inspired the implementation of Clojure's persistent data structures, two of them are well known. Chris Okasaki's <span class="emphasis"><em>Purely Functional Data Structures</em></span> has influenced <a class="indexterm" id="id91"/>the implementation of persistent data structures and lazy sequences/operations. Clojure's persistent queue implementation is adapted from Okasaki's <span class="emphasis"><em>Batched Queues</em></span>. Phil Bagwell's <span class="emphasis"><em>Ideal Hash Tries</em></span>, though meant for mutable and imperative data structures, was adapted to implement Clojure's persistent map/vector/set.</p><div class="section" title="Constructing lesser-used data structures"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec22"/>Constructing lesser-used data structures</h2></div></div></div><p>Clojure supports a <a class="indexterm" id="id92"/>well-known literal syntax for lists, vectors, sets, and maps. Shown in the following list are some less-used methods for creating other data structures:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Map (<code class="literal">PersistentArrayMap</code> and <code class="literal">PersistentHashMap</code>):<div class="informalexample"><pre class="programlisting">{:a 10 :b 20}  ; array-map up to 8 pairs
+{:a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :h 8 :i 9}  ; hash-map for 9 or more pairs</pre></div></li><li class="listitem" style="list-style-type: disc">Sorted map (<code class="literal">PersistentTreeMap</code>):<div class="informalexample"><pre class="programlisting">(sorted-map :a 10 :b 20 :c 30)  ; (keys ..) should return sorted</pre></div></li><li class="listitem" style="list-style-type: disc">Sorted set (<code class="literal">PersistentTreeSet</code>):<div class="informalexample"><pre class="programlisting">(sorted-set :a :b :c)</pre></div></li><li class="listitem" style="list-style-type: disc">Queue (<code class="literal">PersistentQueue</code>):<div class="informalexample"><pre class="programlisting">(import 'clojure.lang.PersistentQueue)
+(reduce conj PersistentQueue/EMPTY [:a :b :c :d])  ; add to queue
+(peek queue)  ; read from queue
+(pop queue)  ; remove from queue</pre></div></li></ul></div><p>As you can see, abstractions such as <code class="literal">TreeMap</code> (sorted by key), <code class="literal">TreeSet</code> (sorted by element), and <code class="literal">Queue</code> should be instantiated by calling their respective APIs.</p></div><div class="section" title="Complexity guarantee"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec23"/>Complexity guarantee</h2></div></div></div><p>The following table gives a summary of the complexity guarantees<a class="indexterm" id="id93"/> (using the Big-O notation) of various kinds of persistent data structures in Clojure:</p><div class="informaltable"><table border="1"><colgroup><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/></colgroup><thead><tr><th style="text-align: left" valign="bottom">
+<p>Operation</p>
+</th><th style="text-align: left" valign="bottom">
+<p>PersistentList</p>
+</th><th style="text-align: left" valign="bottom">
+<p>PersistentHashMap</p>
+</th><th style="text-align: left" valign="bottom">
+<p>PersistentArrayMap</p>
+</th><th style="text-align: left" valign="bottom">
+<p>PersistentVector</p>
+</th><th style="text-align: left" valign="bottom">
+<p>PersistentQueue</p>
+</th><th style="text-align: left" valign="bottom">
+<p>PersistentTreeMap</p>
+</th></tr></thead><tbody><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">count</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">conj</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top"> </td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">first</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top"> </td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">rest</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top"> </td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">doseq</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top"> </td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">nth</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top"> </td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">last</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(n)</p>
+</td><td style="text-align: left" valign="top"> </td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">get</code>
+</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(log n)</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">assoc</code>
+</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(log n)</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">dissoc</code>
+</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(log n)</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">peek</code>
+</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top"> </td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">pop</code>
+</p>
+</td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top"> </td><td style="text-align: left" valign="top">
+<p>O(&lt;7)</p>
+</td><td style="text-align: left" valign="top">
+<p>O(1)</p>
+</td><td style="text-align: left" valign="top"> </td></tr></tbody></table></div><p>A <span class="strong"><strong>list</strong></span>
+<a class="indexterm" id="id94"/> is a sequential <a class="indexterm" id="id95"/>data structure. It provides constant time access for count and for anything regarding the first element only. For example, <code class="literal">conj</code> adds the element to the head and guarantees <span class="emphasis"><em>O(1)</em></span> complexity. Similarly, <code class="literal">first</code> and <code class="literal">rest</code> provide <span class="emphasis"><em>O(1)</em></span> guarantees too. Everything else provides an <span class="emphasis"><em>O(n)</em></span> complexity guarantee.</p><p>Persistent hash-maps<a class="indexterm" id="id96"/> and <a class="indexterm" id="id97"/>vectors use the trie data structure with a branching factor of 32 under the hood. So, even though the complexity is <span class="emphasis"><em>O(log</em></span>
+<span class="emphasis"><em><sub>32</sub></em></span>
+<span class="emphasis"><em> n)</em></span>, only 2<sup>32</sup> hash codes can fit into the trie nodes. Hence, log<sub>32</sub> 2<sup>32</sup>, which turns out to be <code class="literal">6.4</code> and is less than <code class="literal">7</code>, is the worst-case complexity and can be considered near-constant time. As the trie grows larger, the portion to copy gets proportionately tiny due to structure sharing. Persistent hash-set implementation is also based on hash-map; hence, the hash-sets share the characteristics of the hash-maps. In a persistent vector, the last incomplete node is placed at the tail, which is always directly accessible from the root. This makes using <code class="literal">conj</code> to the end a constant time operation.</p><p>Persistent tree-maps<a class="indexterm" id="id98"/> and tree-sets <a class="indexterm" id="id99"/>are basically sorted maps and sets respectively. Their implementation uses red-black trees and is generally more expensive than hash-maps and hash-sets. A persistent queue uses a persistent vector under the hood for adding new elements. Removing an element from a persistent queue takes the head off <code class="literal">seq</code>, which is created from the vector where new elements are added.</p><p>The complexity of an algorithm over a data structure is not an absolute measure of its performance. For example, working with hash-maps involves computing the hashCode, which is not included in the complexity guarantee. Our choice of data structures should be based on the actual use case. For example, when should we use a list instead of a vector? Probably when we need sequential or <span class="strong"><strong>last-in-first-out</strong></span> (<span class="strong"><strong>LIFO</strong></span>)<a class="indexterm" id="id100"/> access, or when constructing an <span class="strong"><strong>abstract-syntax-tree</strong></span> (<span class="strong"><strong>AST</strong></span>)<a class="indexterm" id="id101"/> for a function call.</p><div class="section" title="O(&lt;7) implies near constant time"><div class="titlepage"><div><div><h3 class="title"><a id="ch02lvl3sec06"/>O(&lt;7) implies near constant time</h3></div></div></div><p>You may know that the <span class="strong"><strong>Big-O</strong></span> notation<a class="indexterm" id="id102"/> is used to express the upper bound (worst case) of the efficiency of any algorithm. The variable <span class="emphasis"><em>n</em></span> is used to express the number of elements in the algorithm. For example, a binary search on a sorted associative collection, such as a sorted vector, is a logarithmic time, that is an <span class="emphasis"><em>O(log</em></span>
+<span class="emphasis"><em><sub>2</sub></em></span>
+<span class="emphasis"><em> n)</em></span> or simply an <span class="emphasis"><em>O(log n)</em></span> algorithm. Since there can be a maximum of 2<sup>32</sup> (technically 2<sup>31</sup> due to a signed positive integer) elements in a Java collection and log<sub>2</sub> 2<sup>32</sup> is 32, the binary search can be <span class="emphasis"><em>O(≤32)</em></span> in the worst case. Similarly, though operations on persistent collections are O(log<sub>32</sub> n), in the worst case they actually turn out to be O(log<sub>32</sub> 2<sup>32</sup>) at maximum, which is <span class="emphasis"><em>O(&lt;7)</em></span>. Note that this is much lower than logarithmic time and approaches near constant time. This implies not so bad performance for persistent collections even in the worst possible scenario.</p></div></div><div class="section" title="The concatenation of persistent data structures"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec24"/>The concatenation of persistent data structures</h2></div></div></div><p>While persistent<a class="indexterm" id="id103"/> data structures have excellent <a class="indexterm" id="id104"/>performance characteristics, the concatenation of two persistent data structures has been a linear time <span class="emphasis"><em>O(N)</em></span> operation, except for some recent developments. The <code class="literal">concat</code> function, as of Clojure 1.7, still provides linear time concatenation. Experimental work on <span class="strong"><strong>Relaxed Radix Balanced</strong></span> (<span class="strong"><strong>RRB</strong></span>)<a class="indexterm" id="id105"/> trees is going on in the <a class="indexterm" id="id106"/>
+<span class="strong"><strong>core.rrb-vector</strong></span> contrib project (<a class="ulink" href="https://github.com/clojure/core.rrb-vector">https://github.com/clojure/core.rrb-vector</a>), which may provide logarithmic time <span class="emphasis"><em>O(log N)</em></span> concatenation. Readers interested in the details should refer to the following links:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The RRB-trees paper<a class="indexterm" id="id107"/> at <a class="ulink" href="http://infoscience.epfl.ch/record/169879/files/RMTrees.pdf">http://infoscience.epfl.ch/record/169879/files/RMTrees.pdf</a></li><li class="listitem" style="list-style-type: disc">Phil Bagwell's talk at <a class="ulink" href="http://www.youtube.com/watch?v=K2NYwP90bNs">http://www.youtube.com/watch?v=K2NYwP90bNs</a></li><li class="listitem" style="list-style-type: disc">Tiark Rompf's talk at <a class="ulink" href="http://skillsmatter.com/podcast/scala/fast-concatenation-immutable-vectors">http://skillsmatter.com/podcast/scala/fast-concatenation-immutable-vectors</a></li></ul></div></div></div>
+<div class="section" title="Sequences and laziness"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec16"/>Sequences and laziness</h1></div></div></div><div class="blockquote"><table border="0" cellpadding="0" cellspacing="0" class="blockquote" summary="Block quote" width="100%"><tr><td valign="top"> </td><td valign="top"><p><span class="emphasis"><em>"A seq is like a logical cursor."</em></span></p></td><td valign="top"> </td></tr><tr><td valign="top"> </td><td align="right" colspan="2" style="text-align: center" valign="top">--<span class="attribution"><span class="emphasis"><em>Rich Hickey</em></span></span></td></tr></table></div><p>
+<span class="strong"><strong>Sequences</strong></span> (commonly known as <span class="strong"><strong>seqs</strong></span>) are a way to <a class="indexterm" id="id108"/>sequentially consume a succession of data. As with iterators, they let a user begin consuming elements from the head and proceed realizing one element after another. However, unlike iterators, sequences are immutable. Also, since sequences are only a view of the underlying data, they do not modify the storage structure of the data.</p><p>What makes sequences stand apart is they are not data structures per se; rather, they are a data abstraction over a stream of data. The data may be produced by an algorithm or a data source connected to an I/O operation. For example, the <code class="literal">resultset-seq</code> function accepts a <code class="literal">java.sql.ResultSet</code> JDBC instance as an argument and produces lazily realized rows of data as <code class="literal">seq</code>.</p><p>Clojure data structures can be turned into sequences using the <code class="literal">seq</code> function. For example, (<code class="literal">seq [:a :b :c :d]</code>) returns a sequence. Calling <code class="literal">seq</code> over an empty collection returns nil.</p><p>Sequences can be consumed by the following functions:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">first</code>: This<a class="indexterm" id="id109"/> returns the head of the sequence</li><li class="listitem" style="list-style-type: disc"><code class="literal">rest</code>: This returns the<a class="indexterm" id="id110"/> remaining sequence, even if it's empty, after removing the head</li><li class="listitem" style="list-style-type: disc"><code class="literal">next</code>: This returns the <a class="indexterm" id="id111"/>remaining sequence or nil, if it's empty, after removing the head</li></ul></div><div class="section" title="Laziness"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec25"/>Laziness</h2></div></div></div><p>Clojure is a strict (as in, the opposite of "lazy") language, which can choose to explicitly make use of laziness when required. Anybody can create a lazily evaluated sequence using the <code class="literal">lazy-seq</code> macro. Some Clojure operations over collections, such as <code class="literal">map</code>, <code class="literal">filter</code>, and more are intentionally lazy.</p><p>
+<span class="strong"><strong>Laziness</strong></span>
+<a class="indexterm" id="id112"/> simply means that the value is not computed until actually required. Once the value is computed, it is cached so that any future reference to the value need not re-compute it. The caching of the value is called <a class="indexterm" id="id113"/>
+<span class="strong"><strong>memoization</strong></span>. Laziness and memoization often go hand in hand.</p><div class="section" title="Laziness in data structure operations"><div class="titlepage"><div><div><h3 class="title"><a id="ch02lvl3sec07"/>Laziness in data structure operations</h3></div></div></div><p>Laziness and <a class="indexterm" id="id114"/>memoization together form an extremely useful <a class="indexterm" id="id115"/>combination to keep the single-threaded performance of functional algorithms comparable to its imperative counterparts. For an example, consider the following Java code:</p><div class="informalexample"><pre class="programlisting">List&lt;String&gt; titles = getTitles();
+int goodCount = 0;
+for (String each: titles) {
+  String checksum = computeChecksum(each);
+  if (verifyOK(checksum)) {
+    goodCount++;
+  }
+}</pre></div><p>As is clear from the preceding snippet, it has a linear time complexity, that is, <span class="emphasis"><em>O(n)</em></span>, and the whole operation is performed in a single pass. The comparable Clojure code is as follows:</p><div class="informalexample"><pre class="programlisting">(-&gt;&gt; (get-titles)
+  (map compute-checksum)
+  (filter verify-ok?)
+  count)</pre></div><p>Now, since we know <code class="literal">map</code> and <code class="literal">filter</code> are lazy, we can deduce that the Clojure version also has linear time complexity, that is, <span class="emphasis"><em>O(n)</em></span>, and finishes the task in one pass with no significant memory overhead. Imagine, for a moment, that <code class="literal">map</code> and <code class="literal">filter</code> are not lazy—what would be the complexity then? How many passes would it make? It's not just that map and filter would both have taken one pass, that is, <span class="emphasis"><em>O(n)</em></span>, each; they would each have taken as much memory as the original collection in the worst case, due to storing the intermediate results.</p><p>It is important to know the value of laziness and memoization in an immutability-emphasizing functional language such as Clojure. They form a basis for <span class="strong"><strong>amortization</strong></span>
+<a class="indexterm" id="id116"/> in persistent data structures, which is about focusing on the overall performance of a composite operation instead of microanalyzing the performance of each operation in it; the operations are tuned to perform faster in those operations that matter the most.</p><p>Another<a class="indexterm" id="id117"/> important bit of detail is that when a lazy sequence<a class="indexterm" id="id118"/> is realized, the data is memoized and stored. On the JVM, all the heap references that are reachable in some way are not garbage collected. So, as a consequence, the entire data structure is kept in the memory unless you lose the head of the sequence. When working with lazy sequences using local bindings, make sure you don't keep referring to the lazy sequence from any of the locals. When writing functions that may accept lazy sequence(s), take care that any reference to the lazy <code class="literal">seq</code> does not outlive the execution of the function in the form of a closure or some such.</p></div><div class="section" title="Constructing lazy sequences"><div class="titlepage"><div><div><h3 class="title"><a id="ch02lvl3sec08"/>Constructing lazy sequences</h3></div></div></div><p>Now that we know <a class="indexterm" id="id119"/>what lazy sequences are, let's try to create a retry counter that should return true only as many times as the retry can be performed. This is shown in the following code:</p><div class="informalexample"><pre class="programlisting">(defn retry? [n]
+  (if (&lt;= n 0)
+    (cons false (lazy-seq (retry? 0)))
+    (cons true (lazy-seq (retry? (dec n))))))</pre></div><p>The <code class="literal">lazy-seq</code> macro makes sure that the stack is not used for recursion. We can see that this function would return endless values. Hence, in order to inspect what it returns, we should limit the number of elements as shown in the following code:</p><div class="informalexample"><pre class="programlisting">user=&gt; (take 7 (retry? 5))
+(true true true true true false false)</pre></div><p>Now, let's try using it in a mock fashion:</p><div class="informalexample"><pre class="programlisting">(loop [r (retry? 5)]
+  (if-not (first r)
+    (println "No more retries")
+    (do
+      (println "Retrying")
+      (recur (rest r)))))</pre></div><p>As expected, the output should print <code class="literal">Retrying</code> five times before printing <code class="literal">No more retries</code> and exiting as follows:</p><div class="informalexample"><pre class="programlisting">Retrying
+Retrying
+Retrying
+Retrying
+Retrying
+No more retries
+nil</pre></div><p>Let's take another simpler example of constructing a lazy sequence, which gives us a countdown from a specified number to zero:</p><div class="informalexample"><pre class="programlisting">(defn count-down [n]
+  (if (&lt;= n 0)
+    '(0)
+    (cons n (lazy-seq (count-down (dec n))))))</pre></div><p>We can inspect the values it returns as follows:</p><div class="informalexample"><pre class="programlisting">user=&gt; (count-down 8)
+(8 7 6 5 4 3 2 1 0)</pre></div><p>Lazy sequences<a class="indexterm" id="id120"/> can loop indefinitely without exhausting the stack and can come in handy when working with other lazy operations. To maintain a balance between space-saving and performance, consuming lazy sequences results in the chunking of elements by a factor of 32. That means lazy seqs are realized in a chunk-size of 32, even though they are consumed sequentially.</p><div class="section" title="Custom chunking"><div class="titlepage"><div><div><h4 class="title"><a id="ch02lvl4sec03"/>Custom chunking</h4></div></div></div><p>The default <a class="indexterm" id="id121"/>chunk size 32 may not be optimum for all lazy sequences—you can override the chunking behavior when you need to. Consider the following snippet (adapted from Kevin Downey's public gist at <a class="ulink" href="https://gist.github.com/hiredman/324145">https://gist.github.com/hiredman/324145</a>):</p><div class="informalexample"><pre class="programlisting">(defn chunked-line-seq
+  "Returns the lines of text from rdr as a chunked[size] sequence of strings.
+  rdr must implement java.io.BufferedReader."
+  [^java.io.BufferedReader rdr size]
+  (lazy-seq
+    (when-let [line (.readLine rdr)]
+      (chunk-cons
+        (let [buffer (chunk-buffer size)]
+          (chunk-append buffer line)
+          (dotimes [i (dec size)]
+            (when-let [line (.readLine rdr)]
+              (chunk-append buffer line)))
+  (chunk buffer))
+(chunked-line-seq rdr size)))))</pre></div><p>As per the previous snippet, the user is allowed to pass a chunk size that is used to produce the lazy sequence. A larger chunk size may be useful when processing large text files, such as when processing CSV or log files. You would notice the following four less-known functions used in the snippet:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">clojure.core/chunk-cons</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">clojure.core/chunk-buffer</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">clojure.core/chunk-append</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">clojure.core/chunk</code></li></ul></div><p>While <code class="literal">chunk-cons</code> is the <a class="indexterm" id="id122"/>equivalent of <code class="literal">clojure.core/cons</code> for chunked sequences, <code class="literal">chunk-buffer</code> creates a mutable chunk buffer (controls the chunk size), <code class="literal">chunk-append</code> appends an item to the end of a mutable chunk buffer, and chunk turns a mutable chunk buffer into an immutable chunk.</p><p>The <code class="literal">clojure.core</code> namespace has several functions related to chunked sequences listed as follows:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">chunk</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">chunk-rest</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">chunk-cons</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">chunk-next</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">chunk-first</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">chunk-append</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">chunked-seq?</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">chunk-buffer</code></li></ul></div><p>These functions are not documented, so although I would encourage you to study their source code to understand what they do, I would advise you not to make any assumptions about their support in future Clojure versions.</p></div><div class="section" title="Macros and closures"><div class="titlepage"><div><div><h4 class="title"><a id="ch02lvl4sec04"/>Macros and closures</h4></div></div></div><p>Often, we define a <a class="indexterm" id="id123"/>macro<a class="indexterm" id="id124"/> so as to turn the parameter body of code into a <a class="indexterm" id="id125"/>closure and delegate it to a function. See the <a class="indexterm" id="id126"/>following example:</p><div class="informalexample"><pre class="programlisting">(defmacro do-something
+  [&amp; body]
+  `(do-something* (fn [] ~@body)))</pre></div><p>When using such code, if the body binds a local to a lazy sequence it may be retained longer than necessary, likely with bad consequences on memory consumption and performance. Fortunately, this can be easily fixed:</p><div class="informalexample"><pre class="programlisting">(defmacro do-something
+  [&amp; body]
+  `(do-something* (^:once fn* [] ~@body)))</pre></div><p>Notice the <code class="literal">^:once</code> hint and the <code class="literal">fn*</code> macro, which make the Clojure compiler clear the closed-over references, thus avoiding the problem. Let's see this in action (Alan Malloy's example from <a class="ulink" href="https://groups.google.com/d/msg/clojure/Ys3kEz5c_eE/3St2AbIc3zMJ">https://groups.google.com/d/msg/clojure/Ys3kEz5c_eE/3St2AbIc3zMJ</a>):</p><div class="informalexample"><pre class="programlisting">user&gt; (let [x (for [n (range)] (make-array Object 10000))
+      f (^:once fn* [] (nth x 1e6))]  ; using ^:once
+        (f))
+#&lt;Object[] [Ljava.lang.Object;@402d3105&gt;
+user&gt; (let [x (for [n (range)] (make-array Object 10000))
+            f (fn* [] (nth x 1e6))]         ; not using ^:once
+        (f))
+OutOfMemoryError GC overhead limit exceeded</pre></div><p>The manifestation<a class="indexterm" id="id127"/> of the <a class="indexterm" id="id128"/>previous condition depends on the<a class="indexterm" id="id129"/> available heap space. This issue is tricky to detect as it <a class="indexterm" id="id130"/>only raises <code class="literal">OutOfMemoryError</code>, which is easy to misunderstand as a heap space issue instead of a memory leak. As a preventive measure, I would suggest using <code class="literal">^:once</code> with <code class="literal">fn*</code> in all cases where you close over any potentially lazy sequence.</p></div></div></div></div>
+<div class="section" title="Transducers"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec17"/>Transducers</h1></div></div></div><p>Clojure 1.7 introduced a new abstraction called transducers for "composable algorithmic transformations", commonly used to apply a series of transformations over collections. The idea of transducers follows from<a class="indexterm" id="id131"/> the <span class="strong"><strong>reducing function</strong></span>, which accepts arguments of the form (<code class="literal">result, input</code>) and returns <code class="literal">result</code>. A reducing function is what we typically use with reduce. A <span class="strong"><strong>transducer</strong></span>
+<a class="indexterm" id="id132"/> accepts a reducing function, wraps/composes over its functionality to provide something extra, and returns another reducing function.</p><p>The functions in <code class="literal">clojure.core</code> that deal with collections have acquired an <code class="literal">arity-1</code> variant, which returns a transducer, namely <code class="literal">map</code>, <code class="literal">cat</code>, <code class="literal">mapcat</code>, <code class="literal">filter</code>, <code class="literal">remove</code>, <code class="literal">take</code>, <code class="literal">take-while</code>, <code class="literal">take-nth</code>, <code class="literal">drop</code>, <code class="literal">drop-while</code>, <code class="literal">replace</code>, <code class="literal">partition-by</code>, <code class="literal">partition-all</code>, <code class="literal">keep</code>, <code class="literal">keep-indexed</code>, <code class="literal">dedupe</code> and <code class="literal">random-sample</code>.</p><p>Consider the following few examples, all of which do the same thing:</p><div class="informalexample"><pre class="programlisting">user=&gt; (reduce ((filter odd?) +) [1 2 3 4 5])
+9
+user=&gt; (transduce (filter odd?) + [1 2 3 4 5])
+9
+user=&gt; (defn filter-odd? [xf]
+         (fn
+           ([] (xf))
+           ([result] (xf result))
+           ([result input] (if (odd? input)
+                               (xf result input)
+                               result))))
+#'user/filter-odd?
+user=&gt; (reduce (filter-odd? +) [1 2 3 4 5])
+9</pre></div><p>Here, (<code class="literal">filter odd?</code>) returns a transducer—in the first example the transducer wraps over the reducer function <code class="literal">+</code> to return another combined reducing function. While we use the ordinary <code class="literal">reduce</code> function in the first example, in the second example we use the <code class="literal">transduce</code> function that accepts a transducer as an argument. In the third example, we write a transducer <code class="literal">filter-odd?</code>, which emulates what (<code class="literal">filter odd?</code>) does. Let's see how the performance <a class="indexterm" id="id133"/>varies between traditional and transducer versions:</p><div class="informalexample"><pre class="programlisting">;; traditional way
+user=&gt; (time (dotimes [_ 10000] (reduce + (filter odd? (range 10000)))))
+"Elapsed time: 2746.782033 msecs"
+nil
+;; using transducer
+(def fodd? (filter odd?))
+user=&gt; (time (dotimes [_ 10000] (transduce fodd? + (range 10000))))
+"Elapsed time: 1998.566463 msecs"
+nil</pre></div><div class="section" title="Performance characteristics"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec26"/>Performance characteristics</h2></div></div></div><p>The key point behind <a class="indexterm" id="id134"/>transducers is how orthogonal each<a class="indexterm" id="id135"/> transformation is allowed to be, yet highly composable also. At the same time, transformations can happen in lockstep for the entire sequence instead of each operation producing lazy chunked sequences. This often causes significant performance benefits with transducers. Lazy sequences are still going to be useful when the final result is too large to realize at once—for other use cases transducers should fit the need aptly with improved performance. Since the core functions have been overhauled to work with transducers, it makes sense to model transformations more often than not in terms of transducers.</p></div></div>
+<div class="section" title="Transients"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec18"/>Transients</h1></div></div></div><p>Earlier in this <a class="indexterm" id="id136"/>chapter, we discussed the virtues of immutability and the pitfalls of mutability. However, even though mutability is fundamentally unsafe, it also has very good single-threaded performance. Now, what if there was a way to restrict the mutable operation in a local context in order to provide safety guarantees? That would be equivalent to combining the performance advantage and local safety guarantees. That is exactly the abstraction called <span class="strong"><strong>transients</strong></span>, which is provided by Clojure.</p><p>Firstly, let's verify that it is safe (up to Clojure 1.6 only):</p><div class="informalexample"><pre class="programlisting">user=&gt; (let [t (transient [:a])]
+  @(future (conj! t :b)))
+IllegalAccessError Transient used by non-owner thread  clojure.lang.PersistentVector$TransientVector.ensureEditable (PersistentVector.java:463)</pre></div><p>As we can see previously, up to Clojure 1.6, a transient created in one thread cannot be accessed by another. However, this operation is allowed in Clojure 1.7 in order for transducers to play well<a class="indexterm" id="id137"/> with the <code class="literal">core.async</code> (<a class="ulink" href="https://github.com/clojure/core.async">https://github.com/clojure/core.async</a>) library —the developer should maintain operational consistency on transients across threads:</p><div class="informalexample"><pre class="programlisting">user=&gt; (let [t (transient [:a])] (seq t))
+
+IllegalArgumentException Don't know how to create ISeq from: clojure.lang.PersistentVector$TransientVector  clojure.lang.RT.seqFrom (RT.java:505)</pre></div><p>So, transients cannot be converted to seqs. Hence, they cannot participate in the birthing of new persistent data structures and leak out of the scope of execution. Consider the following code:</p><div class="informalexample"><pre class="programlisting">(let [t (transient [])]
+  (conj! t :a)
+  (persistent! t)
+  (conj! t :b))
+IllegalAccessError Transient used after persistent! call  clojure.lang.PersistentVector$TransientVector.ensureEditable (PersistentVector.java:464)</pre></div><p>The <code class="literal">persistent!</code> function permanently converts <code class="literal">transient</code> into an equivalent persistent data structure. Effectively, transients are for one-time use only.</p><p>Conversion between <code class="literal">persistent</code> and <code class="literal">transient</code> data structures (the <code class="literal">transient</code> and <code class="literal">persistent!</code> functions) is constant time, that is, it is an <span class="emphasis"><em>O(1)</em></span> operation. Transients can be created from unsorted maps, vectors, and sets only. The functions that mutate transients are: <code class="literal">conj!</code>, <code class="literal">disj!</code>, <code class="literal">pop!</code>, <code class="literal">assoc!</code>, and <code class="literal">dissoc!</code>. Read-only operations such as <code class="literal">get</code>, <code class="literal">nth</code>, <code class="literal">count</code>, and many more work as usual on transients, but functions such as <code class="literal">contains?</code> and those that imply seqs, such as <code class="literal">first</code>, <code class="literal">rest</code>, and <code class="literal">next</code>, do not.</p><div class="section" title="Fast repetition"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec27"/>Fast repetition</h2></div></div></div><p>The function <code class="literal">clojure.core/repeatedly</code> lets us <a class="indexterm" id="id138"/>execute a function many times and produces a lazy sequence of results. Peter Taoussanis, in his open source serialization <a class="indexterm" id="id139"/>library <span class="strong"><strong>Nippy</strong></span> (<a class="ulink" href="https://github.com/ptaoussanis/nippy">https://github.com/ptaoussanis/nippy</a>), wrote a transient-aware variant that performs significantly better. It is reproduced, as shown, with his permission (note that the arity of the function is not the same as <code class="literal">repeatedly</code>):</p><div class="informalexample"><pre class="programlisting">(defn repeatedly*
+  "Like `repeatedly` but faster and returns given collection type."
+  [coll n f]
+  (if-not (instance? clojure.lang.IEditableCollection coll)
+    (loop [v coll idx 0]
+      (if (&gt;= idx n)
+        v
+        (recur (conj v (f)) (inc idx))))
+    (loop [v (transient coll) idx 0]
+      (if (&gt;= idx n)
+        (persistent! v)
+        (recur (conj! v (f)) (inc idx))))))</pre></div></div></div>
+<div class="section" title="Performance miscellanea"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec19"/>Performance miscellanea</h1></div></div></div><p>Besides the major<a class="indexterm" id="id140"/> abstractions we saw earlier in the chapter, there are other smaller, but nevertheless very performance-critical, parts of Clojure that we will see in this section.</p><div class="section" title="Disabling assertions in production"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec28"/>Disabling assertions in production</h2></div></div></div><p>Assertions are very <a class="indexterm" id="id141"/>useful to catch logical <a class="indexterm" id="id142"/>errors in the code during development, but<a class="indexterm" id="id143"/> they impose a runtime overhead that you may like to avoid in the production environment. Since <code class="literal">assert</code> is a compile time variable, the assertions can be silenced either by binding <code class="literal">assert</code> to false or by using <code class="literal">alter-var-root</code> before the code is loaded. Unfortunately, both the techniques are cumbersome to use. Paul Stadig's library called <span class="strong"><strong>assertions</strong></span>
+<a class="indexterm" id="id144"/> (<a class="ulink" href="https://github.com/pjstadig/assertions">https://github.com/pjstadig/assertions</a>) helps with this exact use-case by enabling or disabling assertions via the command-line argument <code class="literal">-ea</code> to the Java runtime.</p><p>To use it, you must include it in your Leiningen <code class="literal">project.clj</code> file as a dependency:</p><div class="informalexample"><pre class="programlisting">:dependencies [;; other dependencies…
+                            [pjstadig/assertions "0.1.0"]]</pre></div><p>You must use this library's <code class="literal">assert</code> macro instead of Clojure's own, so each <code class="literal">ns</code> block in the application should look similar to this:</p><div class="informalexample"><pre class="programlisting">(ns example.core
+
+  (:refer-clojure :exclude [assert])
+
+  (:require [pjstadig.assertions :refer [assert]]))</pre></div><p>When<a class="indexterm" id="id145"/> running the application, you<a class="indexterm" id="id146"/> should include the <code class="literal">-ea</code> argument to the <a class="indexterm" id="id147"/>JRE to enable assertions, whereas its exclusion implies no assertion at runtime:</p><div class="informalexample"><pre class="programlisting">$ JVM_OPTS=-ea lein run -m example.core
+$ java -ea -jar example.jar</pre></div><p>Note that this usage will not automatically avoid assertions in the dependency libraries.</p></div><div class="section" title="Destructuring"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec29"/>Destructuring</h2></div></div></div><p>
+<span class="strong"><strong>Destructuring</strong></span>
+<a class="indexterm" id="id148"/> is one of Clojure's built-in mini languages and, arguably, a top <a class="indexterm" id="id149"/>productivity booster during development. This feature leads to the parsing of values to match the left-hand side of the binding forms. The more complicated the binding form, the more work there is that needs to be done. Not surprisingly, this has a little bit of performance overhead.</p><p>It is easy to avoid this overhead by using explicit functions to unravel data in the tight loops and other performance-critical code. After all, it all boils down to making the program work less and do more.</p></div><div class="section" title="Recursion and tail-call optimization (TCO)"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec30"/>Recursion and tail-call optimization (TCO)</h2></div></div></div><p>Functional<a class="indexterm" id="id150"/> languages have <a class="indexterm" id="id151"/>this<a class="indexterm" id="id152"/> concept of tail-call <a class="indexterm" id="id153"/>optimization related to recursion. So, the idea is that when a recursive call is at the tail position, it does not take up space on the stack for recursion. Clojure supports a form of user-assisted recursive call to make sure the recursive calls do not blow the stack. This is kind of an imperative looping, but is extremely fast.</p><p>When carrying out computations, it may make a lot of sense to use <code class="literal">loop-recur</code> in the tight loops instead of iterating over synthetic numbers. For example, we want to add all odd integers from zero through to 1,000,000. Let's compare the code:</p><div class="informalexample"><pre class="programlisting">(defn oddsum-1 [n]  ; using iteration
+  (-&gt;&gt; (range (inc n))
+    (filter odd?)
+    (reduce +)))
+(defn oddsum-2 [n]  ; using loop-recur
+  (loop [i 1 s 0]
+    (if (&gt; i n)
+      s
+      (recur (+ i 2) (+ s i)))))</pre></div><p>When we run the code, we get interesting results:</p><div class="informalexample"><pre class="programlisting">user=&gt; (time (oddsum-1 1000000))
+"Elapsed time: 109.314908 msecs"
+
+250000000000
+user=&gt; (time (oddsum-2 1000000))
+"Elapsed time: 42.18116 msecs"
+
+250000000000</pre></div><p>The <code class="literal">time</code> macro is far from perfect as the performance-benchmarking tool, but the relative numbers indicate a trend—in the subsequent chapters, we will look at the <span class="emphasis"><em>Criterium</em></span> library for more scientific benchmarking. Here, we use <code class="literal">loop-recur</code> not only to iterate faster, but we are also able to change the algorithm itself by iterating only about half as many times as we did in the other example.</p><div class="section" title="Premature end of iteration"><div class="titlepage"><div><div><h3 class="title"><a id="ch02lvl3sec09"/>Premature end of iteration</h3></div></div></div><p>When accumulating <a class="indexterm" id="id154"/>over a collection, in some cases, we may want to end it prematurely. Prior to Clojure 1.5, <code class="literal">loop-recur</code> was the only way to do it. When using <code class="literal">reduce</code>, we can do just that using the <code class="literal">reduced</code> function introduced in Clojure 1.5 as shown:</p><div class="informalexample"><pre class="programlisting">;; let coll be a collection of numbers
+(reduce (fn ([x] x) ([x y] (if (or (zero? x) (zero? y)) (reduced 0) (* x y))))
+             coll)</pre></div><p>Here, we multiply<a class="indexterm" id="id155"/> all the numbers in a collection and, upon finding any of the numbers as zero, immediately return the result zero instead of continuing up to the last element.</p><p>The function <code class="literal">reduced?</code> helps detect when a reduced value is returned. Clojure 1.7 introduces the <code class="literal">ensure-reduced</code> function to box up non-reduced values as reduced.</p></div></div><div class="section" title="Multimethods versus protocols"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec31"/>Multimethods versus protocols</h2></div></div></div><p>
+<span class="strong"><strong>Multimethods</strong></span> are a<a class="indexterm" id="id156"/> fantastic expressive abstraction for a<a class="indexterm" id="id157"/> polymorphic dispatch on the dispatch function's return value. The <code class="literal">dispatch</code> functions associated with a multimethod are maintained at runtime and are looked up whenever a multimethod call is invoked. While multimethods provide a lot of flexibility in determining the dispatch, the performance<a class="indexterm" id="id158"/> overhead is simply too high compared to that of protocol implementations.</p><p>Protocols (<code class="literal">defprotocol</code>) are implemented using reify, records (<code class="literal">defrecord</code>), and types (<code class="literal">deftype</code>, <code class="literal">extend-type</code>) in Clojure. This is a big discussion topic—since we are discussing the performance characteristics, it should suffice to say that protocol implementations dispatch on polymorphic types and are significantly faster than multimethods. Protocols and types are generally the implementation detail of an API, so they are usually fronted by functions.</p><p>Due to the multimethods' flexibility, they still have a place. However, in performance-critical code it is advisable to use protocols, records, and types instead.</p></div><div class="section" title="Inlining"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec32"/>Inlining</h2></div></div></div><p>It is well known that<a class="indexterm" id="id159"/> macros<a class="indexterm" id="id160"/> are expanded inline at the call site and avoid a function call. As a consequence, there is a small performance benefit. There is also a <code class="literal">definline</code> macro that lets you write a function just like a normal macro. It creates an actual function that gets inlined at the call site:</p><div class="informalexample"><pre class="programlisting">(def PI Math/PI)
+(definline circumference [radius]
+  `(* 2 PI ~radius))</pre></div><div class="note" style="" title="Note"><div class="inner"><h3 class="title"><a id="note02"/>Note</h3><p>Note that the JVM also analyzes the code it runs and does its own inlining of code at runtime. While you may choose to inline the hot functions, this technique is known to give only a modest performance boost.</p></div></div><p>When we define a <code class="literal">var</code> object, its value is looked up each time it is used. When we define a <code class="literal">var</code> object using a <code class="literal">:const</code> meta pointing to a <code class="literal">long</code> or <code class="literal">double</code> value, it is inlined from wherever it is called:</p><div class="informalexample"><pre class="programlisting">(def ^:const PI Math/PI)</pre></div><p>This is known to give a <a class="indexterm" id="id161"/>decent <a class="indexterm" id="id162"/>performance boost when applicable. See the following example:</p><div class="informalexample"><pre class="programlisting">user=&gt; (def a 10)
+user=&gt; (def ^:const b 10)
+user=&gt; (def ^:dynamic c 10)
+user=&gt; (time (dotimes [_ 100000000] (inc a)))
+"Elapsed time: 1023.745014 msecs"
+nil
+user=&gt; (time (dotimes [_ 100000000] (inc b)))
+"Elapsed time: 226.732942 msecs"
+nil
+user=&gt; (time (dotimes [_ 100000000] (inc c)))
+"Elapsed time: 1094.527193 msecs"
+nil</pre></div></div></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec20"/>Summary</h1></div></div></div><p>Performance is one of the cornerstones of Clojure's design. Abstractions in Clojure are designed for simplicity, power, and safety, with performance firmly in mind. We saw the performance characteristics of various abstractions and also how to make decisions about abstractions depending on performance use cases.</p><p>In the next chapter, we will see how Clojure interoperates with Java and how we can extract Java's power to derive optimum performance.</p></div></body></html>
