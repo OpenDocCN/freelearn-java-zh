@@ -1,4 +1,4 @@
-# 动态渲染
+# 第六章：动态渲染
 
 在上一章中，我们使用 SpringWebFlux 构建了简单的 Web 服务。到目前为止，我们已经构建了返回 JSON 响应的 RESTful Web 服务。然而，SpringWebFlux 不仅限于 RESTful Web 服务；它是一个完整的 Web 框架，提供了构建动态网页的能力。
 

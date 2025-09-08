@@ -1,4 +1,4 @@
-# 熟悉 WildFly Swarm
+# 第二章：熟悉 WildFly Swarm
 
 在本章中，我们将介绍 WildFly——它如何与 Java EE 相关以及其主要功能。我们将介绍 WildFly Swarm——WildFly 的子项目——描述其目的，并展示如何使用它来开发微服务。我们将使用 Swarm 创建和部署我们的第一个应用程序。
 

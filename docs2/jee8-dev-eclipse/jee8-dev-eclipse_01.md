@@ -1,4 +1,4 @@
-# 创建一个简单的 JEE Web 应用程序
+# 第二章：创建一个简单的 JEE Web 应用程序
 
 上一章为您简要介绍了 JEE 和 Eclipse。我们还学习了如何安装 Eclipse JEE 包以及如何安装和配置 Tomcat。Tomcat 是一个 servlet 容器，它易于使用和配置。因此，许多开发者使用它在本地上运行 JEE Web 应用程序。
 

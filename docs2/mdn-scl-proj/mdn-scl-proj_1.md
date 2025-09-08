@@ -1,4 +1,4 @@
-# 从鸢尾花数据集中预测花的类别
+# 第一章：从鸢尾花数据集中预测花的类别
 
 本章在 Scala 和 Spark 中启动了一个**机器学习**（**ML**）倡议。谈到 Spark，其**机器学习库**（**MLlib**）位于`spark.ml`包下，可以通过其基于 MLlib `DataFrame`的 API 访问。Spark ML，也称为基于 MLlib 的`DataFrame` API，提供了强大的学习算法和管道构建工具，用于数据分析。不用说，从本章开始，我们将利用 MLlib 的分类算法。
 

@@ -1,4 +1,4 @@
-# 使用 Quarkus 进行响应式消息传递
+# 第十章：使用 Quarkus 进行响应式消息传递
 
 在本章中，我们将学习 SmallRye 响应式消息传递的细节，它可以在 Quarkus 中用于实现 Eclipse MicroProfile 响应式消息传递规范。到本章结束时，您将拥有一个坚实的数据流应用程序开发模型，并了解如何连接到 Apache Kafka 和 ActiveMQ 等流平台。
 

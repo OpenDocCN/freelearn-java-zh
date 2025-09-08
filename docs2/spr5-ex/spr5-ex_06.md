@@ -1,4 +1,4 @@
-# 玩转服务器端事件（Server-Sent Events）
+# 第六章：玩转服务器端事件（Server-Sent Events）
 
 在第四章，Kotlin 基础和 Spring Data Redis 以及第五章，*反应式 Web 客户端*中，我们创建了两个微服务。第一个负责在 Redis 上跟踪数据并触发第二个微服务，该微服务将消费 Twitter 流。这个过程是异步发生的。
 

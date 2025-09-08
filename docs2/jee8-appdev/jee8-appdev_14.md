@@ -1,4 +1,4 @@
-# 配置和部署到 GlassFish
+# 第十四章：配置和部署到 GlassFish
 
 在撰写本文时，GlassFish 5 是唯一发布的符合 Java EE 8 规范的应用服务器，因此，所有示例代码都是针对 GlassFish 进行测试的，然而，它们应该可以在任何符合 Java EE 8 规范的应用服务器上运行。
 

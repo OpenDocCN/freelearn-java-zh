@@ -1,4 +1,4 @@
-# Eclipse 中的源代码管理
+# 第三章：Eclipse 中的源代码管理
 
 在上一章中，我们学习了如何使用 JSP、JSF 和 servlets 创建简单的 Web 应用程序。我们还学习了如何使用 Maven 进行构建和项目管理。
 

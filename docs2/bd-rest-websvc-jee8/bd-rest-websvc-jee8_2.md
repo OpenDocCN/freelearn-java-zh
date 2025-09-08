@@ -1,4 +1,4 @@
-# 构建 Synchronous Web 服务和客户端
+# 第二章：构建 Synchronous Web 服务和客户端
 
 在本章中，我们将深入了解使用 Java EE 8 构建同步微服务的细节。我们将学习如何使用基本的 JAX-RS 注解实现服务器端 REST API，实现嵌套 REST API 的子资源定位器，并使用 HTTP 状态码和异常映射器进行异常处理。你还将学习如何使用 JAX-RS 客户端 API 实现客户端，最后，我们将探讨 Java EE 网络服务的不同测试策略。
 

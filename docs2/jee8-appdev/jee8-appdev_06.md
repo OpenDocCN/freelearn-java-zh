@@ -1,4 +1,4 @@
-# 使用 JSON-P 和 JSON-B 进行 JSON 处理
+# 第六章：使用 JSON-P 和 JSON-B 进行 JSON 处理
 
 **JSON**，或称**JavaScript 对象表示法**，是一种人类可读的数据交换格式。正如其名所示，JSON 源自 JavaScript。Java EE 7 引入了**JSON-P**，即 Java JSON 处理 API。Java EE 8 引入了一个额外的 JSON API，即 Java API for **JSON 绑定**（**JSON-B**）。在本章中，我们将涵盖 JSON-P 和 JSON-B。
 

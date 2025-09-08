@@ -1,4 +1,4 @@
-# `switch`表达式
+# 第十一章：`switch`表达式
 
 使用`switch`表达式，Java 12 正在增强其基本语言结构之一——`switch`——以改善开发者的日常编码体验。这种做法的好处是多方面的。与**传统**的`switch`结构相比，`switch`表达式（JDK 增强提案**JEP** 325—[`openjdk.java.net/jeps/325`](http://openjdk.java.net/jeps/325)）可以返回一个值。通过在`switch`分支中定义多个常量并改进代码语义，可以使代码更加简洁。通过移除`switch`分支间的默认穿透控制，你不太可能在`switch`表达式中引入逻辑错误。
 

@@ -1,4 +1,4 @@
-# 使用 JAX-WS 的 Web 服务
+# 第十二章：使用 JAX-WS 的 Web 服务
 
 Java EE 规范将 JAX-WS API 作为其技术之一。JAX-WS 是在 Java 平台上开发 **SOAP**（**简单对象访问协议**）网络服务的标准方式，代表 Java API for XML Web Services。JAX-WS 是一个高级 API；通过 JAX-WS 调用网络服务是通过远程过程调用完成的。JAX-WS 对于 Java 开发者来说是一个非常自然的 API。
 

@@ -1,4 +1,4 @@
-# 使用 Spring MVC 创建 Web 应用程序
+# 第八章：使用 Spring MVC 创建 Web 应用程序
 
 在上一章中，我们学习了如何使用 EJBs 创建 JEE 应用程序。在这一章中，我们将稍微偏离核心 JEE 规范，学习 Spring MVC。
 

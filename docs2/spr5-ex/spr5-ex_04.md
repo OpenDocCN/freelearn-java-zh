@@ -1,4 +1,4 @@
-# Kotlin 基础和 Spring Data Redis
+# 第四章：Kotlin 基础和 Spring Data Redis
 
 Spring Boot 允许开发者创建不同风格的应用程序。在第二章“从 Spring 世界开始——CMS 应用程序”和第三章“使用 Spring Data 和响应式风格的持久化”中，我们已经创建了一个门户应用程序，现在我们将创建一个基于消息驱动架构的应用程序。它展示了 Spring 框架如何很好地适应各种应用程序架构。
 
