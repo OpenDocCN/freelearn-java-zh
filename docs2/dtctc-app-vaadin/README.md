@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Vaadin 数据中心应用
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/27e945b0cb8a70bfd88292cf3003de87`](https://zh.annas-archive.org/md5/27e945b0cb8a70bfd88292cf3003de87)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

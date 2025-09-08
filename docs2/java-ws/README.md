@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Java 研讨会
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/7e98199e364866427216662d687c9e02`](https://zh.annas-archive.org/md5/7e98199e364866427216662d687c9e02)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
