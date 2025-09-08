@@ -1,0 +1,297 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Transformers and Custom Operators</h1>
+                </header>
+            
+            <article>
+                
+<p>In RxJava, there are ways to implement your own custom operators using the <kbd>compose()</kbd> and <kbd>lift()</kbd> methods, which exist on both <kbd>Observable</kbd> and <kbd>Flowable</kbd>. Most of the time, you will likely want to compose existing RxJava operators to create a new operator. But on occasion, you may find yourself needing an operator that must be built from scratch. The latter is a lot more work, but we will cover how to do both of these tasks.</p>
+<p>In this chapter, we will cover the following topics:</p>
+<ul>
+<li>Composing new operators with existing operators using <kbd>compose()</kbd> and Transformers</li>
+<li>The <kbd>to()</kbd> operator</li>
+<li>Implementing operators from scratch with <kbd>lift()</kbd></li>
+<li>RxJava2-Extras and RxJava2Extensions</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Transformers</h1>
+                </header>
+            
+            <article>
+                
+<p>When working with RxJava, you may find yourself wanting to reuse pieces of an <kbd>Observable</kbd> or <kbd>Flowable</kbd> chain and somehow consolidate these operators into a new operator. Good developers find opportunities to reuse code, and RxJava provides this ability using <kbd>ObservableTransformer</kbd> and <kbd>FlowableTransformer</kbd>, which you can pass to the <kbd>compose()</kbd> operator.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">ObservableTransformer</h1>
+                </header>
+            
+            <article>
+                
+<p>Bring back <a href="http://search.maven.org/#artifactdetails%7Ccom.google.guava%7Cguava%7C21.0%7Cbundle"><em>Google Guava</em></a> as a dependency. In <a href="de58a40c-f55f-442f-b12e-7c022e08644e.xhtml">Chapter 3</a>, <em>Basic Operators</em>, we covered the <kbd>collect()</kbd> operator and used it to turn  <kbd>Observable&lt;T&gt;</kbd> into a <kbd>Single&lt;ImmutableList&lt;T&gt;&gt;</kbd>. Effectively, we want to collect <kbd>T</kbd> emissions into a Google Guava <kbd>ImmutableList&lt;T&gt;</kbd>. Suppose we do this operation enough times until it starts to feel redundant. Here, we use this <kbd>ImmutableList</kbd> operation for two different <kbd>Observable</kbd> subscriptions:</p>
+<pre style="padding-left: 60px"> import com.google.common.collect.ImmutableList;<br/> import io.reactivex.Observable;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Observable.just("Alpha", "Beta", "Gamma", "Delta", "Epsilon")<br/>                 .collect(ImmutableList::builder, ImmutableList.Builder::add)<br/>                 .map(ImmutableList.Builder::build)<br/>                 .subscribe(System.out::println);<br/><br/>         Observable.range(1,15)<br/>                 .collect(ImmutableList::builder, ImmutableList.Builder::add)<br/>                 .map(ImmutableList.Builder::build)<br/>                 .subscribe(System.out::println);<br/>     }<br/> }</pre>
+<p>The output is as follows:</p>
+<pre>[Alpha, Beta, Gamma, Delta, Epsilon]<br/> [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]<br/><br/></pre>
+<p>Take a look at this part of the Observable chain used in two places above:</p>
+<pre>collect(ImmutableList::builder, ImmutableList.Builder::add)<br/>     .map(ImmutableList.Builder::build)</pre>
+<p>This is a bit redundant to invoke twice, so is it possible that we can compose these operators into a single operator that collects emissions into an <kbd>ImmutableList</kbd>? As a matter of fact, yes! To target an <kbd>Observable&lt;T&gt;</kbd>, you can implement <kbd>ObservableTransformer&lt;T,R&gt;</kbd>. This type has an <kbd>apply()</kbd> method that accepts an <kbd>Observable&lt;T&gt;</kbd> upstream and returns an <kbd>Observable&lt;R&gt;</kbd> downstream. In your implementation, you can return an <kbd>Observable</kbd> chain that adds on any operators to the upstream, and after those transformations, it returns an <kbd>Observable&lt;R&gt;</kbd>.</p>
+<p>For our example, we will target any generic type <kbd>T</kbd> for a given <kbd>Observable&lt;T&gt;</kbd>, and <kbd>R</kbd> will be an <kbd>ImmutableList&lt;T&gt;</kbd><span> </span>emitted through an <kbd>Observable&lt;ImmutableList&lt;T&gt;&gt;</kbd>. We will package all of this up in an <kbd>ObservableTransformer&lt;T,ImmutableList&lt;T&gt;&gt;</kbd> implementation, as shown in the following code snippet:</p>
+<pre style="padding-left: 60px">public static &lt;T&gt; ObservableTransformer&lt;T, ImmutableList&lt;T&gt;&gt; toImmutableList() {<br/><br/>     return new ObservableTransformer&lt;T, ImmutableList&lt;T&gt;&gt;() {<br/>         @Override<br/>         public ObservableSource&lt;ImmutableList&lt;T&gt;&gt; apply(Observable&lt;T&gt; upstream) {<br/>             return upstream.collect(ImmutableList::&lt;T&gt;builder, ImmutableList.Builder::add)<br/>                     .map(ImmutableList.Builder::build)<br/>                     .toObservable(); <em>// must turn Single into Observable</em><br/>         }<br/>     };<br/> }</pre>
+<p>Since <kbd>collect()</kbd> returns a <kbd>Single</kbd>, we will invoke <kbd>toObservable()</kbd> on it since <kbd>ObservableTransformer</kbd> expects an <kbd>Observable</kbd>, not <kbd>Single</kbd>, to be returned. It is not uncommon for Transformers to be delivered through static factory methods, so that is what we did here.</p>
+<p>Since there is only one single abstract method in <kbd>ObservableTransformer</kbd>, we can streamline this more using a lambda instead. This reads a bit easier, as it reads left-to-right/top-to-bottom and expresses <em>for a given upstream Observable, return it with these operators added to the downstream</em>:</p>
+<pre style="padding-left: 60px">public static &lt;T&gt; ObservableTransformer&lt;T, ImmutableList&lt;T&gt;&gt; toImmutableList() {<br/><br/>     return  upstream -&gt; upstream.collect(ImmutableList::&lt;T&gt;builder, ImmutableList.Builder::add)<br/>                 .map(ImmutableList.Builder::build)<br/>                 .toObservable(); <em>// must turn Single into Observable</em><br/> }</pre>
+<p>To invoke a Transformer into an <kbd>Observable</kbd> chain, you pass it to the <kbd>compose()</kbd> operator. When called on an <kbd>Observable&lt;T&gt;</kbd>, the <kbd>compose()</kbd> operator accepts an <kbd>ObservableTransformer&lt;T,R&gt;</kbd> and returns the transformed <kbd>Observable&lt;R&gt;</kbd>. This allows you to reuse Rx logic and invoke it in multiple places, and now we can call <kbd>compose(toImmutableList())</kbd> on both of our <kbd>Observable</kbd> operations:</p>
+<pre style="padding-left: 60px"> import com.google.common.collect.ImmutableList;<br/> import io.reactivex.Observable;<br/> import io.reactivex.ObservableTransformer;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Observable.just("Alpha", "Beta", "Gamma", "Delta", "Epsilon")<br/>                 .compose(toImmutableList())<br/>                 .subscribe(System.out::println);<br/><br/>         Observable.range(1,10)<br/>                 .compose(toImmutableList())<br/>                 .subscribe(System.out::println);<br/>     }<br/><br/><br/>     public static &lt;T&gt; ObservableTransformer&lt;T, ImmutableList&lt;T&gt;&gt; toImmutableList() {<br/><br/>         return  upstream -&gt; upstream.collect(ImmutableList::&lt;T&gt;builder, ImmutableList.Builder::add)<br/>                     .map(ImmutableList.Builder::build)<br/>                     .toObservable(); <em>// must turn Single into Observable</em><br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">[Alpha, Beta, Gamma, Delta, Epsilon]<br/> [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]</pre>
+<p>It is common for APIs to organize Transformers in a static factory class. In a real-world application, you may store your <kbd>toImmutableList()</kbd> Transformer inside a <kbd>GuavaTransformers</kbd> class. Then, you can invoke it by calling <kbd>compose(GuavaTransformers.toImmutableList())</kbd> in your <kbd>Observable</kbd> operation.</p>
+<div class="packt_tip">Note for this example, we could actually make the <kbd>toImmutableList()</kbd> a reusable singleton since it does not take any parameters.</div>
+<p>You can also create Transformers that target specific emission types and accept arguments. For example, you can create a <kbd>joinToString()</kbd> Transformer that accepts a separator argument and concatenates <kbd>String</kbd> emissions with that separator. Usage of this <kbd>ObservableTransformer</kbd> will only compile when invoked on an <kbd>Observable&lt;String&gt;</kbd>:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.ObservableTransformer;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Observable.just("Alpha", "Beta", "Gamma", "Delta", "Epsilon")<br/>                 .compose(joinToString("/"))<br/>                 .subscribe(System.out::println);<br/>     }<br/><br/>     public static ObservableTransformer&lt;String, String&gt; joinToString(String separator) {<br/>         return  upstream -&gt; upstream<br/>                 .collect(StringBuilder::new, (b,s) -&gt;  {<br/>                     if (b.length() == 0)<br/>                         b.append(s);<br/>                     else<br/>                         b.append(separator).append(s);<br/>                 })<br/>                 .map(StringBuilder::toString)<br/>                 .toObservable();<br/>     }<br/> }</pre>
+<p>The output is as follows:</p>
+<pre style="padding-left: 60px">Alpha/Beta/Gamma/Delta/Epsilon</pre>
+<p>Transformers are a great way to reuse a series of operators that perform a common task, and leveraging them can greatly increase your Rx code reusability. Usually, you will get the most flexibility and speed by implementing them through static factory methods, but you can also extend <kbd>ObservableTransformer</kbd> onto your own class implementation.</p>
+<p>As we will learn in <a href="42947483-7be8-4693-a7e4-2527ad9f180b.xhtml">Chapter 12</a>, <em>Using RxJava with Kotlin</em>, the Kotlin language enables powerful language features that streamline RxJava even more. Instead of using Transformers, you can leverage extension functions to add operators to the <kbd>Observable</kbd> and <kbd>Flowable</kbd> types without inheritance. We will learn more about this later.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">FlowableTransformer</h1>
+                </header>
+            
+            <article>
+                
+<p>When you implement your own <kbd>ObservableTransformer</kbd>, you might want to create a <kbd>FlowableTransformer</kbd> counterpart as well. This way, you can use your operator on both Observables and Flowables.</p>
+<p>The <kbd>FlowableTransformer</kbd> is not much different from <kbd>ObservableTransformer</kbd>. Of course, it will support backpressure since it is composed with Flowables. Otherwise, it is pretty much the same in its usage except that you obviously pass it to <kbd>compose()</kbd> on a <kbd>Flowable</kbd>, not <kbd>Observable</kbd>.</p>
+<p>Here, we take our <kbd>toImmutableList()</kbd> method returning an <kbd>ObservableTransformer</kbd> and implement it as <kbd>FlowableTransformer</kbd> instead:</p>
+<pre style="padding-left: 60px"> import com.google.common.collect.ImmutableList;<br/> import io.reactivex.Flowable;<br/> import io.reactivex.FlowableTransformer;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Flowable.just("Alpha", "Beta", "Gamma", "Delta", "Epsilon")<br/>                 .compose(toImmutableList())<br/>                 .subscribe(System.out::println);<br/><br/>         Flowable.range(1,10)<br/>                 .compose(toImmutableList())<br/>                 .subscribe(System.out::println);<br/>     }<br/><br/><br/>     public static &lt;T&gt; FlowableTransformer&lt;T, ImmutableList&lt;T&gt;&gt; toImmutableList() {<br/><br/>         return  upstream -&gt; upstream.collect(ImmutableList::&lt;T&gt;builder, ImmutableList.Builder::add)<br/>                 .map(ImmutableList.Builder::build)<br/>                 .toFlowable(); <em>// must turn Single into Flowable</em><br/>     }<br/> }</pre>
+<p>You should be able to make a similar conversion to <kbd>FlowableTransformer</kbd> for our <kbd>joinToString()</kbd> example as well.</p>
+<p>You might consider creating separate static utility classes to store your <kbd>FlowableTransformers</kbd> and <kbd>ObservableTransformers</kbd> separately to prevent name clashes. Our <kbd>FlowableTransformer</kbd> and <kbd>ObservableTransformer</kbd> variants of <kbd>toImmutableList()</kbd> cannot exist in the same static utility class unless they have different method names. But it might be cleaner to put them in separate classes, such as <kbd>MyObservableTransformers</kbd> and <kbd>MyFlowableTransformers</kbd>. You could also have them in separate packages with the same class name, <kbd>MyTransformers</kbd>, one for Observables and the other for Flowables.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Avoiding shared state with Transformers</h1>
+                </header>
+            
+            <article>
+                
+<p>When you start creating your own Transformers and custom operators (covered later), an easy way to shoot yourself in the foot is to share states between more than one subscription. This can quickly create unwanted side effects and buggy applications and is one of the reasons you have to tread carefully as you create your own operators.</p>
+<p>Say, you want to create an <kbd>ObservableTransformer&lt;T,IndexedValue&lt;T&gt;&gt;</kbd>, which pairs each emission with its consecutive index starting at 0. First, you create an <kbd>IndexedValue&lt;T&gt;</kbd> class to simply pair each <kbd>T</kbd> value with an <kbd>int index</kbd>:</p>
+<pre style="padding-left: 60px"> static final class IndexedValue&lt;T&gt; {<br/>     final int index;<br/>     final T value;<br/><br/>     IndexedValue(int index, T value) {<br/>         this.index = index;<br/>         this.value = value;<br/>     }<br/><br/>     @Override<br/>     public String toString() {<br/>         return  index + " - " + value;<br/>     }<br/> }</pre>
+<p>Then, you create an <kbd>ObservableTransformer&lt;T,IndexedValue&lt;T&gt;&gt;</kbd><span> t</span>hat uses an <kbd>AtomicInteger</kbd> to increment and attach an integer to each emission. But there is something wrong with our implementation here:</p>
+<pre style="padding-left: 60px">static &lt;T&gt; ObservableTransformer&lt;T,IndexedValue&lt;T&gt;&gt; withIndex() {<br/>     final AtomicInteger indexer = new AtomicInteger(-1);<br/>     return upstream -&gt; upstream.map(v -&gt; new IndexedValue&lt;T&gt;(indexer.incrementAndGet(), v));<br/> }</pre>
+<p>See anything wrong yet? Try to run this <kbd>Observable</kbd> operation, which has two Observers and uses this <kbd>withIndex()</kbd> Transformer. Look at the output carefully:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.ObservableTransformer;<br/> import java.util.concurrent.atomic.AtomicInteger;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Observable&lt;IndexedValue&lt;String&gt;&gt; indexedStrings =<br/>                 Observable.just("Alpha", "Beta", "Gamma", "Delta", "Epsilon")<br/>                     .compose(withIndex());<br/><br/>         indexedStrings.subscribe(v -&gt; System.out.println("Subscriber 1: " + v));<br/>         indexedStrings.subscribe(v -&gt; System.out.println("Subscriber 2: " + v));<br/>     }<br/><br/>     static &lt;T&gt; ObservableTransformer&lt;T,IndexedValue&lt;T&gt;&gt; withIndex() {<br/>         final AtomicInteger indexer = new AtomicInteger(-1);<br/>         return upstream -&gt; upstream.map(v -&gt; new IndexedValue&lt;T&gt;(indexer.incrementAndGet(), v));<br/>     }<br/><br/>     static final class IndexedValue&lt;T&gt; {<br/>         final int index;<br/>         final T value;<br/><br/>         IndexedValue(int index, T value) {<br/>             this.index = index;<br/>             this.value = value;<br/>         }<br/><br/>         @Override<br/>         public String toString() {<br/>             return  index + " - " + value;<br/>         }<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px"> Subscriber 1: 0 - Alpha<br/> Subscriber 1: 1 - Beta<br/> Subscriber 1: 2 - Gamma<br/> Subscriber 1: 3 - Delta<br/> Subscriber 1: 4 - Epsilon<br/> Subscriber 2: 5 - Alpha<br/> Subscriber 2: 6 - Beta<br/> Subscriber 2: 7 - Gamma<br/> Subscriber 2: 8 - Delta<br/> Subscriber 2: 9 - Epsilon</pre>
+<p>Note that a single instance of  <kbd>AtomicInteger</kbd> was shared between both subscriptions, which means its state was shared as well. On the second subscription, instead of starting over at <kbd>0</kbd>, it picks up at the index left by the previous subscription and starts at index <kbd>5</kbd> since the previous subscription ended at <kbd>4</kbd>.</p>
+<p>Unless you have some stateful behaviors you are deliberately implementing, this is probably an unwanted side-effect that can result in maddening bugs. Constants are usually fine, but a mutable shared state between subscriptions is often something you want to avoid.</p>
+<p>A quick and easy way to create a new resource (such as <kbd>AtomicInteger</kbd>) for each subscription is to wrap everything in <kbd>Observable.defer()</kbd>, including the <kbd>AtomicInteger</kbd> instance. This way, a new <kbd>AtomicInteger</kbd> is created each time with the returned indexing operations:</p>
+<pre style="padding-left: 60px">static &lt;T&gt; ObservableTransformer&lt;T,IndexedValue&lt;T&gt;&gt; withIndex() {<br/>     return upstream -&gt; Observable.defer(() -&gt; {<br/>         AtomicInteger indexer = new AtomicInteger(-1);<br/>         return upstream.map(v -&gt; new IndexedValue&lt;T&gt;(indexer.incrementAndGet(), v));<br/>     });<br/> }</pre>
+<p>You can also create an <kbd>AtomicInteger</kbd> within <kbd>Observable.fromCallable()</kbd> and use <kbd>flatMap()</kbd> on it to the <kbd>Observable</kbd> that uses it.</p>
+<p>In this particular example, you can also use <kbd>Observable.zip()</kbd> or <kbd>zipWith()</kbd> with <kbd>Observable.range()</kbd>. Since this is a pure Rx approach as well, no state will be shared between multiple subscribers, and this will also solve our problem:</p>
+<pre style="padding-left: 60px"> static &lt;T&gt; ObservableTransformer&lt;T,IndexedValue&lt;T&gt;&gt; withIndex() {<br/>     return upstream -&gt;<br/>             Observable.zip(upstream,<br/>                     Observable.range(0,Integer.MAX_VALUE),<br/>                     (v,i) -&gt; new IndexedValue&lt;T&gt;(i, v)<br/>             );<br/> }</pre>
+<p>Again, inadvertent shared state and side-effects are dangerous in Rx! Whatever implementation you use to create your Transformer, it is better to rely on pure Rx factories and operators in your implementation if possible. Avoid creating imperative states and objects that risk being shared across subscriptions unless you are fulfilling some strange business requirement where a shared state is explicitly wanted.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Using to() for fluent conversion</h1>
+                </header>
+            
+            <article>
+                
+<p>On rare occasions, you may find yourself having to pass an <kbd>Observable</kbd> to another API that converts it into a proprietary type. This can be done simply by passing an <kbd>Observable</kbd> as an argument to a factory that does this conversion. However, this does not always feel fluent, and this is where the <kbd>to()</kbd> operator comes in.</p>
+<p>For example, JavaFX has a <kbd>Binding&lt;T&gt;</kbd> type that houses a mutable value of type <kbd>T</kbd>, and it will notify affected user interface elements to update when it changes. RxJavaFX has <kbd>JavaFxObserver.toBinding()</kbd> and <kbd>JavaFxSubscriber.toBinding()</kbd> factories, which can turn an <kbd>Observable&lt;T&gt;</kbd> or <kbd>Flowable&lt;T&gt;</kbd> into a JavaFX <kbd>Binding&lt;T&gt;</kbd>. Here is a simple JavaFX <kbd>Application</kbd> that uses <kbd>Binding&lt;String&gt;</kbd> built-off <kbd>Observable&lt;String&gt;</kbd>, which is used to bind to a <kbd>textProperty()</kbd> operator of <kbd>label</kbd>:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.rxjavafx.observers.JavaFxObserver;<br/> import io.reactivex.rxjavafx.schedulers.JavaFxScheduler;<br/> import javafx.application.Application;<br/> import javafx.beans.binding.Binding;<br/> import javafx.scene.Scene;<br/> import javafx.scene.control.Label;<br/> import javafx.scene.layout.VBox;<br/> import javafx.stage.Stage;<br/><br/> import java.util.concurrent.TimeUnit;<br/><br/> public final class JavaFxApp extends Application {<br/><br/>     @Override<br/>     public void start(Stage stage) throws Exception {<br/><br/>         VBox root = new VBox();<br/>         Label label = new Label("");<br/><br/>         <em>// Observable with second timer</em><br/>         Observable&lt;String&gt; seconds =<br/>                 Observable.interval(1, TimeUnit.SECONDS)<br/>                         .map(i -&gt; i.toString())<br/>                         .observeOn(JavaFxScheduler.platform());<br/><br/>         <em>// Turn Observable into Binding</em><br/>         Binding&lt;String&gt; binding = JavaFxObserver.toBinding(seconds);<br/><br/>         <em>//Bind Label to Binding</em><br/>         label.textProperty().bind(binding);<br/><br/>         root.setMinSize(200, 100);<br/>         root.getChildren().addAll(label);<br/><br/>         Scene scene = new Scene(root);<br/>         stage.setScene(scene);<br/>         stage.show();<br/>     }<br/> }</pre>
+<p>Since we have gotten so used to fluent programming with RxJava, would it not be nice to make the conversion of the <kbd>Observable&lt;String&gt;</kbd> to a <kbd>Binding&lt;String&gt;</kbd> part of the <kbd>Observable</kbd> chain too? This way, we do not have to break our fluent style and save intermediary variables. That can be done with the <kbd>to()</kbd> operator, which simply accepts an <kbd>Function&lt;Observable&lt;T&gt;,R&gt;</kbd> to turn an <kbd>Observable&lt;T&gt;</kbd> into any arbitrary <kbd>R</kbd> type. In this case, we can turn our <kbd>Observable&lt;String&gt;</kbd> into a <kbd>Binding&lt;String&gt;</kbd>at the end of our <kbd>Observable</kbd> chain using <kbd>to()</kbd>:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.rxjavafx.observers.JavaFxObserver;<br/> import io.reactivex.rxjavafx.schedulers.JavaFxScheduler;<br/> import javafx.application.Application;<br/> import javafx.beans.binding.Binding;<br/> import javafx.scene.Scene;<br/> import javafx.scene.control.Label;<br/> import javafx.scene.layout.VBox;<br/> import javafx.stage.Stage;<br/> import java.util.concurrent.TimeUnit;<br/><br/> public final class JavaFxApp extends Application {<br/><br/>     @Override<br/>     public void start(Stage stage) throws Exception {<br/><br/>         VBox root = new VBox();<br/>         Label label = new Label("");<br/><br/>         <em>// Turn Observable into Binding</em><br/>         Binding&lt;String&gt; binding =<br/>                 Observable.interval(1, TimeUnit.SECONDS)<br/>                         .map(i -&gt; i.toString())<br/>                         .observeOn(JavaFxScheduler.platform())<br/>                         .to(JavaFxObserver::toBinding);<br/><br/>         <em>//Bind Label to Binding</em><br/>         label.textProperty().bind(binding);<br/><br/>         root.setMinSize(200, 100);<br/>         root.getChildren().addAll(label);<br/><br/>         Scene scene = new Scene(root);<br/>         stage.setScene(scene);<br/>         stage.show();<br/>     }<br/> }</pre>
+<p>Simple but helpful, right? When you are dealing with proprietary non-Rx types that can be built off Rx Observabes and Flowables, this is a handy utility to maintain the fluent Rx style, especially when interoperating with binding frameworks.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Operators</h1>
+                </header>
+            
+            <article>
+                
+<p>Ideally, you will rarely get to a point where you need to build your own operator from scratch by implementing <kbd>ObservableOperator</kbd> or <kbd>FlowableOperator</kbd>. <kbd>ObservableTransformer</kbd> and <kbd>FlowableTransformer</kbd> will hopefully satisfy most cases where you can use existing operators to compose new ones, and this is usually the safest route. But on occasion, you may find yourself having to do something that the existing operators cannot do or not do easily. After you exhaust all other options, you may have to create an operator that manipulates each <kbd>onNext()</kbd>, <kbd>onComplete()</kbd>, and <kbd>onError()</kbd> event between the upstream and the downstream.</p>
+<p>Before you go out and create your own operator, try to use existing operators first with <kbd>compose()</kbd> and a Transformer. After that fails, it is recommended that you post a question on StackOverflow and ask the RxJava community whether such an operator exists or can be composed easily. The RxJava community is very active on StackOverflow and they will likely provide a solution and only escalate the complexity of the solution as required.</p>
+<div class="packt_infobox">Note that David Karnok's <a href="https://github.com/akarnokd/RxJava2Extensions"><em>RxJava2Extensions</em></a> and Dave Moten's <a href="https://github.com/davidmoten/rxjava2-extras"><em>RxJava2-Extras</em></a> have many useful Transformers and operators to augment RxJava as well. You should check out these libraries to see whether they fulfill your needs.</div>
+<p>If it is determined that there are no existing solutions, then proceed carefully to build your own operator. Again, it is recommended that you solicit help from StackOverflow first. Building a native operator is no easy task, and getting insight and experience from an Rx expert is highly valuable and most likely necessary.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Implementing an ObservableOperator</h1>
+                </header>
+            
+            <article>
+                
+<p>Implementing your own <kbd>ObservableOperator</kbd> (as well as <kbd>FlowableTransformer</kbd>) is more involved than creating an <kbd>ObservableTransformer</kbd>. Instead of composing a series of existing operators, you intercept the <kbd>onNext()</kbd>, <kbd>onComplete()</kbd>, <kbd>onError()</kbd>, and <kbd>onSubscribe()</kbd> calls from the upstream by implementing your own <kbd>Observer</kbd> instead. This <kbd>Observer</kbd> will then logically pass the <kbd>onNext()</kbd>, <kbd>onComplete()</kbd>, and <kbd>onError()</kbd> events to the downstream <kbd>Observer</kbd> in a way that fulfills the desired operation.</p>
+<p>Say, you want to create your own <kbd>doOnEmpty()</kbd> operator that will execute an <kbd>Action</kbd> when <kbd>onComplete()</kbd> is called and no emissions have occurred. To create your own <kbd>ObservableOperator&lt;Downstream,Upstream&gt;</kbd> (where <kbd>Upstream</kbd> is the upstream emission type and <kbd>Downstream</kbd> is the downstream emission type), you will need to implement its <kbd>apply()</kbd> method. This accepts an <kbd>Observer&lt;Downstream&gt;</kbd> <kbd>observer</kbd> argument and returns an <kbd>Observer&lt;Upstream&gt;</kbd>.</p>
+<p>You can then use this <kbd>ObservableOperator</kbd> by calling it in the <kbd>lift()</kbd> operator in your <kbd>Observable</kbd> chain, as shown here:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.ObservableOperator;<br/> import io.reactivex.Observer;<br/> import io.reactivex.functions.Action;<br/> import io.reactivex.observers.DisposableObserver;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Observable.range(1, 5)<br/>                 .lift(doOnEmpty(() -&gt; System.out.println("Operation 1 Empty!")))<br/>                 .subscribe(v -&gt; System.out.println("Operation 1: " + v));<br/><br/><br/>         Observable.&lt;Integer&gt;empty()<br/>                 .lift(doOnEmpty(() -&gt; System.out.println("Operation 2 Empty!")))<br/>                 .subscribe(v -&gt; System.out.println("Operation 2: " + v));<br/>     }<br/><br/>     public static &lt;T&gt; ObservableOperator&lt;T,T&gt; doOnEmpty(Action action) {<br/>         return new ObservableOperator&lt;T, T&gt;() {<br/><br/>             @Override<br/>             public Observer&lt;? super T&gt; apply(Observer&lt;? super T&gt; observer) throws Exception {<br/>                 return new DisposableObserver&lt;T&gt;() {<br/>                     boolean isEmpty = true;<br/><br/>                     @Override<br/>                     public void onNext(T value) {<br/>                         isEmpty = false;<br/>                         observer.onNext(value);<br/>                     }<br/><br/>                     @Override<br/>                     public void onError(Throwable t) {<br/>                         observer.onError(t);<br/>                     }<br/><br/>                     @Override<br/>                     public void onComplete() {<br/>                         if (isEmpty) {<br/>                             try {<br/>                                 action.run();<br/>                             } catch (Exception e) {<br/>                                 onError(e);<br/>                                 return;<br/>                             }<br/>                         }<br/>                         observer.onComplete();<br/>                     }<br/>                 };<br/>             }<br/>         };<br/>     }<br/> }</pre>
+<p>The output is as follows:</p>
+<pre style="padding-left: 60px"> Operation 1: 1<br/> Operation 1: 2<br/> Operation 1: 3<br/> Operation 1: 4<br/> Operation 1: 5<br/> Operation 2 Empty!</pre>
+<p>Inside <kbd>apply()</kbd>, you take the passed <kbd>Observer</kbd> that accepts events for the downstream. You create another <kbd>Observer</kbd> (in this case, we should use a <kbd>DisposableObserver</kbd> that handles disposal requests for us) to receive emissions and events from the upstream and relay them to the downstream <kbd>Observer</kbd>. You can manipulate the events to execute the desired logic as well as add any side-effects.</p>
+<p>In this case, we simply passed the events from the upstream to the downstream untampered but track whether <kbd>onNext()</kbd> was called to flag if emissions were present. When <kbd>onComplete()</kbd> is called and no emissions are present, it will execute the user-specified action within <kbd>onComplete()</kbd>. It is usually a good idea to wrap any code that could throw runtime errors in <kbd>try-catch</kbd> and pass those captured errors to <kbd>onError()</kbd>.</p>
+<p>With <kbd>ObservableOperator</kbd>, it may seem odd that you get the downstream as an input and have to produce an <kbd>Observer</kbd> for the upstream as the output. With the <kbd>map()</kbd> operator, for example, the function receives the upstream value and returns the value to be emitted toward the downstream. The reason for this is that code from an <kbd>ObservableOperator</kbd> gets executed at subscription time where the call travels from the end <kbd>Observer</kbd> (downstream) toward the source <kbd>Observable</kbd> (upstream).</p>
+<p>Since it is a single abstract method class, you can also express your <kbd>ObservableOperator</kbd> implementation as a lambda, as shown here:</p>
+<pre style="padding-left: 60px"> public static &lt;T&gt; ObservableOperator&lt;T,T&gt; doOnEmpty(Action action) {<br/>     return observer -&gt; new DisposableObserver&lt;T&gt;() {<br/>         boolean isEmpty = true;<br/><br/>         @Override<br/>         public void onNext(T value) {<br/>             isEmpty = false;<br/>             observer.onNext(value);<br/>         }<br/><br/>         @Override<br/>         public void onError(Throwable t) {<br/>             observer.onError(t);<br/>         }<br/><br/>         @Override<br/>         public void onComplete() {<br/>             if (isEmpty) {<br/>                 try {<br/>                     action.run();<br/>                 } catch (Exception e) {<br/>                     onError(e);<br/>                     return;<br/>                 }<br/>             }<br/>             observer.onComplete();<br/>         }<br/>     };<br/> }</pre>
+<p>Just like <kbd>Transformers</kbd>, be mindful when creating custom operators to not share states between subscriptions unless you absolutely mean to. This is a relatively simple operator because it is a simple reactive building block, but operators can be made enormously complex. This is especially the case when the operators deal with concurrency (for example, <kbd>observeOn()</kbd> and <kbd>subscribeOn()</kbd>) or share states between subscriptions (for example, <kbd>replay()</kbd>). The implementations of <kbd>groupBy()</kbd>, <kbd>flatMap()</kbd>, and <kbd>window()</kbd> are complicated and intricate as well.</p>
+<div class="packt_tip">There are a couple of rules in the <kbd>Observable</kbd> contract you must follow when calling the three events. Never call <kbd>onComplete()</kbd> after <kbd>onError()</kbd> has occurred (or vice versa). Do not call <kbd>onNext()</kbd> after <kbd>onComplete()</kbd> or <kbd>onError()</kbd> is called, and do not call any events after disposal. Breaking these rules can have unintended consequences downstream.</div>
+<p>Another thing that needs to be pointed out is that <kbd>onNext()</kbd>, <kbd>onComplete()</kbd>, and <kbd>onError()</kbd> calls can be manipulated and mixed as needed. For example, <kbd>toList()</kbd> does not pass an <kbd>onNext()</kbd>call downstream for every <kbd>onNext()</kbd>it receives from the upstream. It will keep collecting these emissions in an internal list. When <kbd>onComplete()</kbd> is called from the upstream, it will call <kbd>onNext()</kbd> on the downstream to pass that list before it calls <kbd>onComplete()</kbd>. Here, we implement our own <kbd>myToList()</kbd> operator to understand how <kbd>toList()</kbd> could work, even though in normal circumstances, we should use <kbd>collect()</kbd> or <kbd>toList()</kbd>:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.ObservableOperator;<br/> import io.reactivex.observers.DisposableObserver;<br/> import java.util.ArrayList;<br/> import java.util.List;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Observable.range(1, 5)<br/>                 .lift(myToList())<br/>                 .subscribe(v -&gt; System.out.println("Operation 1: " + v));<br/><br/>         Observable.&lt;Integer&gt;empty()<br/>                 .lift(myToList())<br/>                 .subscribe(v -&gt; System.out.println("Operation 2: " + v));<br/>     }<br/><br/>     public static &lt;T&gt; ObservableOperator&lt;List&lt;T&gt;,T&gt; myToList() {<br/>         return observer -&gt; new DisposableObserver&lt;T&gt;() {<br/><br/>             ArrayList&lt;T&gt; list = new ArrayList&lt;&gt;();<br/><br/>             @Override<br/>             public void onNext(T value) {<br/>                 <em>//add to List, but don't pass anything downstream</em><br/>                 list.add(value);<br/>             }<br/><br/>             @Override<br/>             public void onError(Throwable t) {<br/>                 observer.onError(t);<br/>             }<br/><br/>             @Override<br/>             public void onComplete() {<br/>                 observer.onNext(list); <em>//push List downstream</em><br/>                 observer.onComplete();<br/>             }<br/>         };<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px"> Operation 1: [1, 2, 3, 4, 5]<br/> Operation 2: []</pre>
+<p>Before you start getting ambitious in creating your own operators, it might be good to study the source code of RxJava or other libraries, such as RxJava2-Extras. Operators can be difficult to implement correctly as you need to have a good understanding of how to build reactive patterns from imperative ones. You will also want to test the heck out of it (which we will cover in <a href="ec80132f-c411-4cc1-87b2-7a8ebba089b8.xhtml">Chapter 10</a>, <em>Testing and Debugging</em>) in order to ensure that it behaves correctly before putting it in production.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">FlowableOperator</h1>
+                </header>
+            
+            <article>
+                
+<p>When you create your own <kbd>ObservableOperator</kbd>, you will most likely want to create a <kbd>FlowableOperator</kbd> counterpart as well. This way, your operator can be used for both Observables and Flowables. Thankfully, <kbd>FlowableOperator</kbd> is implemented in a similar manner to <kbd>ObservableOperator</kbd>, as shown here:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Flowable;<br/> import io.reactivex.FlowableOperator;<br/> import io.reactivex.functions.Action;<br/> import io.reactivex.subscribers.DisposableSubscriber;<br/> import org.reactivestreams.Subscriber;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Flowable.range(1, 5)<br/>                 .lift(doOnEmpty(() -&gt; System.out.println("Operation 1 Empty!")))<br/>                 .subscribe(v -&gt; System.out.println("Operation 1: " + v));<br/><br/><br/>         Flowable.&lt;Integer&gt;empty()<br/>                 .lift(doOnEmpty(() -&gt; System.out.println("Operation 2 Empty!")))<br/>                 .subscribe(v -&gt; System.out.println("Operation 2: " + v));<br/>     }<br/><br/>     public static &lt;T&gt; FlowableOperator&lt;T,T&gt; doOnEmpty(Action action) {<br/>         return new FlowableOperator&lt;T, T&gt;() {<br/>             @Override<br/>             public Subscriber&lt;? super T&gt; apply(Subscriber&lt;? super T&gt; subscriber) throws Exception {<br/>                 return new DisposableSubscriber&lt;T&gt;() {<br/>                     boolean isEmpty = true;<br/><br/>                     @Override<br/>                     public void onNext(T value) {<br/>                         isEmpty = false;<br/>                         subscriber.onNext(value);<br/>                     }<br/><br/>                     @Override<br/>                     public void onError(Throwable t) {<br/>                         subscriber.onError(t);<br/>                     }<br/><br/>                     @Override<br/>                     public void onComplete() {<br/>                         if (isEmpty) {<br/>                             try {<br/>                                 action.run();<br/>                             } catch (Exception e) {<br/>                                 onError(e);<br/>                                 return;<br/>                             }<br/>                         }<br/>                         subscriber.onComplete();<br/>                     }<br/>                 };<br/>             }<br/>         };<br/>     }<br/> }</pre>
+<p>Instead of Observers, we used Subscribers, which hopefully is not surprising at this point. The <kbd>Subscriber</kbd> passed via <kbd>apply()</kbd> receives events for the downstream, and the implemented <kbd>Subscriber</kbd> receives events from the upstream, which it relays to the downstream (just as we used <kbd>DisposableObserver</kbd>, we use <kbd>DisposableSubscriber</kbd> to handle disposal/unsubscription for us). Just like earlier, <kbd>onComplete()</kbd> will verify that no emissions occurred and run the specified action if that is the case.</p>
+<p>And of course, you can express your <kbd>FlowableOperator</kbd>as a lambda too:</p>
+<pre style="padding-left: 60px"> public static &lt;T&gt; FlowableOperator&lt;T,T&gt; doOnEmpty(Action action) {<br/>     return subscriber -&gt; new DisposableSubscriber&lt;T&gt;() {<br/>         boolean isEmpty = true;<br/><br/>         @Override<br/>         public void onNext(T value) {<br/>             isEmpty = false;<br/>             subscriber.onNext(value);<br/>         }<br/><br/>         @Override<br/>         public void onError(Throwable t) {<br/>             subscriber.onError(t);<br/>         }<br/><br/>         @Override<br/>         public void onComplete() {<br/>             if (isEmpty) {<br/>                 try {<br/>                     action.run();<br/>                 } catch (Exception e) {<br/>                     onError(e);<br/>                     return;<br/>                 }<br/>             }<br/>             subscriber.onComplete();<br/>         }<br/>     };<br/> }</pre>
+<p>Again, be studious and thorough when you start implementing your own operators, especially as they pass a threshold of complexity. Strive to use existing operators to compose Transformers, and hit StackOverflow or the RxJava community to see whether others can point out an obvious solution first. Implementing operators is something you should be conservative about and only pursue when all other options have been exhausted.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Custom Transformers and operators for Singles, Maybes, and Completables</h1>
+                </header>
+            
+            <article>
+                
+<p>There are Transformer and operator counterparts for <kbd>Single</kbd>, <kbd>Maybe</kbd>, and <kbd>Completable</kbd>. When you want to create an <kbd>Observable</kbd> or <kbd>Flowable</kbd> operator that yields <kbd>Single</kbd>, you might find it easier to convert it back into an <kbd>Observable</kbd>/<kbd>Flowable</kbd> by calling its <kbd>toObservable()</kbd> or <kbd>toFlowable()</kbd> operators. This also applies to <kbd>Maybe</kbd>.</p>
+<p>If on some rare occasion you need to create a Transformer or operator specifically to take a <kbd>Single</kbd> and transform it into another <kbd>Single</kbd>, you will want to use <kbd>SingleTransformer</kbd> or <kbd>SingleOperator</kbd>. <kbd>Maybe</kbd> and <kbd>Completable</kbd> will have counterparts with <kbd>MaybeTransformer</kbd>/<kbd>MaybeOperator</kbd> and <kbd>CompletableTransformer</kbd>/<kbd>CompletableOperator</kbd>, respectively. The implementation of <kbd>apply()</kbd> for all of these should largely be the same experience, and you will use <kbd>SingleObserver</kbd>, <kbd>MaybeObserver</kbd>, and <kbd>CompletableObserver</kbd> to proxy the upstream and downstream.</p>
+<p>Here is an example of a <kbd>SingleTransformer</kbd> that takes <kbd>Single&lt;Collection&lt;T&gt;&gt;</kbd> and maps the emitted <kbd>Collection</kbd> to an unmodifable collection:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.SingleTransformer;<br/> import java.util.Collection;<br/> import java.util.Collections;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/>         Observable.just("Alpha","Beta","Gamma","Delta","Epsilon")<br/>                 .toList()<br/>                 .compose(toUnmodifiable())<br/>                 .subscribe(System.out::println);<br/>     }<br/><br/>     public static &lt;T&gt;  SingleTransformer&lt;Collection&lt;T&gt;, Collection&lt;T&gt;&gt; toUnmodifiable() {<br/>         return singleObserver -&gt; singleObserver.map(Collections::unmodifiableCollection);<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">[Alpha, Beta, Gamma, Delta, Epsilon]</pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Using RxJava2-Extras and RxJava2Extensions</h1>
+                </header>
+            
+            <article>
+                
+<p>If you are interested in learning about additional operators beyond what RxJava provides, it may be worthwhile to explore the <a href="https://github.com/davidmoten/rxjava2-extras"><em>RxJava2-Extras</em></a> and <a href="https://github.com/akarnokd/RxJava2Extensions"><em>RxJava2Extensions</em></a> libraries. While neither of these libraries are at a 1.0 version, useful operators, Transformers, and <kbd>Observable</kbd>/<kbd>Flowable</kbd> factories are continually added as an ongoing project.</p>
+<p>Two useful operators are <kbd>toListWhile()</kbd> and <kbd>collectWhile()</kbd>. These will buffer emissions into a list or collection while they meet a certain condition. Because a <kbd>BiPredicate</kbd> passes both the list/collection and the next <kbd>T</kbd> item as lamda input parameters, you can use this to buffer items but cut off the moment something changes about the emissions. Here, we keep collecting strings into a list but push that list forward when the length changes (kind of like <kbd>distinctUntilChanged()</kbd>). We also will qualify a list being empty, as that is the start of the next buffer, as well as sample an item from the list to compare lengths with the next emission:</p>
+<pre style="padding-left: 60px"> import com.github.davidmoten.rx2.flowable.Transformers;<br/> import io.reactivex.Flowable;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/><br/>         Flowable.just("Alpha","Beta","Zeta","Gamma","Delta","Theta","Epsilon")<br/>                 .compose(Transformers.toListWhile((list,next) -&gt;<br/>                     list.size() == 0 || list.get(0).length() == next.length()<br/>                 )).subscribe(System.out::println);<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px"> [Alpha]<br/> [Beta, Zeta]<br/> [Gamma, Delta, Theta]<br/> [Epsilon]</pre>
+<p>Spend some quality time with RxJava2-Extras and RxJava2Extensions to learn about their custom operators. This way, you will not have to reinvent something that may already be done, and there are already many powerful factories and operators. One of my personal favorites is a resettable <kbd>cache()</kbd> operator, which works like the cache we studied in <a href="4d0b16d7-cc3c-4c9c-8666-7f80c96bd779.xhtml">Chapter 5</a>, <em>Multicasting</em>, but it can be cleared and then resubscribed to the source at any time. It can also clear the cache at fixed time intervals or periods of no activity, preventing stale caches from persisting.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we got our feet wet by creating our own operators. It is preferable to use <kbd>ObservableTransformer</kbd> and <kbd>FlowableTransformer</kbd> to compose existing operators together to create new ones, and even with that, you need to be cautious when introducing stateful resources that cause undesirable side-effects. When all else fails, you can create your own <kbd>ObservableOperator</kbd> or <kbd>FlowableOperator</kbd> and create an operator at a low level that intercepts and relays each emission and event. This can be tricky and you should exhaust all other options, but with careful study and testing, creating operators can be a valuable advanced skill to have. Just be careful to not reinvent the wheel and seek guidance from the Rx community as you start dabbling in custom operators.</p>
+<p>If you truly are interested in implementing your own operators (at a low level, not with Transformers), definitely study existing operators in RxJava and other reputable RxJava extension libraries. It is easy to hack an operator together and believe nothing will go wrong, when in fact there are a lot of complications you can overlook. Your operator needs to be serialized, cancellable, concurrent, and handle re-entrancy (which occurs when an emission invokes a request on the same thread). Of course, some operators are simpler than others, but you should never assume without committed study first.</p>
+<p>In the next chapter, we will learn about the different strategies to do unit testing against RxJava APIs and utilities. Whether you create your own custom operators or you have an Rx project at work, automated testing is something you will want to be proficient in. We will also learn how to debug RxJava applications, which is not always easy, but it can be done effectively.</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

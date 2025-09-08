@@ -1,0 +1,371 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Testing and Debugging</h1>
+                </header>
+            
+            <article>
+                
+<p>While unit testing is not a silver bullet to ensure that your code works properly, it is a good practice to strive for. This is especially true if your logic is highly deterministic and modular enough to isolate.</p>
+<p>Testing with RxJava at first glance may not seem straightforward. After all, RxJava declares behaviors rather than states. So how do we test whether behaviors are working correctly, especially when most testing frameworks expect a stateful result? Fortunately, RxJava comes with several tools to aid testing, and you can use these tools with your favorite testing frameworks. There are many testing tools available on the market that can work with RxJava, but in this chapter, we will use JUnit.</p>
+<p>We will also cover a few tips to effectively debug RxJava programs. One of the downsides of RxJava is that when bugs occur, traditional approaches to debugging are not always effective, particularly because the stack traces are not always helpful and breakpoints do not apply easily. But there is a benefit RxJava offers in debugging: with the right approach, you can walk through your entire reactive chain and find the operator that causes things to go wrong. The problem becomes very linear and a matter of isolating the bad link. This can simplify the debugging process significantly.</p>
+<p>This chapter has a number of testing features to cover, so we will start with simpler naive approaches to cover basic blocking operators. Then, we will escalate to the more robust tools, such as <kbd>TestObserver</kbd>, <kbd>TestSubscriber</kbd>, and <kbd>TestScheduler</kbd>, which you will likely use in your applications.</p>
+<p>In this chapter, we will cover the following topics:</p>
+<ul>
+<li><kbd>blockingSubscribe()</kbd></li>
+<li>Blocking operators</li>
+<li><kbd>TestObserver</kbd> and <kbd>TestSubscriber</kbd></li>
+<li><kbd>TestScheduler</kbd></li>
+<li>RxJava debugging strategies</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Configuring JUnit</h1>
+                </header>
+            
+            <article>
+                
+<p>In this section, we will be using JUnit as our testing framework. Add the following dependency to your Maven or Gradle project.</p>
+<p>Here is the configuration for Maven:</p>
+<pre style="padding-left: 60px">&lt;dependency&gt;<br/>     &lt;groupId&gt;junit&lt;/groupId&gt;<br/>     &lt;artifactId&gt;junit&lt;/artifactId&gt;<br/>     &lt;version&gt;4.12&lt;/version&gt;<br/> &lt;/dependency&gt;</pre>
+<p>Here is the configuration for Gradle:</p>
+<pre style="padding-left: 60px">dependencies { <br/>     compile 'junit:junit:4.12'<br/>}</pre>
+<p>To save yourself hassle, organize your code project to conform to the Maven Standard Directory layout. You might want to place your test classes in a <kbd>/src/test/java/</kbd> folder so Maven and Gradle will automatically recognize it as the test code folder. You also should put your production code in a <kbd>/src/main/java/</kbd> folder in your project. You can read more about the Maven Standard Directory layout at <a href="https://maven.apache.org/guides/introduction/introduction-to-the-standard-directory-layout.html">https://maven.apache.org/guides/introduction/introduction-to-the-standard-directory-layout.html</a>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Blocking subscribers</h1>
+                </header>
+            
+            <article>
+                
+<p>Remember how sometimes we have to stop the main thread from racing past an <kbd>Observable</kbd> or <kbd>Flowable</kbd> that operates on a different thread and keep it from exiting the application before it has a chance to fire? We often prevented this using <kbd>Thread.sleep()</kbd>, especially when we used <kbd>Observable.interval()</kbd>, <kbd>subscribeOn()</kbd>, or <kbd>observeOn()</kbd>. The following code shows how we did this typically and kept an <kbd>Observable.interval()</kbd> application alive for five seconds:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import java.util.concurrent.TimeUnit;<br/><br/> public class Launcher {<br/><br/>     public static void main(String[] args) {<br/>         Observable.interval(1, TimeUnit.SECONDS)<br/>                 .take(5)<br/>                 .subscribe(System.out::println);<br/><br/>         sleep(5000);<br/>     }<br/><br/>     public static void sleep(int millis) {<br/>         try {<br/>             Thread.sleep(millis);<br/>         } catch (InterruptedException e) {<br/>             e.printStackTrace();<br/>         }<br/>     }<br/> }</pre>
+<p>When it comes to unit testing, the unit test usually has to complete before it starts the next one. This can become quite messy when we have an <kbd>Observable</kbd> or <kbd>Flowable</kbd> operation that happens on a different thread. When a <kbd>test</kbd> method declares an asynchronous <kbd>Observable</kbd> or <kbd>Flowable</kbd> chain operation, we need to block and wait for that operation to complete.</p>
+<p>Here, we create a test to ensure that five emissions are emitted from <kbd>Observable.interval()</kbd>, and we increment <kbd>AtomicInteger</kbd> before validating that it was incremented five times:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import java.util.concurrent.TimeUnit;<br/> import java.util.concurrent.atomic.AtomicInteger;<br/> import static org.junit.Assert.assertTrue;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testBlockingSubscribe() {<br/><br/>         AtomicInteger hitCount = new AtomicInteger();<br/><br/>         Observable&lt;Long&gt; source = Observable.interval(1, TimeUnit.SECONDS)<br/>                     .take(5);<br/><br/>         source.subscribe(i -&gt; hitCount.incrementAndGet());<br/><br/>         assertTrue(hitCount.get() == 5);<br/>     }<br/> }</pre>
+<div class="packt_tip">We use the <kbd>@Test</kbd> annotation to tell <kbd>JUnit</kbd> that this is a test method. You can run it in Intellij IDEA by clicking on its green triangular <em>play</em> button in the gutter or by running the test task in Gradle or Maven.</div>
+<p>There is a problem, though. When you run this test, the assertion fails. <kbd>Observable.interval()</kbd> is running on a computation thread and the main thread rushes past it. The main thread performs <kbd>assertTrue()</kbd> before the five emissions are fired and therefore finds <kbd>hitCount</kbd> to be <kbd>0</kbd> rather than <kbd>5</kbd>. We need to stop the main thread until <kbd>subscribe()</kbd> finishes and calls <kbd>onComplete()</kbd>.</p>
+<p>Thankfully, we do not have to get creative using synchronizers and other native Java concurrency tools. Instead, we can use <kbd>blockingSubscribe()</kbd>, which will block the declaring main thread until <kbd>onComplete()</kbd> (or <kbd>onError()</kbd>) is called. Once those five emissions are gathered, the main thread can proceed and perform the assertion successfully, as demonstrated here. The test should then pass:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import java.util.concurrent.TimeUnit;<br/> import java.util.concurrent.atomic.AtomicInteger;<br/> import static org.junit.Assert.assertTrue;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testBlockingSubscribe() {<br/><br/>         AtomicInteger hitCount = new AtomicInteger();<br/><br/>         Observable&lt;Long&gt; source = Observable.interval(1, TimeUnit.SECONDS)<br/>                     .take(5);<br/><br/>         source.blockingSubscribe(i -&gt; hitCount.incrementAndGet());<br/><br/>         assertTrue(hitCount.get() == 5);<br/>     }<br/> }</pre>
+<p>As we will see in this chapter, there are better ways to test other than <kbd>blockingSubscribe()</kbd>. But <kbd>blockingSubscribe()</kbd> is a quick and effective way to stop the declaring thread and wait for the <kbd>Observable</kbd> or <kbd>Flowable</kbd> to finish before proceeding, even if it is on a different thread. Just make sure that the source terminates at some point, or the test will never finish.</p>
+<div class="packt_tip">Be judicious in how you use <kbd>blockingSubscribe()</kbd> outside the context of testing and using it in production. There are definitely times it is a legitimate solution to interface with a non-reactive API. For example, it can be valid to use it in production to keep an application alive indefinitely and is an effective alternative to using <kbd>Thread.sleep()</kbd>. Just be careful to ensure the asynchronous benefits of RxJava are not undermined.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Blocking operators</h1>
+                </header>
+            
+            <article>
+                
+<p>In RxJava, there is a set of operators we have not covered yet called <strong>blocking operators</strong>. These operators serve as an immediate proxy between the reactive world and the stateful one, blocking and waiting for results to be emitted, but returned in a non-reactive way. Even if the reactive operations are working on different threads, blocking operators will stop the declaring thread and make it wait for the results in a synchronized manner, much like <kbd>blockingSubscribe()</kbd>.</p>
+<p>Blocking operators are especially helpful in making the results of an <kbd>Observable</kbd> or <kbd>Flowable</kbd> easily available for evaluation. However, you will want to avoid using them in production because they encourage anti-patterns and undermine the benefits of reactive programming. For testing, you will still want to prefer <kbd>TestObserver</kbd> and <kbd>TestSubscriber</kbd>, which we will cover later. But here are the blocking operators if you ever have a need for them.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingFirst()</h1>
+                </header>
+            
+            <article>
+                
+<p>The <kbd>blockingFirst()</kbd> operator will stop the calling thread and make it wait for the first value to be emitted and returned (even if the chain is operating on a different thread with <kbd>observeOn()</kbd> and <kbd>subscribeOn()</kbd>). Say we want to test an <kbd>Observable</kbd> chain that filters a sequence of string emissions for only ones that have a length of four. If we want to assert that the first emission to make it through this operation is <kbd>Beta</kbd>, we can test for it like this:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import static org.junit.Assert.assertTrue;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testFirst() {<br/>         Observable&lt;String&gt; source =<br/>                 Observable.just("Alpha", "Beta", "Gamma", "Delta", "Zeta");<br/><br/>         String firstWithLengthFour = source.filter(s -&gt; s.length() == 4)<br/>                 .blockingFirst();<br/><br/>         assertTrue(firstWithLengthFour.equals("Beta"));<br/>     }<br/> }</pre>
+<p>Here, our unit test is called <kbd>testFirst()</kbd>, and it will assert that the first string emitted with a length of four is <kbd>Beta</kbd>. Note that instead of using <kbd>subscribe()</kbd> or <kbd>blockingSubscribe()</kbd> to receive the emissions, we use <kbd>blockingFirst()</kbd>, which will return the first emission in a non-reactive way. In other words, it returns a straight-up string and not an <kbd>Observable</kbd> emitting string.</p>
+<p>This will block the declaring thread until the value is returned and assigned to <kbd>firstWithLengthFour</kbd>. We then use that saved value to assert that it is, in fact, <kbd>Beta</kbd>.</p>
+<div class="packt_tip">Looking at <kbd>blockingFirst()</kbd>, you may be tempted to use it in production code to save a result statefully and refer to it later. Try not to do that! While there are certain cases where you might be able to justify it (such as saving emissions into a <kbd>HashMap</kbd> for expensive computations and lookups), blocking operators can easily be abused. If you need to persist values, try to use <kbd>replay()</kbd> and other reactive caching strategies so that you can easily change its behaviors and concurrency policies down the road. Blocking will often make your code less flexible and undermine the benefits of Rx.</div>
+<p>Note that the <kbd>blockingFirst()</kbd> operator will throw an error and fail the test if no emissions come through. However, you can provide a default value as an overload to <kbd>blockingFirst()</kbd> so it always has a value to fall back on.</p>
+<p>A similar blocking operator to <kbd>blockingFirst()</kbd> is <kbd>blockingSingle()</kbd>, which expects only a single item to be emitted, but throws an error if there are more.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingGet()</h1>
+                </header>
+            
+            <article>
+                
+<p><kbd>Maybe</kbd> and <kbd>Single</kbd> do not have <kbd>blockingFirst()</kbd> since there can only be one element at most. Logically, for a <kbd>Single</kbd> and <kbd>Maybe</kbd>, it is not exactly the <em>first</em> element, but rather the <em>only</em> element, so the equivalent operator is <kbd>blockingGet()</kbd>.</p>
+<p>Here, we assert that all items of length four include only <kbd>Beta</kbd> and <kbd>Zeta</kbd>, and we collect them with <kbd>toList()</kbd>, which yields a <kbd>Single&lt;List&lt;String&gt;&gt;</kbd>. We can use <kbd>blockingGet()</kbd> to wait for this list and assert that it is equal to our desired result:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import java.util.Arrays;<br/> import java.util.List;<br/> import static org.junit.Assert.assertTrue;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testSingle() {<br/>         Observable&lt;String&gt; source =<br/>                 Observable.just("Alpha", "Beta", "Gamma", "Delta", "Zeta");<br/><br/>         List&lt;String&gt; allWithLengthFour = source.filter(s -&gt; s.length() == 4)<br/>                 .toList()<br/>                 .blockingGet();<br/><br/>         assertTrue(allWithLengthFour.equals(Arrays.asList("Beta","Zeta")));<br/>     }<br/> }</pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingLast()</h1>
+                </header>
+            
+            <article>
+                
+<p>If there is <kbd>blockingFirst()</kbd>, it only makes sense to have <kbd>blockingLast()</kbd>. This will block and return the last value to be emitted from an <kbd>Observable</kbd> or <kbd>Flowable</kbd> operation. Of course, it will not return anything until <kbd>onComplete()</kbd> is called, so this is something you will want to avoid using with infinite sources.</p>
+<p>Here, we assert that the last four-character string emitted from our operation is <kbd>Zeta</kbd>:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import static org.junit.Assert.assertTrue;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testLast() {<br/>         Observable&lt;String&gt; source =<br/>                 Observable.just("Alpha", "Beta", "Gamma", "Delta", "Zeta");<br/><br/>         String lastWithLengthFour = source.filter(s -&gt; s.length() == 4)<br/>                 .blockingLast();<br/><br/>         assertTrue(lastWithLengthFour.equals("Zeta"));<br/>     }<br/> }</pre>
+<p>Just like <kbd>blockingFirst()</kbd>, <kbd>blockingLast()</kbd> will throw an error if no emissions occur, but you can specify an overload for a default value.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingIterable()</h1>
+                </header>
+            
+            <article>
+                
+<p>One of the most interesting blocking operators is <kbd>blockingIterable()</kbd>. Rather than returning a single emission like our previous examples, it will provide the emissions as they become available through <kbd>iterable&lt;T&gt;</kbd>. The <kbd>Iterator&lt;T&gt;</kbd> provided by the <kbd>Iterable&lt;T&gt;</kbd> will keep blocking the iterating thread until the next emission is available, and the iteration will end when <kbd>onComplete()</kbd> is called. Here, we iterate through each returned string value to ensure that its length is actually <kbd>5</kbd>:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import static org.junit.Assert.assertTrue;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testIterable() {<br/>         Observable&lt;String&gt; source =<br/>                 Observable.just("Alpha", "Beta", "Gamma", "Delta", "Zeta");<br/><br/>         Iterable&lt;String&gt; allWithLengthFive = source.filter(s -&gt; s.length() == 5)<br/>                 .blockingIterable();<br/><br/>         for (String s: allWithLengthFive) {<br/>             assertTrue(s.length() == 5);<br/>         }<br/>     }<br/> }</pre>
+<p>The <kbd>blockingIterable()</kbd> will queue up unconsumed values until the <kbd>Iterator</kbd> is able to process them. This can be problematic without backpressure as you may run into <kbd>OutOfMemoryException</kbd> errors.</p>
+<p>Unlike C#, note that Java's for-each construct will not handle cancellation, breaking, or disposal. You can work around this by iterating the <kbd>Iterator</kbd> from the iterable inside <kbd>try-finally</kbd>. In the <kbd>finally</kbd> block, cast the <kbd>Iterator</kbd> to a <kbd>disposable</kbd> so you can call its <kbd>dispose()</kbd> method.</p>
+<p>The <kbd>blockingIterable()</kbd> can be helpful in quickly turning an <kbd>Observable</kbd> or <kbd>Flowable</kbd> into pull-driven functional sequence types such as a Java 8 Stream or Kotlin sequence, which can be built-off iterables. However, for Java 8 streams, you are likely better-off using David Karnok's RxJava2Jdk8Interop library (<a href="https://github.com/akarnokd/RxJava2Jdk8Interop">https://github.com/akarnokd/RxJava2Jdk8Interop</a>), so that termination is handled more safely.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingForEach()</h1>
+                </header>
+            
+            <article>
+                
+<p>A more fluent way in which we can execute a blocking for each task is to use the <kbd>blockingForEach()</kbd> operator instead of <kbd>blockingIterable()</kbd>. This will block the declaring thread and wait for each emission to be processed before allowing the thread to continue. We can streamline our earlier example, where we iterated each emitted string and ensured that its length was five and specify the assertion as a lambda in the <kbd>forEach()</kbd> operator instead:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import static org.junit.Assert.assertTrue;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testBlockingForEach() {<br/>         Observable&lt;String&gt; source =<br/>                 Observable.just("Alpha", "Beta", "Gamma", "Delta", "Zeta");<br/><br/>         source.filter(s -&gt; s.length() == 5)<br/>                 .blockingForEach(s -&gt; assertTrue(s.length() == 5));<br/>     }<br/> }</pre>
+<p>A variant of <kbd>blockingForEach()</kbd> is <kbd>blockingForEachWhile()</kbd>, which accepts a predicate that gracefully terminates the sequence if the predicate evaluates to false against an emission. This can be desirable if all emissions are not going to be consumed and you want to gracefully terminate.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingNext()</h1>
+                </header>
+            
+            <article>
+                
+<p>The <kbd>blockingNext()</kbd> will return an iterable and block each iterator's <kbd>next()</kbd> request until the next value is provided. Emissions that occur after the last fulfilled <kbd>next()</kbd> request and before the current <kbd>next()</kbd> are ignored. Here, we have a source that emits every microsecond (1/1000th of a millisecond). Note that the iterable returned from <kbd>blockingNext()</kbd> ignored previous values it missed:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import java.util.concurrent.TimeUnit;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testBlockingNext() {<br/>         Observable&lt;Long&gt; source =<br/>                 Observable.interval(1, TimeUnit.MICROSECONDS)<br/>                 .take(1000);<br/><br/>         Iterable&lt;Long&gt; iterable = source.blockingNext();<br/><br/>         for (Long i: iterable) {<br/>             System.out.println(i);<br/>         }<br/>     }<br/> }</pre>
+<p>The output is as follows:</p>
+<pre style="padding-left: 60px">0<br/>6<br/>9<br/>11<br/>17<br/>23<br/>26<span class="packt_screen"><br/></span></pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingLatest()</h1>
+                </header>
+            
+            <article>
+                
+<p>The iterable from <kbd>blockingLatest()</kbd>, on the other hand, does not wait for the next value, but requests the last emitted value. Any values before that which were not captured are forgotten. It will not reconsume the latest value if the iterator's <kbd>next()</kbd> consumed it previously and will block until the next one comes:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import java.util.concurrent.TimeUnit;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testBlockingLatest() {<br/>         Observable&lt;Long&gt; source =<br/>                 Observable.interval(1, TimeUnit.MICROSECONDS)<br/>                 .take(1000);<br/><br/>         Iterable&lt;Long&gt; iterable = source.blockingLatest();<br/><br/>         for (Long i: iterable) {<br/>             System.out.println(i);<br/>         }<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">0<br/>49<br/>51<br/>53<br/>55<br/>56<br/>58<br/>...</pre>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">blockingMostRecent()</h1>
+                </header>
+            
+            <article>
+                
+<p>The <kbd>blockingMostRecent()</kbd> is similar to <kbd>blockingLatest()</kbd>, but it will re-consume the latest value repeatedly for every <kbd>next()</kbd> call from the iterator even if it was consumed already. It also requires a <kbd>defaultValue</kbd> argument so it has something to return if no value is emitted yet. Here, we use <kbd>blockingMostRecent()</kbd> against an <kbd>Observable</kbd> emitting every 10 milliseconds. The default value is <kbd>-1</kbd>, and it consumes each value repeatedly until the next value is provided:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import org.junit.Test;<br/> import java.util.concurrent.TimeUnit;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void testBlockingMostRecent() {<br/>         Observable&lt;Long&gt; source =<br/>                 Observable.interval(10, TimeUnit.MILLISECONDS)<br/>                 .take(5);<br/><br/>         Iterable&lt;Long&gt; iterable = source.blockingMostRecent(-1L);<br/><br/>         for (Long i: iterable) {<br/>             System.out.println(i);<br/>         }<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">-1<br/>-1<br/>-1<br/>...<br/>0<br/>0<br/>0<br/>...<br/>1<br/>1<br/>1<br/>...</pre>
+<p>As we finish covering blocking operators, it should be emphasized again that they can be an effective way to do simple assertions and provide means to block for results so they can be consumed easily by a testing framework. However, you will want to avoid using blocking operators for production as much as possible. Try not to give into the sirens of convenience, as you will find that they can quickly undermine the flexibility and benefits of reactive programming.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Using TestObserver and TestSubscriber</h1>
+                </header>
+            
+            <article>
+                
+<p>We've covered <kbd>blockingSubscribe()</kbd> and several blocking operators in this chapter so far. While you can use these blocking tools to do simple assertions, there is a much more comprehensive way to test reactive code than simply blocking for one or more values. After all, we should do more than test <kbd>onNext()</kbd> calls. We also have <kbd>onComplete()</kbd> and <kbd>onError()</kbd> events to account for! It also would be great to streamline testing other RxJava events, such as subscription, disposal, and cancellation.</p>
+<p>So let's introduce the <kbd>TestObserver</kbd> and <kbd>TestSubscriber</kbd>, your two best friends in testing your RxJava applications.</p>
+<p><kbd>TestObserver</kbd> and <kbd>TestSubscriber</kbd> are a treasure trove of convenient methods to aid testing, many of which assert that certain events have occurred or specific values were received. There are also blocking methods, such as <kbd>awaitTerminalEvent()</kbd>, which will stop the calling thread until the reactive operation terminates.</p>
+<p><kbd>TestObserver</kbd> is used for <kbd>Observable</kbd>, <kbd>Single</kbd>, <kbd>Maybe</kbd>, and <kbd>Completable</kbd> sources, while <kbd>TestSubscriber</kbd> is used for Flowable sources. Here is a unit test showcasing several <kbd>TestObserver</kbd> methods, which also exist on <kbd>TestSubscriber</kbd> if you are working with Flowables. These methods perform tasks such as asserting that certain events have (or have not) occurred, awaiting terminations or asserting that certain values were received:</p>
+<p> </p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.observers.TestObserver;<br/> import org.junit.Test;<br/> import java.util.concurrent.TimeUnit;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void usingTestObserver() {<br/><br/>         <em>//An Observable with 5 one-second emissions</em><br/>         Observable&lt;Long&gt; source = Observable.interval(1, TimeUnit.SECONDS)<br/>                 .take(5);<br/><br/>         <em>//Declare TestObserver</em><br/>         TestObserver&lt;Long&gt; testObserver = new TestObserver&lt;&gt;();<br/><br/>         <em>//Assert no subscription has occurred yet</em><br/>         testObserver.assertNotSubscribed();<br/><br/>         <em>//Subscribe TestObserver to source</em><br/>         source.subscribe(testObserver);<br/><br/>         <em>//Assert TestObserver is subscribed</em><br/>         testObserver.assertSubscribed();<br/><br/>         <em>//Block and wait for Observable to terminate</em><br/>         testObserver.awaitTerminalEvent();<br/><br/>         <em>//Assert TestObserver called onComplete()</em><br/>         testObserver.assertComplete();<br/><br/>         <em>//Assert there were no errors</em><br/>         testObserver.assertNoErrors();<br/><br/>         <em>//Assert 5 values were received</em><br/>         testObserver.assertValueCount(5);<br/><br/>         <em>//Assert the received emissions were 0, 1, 2, 3, 4</em><br/>         testObserver.assertValues(0L, 1L, 2L, 3L, 4L);<br/>     }<br/> }</pre>
+<p>This is just a handful of many testing methods available, and they will make your unit tests in a much more comprehensive and streamlined manner. Most of the <kbd>TestObserver</kbd> methods return <kbd>TestObserver</kbd> so you can actually chain these assertions fluently (and this also applies to <kbd>TestSubscriber</kbd>).</p>
+<div class="packt_infobox">Note also that the <kbd>awaitTerminalEvent()</kbd> operator can accept a timeout argument that will throw an error if the source does not complete before that time.</div>
+<p>Spend some time going through all these testing methods so you are aware of the different assertions you make. Prefer <kbd>TestObserver</kbd> and <kbd>TestSubscriber</kbd> over blocking operators as much as possible. This way, you can spend less time maintaining your tests and ensure that you cover the full spectrum of events in the life cycle of an <kbd>Observable</kbd> or <kbd>Flowable</kbd> operation.</p>
+<p><kbd>TestObserver</kbd> implements <kbd>Observer</kbd>, <kbd>MaybeObserver</kbd>, <kbd>SingleObserver</kbd>, and <kbd>CompetableObserver</kbd> to support all these reactive types. If you live test a long-running asynchronous source, you might want to use <kbd>awaitCount()</kbd> to wait for a minimum number of emissions to assert with and not wait for the <kbd>onComplete()</kbd> call.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Manipulating time with the TestScheduler</h1>
+                </header>
+            
+            <article>
+                
+<p>In our previous examples, did you notice that testing a time-driven <kbd>Observable</kbd> or <kbd>Flowable</kbd> requires that time to elapse before the test completes? In the last exercise, we took five emissions from an <kbd>Observable.interval()</kbd> emitting every 1 second, so that test took 5 seconds to complete. If we have a lot of unit tests that deal with time-driven sources, it can take a long time for testing to complete. Would it not be nice if we could simulate time elapses rather than experiencing them?</p>
+<p>The <kbd>TestScheduler</kbd> does exactly this. It is a Scheduler implementation that allows us to <em>fast-forward</em> by a specific amount of elapsed time, and we can do any assertions after each f<em>ast-forward</em> to see what events have occurred.</p>
+<p>Here, we create a test against <kbd>Observable.interval()</kbd> that emits every minute and ultimately asserts that 90 emissions have occurred after 90 minutes. Rather than having to wait the entire 90 minutes in real time, we use <kbd>TestObserver</kbd> to artificially elapse these 90 minutes. This allows the test to run instantly:</p>
+<pre style="padding-left: 60px"> import io.reactivex.Observable;<br/> import io.reactivex.observers.TestObserver;<br/> import io.reactivex.schedulers.TestScheduler;<br/> import org.junit.Test;<br/><br/> import java.util.concurrent.TimeUnit;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void usingTestScheduler() {<br/><br/>         <em>//Declare TestScheduler</em><br/>         TestScheduler testScheduler = new TestScheduler();<br/><br/>         <em>//Declare TestObserver</em><br/>         TestObserver&lt;Long&gt; testObserver = new TestObserver&lt;&gt;();<br/><br/>         <em>//Declare Observable emitting every 1 minute</em><br/>         Observable&lt;Long&gt; minuteTicker =<br/>                 Observable.interval(1, TimeUnit.MINUTES, testScheduler);<br/><br/>         <em>//Subscribe to TestObserver</em><br/>         minuteTicker.subscribe(testObserver);<br/><br/>         <em>//Fast forward by 30 seconds</em><br/>         testScheduler.advanceTimeBy(30, TimeUnit.SECONDS);<br/><br/>         <em>//Assert no emissions have occurred yet</em><br/>         testObserver.assertValueCount(0);<br/><br/>         <em>//Fast forward to 70 seconds after subscription</em><br/>         testScheduler.advanceTimeTo(70, TimeUnit.SECONDS);<br/><br/>         <em>//Assert the first emission has occurred</em><br/>         testObserver.assertValueCount(1);<br/><br/>         <em>//Fast Forward to 90 minutes after subscription</em><br/>         testScheduler.advanceTimeTo(90, TimeUnit.MINUTES);<br/><br/>         <em>//Assert 90 emissions have occurred</em><br/>         testObserver.assertValueCount(90);<br/>     }<br/> }</pre>
+<p>Cool, right? It is almost like time travel! We put <kbd>Observable.interval()</kbd> on our <kbd>TestScheduler</kbd>. This way, <kbd>TestScheduler</kbd> controls how the <kbd>Observable</kbd> interprets time and pushes emissions. We fast-forward 30 seconds using <kbd>advanceTimeBy()</kbd> and then assert that no emissions have happened yet. We then use <kbd>advanceTimeTo()</kbd> to jump 70 seconds after subscription occurred and assert that one emission did happen. Finally, we advance 90 minutes after subscription, and we assert that 90 emissions did, in fact, occur.</p>
+<p>This all ran instantly rather than taking 90 minutes, showing that it is indeed possible to test time-driven <kbd>Observable</kbd>/<kbd>Flowable</kbd> operations without having to actually elapse that time. Carefully note that <kbd>advanceTimeBy()</kbd> will fast-forward the specified time interval relative to the <em>current</em> time, whereas <kbd>advanceTimeTo()</kbd> will jump to the exact time elapsed since the subscription has occurred.</p>
+<p>In summary, use <kbd>TestScheduler</kbd> when you need to virtually represent time elapsing, but note that it is not a thread-safe Scheduler and should not be used with actual concurrency. A common pitfall is complicated flows that use many operators and Schedulers are not easily configurable to use <kbd>TestScheduler</kbd>. In this case, you can use <kbd>RxJavaPlugins.setComputationScheduler()</kbd> and similar methods that override the standard Schedulers and inject <kbd>TestScheduler</kbd> in its place.</p>
+<p>There are two other methods to note in <kbd>TestScheduler</kbd>. The <kbd>now()</kbd> will return how much time has virtually elapsed in the unit you specify. The <kbd>triggerActions()</kbd> method will kick-off any actions that are scheduled to be triggered, but have not virtually been elapsed yet.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Debugging RxJava code</h1>
+                </header>
+            
+            <article>
+                
+<p>RxJava is not easy to debug at first glance, primarily due to the lack of debug tooling and the large stack traces it can produce. There are efforts in creating effective debugging tools for RxJava, most notably the Frodo library for Android (<a href="https://github.com/android10/frodo">https://github.com/android10/frodo</a>). We will not cover any debugging tools for RxJava as nothing has been standardized quite yet, but we will learn about an effective approach that you can take to debug reactive code.</p>
+<p>A common theme in debugging RxJava operations is finding the bad link or the operator in the <kbd>Observable</kbd>/<kbd>Flowable</kbd> chain that is causing the problem. Whether an error is being emitted, <kbd>onComplete()</kbd> is never being called, or an <kbd>Observable</kbd> is unexpectedly empty, you often have to start at the beginning of the chain at the source and then validate each step downstream until you find the one not working correctly.</p>
+<p>Say, we have an <kbd>Observable</kbd> pushing five strings containing numbers and alphabetic words separated by slashes "<kbd>/</kbd>". We want to break these up on the slashes "<kbd>/</kbd>", filter only for the alphabetic words, and capture them in <kbd>TestObserver</kbd>. However, run this operation and you will see that this test fails:</p>
+<pre style="padding-left: 60px"> import io.reactivex.observers.TestObserver;<br/> import org.junit.Test;<br/> import io.reactivex.Observable;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void debugWalkthrough() {<br/><br/>         <em>//Declare TestObserver</em><br/>         TestObserver&lt;String&gt; testObserver = new TestObserver&lt;&gt;();<br/><br/>         <em>//Source pushing three strings</em><br/>         Observable&lt;String&gt; items =<br/>                 Observable.just("521934/2342/Foxtrot",<br/>                         "Bravo/12112/78886/Tango",<br/>                         "283242/4542/Whiskey/2348562");<br/><br/>         <em>//Split and concatMap() on "/"</em><br/>         items.concatMap(s -&gt;<br/>                 Observable.fromArray(s.split("/"))<br/>         )<br/>          <em>//filter for only alphabetic Strings using regex</em><br/>          .filter(s -&gt; s.matches("[A-Z]+"))<br/><br/>          <em>//Subscribe the TestObserver</em><br/>          .subscribe(testObserver);<br/><br/>         <em>//Why are no values being emitted?</em><br/>         System.out.println(testObserver.values());<br/><br/>         <em>//This fails due to no values</em><br/>         testObserver.assertValues("Foxtrot","Bravo","Tango","Whiskey");<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">[]<br/><br/>java.lang.AssertionError: Value count differs; Expected: 4 [Foxtrot, Bravo, Tango, Whiskey],<br/>    Actual: 0 [] (latch = 0, values = 0, errors = 0, completions = 1)<br/><br/>    at io.reactivex.observers.BaseTestConsumer.fail(BaseTestConsumer.java:163)<br/>    at io.reactivex.observers.BaseTestConsumer.assertValues(BaseTestConsumer.java:485)<br/>    at RxTest.debugWalkthrough(RxTest.java:32)<br/>...</pre>
+<p>So what in the world went wrong? How do we debug this failing test? Well, remember that RxJava operations are a pipeline. The correct emissions are supposed to flow through and make it to the <kbd>Observer</kbd>. But no emissions were received instead. Let's get our plumber gear on and find out where the clog in the pipeline is. We will start at the source.</p>
+<p>Place <kbd>doOnNext()</kbd> immediately after the source and before <kbd>concatMap()</kbd>, and print each emission. This gives us visibility into what is coming out of the source <kbd>Observable</kbd>. As shown here, we should see all the emissions from the source print, which shows that no emissions are being omitted and the source upstream is working correctly:</p>
+<pre style="padding-left: 60px"><em>//Split and concatMap() on "/"</em><br/> items.doOnNext(s -&gt; System.out.println("Source pushed: " + s))<br/>         .concatMap(s -&gt;<br/>                 Observable.fromArray(s.split("/"))<br/>         )</pre>
+<p>The output is as follows:</p>
+<pre style="padding-left: 60px">Source pushed: 521934/2342/Foxtrot<br/>Source pushed: Bravo/12112/78886/Tango<br/>Source pushed: 283242/4542/Whiskey/2348562<br/>[]<br/><br/>java.lang.AssertionError: Value count differs; Expected ...</pre>
+<p>Let's move downstream and look at <kbd>concatMap()</kbd> next. Maybe that is omitting emissions, so let's check. Move <kbd>doOnNext()</kbd> after <kbd>concatMap()</kbd> and print each emission to see whether all of them are coming through, as shown next:</p>
+<pre style="padding-left: 60px"><em>//Split and concatMap() on "/"</em><br/> items.concatMap(s -&gt;<br/>                 Observable.fromArray(s.split("/"))<br/>         )<br/>  .doOnNext(s -&gt; System.out.println("concatMap() pushed: " + s))</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">concatMap() pushed: 521934<br/>concatMap() pushed: 2342<br/>concatMap() pushed: Foxtrot<br/>concatMap() pushed: Bravo<br/>concatMap() pushed: 12112<br/>concatMap() pushed: 78886<br/>concatMap() pushed: Tango<br/>concatMap() pushed: 283242<br/>concatMap() pushed: 4542<br/>concatMap() pushed: Whiskey<br/>concatMap() pushed: 2348562<br/>[]<br/><br/>java.lang.AssertionError: Value count differs; Expected ...</pre>
+<p>Okay, so <kbd>concatMap()</kbd> is working fine and all the emissions are going through. So nothing is wrong with the splitting operation inside <kbd>concatMap()</kbd>. Let's move on downstream and put <kbd>doOnNext()</kbd> after <kbd>filter()</kbd>. As shown, print each emission to see whether the ones we want come out of the <kbd>filter()</kbd>:</p>
+<pre style="padding-left: 60px"><em>//filter for only alphabetic Strings using regex</em><br/> .filter(s -&gt; s.matches("[A-Z]+"))<br/> .doOnNext(s -&gt; System.out.println("filter() pushed: " + s))</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">[]<br/><br/>java.lang.AssertionError: Value count differs; Expected ...</pre>
+<p>Aha! No emissions were printed after <kbd>filter()</kbd>, which means nothing flowed through it. The <kbd>filter()</kbd> is the operator causing the problem. We intended to filter out the numeric strings and only emit the alphabetic words. But for some reason, all emissions were filtered out. If you know anything about regular expressions, note that we are only qualifying strings that are entirely uppercase. We actually need to qualify lowercase letters too, so here is the correction we need:</p>
+<pre style="padding-left: 60px"><em>//filter for only alphabetic Strings using regex</em><br/> .filter(s -&gt; s.matches("[A-Za-z]+"))<br/> .doOnNext(s -&gt; System.out.println("filter() pushed: " + s))</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">filter() pushed: Foxtrot<br/>filter() pushed: Bravo<br/>filter() pushed: Tango<br/>filter() pushed: Whiskey<br/>[Foxtrot, Bravo, Tango, Whiskey]</pre>
+<p>Alright, it is fixed! Our unit test passed finally, and here it is in its entirety. Now that the problem is solved and we are finished debugging, we can remove <kbd>doOnNext()</kbd> and any print calls:</p>
+<pre style="padding-left: 60px"> import io.reactivex.observers.TestObserver;<br/> import org.junit.Test;<br/> import io.reactivex.Observable;<br/><br/> public class RxTest {<br/><br/>     @Test<br/>     public void debugWalkthrough() {<br/><br/>         <em>//Declare TestObserver</em><br/>         TestObserver&lt;String&gt; testObserver = new TestObserver&lt;&gt;();<br/><br/>         <em>//Source pushing three strings</em><br/>         Observable&lt;String&gt; items =<br/>                 Observable.just("521934/2342/Foxtrot",<br/>                         "Bravo/12112/78886/Tango",<br/>                         "283242/4542/Whiskey/2348562");<br/><br/>         <em>//Split and concatMap() on "/"</em><br/>         items.concatMap(s -&gt;<br/>                         Observable.fromArray(s.split("/"))<br/>          )<br/>          <em>//filter for only alphabetic Strings using regex</em><br/>          .filter(s -&gt; s.matches("[A-Za-z]+"))<br/><br/>          <em>//Subscribe the TestObserver</em><br/>          .subscribe(testObserver);<br/><br/>         <em>//This succeeds</em><br/>         testObserver.assertValues("Foxtrot","Bravo","Tango","Whiskey");<br/>     }<br/> }</pre>
+<p><span>The output is as follows:</span></p>
+<pre style="padding-left: 60px">[Foxtrot, Bravo, Tango, Whiskey]</pre>
+<p>In summary, when you have an <kbd>Observable</kbd> or <kbd>Flowable</kbd> operation that is emitting an error, the wrong items, or no items at all, start at the source and work your way downstream until you find the operator causing the problem. You can also put <kbd>TestObserver</kbd> at each step to get a more comprehensive report of what happened in that operation, but using operators such as <kbd>doOnNext()</kbd>, <kbd>doOnError()</kbd>, <kbd>doOnComplete()</kbd>, <kbd>doOnSubscribe()</kbd>, and so on are quick and easy ways to get an insight into what is happening in that part of the pipeline.</p>
+<p>It may not be optimal that you have to modify code with <kbd>doXXX()</kbd> operators to debug it. If you are using Intellij IDEA, you can try to use breakpoints within lambdas, although I have only had mixed success with this approach. You can also research RxJava debugging libraries to get detailed logs without modifying your code. Hopefully, as RxJava continues to gain traction, more useful debugging tools will pop up and become standardized.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, you learned how to test and debug RxJava code. When you create an application or an API that is built on RxJava, you may want to build unit tests around it in order to ensure that sanity checks are always enforced. You can use blocking operators to help perform assertions, but <kbd>TestObserver</kbd> and <kbd>TestSubscriber</kbd> will give you a much more comprehensive and streamlined testing experience. You can also use <kbd>TestScheduler</kbd> to simulate time elapses so that time-based Observables can be tested instantly. Finally, we covered a debugging strategy in RxJava, which often involves finding the <em>broken operator</em>, starting at the source, and moving downstream until it is found.</p>
+<p>This chapter closes our journey covering the RxJava library, so congratulations if you got here! You now have a solid foundation of building reactive Java applications. In the final two chapters, we will cover RxJava in two specific domains: Android and Kotlin.</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>
