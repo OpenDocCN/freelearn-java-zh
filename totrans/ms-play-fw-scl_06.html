@@ -1,0 +1,174 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;6.&#xA0;Reactive Data Streams"><div class="titlepage"><div><div><h1 class="title"><a id="ch06"/>Chapter 6. Reactive Data Streams</h1></div></div></div><p>In particular circumstances, our application may be required to handle huge file uploads. This can be done by putting all of these in the memory, by creating a temporary file, or by acting directly on the stream. Out of these three, the last option works the best for us, as it removes I/O stream limitations (such as blocking, memory, and threads) and also eliminates the need to buffer (that is, acting on input at the rate needed).</p><p>Handling huge file uploads belongs to the set of unavoidable operations that can be heavy on resources. Some other tasks that belong to the same category are processing real-time data for monitoring, analysis, bulk data transfers, and processing large datasets. In this chapter, we will discuss the Iteratee approach used to handle such situations. This chapter covers the basics of handling data streams with a brief explanation of the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Iteratees</li><li class="listitem" style="list-style-type: disc">Enumerators</li><li class="listitem" style="list-style-type: disc">Enumeratees</li></ul></div><p>This chapter may seem intense at times but the topics discussed here will be helpful for some of the following chapters.</p><div class="section" title="Basics of handling data streams"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec42"/>Basics of handling data streams</h1></div></div></div><p>Consider that we <a id="id209" class="indexterm"/>connected a mobile device (such as a tablet, phone, MP3 player, and so on) to its charger and plugged it in. The consequences of this can be as follows:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The device's battery starts charging and continues to do so until the occurrence of one of the other options</li><li class="listitem" style="list-style-type: disc">The device's battery is completely charged and minimal power is drawn by the device to continue running</li><li class="listitem" style="list-style-type: disc">The device's battery can not be charged due to malfunctioning of the device</li></ul></div><p>Here, the power supply is the source, the device is the sink, while the charger is the channel that enables transfer of energy from the source to the sink. The processing or task performed by the device is that of charging its battery.</p><p>Well, this covers most of the Iteratee approach without any of the usual jargon. Simply put, the power supply represents a data source, the charger acts as the Enumerator, and the device as the Iteratee.</p><p>Oops, we missed the <a id="id210" class="indexterm"/>Enumeratee! Suppose that the energy from a regular power supply is not compatible with the device; then, in this case, the charger generally has an internal component that performs this transformation. For example, converting from A.C. (alternating current) to D.C. (direct current). In such cases, the charger can be considered a combination of the Enumerator and the Enumeratee. The component that collects energy from the power supply acts like the Enumerator, and the other component that transforms the energy is similar to an Enumeratee.</p><div class="mediaobject"><img src="graphics/3803OS_06_01.jpg" alt="Basics of handling data streams"/></div><p>The concept of Iteratee, Enumerator, and Enumeratee originated from the Haskell library Iteratee I/O, which was developed by Oleg Kiselyov to overcome the problems faced with lazy I/O.</p><p>In Oleg's words, as <a id="id211" class="indexterm"/>seen on <a class="ulink" href="http://okmij.org/ftp/Streams.html">http://okmij.org/ftp/Streams.html</a>:</p><div class="blockquote"><blockquote class="blockquote"><p><span class="emphasis"><em>Enumerator is an encapsulation of a data source, a stream producer—what folds an iteratee over the stream. An enumerator takes an iteratee and applies it to the stream data as they are being produced, until the source is depleted or the iteratee said it had enough. After disposing of buffers and other source-draining resources, enumerator returns the final value of the iteratee. Enumerator thus is an iteratee transformer.</em></span></p></blockquote></div><p>Iteratees are stream <a id="id212" class="indexterm"/>consumers and an Iteratee can be in one of the following <a id="id213" class="indexterm"/>states:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><span class="emphasis"><em>Completed or done</em></span>: The Iteratee has completed processing</li><li class="listitem" style="list-style-type: disc"><span class="emphasis"><em>Continuing</em></span>: The current element has been processed but the Iteratee is not done yet and can accept the next element</li><li class="listitem" style="list-style-type: disc"><span class="emphasis"><em>Error</em></span>: The Iteratee has encountered an error</li></ul></div><div class="blockquote"><blockquote class="blockquote"><p><span class="emphasis"><em>Enumeratee is both a consumer and a producer, incrementally decoding the outer stream and producing the nested stream of decoded data.</em></span></p></blockquote></div><p>Although the enumerator knows how to get to the next element, it is completely unaware of the processing the Iteratee will perform on this element and vice versa.</p><p>Different libraries implement the Iteratee, Enumerator, and Enumeratee differently, based on these definitions. In the following sections, we will see how these are implemented in Play Framework and how we can use them in our application. Let's start with the Iteratee, as the Enumerator requires a one.</p></div></div>
+<div class="section" title="Iteratees"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec43"/>Iteratees</h1></div></div></div><p>Iteratee is defined as a <a id="id214" class="indexterm"/>trait, <code class="literal">Iteratee[E, +A]</code>, where E is the input type and A is the result type. The state of an Iteratee is represented by an instance of <code class="literal">Step</code>, which is defined as follows:</p><div class="informalexample"><pre class="programlisting">sealed trait Step[E, +A] {
+
+  def it: Iteratee[E, A] = this match {
+    case Step.Done(a, e) =&gt; Done(a, e)
+    case Step.Cont(k) =&gt; Cont(k)
+    case Step.Error(msg, e) =&gt; Error(msg, e)
+  }
+
+}
+
+object Step {
+
+  //done state of an iteratee
+  case class Done[+A, E](a: A, remaining: Input[E]) extends Step[E, A]
+
+  //continuing state of an iteratee.
+  case class Cont[E, +A](k: Input[E] =&gt; Iteratee[E, A]) extends Step[E, A]
+
+  //error state of an iteratee
+  case class Error[E](msg: String, input: Input[E]) extends Step[E, Nothing]
+}</pre></div><p>The input used here <a id="id215" class="indexterm"/>represents an element of the data stream, which can be empty, an element, or an end of file indicator. Therefore, <code class="literal">Input</code> is defined as follows:</p><div class="informalexample"><pre class="programlisting">sealed trait Input[+E] {
+  def map[U](f: (E =&gt; U)): Input[U] = this match {
+    case Input.El(e) =&gt; Input.El(f(e))
+    case Input.Empty =&gt; Input.Empty
+    case Input.EOF =&gt; Input.EOF
+  }
+}
+
+object Input {
+
+  //An input element
+  case class El[+E](e: E) extends Input[E]
+
+  // An empty input
+  case object Empty extends Input[Nothing]
+
+  // An end of file input
+  case object EOF extends Input[Nothing]
+
+}</pre></div><p>An Iteratee is an immutable data type and each result of processing an input is a new Iteratee with a new state.</p><p>To handle the possible states of an Iteratee, there is a predefined helper object for each state. They are:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Cont</li><li class="listitem" style="list-style-type: disc">Done</li><li class="listitem" style="list-style-type: disc">Error</li></ul></div><p>Let's see the definition of the <code class="literal">readLine</code> method, which utilizes these objects:</p><div class="informalexample"><pre class="programlisting">def readLine(line: List[Array[Byte]] = Nil): Iteratee[Array[Byte], String] = <span class="strong"><strong>Cont {</strong></span>
+      case Input.El(data) =&gt; {
+        val s = data.takeWhile(_ != '\n')
+        if (s.length == data.length) {
+          readLine(s :: line)
+        } else {
+          <span class="strong"><strong>Done(new String(Array.concat((s :: line).reverse: _*), "UTF-8").trim(), elOrEmpty(data.drop(s.length + 1)))</strong></span>
+        }
+      }
+      case Input.EOF =&gt; {
+        <span class="strong"><strong>Error("EOF found while reading line", Input.Empty)</strong></span>
+      }
+      case Input.Empty =&gt; readLine(line)
+    }</pre></div><p>The <code class="literal">readLine</code> method is responsible for reading a line and returning an Iteratee. As long as there are more bytes to be read, the <code class="literal">readLine</code> method is called recursively. On completing the process, an <a id="id216" class="indexterm"/>Iteratee with a completed state (Done) is returned, else an Iteratee with state continuous (Cont) is returned. In case the method encounters EOF, an Iteratee with state Error is returned.</p><p>In addition to these, Play Framework exposes a companion Iteratee object, which has helper methods to deal with <a id="id217" class="indexterm"/>Iteratees. The API exposed through the Iteratee object is documented at <a class="ulink" href="https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.iteratee.Iteratee$">https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.iteratee.Iteratee$</a>.</p><p>The Iteratee object is also used internally within the framework to provide some key features. For example, consider the request body parsers. The <code class="literal">apply</code> method of the <code class="literal">BodyParser</code> object is defined as follows:</p><div class="informalexample"><pre class="programlisting">def apply[T](debugName: String)(f: RequestHeader =&gt; Iteratee[Array[Byte], Either[Result, T]]): BodyParser[T] = new BodyParser[T] {
+    def apply(rh: RequestHeader) = f(rh)
+    override def toString = "BodyParser(" + debugName + ")"
+  }</pre></div><p>So, to define <code class="literal">BodyParser[T]</code>, we need to define a method that accepts <code class="literal">RequestHeader</code> and returns an <code class="literal">Iteratee</code> whose input is an <code class="literal">Array[Byte]</code> and results in Either<code class="literal">[Result,T]</code>.</p><p>Let's look at some of the existing implementations to understand how this works.</p><p>The <code class="literal">RawBuffer</code> parser is defined as follows:</p><div class="informalexample"><pre class="programlisting">def raw(memoryThreshold: Int): BodyParser[RawBuffer] = BodyParser("raw, memoryThreshold=" + memoryThreshold) { request =&gt;
+      import play.core.Execution.Implicits.internalContext
+      val buffer = RawBuffer(memoryThreshold)
+      <span class="strong"><strong>Iteratee.foreach[Array[Byte]](bytes =&gt; buffer.push(bytes)).map { _ =&gt;</strong></span>
+<span class="strong"><strong>        buffer.close()</strong></span>
+<span class="strong"><strong>        Right(buffer)</strong></span>
+<span class="strong"><strong>      }</strong></span>
+    }</pre></div><p>The <code class="literal">RawBuffer</code> parser uses <code class="literal">Iteratee.forEach</code> method and pushes the input received into a buffer.</p><p>The file parser is defined as <a id="id218" class="indexterm"/>follows:</p><div class="informalexample"><pre class="programlisting">def file(to: File): BodyParser[File] = BodyParser("file, to=" + to) { request =&gt;
+      import play.core.Execution.Implicits.internalContext
+      <span class="strong"><strong>Iteratee.fold[Array[Byte], FileOutputStream](new FileOutputStream(to)) {</strong></span>
+<span class="strong"><strong>        (os, data) =&gt;</strong></span>
+<span class="strong"><strong>        os.write(data)</strong></span>
+<span class="strong"><strong>        os</strong></span>
+<span class="strong"><strong>      }.map { os =&gt;</strong></span>
+<span class="strong"><strong>        os.close()</strong></span>
+<span class="strong"><strong>        Right(to)</strong></span>
+<span class="strong"><strong>      }</strong></span>
+    }</pre></div><p>The file parser uses the <code class="literal">Iteratee.fold</code> method to create <code class="literal">FileOutputStream</code> of the incoming data.</p><p>Now, let's see the implementation of Enumerator and how these two pieces fit together.</p></div>
+<div class="section" title="Enumerator"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec44"/>Enumerator</h1></div></div></div><p>Similar to the <a id="id219" class="indexterm"/>Iteratee, an <span class="strong"><strong>Enumerator</strong></span> is also defined through a trait and backed by an object of the same name:</p><div class="informalexample"><pre class="programlisting">trait Enumerator[E] {
+  parent =&gt;
+  def apply[A](i: Iteratee[E, A]): Future[Iteratee[E, A]]
+  ...
+}
+object Enumerator{
+def apply[E](in: E*): Enumerator[E] = in.length match {
+    case 0 =&gt; Enumerator.empty
+    case 1 =&gt; new Enumerator[E] {
+      def apply[A](i: Iteratee[E, A]): Future[Iteratee[E, A]] = i.pureFoldNoEC {
+        case Step.Cont(k) =&gt; k(Input.El(in.head))
+        case _ =&gt; i
+      }
+    }
+    case _ =&gt; new Enumerator[E] {
+      def apply[A](i: Iteratee[E, A]): Future[Iteratee[E, A]] = enumerateSeq(in, i)
+    }
+  }
+...
+}</pre></div><p>Observe that the <code class="literal">apply</code> method of the trait and its companion object are different. The <code class="literal">apply</code> method of the trait accepts <code class="literal">Iteratee[E, A]</code> and returns <code class="literal">Future[Iteratee[E, A]]</code>, while that of the companion object accepts a sequence of type <code class="literal">E</code> and returns an <code class="literal">Enumerator[E]</code>.</p><p>Now, let's define a simple <a id="id220" class="indexterm"/>data flow using the companion object's <code class="literal">apply</code> method; first, get the character count in a given <code class="literal">(Seq[String])</code> line:</p><div class="informalexample"><pre class="programlisting">  val line: String = "What we need is not the will to believe, but the wish to find out."
+  val words: Seq[String] = line.split(" ")
+
+  val src: Enumerator[String] = Enumerator(words: _*)
+
+  val sink: Iteratee[String, Int] = Iteratee.fold[String, Int](0)((x, y) =&gt; x + y.length)
+  val flow: Future[Iteratee[String, Int]] = src(sink)
+
+  val result: Future[Int] = flow.flatMap(_.run)</pre></div><p>The variable result has the <code class="literal">Future[Int]</code> type. We can now process this to get the actual count.</p><p>In the preceding code snippet, we got the result by following these steps:</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Building an Enumerator using the companion object's <code class="literal">apply</code> method:<div class="informalexample"><pre class="programlisting">val src: Enumerator[String] = Enumerator(words: _*)</pre></div></li><li class="listitem">Getting <code class="literal">Future[Iteratee[String, Int]]</code> by binding the Enumerator to an Iteratee:<div class="informalexample"><pre class="programlisting">val flow: Future[Iteratee[String, Int]] = src(sink)</pre></div></li><li class="listitem">Flattening <code class="literal">Future[Iteratee[String,Int]]</code> and processing it:<div class="informalexample"><pre class="programlisting">val result: Future[Int] = flow.flatMap(_.run)</pre></div></li><li class="listitem">Fetching the result from <code class="literal">Future[Int]</code>:</li></ol></div><p>Thankfully, Play provides a shortcut method by merging steps 2 and 3 so that we don't have to repeat the same process every time. The method is represented by the |<code class="literal">&gt;&gt;&gt;</code> symbol. Using the shortcut method, our code is reduced to this:</p><div class="informalexample"><pre class="programlisting">val src: Enumerator[String] = Enumerator(words: _*)
+val sink: Iteratee[String, Int] = Iteratee.fold[String, Int](0)((x, y) =&gt; x + y.length)
+val result: Future[Int] = src |&gt;&gt;&gt; sink</pre></div><p>Why use this when we can simply use the methods of the data type? In this case, do we use the <code class="literal">length</code> method of <code class="literal">String</code> to get the same value (by ignoring whitespaces)?</p><p>In this example, we are getting the data as a single <code class="literal">String</code> but this will not be the only scenario. We need ways to process continuous data, such as a file upload, or feed data from various networking sites, and so on.</p><p>For example, suppose our <a id="id221" class="indexterm"/>application receives heartbeats at a fixed interval from all the devices (such as cameras, thermometers, and so on) connected to it. We can simulate a data stream using the <code class="literal">Enumerator.generateM</code> method:</p><div class="informalexample"><pre class="programlisting">val dataStream: Enumerator[String] = Enumerator.generateM {
+  Promise.timeout(Some("alive"), 100 millis)
+}</pre></div><p>In the preceding snippet, the <code class="literal">"alive"</code> String is produced every 100 milliseconds. The function passed to the <code class="literal">generateM</code> method is called whenever the Iteratee bound to the Enumerator is in the <code class="literal">Cont</code> state. This method is used internally to build enumerators and can come in handy when we want to analyze the processing for an expected data stream.</p><p>An Enumerator can be <a id="id222" class="indexterm"/>created from a file, <code class="literal">InputStream</code>, or <code class="literal">OutputStream</code>. Enumerators can be concatenated or interleaved. The Enumerator API is documented at <a class="ulink" href="https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.iteratee.Enumerator$">https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.iteratee.Enumerator$</a>.</p><div class="section" title="Using the Concurrent object"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec26"/>Using the Concurrent object</h2></div></div></div><p>The <code class="literal">Concurrent</code> object is a <a id="id223" class="indexterm"/>helper that provides utilities for <a id="id224" class="indexterm"/>using Iteratees, enumerators, and Enumeratees concurrently. Two of its important methods are:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><span class="strong"><strong>Unicast</strong></span>: It is useful when sending data to a single iterate.</li><li class="listitem" style="list-style-type: disc"><span class="strong"><strong>Broadcast</strong></span>: It facilitates <a id="id225" class="indexterm"/>sending the same data to multiple Iteratees concurrently.</li></ul></div><div class="section" title="Unicast"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec04"/>Unicast</h3></div></div></div><p>For example, the character <a id="id226" class="indexterm"/>count example in the previous section can be implemented as follows:</p><div class="informalexample"><pre class="programlisting">  val unicastSrc = Concurrent.unicast[String](
+    channel =&gt;
+      channel.push(line)
+  )
+
+  val unicastResult: Future[Int] = unicastSrc |&gt;&gt;&gt; sink</pre></div><p>The <code class="literal">unicast</code> method accepts the <code class="literal">onStart</code>, <code class="literal">onError</code>, and <code class="literal">onComplete</code> handlers. In the preceding code snippet, we have provided the <code class="literal">onStart</code> method, which is mandatory. The signature of unicast is this:</p><div class="informalexample"><pre class="programlisting">def unicast[E](onStart: (Channel[E]) ⇒ Unit,
+    onComplete: ⇒ Unit = (),
+    onError: (String, Input[E]) ⇒ Unit = (_: String, _: Input[E]) =&gt; ())(implicit ec: ExecutionContext): Enumerator[E] {…}</pre></div><p>So, to add a log for errors, we can define the <code class="literal">onError</code> handler as follows:</p><div class="informalexample"><pre class="programlisting">val unicastSrc2 = Concurrent.unicast[String](
+    channel =&gt; channel.push(line),
+    onError = { (msg, str) =&gt; Logger.error(s"encountered $msg for $str")}
+      )</pre></div><p>Now, let's see how broadcast works.</p></div><div class="section" title="Broadcast"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec05"/>Broadcast</h3></div></div></div><p>The <code class="literal">broadcast[E]</code> method <a id="id227" class="indexterm"/>creates an enumerator and a channel and returns a <code class="literal">(Enumerator[E], Channel[E])</code> tuple. The enumerator and channel thus obtained can be used to broadcast data to multiple Iteratees:</p><div class="informalexample"><pre class="programlisting">  val (broadcastSrc: Enumerator[String], channel: Concurrent.Channel[String]) = Concurrent.broadcast[String]  
+  private val vowels: Seq[Char] = Seq('a', 'e', 'i', 'o', 'u')
+
+  def getVowels(str: String): String = {
+    val result = str.filter(c =&gt; vowels.contains(c))
+    result
+  }
+
+  def getConsonants(str: String): String = {
+    val result = str.filterNot(c =&gt; vowels.contains(c))
+    result
+  }
+
+  val vowelCount: Iteratee[String, Int] = Iteratee.fold[String, Int](0)((x, y) =&gt; x + getVowels(y).length)
+
+  val consonantCount: Iteratee[String, Int] = Iteratee.fold[String, Int](0)((x, y) =&gt; x + getConsonants(y).length)
+
+  val vowelInfo: Future[Int]  = broadcastSrc |&gt;&gt;&gt; vowelCount
+  val consonantInfo: Future[Int]  = broadcastSrc |&gt;&gt;&gt; consonantCount
+
+  words.foreach(w =&gt; channel.push(w))
+  channel.end()
+
+  vowelInfo onSuccess { case count =&gt; println(s"vowels:$count")}
+  consonantInfo onSuccess { case count =&gt; println(s"consonants:$count")}</pre></div></div></div></div>
+<div class="section" title="Enumeratees"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec45"/>Enumeratees</h1></div></div></div><p>
+<span class="strong"><strong>Enumeratee</strong></span> is also defined <a id="id228" class="indexterm"/>using a trait and its companion object with the same <code class="literal">Enumeratee</code> name.</p><p>It is defined as follows:</p><div class="informalexample"><pre class="programlisting">trait Enumeratee[From, To] {
+...
+def applyOn[A](inner: Iteratee[To, A]): Iteratee[From, Iteratee[To, A]]
+
+def apply[A](inner: Iteratee[To, A]): Iteratee[From, Iteratee[To, A]] = applyOn[A](inner)
+...
+}</pre></div><p>An Enumeratee transforms the Iteratee given to it as input and returns a new Iteratee. Let's look at a method that defines an Enumeratee by implementing the <code class="literal">applyOn</code> method. An Enumeratee's <code class="literal">flatten</code> method accepts <code class="literal">Future[Enumeratee]</code> and returns an another Enumeratee, which is defined as follows:</p><div class="informalexample"><pre class="programlisting">  def flatten[From, To](futureOfEnumeratee: Future[Enumeratee[From, To]]) = new Enumeratee[From, To] {
+    def applyOn[A](it: Iteratee[To, A]): Iteratee[From, Iteratee[To, A]] =
+      Iteratee.flatten(futureOfEnumeratee.map(_.applyOn[A](it))(dec))
+  }</pre></div><p>In the preceding snippet, <code class="literal">applyOn</code> is called on the Enumeratee whose future is passed and <code class="literal">dec</code> is <code class="literal">defaultExecutionContext</code>.</p><p>Defining an Enumeratee using the companion object is a lot simpler. The companion object has a lot of methods to deal with Enumeratees, such as map, transform, collect, take, filter, and so on. The API is documented at <a class="ulink" href="https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.iteratee.Enumeratee$">https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.iteratee.Enumeratee$</a>.</p><p>Let's define an Enumeratee <a id="id229" class="indexterm"/>by working through a problem. The example we used in the previous section to find the count of vowels and consonants will not work correctly if a vowel is capitalized in a sentence, that is, the result of <code class="literal">src |&gt;&gt;&gt; vowelCount</code> will be incorrect when the <code class="literal">line</code> variable is defined as follows:</p><div class="informalexample"><pre class="programlisting">val line: String = "What we need is not the will to believe, but the wish to find out.".toUpperCase</pre></div><p>To fix this, let's alter the case of all the characters in the data stream to lowercase. We can use an Enumeratee to update the input provided to the Iteratee.</p><p>Now, let's define an Enumeratee to return a given string in lowercase:</p><div class="informalexample"><pre class="programlisting">  val toSmallCase: Enumeratee[String, String] = Enumeratee.map[String] {
+    s =&gt; s.toLowerCase
+  }</pre></div><p>There are two ways to <a id="id230" class="indexterm"/>add an Enumeratee to the dataflow. It can be bound to the following:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Enumerators</li><li class="listitem" style="list-style-type: disc">Iteratees</li></ul></div><div class="section" title="Binding an Enumeratee to an Enumerator"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec27"/>Binding an Enumeratee to an Enumerator</h2></div></div></div><p>An Enumeratee <a id="id231" class="indexterm"/>can be bound to an enumerator by <a id="id232" class="indexterm"/>using the enumerator's <code class="literal">through</code> method, which returns a new Enumerator and is composed using the given enumeratee.</p><p>Updating the example to include an Enumeratee, we get this:</p><div class="informalexample"><pre class="programlisting">val line: String = "What we need is not the will to believe, but the wish to find out.".toUpperCase
+val words: Seq[String] = line.split(" ")
+
+val src: Enumerator[String] = Enumerator(words: _*)
+
+private val vowels: Seq[Char] = Seq('a', 'e', 'i', 'o', 'u')
+def getVowels(str: String): String = {
+  val result = str.filter(c =&gt; vowels.contains(c))
+  result
+}
+
+<span class="strong"><strong>src.through(toSmallCase) |&gt;&gt;&gt; vowelCount</strong></span>
+</pre></div><p>The <code class="literal">through</code> method <a id="id233" class="indexterm"/>is an alias for the <code class="literal">&amp;&gt;</code> method and is defined <a id="id234" class="indexterm"/>for an enumerator, so the last statement can also be rewritten as follows:</p><div class="informalexample"><pre class="programlisting">src &amp;&gt; toSmallCase |&gt;&gt;&gt; vowelCount</pre></div></div><div class="section" title="Binding an Enumeratee to an Iteratee"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec28"/>Binding an Enumeratee to an Iteratee</h2></div></div></div><p>Now, let's <a id="id235" class="indexterm"/>implement the same flow by binding the enumeratee to the Iteratee. This can be done using the enumeratee's <code class="literal">transform</code> method. The t<code class="literal">ransform</code> method transforms the given Iteratee and results in a new Iteratee. Modifying the flow according to this, we get the following:</p><div class="informalexample"><pre class="programlisting">src |&gt;&gt;&gt; toSmallCase.transform(vowelCount)</pre></div><p>The enumeratee's <a id="id236" class="indexterm"/>
+<code class="literal">transform</code> method has a <code class="literal">&amp;&gt;&gt;</code> symbolic alias. Using this, we can rewrite the flow as follows:</p><div class="informalexample"><pre class="programlisting">src |&gt;&gt;&gt; toSmallCase &amp;&gt;&gt; vowelCount</pre></div><p>In addition to the fact that enumeratees can be bound to either Enumerators or Iteratees, different Enumeratees can be also be combined if the output type of one is the same as the input type of the other. For example, assume we have a <code class="literal">filterVowel</code> Enumeratee that filters out the vowels, as demonstrated in the following code:</p><div class="informalexample"><pre class="programlisting">val filterVowel: Enumeratee[String, String] = Enumeratee.map[String] {
+  str =&gt; str.filter(c =&gt; vowels.contains(c))
+}</pre></div><p>Combining <code class="literal">toSmallCase</code> and <code class="literal">filterVowel</code> is possible since the output type of <code class="literal">toSmallCase</code> is a <code class="literal">String</code> and the input type of <code class="literal">filterVowel</code> is also a <code class="literal">String</code>. To do this, we use the Enumeratee's <code class="literal">compose</code> method:</p><div class="informalexample"><pre class="programlisting">toSmallCase.compose(filterVowel)</pre></div><p>Now, let's rewrite the flow by using this:</p><div class="informalexample"><pre class="programlisting">src |&gt;&gt;&gt; toSmallCase.compose(filterVowel) &amp;&gt;&gt; sink</pre></div><p>Here, <code class="literal">sink</code> is defined as follows:</p><div class="informalexample"><pre class="programlisting">  val sink: Iteratee[String, Int] = Iteratee.fold[String, Int](0)((x, y) =&gt; x + y.length)</pre></div><p>Like the <code class="literal">transform</code> and <code class="literal">compose</code> methods, this also has a <code class="literal">&gt;&lt;&gt;</code> symbolic alias. Let's define the flow using all the symbols instead of method names in the following way:</p><div class="informalexample"><pre class="programlisting">src |&gt;&gt;&gt; toSmallCase &gt;&lt;&gt; filterVowel &amp;&gt;&gt; sink</pre></div><p>We can add another <a id="id237" class="indexterm"/>enumeratee that computes the length of <code class="literal">String</code> <a id="id238" class="indexterm"/>and uses <code class="literal">Iteratee</code>, which simply sums up the lengths:</p><div class="informalexample"><pre class="programlisting">  val toInt: Enumeratee[String, Int] = Enumeratee.map[String] {
+    str =&gt; str.length
+  }
+  val sum: Iteratee[Int, Int] = Iteratee.fold[Int, Int](0)((x, y) =&gt; x + y)
+  <span class="strong"><strong>src |&gt;&gt;&gt; toSmallCase &gt;&lt;&gt; filterVowel &gt;&lt;&gt; toInt &amp;&gt;&gt; sum</strong></span>
+</pre></div><div class="mediaobject"><img src="graphics/3803OS_06_02.jpg" alt="Binding an Enumeratee to an Iteratee"/></div><p>In the preceding snippet, we had to use a different iterator that accepts data of the <code class="literal">Int</code> type, since our <code class="literal">toInt</code> enumeratee transforms the <code class="literal">String</code> input to <code class="literal">Int</code>.</p><p>This concludes the chapter. Define a few data flows to get familiar with the API. Start with simpler data flows, such as extracting all the numbers or words in a given paragraph, and then complicate them gradually.</p></div></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec46"/>Summary</h1></div></div></div><p>In this chapter, we discussed the concept of Iteratees, Enumerators, and Enumeratees. We also saw how they were implemented in Play Framework and used internally. This chapter also walked you through a simple example to illustrate how data flow can be defined using the API exposed by Play Framework.</p><p>In the next chapter, we will explore the features provided in a Play application through a global plugin.</p></div></body></html>

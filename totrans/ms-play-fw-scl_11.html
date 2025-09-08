@@ -1,0 +1,240 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;11.&#xA0;Web Services and Authentication"><div class="titlepage"><div><div><h1 class="title"><a id="ch11"/>Chapter 11. Web Services and Authentication</h1></div></div></div><p>The internet is vast and constantly expanding. A lot of day-to-day tasks can be dealt with in a simpler manner—bill payments, checking reviews of a product, booking movie tickets, and so on. In addition to this, most electronic devices can now be connected to the Internet, such as mobile phones, watches, surveillance systems, and security systems. These can communicate with each other and they need not all be of the same brand. Applications can utilize user-specific information and provide features with better customization. Most importantly, we can decide if we wish to share our information with the application by authenticating it or not.</p><p>In this chapter, we will cover Play Framework's support for the following:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Calling web services</li><li class="listitem" style="list-style-type: disc">OpenID and OAuth authentication</li></ul></div><div class="section" title="Calling web services"><div class="titlepage"><div><div><h1 class="title"><a id="ch11lvl1sec72"/>Calling web services</h1></div></div></div><p>Suppose we <a id="id407" class="indexterm"/>need to book a flight ticket online. We can do this by using either the website of the flight's brand (such as Lufthansa, Emirates, and so on), or a travel booking website (such as ClearTrip, MakeMyTrip, and so on). How is it that we can do the same task from two or more different websites?</p><p>The website of the flight's brand provides some APIs with which the travel booking websites work. These API can be freely available or charged by a contract, which is for the provider and the other third-party involved to decide. These APIs are also called web services.</p><p>A web service is more or less a method that is called over the Internet. Only the provider is fully aware of the internal working of these sites. Those who use the web service are only aware of the purpose and its possible outcome.</p><p>Many applications require/prefer to use third-party APIs to complete common tasks for various reasons, such as common norms in the business domain, easier means to provide secure authorization, or to avoid the overhead of maintenance, and so on.</p><p>The Play Framework has a web service API specifically to meet such requirements. The web service API can be used by including it as a dependency:</p><div class="informalexample"><pre class="programlisting">libraryDependencies ++= Seq(
+  ws
+)</pre></div><p>A common use case is to send an e-mail with the link for account verification and/or resetting the password using a transactional e-mail API service, such as Mailgun, SendGrid, and so on.</p><p>Let's assume that our <a id="id408" class="indexterm"/>application has such a requirement, and we have an <code class="literal">Email</code> object that handles all these kind of transactions. We need one method to send e-mails that makes actual calls to the e-mailing API service, and then other methods that internally call send. Using the Play web service API, we could define <code class="literal">Email</code> as:</p><div class="informalexample"><pre class="programlisting">object Email {
+
+  val logger = Logger(getClass)
+
+  private def send(emailIds: Seq[String], subject: String, content: String): Unit = {
+
+    var properties: Properties = new Properties()
+
+    try {
+
+      properties.load(new FileInputStream("/opt/appName/mail-config.properties"))
+
+      val url: String = properties.getProperty("url")
+
+      val apiKey: String = properties.getProperty("api")
+
+      val from: String = properties.getProperty("from")
+
+      <span class="strong"><strong>val requestHolder: WSRequestHolder = WS.url(url).withAuth("api", apiKey, WSAuthScheme.BASIC)</strong></span>
+      val requestData = Map(
+
+        "from" -&gt; Seq(from),
+
+        "to" -&gt; emailIds,
+
+        "subject" -&gt; Seq(subject),
+
+        "text" -&gt; Seq(content))
+
+      <span class="strong"><strong>val response: Future[WSResponse] = requestHolder.post(requestData)</strong></span>
+
+      <span class="strong"><strong>response.map(</strong></span>
+
+        <span class="strong"><strong>res =&gt; {</strong></span>
+
+          <span class="strong"><strong>val responseMsg: String = res.json.toString()</strong></span>
+
+          <span class="strong"><strong>if (res.status == 200) {</strong></span>
+
+            <span class="strong"><strong>logger.info(responseMsg)</strong></span>
+
+          <span class="strong"><strong>} else {</strong></span>
+
+            <span class="strong"><strong>logger.error(responseMsg)</strong></span>
+
+          <span class="strong"><strong>}</strong></span>
+
+        <span class="strong"><strong>}</strong></span>
+
+      )
+
+    } catch {
+
+      case exp: IOException =&gt;
+
+        logger.error("Failed to load email configuration properties.")
+
+    }
+
+  }
+
+  def sendVerification(userId: Long, emailId: String, host: String): Unit = {
+
+    val subject: String = "Email Verification"
+
+    val content: String =
+
+      s"""To verify your account on &lt;appName&gt;, please click on the link below
+
+         |
+
+         |http://$host/validate/user/$userId""".stripMargin
+
+    send(Seq(emailId), subject, content)
+
+  }
+
+  def recoverPassword(emailId: String, password: String): Unit = {
+
+    val subject: String = "Password Recovery"
+
+    val emailContent: String = s"Your password has been reset.The new password is $password"
+
+    send(Seq(emailId), subject, emailContent)
+
+  }
+
+}</pre></div><p>The web service API is <a id="id409" class="indexterm"/>exposed through the <code class="literal">WS</code> object, which provides methods to query web services as an HTTP client. In the preceding code snippet, we have used the web service API to make a post request. Other available methods to trigger a request and fetch a response or response stream are:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">get</code> or <code class="literal">getStream</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">put</code> or <code class="literal">putAndRetrieveStream</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">post</code> or <code class="literal">postAndRetrieveStream</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">delete</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">head</code></li></ul></div><p>The result of any of these calls is of the <code class="literal">Future[WSResponse]</code> type, so we can safely say that the web service API is asynchronous.</p><p>It is not restricted to REST services. For example, let's say we use a SOAP service to fetch the currencies of all countries:</p><div class="informalexample"><pre class="programlisting">  def displayCurrency = Action.async {
+
+    val url: String = "http://www.webservicex.net/country.asmx"
+
+    val wsReq: String = """&lt;?xml version="1.0" encoding="utf-8"?&gt;
+
+                          |&lt;soap12:Envelope   &gt;
+
+                          |  &lt;soap12:Body&gt;
+
+                          |    &lt;GetCurrencies  /&gt;
+
+                          |  &lt;/soap12:Body&gt;
+
+                          |&lt;/soap12:Envelope&gt;""".stripMargin
+
+    val response: Future[WSResponse] = WS.url(url).withHeaders("Content-Type" -&gt; "application/soap+xml").post(wsReq)
+
+    response map {
+
+      data =&gt; Ok(data.xml)
+
+    }
+
+  }</pre></div><p>An HTTP request can be built using <code class="literal">WS.url()</code>, which returns an instance of <code class="literal">WSRequestHolder</code>. The <code class="literal">WSRequestHolder</code> trait has methods to add headers, authentication, request parameters, data, and so on. Here is another example of commonly used methods:</p><div class="informalexample"><pre class="programlisting">WS.url("http://third-party.com/service?=serviceName")
+.withAuth("api","apiKey", WSAuthScheme.BASIC)
+.withQueryString("month" -&gt; "12",
+        "year" -&gt; "2014",
+        "code" -&gt; "code")
+.withHeaders(HeaderNames.ACCEPT -&gt; MimeTypes.JSON)
+.get</pre></div><p>Although in this example we have used Basic authentication, the web service API supports most of the <a id="id410" class="indexterm"/>commonly used authentication schemes, which you can find at the following links:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><span class="strong"><strong>Basic</strong></span>: <a class="ulink" href="http://en.wikipedia.org/wiki/Basic_access_authentication">http://en.wikipedia.org/wiki/Basic_access_authentication</a></li><li class="listitem" style="list-style-type: disc"><a id="id411" class="indexterm"/><span class="strong"><strong>Digest</strong></span>: <a class="ulink" href="http://en.wikipedia.org/wiki/Digest_access_authentication">http://en.wikipedia.org/wiki/Digest_access_authentication</a></li><li class="listitem" style="list-style-type: disc"><span class="strong"><strong>Simple and </strong></span><a id="id412" class="indexterm"/><span class="strong"><strong>Protected GSSAPI Negotiation Mechanism (SPNEGO)</strong></span>: <a class="ulink" href="http://en.wikipedia.org/wiki/SPNEGO">http://en.wikipedia.org/wiki/SPNEGO</a></li><li class="listitem" style="list-style-type: disc"><span class="strong"><strong>NT LAN </strong></span><a id="id413" class="indexterm"/><span class="strong"><strong>Manager (NTLM)</strong></span>: <a class="ulink" href="http://en.wikipedia.org/wiki/NT_LAN_Manager">http://en.wikipedia.org/wiki/NT_LAN_Manager</a></li><li class="listitem" style="list-style-type: disc"><span class="strong"><strong>Kerberos</strong></span>: <a id="id414" class="indexterm"/><a class="ulink" href="http://en.wikipedia.org/wiki/Kerberos_(protocol)">http://en.wikipedia.org/wiki/Kerberos_(protocol)</a></li></ul></div><p>All the methods available through the <code class="literal">WS</code> object simply call the relevant methods of the available <code class="literal">WSAPI</code> trait's implementation. The web service API provided by default utilizes Ning's AysncHttpClient (refer to <a class="ulink" href="https://github.com/AsyncHttpClient/async-http-client">https://github.com/AsyncHttpClient/async-http-client</a>). If we wish to use any other HTTP client, we need to implement the <code class="literal">WSAPI</code> trait and bind it <a id="id415" class="indexterm"/>through a plugin. When we add the <code class="literal">ws</code> Play library, it adds <code class="literal">play.api.libs.ws.ning.NingWSPlugin</code> to our application, which is defined as:</p><div class="informalexample"><pre class="programlisting">class NingWSPlugin(app: Application) extends WSPlugin {
+
+  @volatile var loaded = false
+
+  override lazy val enabled = true
+
+  private val config = new DefaultWSConfigParser(app.configuration, app.classloader).parse()
+
+  private lazy val ningAPI = new NingWSAPI(app, config)
+
+  override def onStart() {
+    loaded = true
+  }
+
+  override def onStop() {
+    if (loaded) {
+      ningAPI.resetClient()
+      loaded = false
+    }
+  }
+
+  def api = ningAPI
+
+}</pre></div><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note39"/>Note</h3><p>In a Play app, using <a id="id416" class="indexterm"/>SSL with WS requires a few changes in the configuration, and it is documented at <a class="ulink" href="https://www.playframework.com/documentation/2.3.x/WsSSL">https://www.playframework.com/documentation/2.3.x/WsSSL</a>.</p></div></div><p>Since a huge number of <a id="id417" class="indexterm"/>applications rely on a user's data from various sources, Play provides an API for OpenID and OAuth. We will discuss these in the following sections.</p></div></div>
+<div class="section" title="OpenID"><div class="titlepage"><div><div><h1 class="title"><a id="ch11lvl1sec73"/>OpenID</h1></div></div></div><p>OpenID is an <a id="id418" class="indexterm"/>authentication protocol, wherein OpenID Providers validate the identity of a user for third-party applications. An OpenID Provider is any service/application that provides an OpenID to users. Yahoo, AOL, and others are a few examples of these. Applications that require a user's OpenID to complete transactions are known as OpenID Consumers.</p><p>The flow of control in an OpenID Consumer is as follows:</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">The user is directed to the login page of the supported/selected OpenID Provider.</li><li class="listitem">Once the user completes logging in, the OpenID Provider informs the user about user-related data requested by the OpenID Consumer.</li><li class="listitem">If the user agrees to share the information, he or she is redirected to the page requested by him or her on the consumer application. The information is added to the request URL. The information is termed as attribute properties and this is documented at <a class="ulink" href="http://openid.net/specs/openid-attribute-properties-list-1_0-01.html">http://openid.net/specs/openid-attribute-properties-list-1_0-01.html</a>.</li></ol></div><p>Play provides an API to <a id="id419" class="indexterm"/>simplify OpenID transactions, which is documented at <a class="ulink" href="https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.openid.OpenID$">https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.openid.OpenID$</a>.</p><p>Two critical methods are as follows:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">redirectURL</code>: This is used for verifying the user, requesting specific user information and redirecting it to the callback page</li><li class="listitem" style="list-style-type: disc"><code class="literal">verifiedId</code>: This is used to extract user information from a verified OpenID callback request</li></ul></div><p>Let's build an application that uses OpenID from the provider, Yahoo. We can define the controller as follows:</p><div class="informalexample"><pre class="programlisting">object Application extends Controller {
+
+  def index = Action.async {
+
+    implicit request =&gt;
+
+      OpenID.verifiedId.map(info =&gt; Ok(views.html.main(info.attributes)))
+
+        .recover {
+
+        case t: Throwable =&gt;
+
+          Redirect(routes.Application.login())
+
+      }
+
+  }
+
+
+
+  def login = Action.async {
+
+    implicit request =&gt;
+
+      val openIdRequestURL: String = "https://me.yahoo.com"
+
+      OpenID.redirectURL(
+
+        openIdRequestURL,
+
+        routes.Application.index.absoluteURL(),
+
+        Seq("email" -&gt; "http://schema.openid.net/contact/email",
+
+          "name" -&gt; "http://openid.net/schema/namePerson/first"))
+
+        .map(url =&gt; Redirect(url))
+
+        .recover { case t: Throwable =&gt; Ok(t.getMessage) }
+
+  }
+
+}</pre></div><p>In the preceding code <a id="id420" class="indexterm"/>snippet, the <code class="literal">login</code> method redirects the user to the Yahoo login page (refer to <a class="ulink" href="https://me.yahoo.com">https://me.yahoo.com</a>). Once the user logs in, he or she is asked if the user's profile can be shared by the application. If the user agrees, it redirects to <code class="literal">routes.Application.index.absoluteURL()</code>.</p><p>The <code class="literal">index</code> method expects data shared by the OpenID Provider (Yahoo, in our case) on a successful login. If it is not available, the user is redirected to the <code class="literal">login</code> method.</p><p>The third parameter for <code class="literal">OpenID.redirectURL</code> is a sequence of tuples which indicates the information required by the application (required attributes). The second element in each tuple label of the attribute property is requested using OpenID Attribute Exchange—it enables the transport of personal identity information. The first element in each tuple is the label with which the value <a id="id421" class="indexterm"/>for the attribute property should be mapped by the OpenID Provider in the callback request's <code class="literal">queryString</code>.</p><p>For example, the <code class="literal">http://openid.net/schema/namePerson/first</code> property represents the attribute property by its first name. On successful login, the value of this property and the label provided by the consumer are added to the <code class="literal">queryString</code> in the callback. So, <code class="literal">openid.ext1.value.name=firstName</code> is added to the login callback.</p></div>
+<div class="section" title="OAuth"><div class="titlepage"><div><div><h1 class="title"><a id="ch11lvl1sec74"/>OAuth</h1></div></div></div><p>According <a id="id422" class="indexterm"/>to <a class="ulink" href="http://oauth.net/core/1.0/">http://oauth.net/core/1.0/</a>, the definition of OAuth is as follows:</p><div class="blockquote"><blockquote class="blockquote"><p><span class="emphasis"><em>"OAuth authentication is the process in which Users grant access to their Protected Resources without sharing their credentials with the Consumer. OAuth uses Tokens generated by the Service Provider instead of the User's credentials in Protected Resources requests. The process uses two Token types:</em></span></p><p><span class="emphasis"><em>Request Token: Used by the Consumer to ask the User to authorize access to the Protected Resources. The User-authorized Request Token is exchanged for an Access Token, MUST only be used once, and MUST NOT be used for any other purpose. It is RECOMMENDED that Request Tokens have a limited lifetime.</em></span></p><p><span class="emphasis"><em>Access Token: Used by the Consumer to access the Protected Resources on behalf of the User. Access Tokens MAY limit access to certain Protected Resources, and MAY have a limited lifetime. Service Providers SHOULD allow Users to revoke Access Tokens. Only the Access Token SHALL be used to access the Protect Resources.</em></span></p><p><span class="emphasis"><em>OAuth Authentication is done in three steps:</em></span></p><p><span class="emphasis"><em>The Consumer obtains an unauthorized Request Token.</em></span></p><p><span class="emphasis"><em>The User authorizes the Request Token.</em></span></p><p><span class="emphasis"><em>The Consumer exchanges the Request Token for an Access Token."</em></span></p></blockquote></div><p>Exactly what and how much of it is accessible is decided solely by the service provider.</p><p>There are three versions of OAuth: 1.0, 1.0a, and 2.0. The first one (1.0) has some security issues and is not used anymore by service providers.</p><p>Play provides an API for using 1.0 and 1.0a and not for 2.0, since using this is a lot simpler. The API is documented at <a class="ulink" href="https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.oauth.package">https://www.playframework.com/documentation/2.3.x/api/scala/index.html#play.api.libs.oauth.package</a>.</p><p>Let's build an app to that utilizes a Twitter account to log in using Play's OAuth API.</p><p>Initially, we'll need to <a id="id423" class="indexterm"/>register the app at <a class="ulink" href="https://apps.twitter.com/">https://apps.twitter.com/</a> using a Twitter account so that we have a valid consumer key and secret combination. After this, we can define the action as follows:</p><div class="informalexample"><pre class="programlisting">val KEY: ConsumerKey = ConsumerKey("myAppKey", "myAppSecret")
+val TWITTER: OAuth = OAuth(ServiceInfo(
+    "https://api.twitter.com/oauth/request_token",
+    "https://api.twitter.com/oauth/access_token",
+    "https://api.twitter.com/oauth/authorize", KEY),
+    true)
+
+def authenticate = Action { request =&gt;
+    TWITTER.retrieveRequestToken("http://localhost:9000/welcome") match {
+      case Right(t) =&gt; {
+        Redirect(TWITTER.redirectUrl(t.token)).withSession("token" -&gt; t.token, "secret" -&gt; t.secret)
+      }
+      case Left(e) =&gt; throw e
+    }
+  }</pre></div><p>OAuth is a Play helper class and has this signature:</p><div class="informalexample"><pre class="programlisting">OAuth(info: ServiceInfo, use10a: Boolean = true)</pre></div><p>The parameter determines the version of OpenID. If it's set to <code class="literal">true</code>, it uses OpenID 1.0 or else, 1.0.</p><p>It provides these three methods:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">redirectURL</code>: This fetches the URL string where a user should be redirected to authorize the application through the provider</li><li class="listitem" style="list-style-type: disc"><code class="literal">retrieveRequestToken</code>: This fetches the request token from the provider</li><li class="listitem" style="list-style-type: disc"><code class="literal">retrieveAccessToken</code>: This exchanges the request token for an access token</li></ul></div><p>In the preceding action definition, we only use the provider to login; we cannot get any user details unless we do not exchange the authorized request token for an access token. To get the access token, we need the request token and <code class="literal">oauth_verifier</code>, which is provided by the service provider when granting the request token.</p><p>Using the Play OAuth API, redirecting after obtaining a request token adds <code class="literal">oauth_verifier</code> to the <a id="id424" class="indexterm"/>request query string. So, we should redirect to an action that attempts to obtain the access token and then store it, so that it is easily accessible for future requests. In this example, it's stored in the Session:</p><div class="informalexample"><pre class="programlisting">def authenticate = Action { request =&gt;
+    request.getQueryString("oauth_verifier").map { verifier =&gt;
+      val tokenPair = sessionTokenPair(request).get
+      TWITTER.retrieveAccessToken(tokenPair, verifier) match {
+        case Right(t) =&gt; {
+          Redirect(routes.Application.welcome()).withSession("token" -&gt; t.token, "secret" -&gt; t.secret)
+        }
+        case Left(e) =&gt; throw e
+      }
+    }.getOrElse(
+        TWITTER.retrieveRequestToken("http://localhost:9000/twitterLogin") match {
+      case Right(rt) =&gt;
+        Redirect(TWITTER.redirectUrl(rt.token)).withSession("token" -&gt; rt.token, "secret" -&gt; rt.secret)
+      case Left(e) =&gt; throw e
+    })
+  }
+
+  private def sessionTokenPair(implicit request: RequestHeader): Option[RequestToken] = {
+    for {
+      token &lt;- request.session.get("token")
+      secret &lt;- request.session.get("secret")
+    } yield {
+      RequestToken(token, secret)
+    }
+  }
+
+  def welcome = Action.async {
+    implicit request =&gt;
+      sessionTokenPair match {
+        case Some(credentials) =&gt; {
+          WS.url("https://api.twitter.com/1.1/statuses/home_timeline.json")
+            .sign(OAuthCalculator(KEY, credentials))
+            .get()
+            .map(result =&gt; Ok(result.json))
+        }
+        case _ =&gt; Future.successful(Redirect(routes.Application.authenticate()).withNewSession)
+      }
+
+  }</pre></div><p>On successful login and authorization by the user, we fetch the status on a user's timeline and display it as JSON using the welcome action.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note40"/>Note</h3><p>There is no built-in <a id="id425" class="indexterm"/>support in Play for authentication using OAuth 2.0, CAS, SAML, or any other protocol. However, developers can choose to use a <a id="id426" class="indexterm"/>third-party plugin or library that suits their requirements. Some of them are Silhouette (<a class="ulink" href="http://silhouette.mohiva.com/v2.0">http://silhouette.mohiva.com/v2.0</a>), deadbolt-2 (<a class="ulink" href="https://github.com/schaloner/deadbolt-2">https://github.com/schaloner/deadbolt-2</a>), play-pac4j (<a class="ulink" href="https://github.com/pac4j/play-pac4j">https://github.com/pac4j/play-pac4j</a>), and so on.</p></div></div></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch11lvl1sec75"/>Summary</h1></div></div></div><p>In this chapter, we learned about the WS (web service) plugin and the API exposed through it. We have also seen how to access a user's data from service providers using OpenID and OAuth 1.0a (since most service providers use either 1.0a or 2.0), with the help of the OpenID and OAuth APIs in Play.</p><p>In the next chapter, we will see how some of the modules provided by Play work and how we can build a custom module using them.</p></div></body></html>

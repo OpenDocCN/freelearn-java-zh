@@ -1,0 +1,1145 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;2.&#xA0;Defining Actions"><div class="titlepage"><div><div><h1 class="title"><a id="ch02"/>Chapter 2. Defining Actions</h1></div></div></div><p>If you're reading this, you've either survived the first chapter or skipped it. Either way, I am assuming you know the structure of a simple Play application. A controller in Play generates Action values and, to do so, it uses several objects and methods internally. In this chapter, we will see what goes on behind the scenes and how we can leverage these actions when we build our application.</p><p>In this chapter, we will be covering the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Defining Actions</li><li class="listitem" style="list-style-type: disc">Request body parsers</li><li class="listitem" style="list-style-type: disc">Action composition and troubleshooting</li></ul></div><div class="section" title="A dummy Artist model"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec10"/>A dummy Artist model</h1></div></div></div><p>In the following <a id="id32" class="indexterm"/>sections, we will give make reference to an <code class="literal">artist</code> model. It is a simple <code class="literal">class</code> with a companion <code class="literal">object</code>, defined as follows:</p><div class="informalexample"><pre class="programlisting">case class Artist(name: String, country: String)
+
+object Artist {
+  val availableArtist = Seq(Artist("Wolfgang Amadeus Mozart", "Austria"), 
+    Artist("Ludwig van Beethoven", "Germany"), 
+    Artist("Johann Sebastian Bach", "Germany"), 
+    Artist("Frédéric François Chopin", "Poland"), 
+    Artist("Joseph Haydn", "Austria"), 
+    Artist("Antonio Lucio Vivaldi", "Italy"), 
+    Artist("Franz Peter Schubert", "Austria"), 
+    Artist("Franz Liszt", "Austria"), 
+    Artist("Giuseppe Fortunino Francesco Verdi", "Austria")) 
+
+  def fetch: Seq[Artist] = {
+    availableArtist 
+  } 
+
+  def fetchByName(name: String): Seq[Artist] = {
+    availableArtist.filter(a =&gt; a.name.contains(name)) 
+  } 
+
+  def fetchByCountry(country: String): Seq[Artist] = {
+    availableArtist.filter(a =&gt; a.country == country) 
+  } 
+
+  def fetchByNameOrCountry(name: String, country: String): Seq[Artist] = { 
+    availableArtist.filter(a =&gt; a.name.contains(name) || a.country == country) 
+  } 
+
+  def fetchByNameAndCountry(name: String, country: String): Seq[Artist] = {
+    availableArtist.filter(a =&gt; a.name.contains(name) &amp;&amp; a.country == country)
+  } 
+} </pre></div><p>The Artist model has a <a id="id33" class="indexterm"/>method to fetch all these artists and a few methods to filter the artist, based on different parameters.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note06"/>Note</h3><p>In real applications, the model interacts with the database but to keep things simple, we have hardcoded the data as <code class="literal">Seq[Artist]</code>.</p></div></div><p>We also have a view of <code class="literal">home.scala.html</code>, which displays information about the artist in a table:</p><div class="informalexample"><pre class="programlisting">@(artists: Seq[Artist])
+&lt;!DOCTYPE html&gt; 
+
+&lt;html&gt;
+    &lt;head&gt;
+        &lt;title&gt;Action App&lt;/title&gt;
+    &lt;/head&gt;
+    &lt;body&gt;
+        &lt;table&gt;
+            &lt;thead&gt;
+                &lt;tr&gt;
+                    &lt;th&gt;Name&lt;/th&gt;
+                    &lt;th&gt;Country&lt;/th&gt;
+                    &lt;/tr&gt;
+            &lt;/thead&gt;
+            &lt;tbody&gt;
+            @artists.map { artist =&gt; 
+                &lt;tr&gt;
+                    &lt;td&gt;@artist.name&lt;/td&gt;
+                    &lt;td&gt;@artist.country&lt;/td&gt;
+                &lt;/tr&gt;
+            } 
+            &lt;/tbody&gt;
+        &lt;/table&gt;
+    &lt;/body&gt;
+&lt;/html&gt;</pre></div><p>This is a twirl, template <a id="id34" class="indexterm"/>which requires a <code class="literal">Seq[Artist]</code>. It is similar to the view of the TaskTracker application we built in the previous chapter.</p></div></div>
+<div class="section" title="Actions"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec11"/>Actions</h1></div></div></div><p>An <span class="strong"><strong>Action</strong></span> in Play <a id="id35" class="indexterm"/>defines how a server should respond to a request. The methods, which define an Action, are mapped to a request in the <code class="literal">routes</code> file. For example, let's define an Action which displays the information of all the artists as a response:</p><div class="informalexample"><pre class="programlisting">def listArtist = Action {
+  Ok(views.html.home(Artist.fetch))
+}</pre></div><p>Now, to use this Action, we should map it to a request in the <code class="literal">routes</code> file.</p><div class="informalexample"><pre class="programlisting">GET     /api/artist       controllers.Application.listArtist</pre></div><p>In this example, we fetch all the artists and send them with the view, as the response to the request.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note07"/>Note</h3><p>The term <code class="literal">api</code> used in the <code class="literal">route</code> file is just a URL prefix and is not mandatory.</p></div></div><p>Run the application and access <code class="literal">http://localhost:9000/api/artist</code> from the browser. A table with the available artist is visible.</p><p>Action takes a request and yields a result. It is an implementation of the <code class="literal">EssentialAction</code> trait. It is defined as:</p><div class="informalexample"><pre class="programlisting">trait EssentialAction extends (RequestHeader =&gt; Iteratee[Array[Byte], Result]) with Handler {
+ 
+  def apply() = this
+
+}
+
+object EssentialAction {
+  def apply(f: RequestHeader =&gt; Iteratee[Array[Byte], Result]): EssentialAction = new EssentialAction {
+    def apply(rh: RequestHeader) = f(rh)
+  }
+}</pre></div><p>
+<span class="strong"><strong>Iteratee</strong></span> is a concept <a id="id36" class="indexterm"/>borrowed from functional languages. It is used to process chunks of data in an incremental manner. We will dig deeper into it in <a class="link" href="ch06.html" title="Chapter 6. Reactive Data Streams">Chapter 6</a>, <span class="emphasis"><em>Reactive Data Streams</em></span>.</p><p>The apply method accepts <a id="id37" class="indexterm"/>a function, which transforms a request into a result. The <code class="literal">RequestHeader</code> and other chunks of data represent the request. In short, the <code class="literal">apply</code> method takes in a request and returns a result.</p><p>Let's see some of the ways in which an action can be defined.</p><div class="section" title="Actions with parameters"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec09"/>Actions with parameters</h2></div></div></div><p>We might come <a id="id38" class="indexterm"/>across a situation where we need to define an Action, which takes a value from the request path. In this case, we will need to add the parameters required for the method signature and pass them in the routes file. An example of this would be the method to fetch artists by their selected names. In the controller, add the following:</p><div class="informalexample"><pre class="programlisting">  def fetchArtistByName(name:String) = Action { 
+     Ok(views.html.home(Artist.fetchByName(name))) 
+  } </pre></div><p>The mapping for this in the <code class="literal">routes</code> file will be:</p><div class="informalexample"><pre class="programlisting">GET    /api/artist/:name       controllers.Application.fetchArtistByName(name)</pre></div><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note08"/>Note</h3><p>If it's not specified explicitly, keep in mind that the type of parameter in the path is set to <code class="literal">String</code> by default. The type can be specified in the method call. So, the route defined is equivalent to:</p><div class="informalexample"><pre class="programlisting">GET    /api/artist/:name        controllers.Application.fetchArtistByName(name:String)</pre></div></div></div><p>Similarly, we could add more parameters if required.</p><p>Now, take the use case of a search query. We want the action to accept query parameters, such as name and country. The action is defined as:</p><div class="informalexample"><pre class="programlisting">def search(name: String, country: String) = Action { 
+    val result = Artist.fetchByNameOrCountry(name, country) 
+    if(result.isEmpty){
+      NoContent
+       } 
+    else {
+      Ok(views.html.home(result))
+    }
+  }</pre></div><p>If there are no artists matching the criteria, the response is empty, and shows a status code 204 (no content). If it doesn't, the response status is <code class="literal">200 = (Ok)</code>, and shows the result as the response body.</p><p>The entry corresponding to this Action in the routes file will be the following:</p><div class="informalexample"><pre class="programlisting">GET    /api/search/artist        controllers.Application.search(name:String,country:String)     </pre></div><p>We do not use any parameters in the path, but query parameters whose labels correspond to the method's parameter <a id="id39" class="indexterm"/>names in the <code class="literal">routes</code> file should be included.</p><p>This will result in a valid URL: <code class="literal">http://localhost:9000/api/search/artist?name=Franz&amp;country=Austria</code>
+</p><p>What if we decided to make <code class="literal">country</code> an optional parameter?</p><p>Let's modify the route to accommodate this change:</p><div class="informalexample"><pre class="programlisting">GET    /api/search/artist    controllers.Application.search(name:String?="",country:String?="") </pre></div><p>This allows us to make queries by the name as well, so, both the URLs will now look like this: <code class="literal">http://localhost:9000/api/search/artist?name=Franz</code> and <code class="literal">http://localhost:9000/api/search/artist?name=Franz&amp;country=Austria </code>are now supported.</p><p>Here, we made the <code class="literal">country</code> parameter optional by setting a default value for it in the route definition. Alternatively, we could define an Action to accept a parameter of the <code class="literal">Option</code> type:</p><div class="informalexample"><pre class="programlisting">def search2(name: Option[String], country: String) = Action { 
+    val result = name match{ 
+      case Some(n) =&gt; Artist.fetchByNameOrCountry(n, country) 
+      case None =&gt; Artist.fetchByCountry(country) 
+    } 
+    if(result.isEmpty){
+      NoContent
+    } 
+    else { 
+      Ok(views.html.home(result)) 
+    } 
+  }</pre></div><p>Then, the route will be as follows:</p><div class="informalexample"><pre class="programlisting">GET    /api/search2/artist    controllers.Application.search2(name:Option[String],country:String)</pre></div><p>We can now make requests with or without passing the name of the country:</p><p>
+<code class="literal">http://localhost:9000/api/search2/artist?country=Austria</code>
+</p><p>
+<code class="literal">http://localhost:9000/api/search2/artist?name=Franz&amp;country=Austria</code>
+</p><p>In the examples shown in this section, we didn't need to use the request to generate our result but in some cases, we <a id="id40" class="indexterm"/>would use the request to generate a relevant result. However, to do this, understanding the format of the request content is crucial. We'll see how this is done in the following section.</p></div></div>
+<div class="section" title="Request body parsers"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec12"/>Request body parsers</h1></div></div></div><p>Consider the most <a id="id41" class="indexterm"/>common POST request in any application—the request sent for logins. Will it be sufficient if the request body has the user's credentials in, say, a JSON or XML format? Will the request handler be able to extract this data and process it directly? No, since the data in the request has to be understood by the application code, it must be translated into a compatible type. For example, XML sent in a request must be translated to Scala XML for a Scala application.</p><p>There are several libraries, such as Jackson, XStream, and so on, which can be used to achieve this task, but we wouldn't need them as Play supports this internally. Play provides request body parsers to transform the request body into equivalent Scala objects for some of the frequently used content types. In addition to this, we can extend existing parsers or define new ones.</p><p>Every Action has a parser. How do I know this ? Well, the Action object, which we used to define how our app should respond, is simply an extension of the Action trait, and is defined as follows:</p><div class="informalexample"><pre class="programlisting"> trait Action[A] extends EssentialAction {   
+
+  //Type of the request body. 
+  type BODY_CONTENT = A 
+
+  //Body parser associated with this action. 
+  def parser: BodyParser[A] 
+
+  //Invokes this action 
+  def apply(request: Request[A]): Future[Result] 
+
+       <span class="strong"><strong>def apply(rh: RequestHeader): Iteratee[Array[Byte], Result] = parser(rh).mapM {</strong></span>
+ <span class="strong"><strong>    </strong></span>     <span class="strong"><strong>case Left(r) =&gt;</strong></span> 
+<span class="strong"><strong>      </strong></span>
+<span class="strong"><strong>      Future.successful(r)</strong></span>
+<span class="strong"><strong>    case Right(a) =&gt; </strong></span>
+<span class="strong"><strong>      val request = Request(rh, a) </strong></span>
+<span class="strong"><strong>      </strong></span>
+<span class="strong"><strong>      Play.maybeApplication.map { app =&gt; </strong></span>
+<span class="strong"><strong>        play.utils.Threads.withContextClassLoader(app.classloader) {</strong></span>
+<span class="strong"><strong>          apply(request)</strong></span>
+ <span class="strong"><strong>        }</strong></span>
+<span class="strong"><strong>      }.getOrElse {</strong></span>
+ <span class="strong"><strong>        apply(request)</strong></span>
+<span class="strong"><strong>      }</strong></span>
+<span class="strong"><strong>  }(executionContext)</strong></span>
+
+  //The execution context to run this action in 
+  def executionContext: ExecutionContext = play.api.libs.concurrent.Execution.defaultContext 
+
+  //Returns itself, for better support in the routes file. 
+  override def apply(): Action[A] = this 
+
+  override def toString = { 
+    "Action(parser="+ parser + ")" 
+  } 
+ 
+}</pre></div><p>The <code class="literal">apply</code> method <a id="id42" class="indexterm"/>transforms the value returned by the parser. The value from the parser can either be a result or the request body (denoted as <code class="literal">Either[Result,A]</code>).</p><p>Therefore, the transformation is defined for both possible outcomes. If we pattern-match this, we get <code class="literal">Left(r)</code>, which is a result type and <code class="literal">Right(a)</code>, which is the request body.</p><p>The <code class="literal">mapM</code> method functions similarly to the <code class="literal">map</code> method, the only difference being, it does so asynchronously.</p><p>However, can Actions be defined even without a parser? Yes and no.</p><p>Let's look at an example Action: a POST request, which is required to subscribe to updates. This request takes the user's e-mail ID as a query parameter, which means that we will need to access the request body in order to complete the subscription for this user. First, we'll check what the request body looks like when we do not specify a parser. Create an Action <code class="literal">subscribe</code> in a controller, as shown here:</p><div class="informalexample"><pre class="programlisting">def subscribe = Action { 
+    request =&gt; 
+        Ok("received " + request.body) 
+  } </pre></div><p>Now, add an entry for this in the routes file:</p><div class="informalexample"><pre class="programlisting">POST    /subscribe         controllers.AppController.subscribe </pre></div><p>After this, run the application. Send a POST request at <code class="literal">http://localhost:9000/subscribe</code> with the <code class="literal">userId@gmail.com</code> e-mail ID using a REST client or Curl (whichever you are more comfortable with).</p><p>For example:</p><div class="informalexample"><pre class="programlisting">curl 'http://localhost:9000/subscribe' -H 'Content-Type: text/plain;charset=UTF-8' --data-binary 'userId@gmail.com' </pre></div><p>The response for this request will be as follows:</p><div class="informalexample"><pre class="programlisting">received AnyContentAsText(userId@gmail.com)</pre></div><p>Did you notice that our <code class="literal">subscribe</code> method understood that the content was text? The request body was <a id="id43" class="indexterm"/>translated as <code class="literal">AnyContentAsText(userId@gmail.com)</code>. How did our method determine this? Isn't this the job of a parser mapped to a particular Action?</p><p>When a parser is not specified for an Action, the parser returned by the <code class="literal">BodyParsers.parse.anyContent</code> method is set as the parser for this Action. This is handled by the <code class="literal">ActionBuilder</code>, which we will see later in this chapter. The following code snippet shows one of the methods to generate an Action when no parser is given:</p><div class="informalexample"><pre class="programlisting">final def apply(block: R[AnyContent] =&gt; Result): Action[AnyContent] = apply(BodyParsers.parse.anyContent)(block) </pre></div><p>Now, let's examine what the <code class="literal">BodyParsers.parse.anyContent</code> method does:</p><div class="informalexample"><pre class="programlisting">def anyContent: BodyParser[ AnyContent] = BodyParser("anyContent") { request =&gt; 
+      import play.api.libs.iteratee.Execution.Implicits.trampoline 
+      request.contentType.map(_.toLowerCase(Locale.ENGLISH)) match { 
+        case _ if request.method == HttpVerbs.GET || request.method == HttpVerbs.HEAD =&gt; { 
+          Play.logger.trace("Parsing AnyContent as empty") 
+          empty(request).map(_.right.map(_ =&gt; AnyContentAsEmpty)) 
+        } 
+        case Some("text/plain") =&gt; { 
+          Play.logger.trace("Parsing AnyContent as text") 
+          text(request).map(_.right.map(s =&gt; AnyContentAsText(s))) 
+        } 
+        case Some("text/xml") | Some("application/xml") | Some(ApplicationXmlMatcher()) =&gt; { 
+          Play.logger.trace("Parsing AnyContent as xml") 
+          xml(request).map(_.right.map(x =&gt; AnyContentAsXml(x))) 
+         } 
+        case Some("text/json") | Some("application/json") =&gt; { 
+          Play.logger.trace("Parsing AnyContent as json") 
+          json(request).map(_.right.map(j =&gt; AnyContentAsJson(j))) 
+        } 
+        case Some("application/x-www-form-urlencoded") =&gt; { 
+          Play.logger.trace("Parsing AnyContent as urlFormEncoded") 
+          urlFormEncoded(request).map(_.right.map(d =&gt; AnyContentAsFormUrlEncoded(d))) 
+        } 
+        case Some("multipart/form-data") =&gt; { 
+          Play.logger.trace("Parsing AnyContent as multipartFormData") 
+          multipartFormData(request).map(_.right.map(m =&gt; AnyContentAsMultipartFormData(m))) 
+        } 
+        case _ =&gt; { 
+          Play.logger.trace("Parsing AnyContent as raw") 
+          raw(request).map(_.right.map(r =&gt; AnyContentAsRaw(r))) 
+           }
+      }
+     }</pre></div><p>First of all, it checks whether the request type supports sending data along with the request. If not, it returns <code class="literal">AnyContentAsEmpty</code> (you can check this by changing the request type to GET in the routes file and sending a GET request), else it compares the content type Header of the <a id="id44" class="indexterm"/>request with the supported types. If a match is found, it transforms the data into the corresponding type and returns that, or else it parses it as bytes and returns <code class="literal">play.api.mvc.RawBuffer</code>.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note09"/>Note</h3><p>
+<code class="literal">AnyContentAsEmpty</code>, <code class="literal">AnyContentAsText</code>, <code class="literal">AnyContentAsXml</code>, <code class="literal">AnyContentAsJson</code>, <code class="literal">AnyContentAsFormUrlEncoded</code>, <code class="literal">AnyContentAsMultipartFormData</code>, and <code class="literal">AnyContentAsRaw</code> all extend the trait <code class="literal">AnyContent</code>.</p></div></div><p>So, when an Action is defined for one of the supported content types or when it's a GET/HEAD request, we need not mention the parser.</p><p>Let's see how we can access the request body in our Action. We can now updating our <code class="literal">subscrib</code>
+<code class="literal">e</code> method:</p><div class="informalexample"><pre class="programlisting">def subscribe = Action {
+    request =&gt; 
+      val reqBody: AnyContent = request.body 
+      val textContent: Option[String] = reqBody.asText 
+      textContent.map { 
+        emailId =&gt; 
+          Ok("added " + emailId + " to subscriber's list") 
+      }.getOrElse { 
+        BadRequest("improper request body")
+      } 
+  } </pre></div><p>In order to access the data in the request body, we need to convert it from <code class="literal">AnyContent</code> to <code class="literal">Option[String]</code> using the <code class="literal">asText</code> method. This would become more concise if we added the parser in the Action definition:</p><div class="informalexample"><pre class="programlisting">def subscribe = Action(parse.text) { 
+    request =&gt; 
+      Ok("added " + request.body + " to subscriber's list") 
+  } </pre></div><p>The <code class="literal">urlFormEncoded</code> text <a id="id45" class="indexterm"/>XML parsers return standard Scala objects while the others return Play objects.</p><p>We can assume that the subscription request takes a JSON in this format:</p><div class="informalexample"><pre class="programlisting">{"emailId": "userId@gmail.com", " interval": "month"} </pre></div><p>Now, we will need to modify our <code class="literal">subscribe</code> method to <code class="literal">def subscribe = Action(parse.json) {</code>, as shown here:</p><div class="informalexample"><pre class="programlisting">       request =&gt; 
+      val reqData: JsValue = request.body 
+      val emailId = (reqData \ "emailId").as[String] 
+      val interval = (reqData \ "interval").as[String] 
+      Ok(s"added $emailId to subscriber's list and will send updates every $interval") 
+  } </pre></div><p>For the following request:</p><div class="informalexample"><pre class="programlisting">curl 'http://localhost:9000/subscribe' -H 'Content-Type: text/json' --data-binary '{"emailId": "userId@gmail.com", "interval": "month"}' </pre></div><p>We get a response as follows:</p><p>Added <code class="literal">userId@gmail.com</code> to the subscriber's list and will send updates every month</p><p>The <code class="literal">parse.json</code> transforms the request body to <code class="literal">play.api.libs.json.JsValue</code>. The <code class="literal">\</code> operator is used to access the value of a particular key. Similarly, there is a <code class="literal">\\</code> operator, which can be for the value of a key, though it may not be a direct child of the current node. Play-Json has several methods that simplify the handling of data in a JSON format, such as modifying the structure, or converting it to Scala models, and so on. Play-Json is also available as a <a id="id46" class="indexterm"/>stand-alone library to enable its usage in non-Play projects. Its documentation is available at <a class="ulink" href="https://www.playframework.com/documentation/2.3.x/ScalaJson">https://www.playframework.com/documentation/2.3.x/ScalaJson</a>.</p><p>Now, let's see how to write an Action to add a new user, which takes a request of content-type multipart:</p><div class="informalexample"><pre class="programlisting">import java.io.File 
+ 
+  def createProfile = Action(parse.multipartFormData) {
+    request =&gt; 
+      val formData = request.body.asFormUrlEncoded
+      val email: String = formData.get("email").get(0)
+      val name: String = formData.get("name").get(0)
+      val userId: Long = User(email, name).save
+      request.body.file("displayPic").map {
+        picture =&gt; 
+          val path = "/socialize/user/" 
+          if (!picture.filename.isEmpty) {
+            picture.ref.moveTo(new File(path + userId + ".jpeg"))
+          }
+          Ok("successfully added user")
+      }.getOrElse {
+           BadRequest("failed to add user")
+      }
+  }</pre></div><p>The request has three fields: <code class="literal">email</code>, <code class="literal">name</code>, and <code class="literal">displayPic</code>. From the request data, we fetch the e-mail of, name, and add a new user. The <code class="literal">User.</code> <code class="literal">save</code> method adds an entry in the user table and throws an error if a user with the same e-mail ID exists. This is why the operations in the file are performed only after adding a user. The <code class="literal">displayPic</code> is optional; therefore, the check for its length to be greater than zero is made prior to saving the image.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note10"/>Note</h3><p>It is better to complete the data transactions before the file-related ones, since they may fail and file-related operations might not be required for the incorrect request. The following table <a id="id47" class="indexterm"/>shows the supported content-types, parsers, and their default conversions.</p></div></div><div class="informaltable"><table border="1"><colgroup><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/></colgroup><thead><tr><th style="text-align: left" valign="bottom">
+<p>Content type</p>
+</th><th style="text-align: left" valign="bottom">
+<p>Parser</p>
+</th><th style="text-align: left" valign="bottom">
+<p>Parsed to Scala type</p>
+</th></tr></thead><tbody><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">text/plain</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">text</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">String</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">application/json</code> or <code class="literal">text/json</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">json</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">play.api.libs.json.JsValue</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">application/xml</code>, <code class="literal">text/xml</code>,  or <code class="literal">application/XXX+xml</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">xml</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NodeSeq</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">application/form-url-encoded</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">urlFormEncoded</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Map[String, Seq[String]]</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">multipart/form-data</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">multipartFormData</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">play.api.mvc.MultipartFormData[TemporaryFile]</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">other</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">raw</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Play.api.mvc.RawBuffer</code>
+</p>
+</td></tr></tbody></table></div></div>
+<div class="section" title="Extending a parser"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec13"/>Extending a parser</h1></div></div></div><p> Let's extend <a id="id48" class="indexterm"/>the JSON parser so that we get a subscription model. We will assume that the <code class="literal">Subscription</code> model is defined as follows:</p><div class="informalexample"><pre class="programlisting">case class Subscription(emailId: String, interval: String) </pre></div><p>Now, let's write a parser that transforms the request body into a subscription object. The following code should be written in a controller:</p><div class="informalexample"><pre class="programlisting">val parseAsSubscription = parse.using {
+    request =&gt; 
+      parse.json.map {
+        body =&gt; 
+          val emailId:String = (body \ "emailId").as[String] 
+          val fromDate:Long = (body \ "fromDate").as[Long] 
+          Subscription(emailId, fromDate)
+      }
+  }
+
+  implicit val subWrites = Json.writes[Subscription]
+  def getSub = Action(parseAsSubscription) {
+    request =&gt; 
+      val subscription: Subscription = request.body
+      Ok(Json.toJson(subscription))
+   } </pre></div><p>There are also tolerant parsers. By tolerant, we mean that errors in a format are not ignored. This simply means that it ignores the content type header in the request and parses based on the type specified. For example, let's update the <code class="literal">subscribe</code> method:</p><div class="informalexample"><pre class="programlisting">def subscribe = Action(parse.tolerantJson) {
+    request =&gt; 
+      val reqData: JsValue = request.body
+      val emailId = (reqData \ "email").as[String]
+      val interval = (reqData \ "interval").as[String]
+  Ok(s"added $emailId to subscriber's list and will send updates every $interval") 
+    } </pre></div><p>Now, a request with the <a id="id49" class="indexterm"/>content type as text and a request where the content type text/JSON, or any other type for that matter, will give the same result. There are tolerant parsers for all the basic parsers supported in Play.</p></div>
+<div class="section" title="Exploring the results"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec14"/>Exploring the results</h1></div></div></div><p>In Play, the <a id="id50" class="indexterm"/>response to a request is a <span class="strong"><strong>result</strong></span>. A result has two components: the response header and the response body. Let's look at a simple example of this:</p><div class="informalexample"><pre class="programlisting">def plainResult = Action {
+  Result( 
+    header = ResponseHeader(200, Map(CONTENT_TYPE -&gt; "text/plain")), 
+    body = Enumerator("This is the response from plainResult method".getBytes())
+  )
+}</pre></div><p>Notice that we used an enumerator for the response body. An enumerator is a means to provide data to an iteratee. We will discuss these in detail in <a class="link" href="ch06.html" title="Chapter 6. Reactive Data Streams">Chapter 6</a>, <span class="emphasis"><em>Reactive Data Streams</em></span>.</p><p>Apart from this, a result has additional functions that equips us with better means to handle response headers, sessions, cookies, and so on.</p><p>A result can send JSON, XML, and images as a response, apart from a String content. An easier way of generating a result is to use the result helpers. A result helper is used for most of the HTTP response status. As an example, let's see how the <code class="literal">TODO</code> Action that comes built in with Play is implemented:</p><div class="informalexample"><pre class="programlisting">val TODO = Action {
+    NotImplemented[play.api.templates.Html](views.html.defaultpages.todo()) 
+  } </pre></div><p>In this snippet, <code class="literal">NotImplemented</code> is a helper, which returns a result with a status of 501 and <code class="literal">views.html.defaultpages.todo()</code> returns the default page, which is <code class="literal">todo.scala.html</code>.</p><p>As an example, we'll consider the Action that sends the user's profile image inline. The Action would now be as follows:</p><div class="informalexample"><pre class="programlisting">def getUserImage(userId: Long) = Action {
+    val path: String = s"/socialize/user/$userId.jpeg"
+    val img = new File(path)
+    if (img.exists()) {
+      Ok.sendFile( 
+        content = img, 
+        inline = true
+      )
+     }
+    else
+      NoContent
+  } </pre></div><p>Here, we attempt to load the user's profile image using the predefined <code class="literal">getUserImagePath</code> method. If the image file exists and attaches itself to the response, we return a <a id="id51" class="indexterm"/>response with the <code class="literal">204</code> status code.</p><p>We also saw how a result helper can be used to send the page content, both static and dynamic, using views:</p><div class="informalexample"><pre class="programlisting">def listArtist = Action { 
+     Ok(views.html.home(Artist.fetch)) 
+  }</pre></div><p>We could also use the <code class="literal">Status</code> class to generate the result, as shown here:</p><div class="informalexample"><pre class="programlisting">def save = Action(parse.text) { 
+    request =&gt; 
+      Status(200)("Got: " + request.body) 
+  } </pre></div><p>This table shows you the result helpers and their corresponding status codes:</p><div class="informaltable"><table border="1"><colgroup><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/></colgroup><thead><tr><th style="text-align: left" valign="bottom">
+<p>Result helper</p>
+</th><th style="text-align: left" valign="bottom">
+<p>Status code constants</p>
+</th><th style="text-align: left" valign="bottom">
+<p>Status code</p>
+</th></tr></thead><tbody><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">CONTINUE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>100</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">SWITCHING_PROTOCOLS</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>101</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Ok</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">OK</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>200</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Created</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">CREATED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>201</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Accepted</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">ACCEPTED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>202</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NonAuthoritativeInformation</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NON_AUTHORITATIVE_INFORMATION</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>203</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NoContent</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NO_CONTENT</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>204</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">ResetContent</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">RESET_CONTENT</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>205</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">PartialContent</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">PARTIAL_CONTENT</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>206</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">MultiStatus</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">MULTI_STATUS</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>207</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">MULTIPLE_CHOICES</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>300</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">MovedPermanently</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">MOVED_PERMANENTLY</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>301</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Found</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">FOUND</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>302</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">SeeOther</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">SEE_OTHER</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>303</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NotModified</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NOT_MODIFIED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>304 </p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">USE_PROXY</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>305</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">TemporaryRedirect</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">TEMPORARY_REDIRECT</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>307</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">BadRequest</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">BAD_REQUEST</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>400</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Unauthorized</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">UNAUTHORIZED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>401</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">PAYMENT_REQUIRED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>402</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Forbidden</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">FORBIDDEN</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>403</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NotFound</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NOT_FOUND</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>404</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">MethodNotAllowed</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">METHOD_NOT_ALLOWED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>405</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NotAcceptable</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NOT_ACCEPTABLE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>406</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">PROXY_AUTHENTICATION_REQUIRED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>407</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">RequestTimeout</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">REQUEST_TIMEOUT</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>408</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Conflict</code>
+</p>
+</td><td style="text-align: left" valign="top"><a id="id52" class="indexterm"/>
+<p>
+<code class="literal">CONFLICT</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>409</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Gone</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">GONE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>410</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">LENGTH_REQUIRED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>411</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">PreconditionFailed</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">PRECONDITION_FAILED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>412</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">EntityTooLarge</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">REQUEST_ENTITY_TOO_LARGE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>413</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">UriTooLong</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">REQUEST_URI_TOO_LONG</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>414</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">UnsupportedMediaType</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">UNSUPPORTED_MEDIA_TYPE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>415</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>–</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">REQUESTED_RANGE_NOT_SATISFIABLE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>416</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">ExpectationFailed</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">EXPECTATION_FAILED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>417</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">UnprocessableEntity</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">UNPROCESSABLE_ENTITY</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>422</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">Locked</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">LOCKED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>423</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">FailedDependency</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">FAILED_DEPENDENCY</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>424</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">TooManyRequest</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">TOO_MANY_REQUEST</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>429</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">InternalServerError</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">INTERNAL_SERVER_ERROR</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>500</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NotImplemented</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">NOT_IMPLEMENTED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>501</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">BadGateway</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">BAD_GATEWAY</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>502</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">ServiceUnavailable</code>
+</p>
+</td><td style="text-align: left" valign="top"><a id="id53" class="indexterm"/>
+<p>
+<code class="literal">SERVICE_UNAVAILABLE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>503</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">GatewayTimeout</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">GATEWAY_TIMEOUT</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>504</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">HttpVersionNotSupported</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">HTTP_VERSION_NOT_SUPPORTED</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>505</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">InsufficientStorage</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">INSUFFICIENT_STORAGE</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>507</p>
+</td></tr></tbody></table></div></div>
+<div class="section" title="Asynchronous Actions"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec15"/>Asynchronous Actions</h1></div></div></div><p>Suppose that we are <a id="id54" class="indexterm"/>at a food court and place an order to eat something at a kiosk, we are given a token and a bill. Later, when the order is ready, the kiosk <a id="id55" class="indexterm"/>flashes the token number, and upon noticing it, we collect the order.</p><p>This is similar to a request with an asynchronous response cycle, where the kiosk acts like the server, the order acts similar to a request, and the token as a promise, which gets resolved when the order is ready.</p><p>Most operations are better handled asynchronously. This is also mostly preferred since it does not block server resources until the operation is completed.</p><p>Play Action is a helper object, which extends the <code class="literal">ActionBuilder</code> trait. The apply method of the <code class="literal">ActionBuilder</code> trait implements the <code class="literal">Action</code> trait, which we saw earlier. Let's take a look at the relevant code from the <code class="literal">ActionBuilder</code> trait:</p><div class="informalexample"><pre class="programlisting">trait ActionBuilder[+R[_]] extends ActionFunction[Request, R] { 
+  self =&gt; 
+
+  final def apply[A](bodyParser: BodyParser[A])(block: R[A] =&gt; 
+    Result): Action[A] = async(bodyParser) { req: R[A] =&gt; 
+    Future.successful(block(req)) 
+  } 
+
+  final def async[A](bodyParser: BodyParser[A])(block: R[A] =&gt; Future[Result]): Action[A] = composeAction(new Action[A] { 
+    def parser = composeParser(bodyParser) 
+    def apply(request: Request[A]) = try { 
+      invokeBlock(request, block) 
+    } catch { 
+      // NotImplementedError is not caught by NonFatal, wrap it 
+      case e: NotImplementedError =&gt; throw new RuntimeException(e) 
+      // LinkageError is similarly harmless in Play Framework, since automatic reloading could easily trigger it 
+      case e: LinkageError =&gt; throw new RuntimeException(e) 
+    } 
+    override def executionContext = ActionBuilder.this.executionContext 
+  }) 
+
+... 
+
+}  </pre></div><p>Notice that the <code class="literal">apply</code> method itself calls the <code class="literal">async</code> method internally. The <code class="literal">async</code> method expects us to define the Action, which results in <code class="literal">Future[Result]</code>, thereby aiding us to write non-blocking code.</p><p>We will use the same <a id="id56" class="indexterm"/>method to define an asynchronous Action. Assume that we need to fetch the requested file from a remote client, consolidate/analyze the data, and then send the results. Since we do not know the size of the file and the <a id="id57" class="indexterm"/>status of network connectivity with a remote client, it is better to handle the Action asynchronously. The action will be defined in this way:</p><div class="informalexample"><pre class="programlisting">def getReport(fileName:String ) = Action.async { 
+     Future { 
+      val file:File = new File(fileName) 
+      if (file.exists()) { 
+        val info = file.lastModified() 
+        Ok(s"lastModified on ${new Date(info)}") 
+      } 
+      else 
+        NoContent 
+    } 
+  } </pre></div><p>After fetching the file, if it is empty, we send a response with a status code of 204, else we continue with the processing and send the processed data as a part of the result.</p><p>We may come across an instance, as we saw in the previous example, get report, that we do not wish to wait longer than 10 seconds for the remote client to fetch the file. In this case, we'll need to modify the Action definition in this way:</p><div class="informalexample"><pre class="programlisting">def getReport(fileName: String) = Action.async { 
+   
+    val mayBeFile = Future { 
+      new File(fileName) 
+    } 
+    val timeout = play.api.libs.concurrent.Promise.timeout("Past max time", 10, TimeUnit.SECONDS) 
+    Future.firstCompletedOf(Seq(mayBeFile, timeout)).map { 
+      case f: File =&gt; 
+        if (f.exists()) {
+          val info = f.lastModified()
+          Ok(s"lastModified on ${new Date(info)}")
+        } 
+        else
+          NoContent
+      case t: String =&gt; InternalServerError(t)
+    }
+  }</pre></div><p>So, if the remote client doesn't respond with the requested file in 10 seconds, we will get a response with status <a id="id58" class="indexterm"/>code 500 and the content as the message we set for the <a id="id59" class="indexterm"/>timeout, <code class="literal">Past max time</code>.</p></div>
+<div class="section" title="Content negotiation"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec16"/>Content negotiation</h1></div></div></div><p>According to <a id="id60" class="indexterm"/>HTTP:</p><div class="blockquote"><blockquote class="blockquote"><p><span class="emphasis"><em>Content negotiation is the process of selecting the best representation for a given response when there are multiple representations available.</em></span></p></blockquote></div><p>It can either be server-driven or agent-driven or a combination of both, which is called transparent negotiation. Play provides support for server-driven negotiations. This is handled by the rendering trait and is extended by the controller trait. The controller trait is the one where the controller objects in a Play app extend.</p><p>Let's look at the <code class="literal">Rendering</code> trait:</p><div class="informalexample"><pre class="programlisting">trait Rendering {
+
+   object render { 
+
+    //Tries to render the most acceptable result according to the request's Accept header value. 
+    def apply(f: PartialFunction[MediaRange, Result])(implicit request: RequestHeader): Result = { 
+      def _render(ms: Seq[MediaRange]): Result = ms match {
+        case Nil =&gt; NotAcceptable 
+        case Seq(m, ms @ _*) =&gt; 
+          f.applyOrElse(m, (m: MediaRange) =&gt; _render(ms)) 
+      } 
+
+      // "If no Accept header field is present, then it is assumed that the client accepts all media types." 
+      val result = 
+        if (request.acceptedTypes.isEmpty) _render(Seq(new MediaRange("*", "*", Nil, None, Nil))) 
+        else _render(request.acceptedTypes) 
+      result.withHeaders(VARY -&gt; ACCEPT) 
+    } 
+
+    /**Tries to render the most acceptable result according to the request's Accept header value. 
+      * This function can be used if you want to do asynchronous processing in your render function. 
+     */ 
+    def async(f: PartialFunction[MediaRange, Future[Result]])(implicit request: RequestHeader): Future[Result] = { 
+      def _render(ms: Seq[MediaRange]): Future[Result] = ms match { 
+        case Nil =&gt; Future.successful(NotAcceptable) 
+         case Seq(m, ms @ _*) =&gt; 
+           f.applyOrElse(m, (m: MediaRange) =&gt; _render(ms)) 
+      } 
+
+      // "If no Accept header field is present, then it is assumed that the client accepts all media types." 
+      val result = 
+        if (request.acceptedTypes.isEmpty) _render(Seq(new MediaRange("*", "*", Nil, None, Nil))) 
+        else _render(request.acceptedTypes) 
+      result.map(_.withHeaders(VARY -&gt; ACCEPT)) 
+     } 
+  } 
+}</pre></div><p>The <code class="literal">_render</code> method defined in the <code class="literal">apply</code> method calls the partial <code class="literal">f</code> function on the accept headers in the request. If <code class="literal">f</code> is not defined for the any of the accept headers, a response with status code 406 is forwarded. If it's not, the result of <code class="literal">f</code> for the first accept header for which <code class="literal">f</code> is defined, is returned.</p><p>Since the controller extends the rendering trait, we can use the render object within our Action definition. For example, we might have an Action, which gets the configuration in JSON and XML after reading it from a file with an XML format, depending on the accept headers in the request. Let's see how this is done:</p><div class="informalexample"><pre class="programlisting">def getConfig = Action {
+    implicit request =&gt; 
+      val xmlResponse: Node = &lt;metadata&gt; 
+        &lt;company&gt;TinySensors&lt;/company&gt; 
+        &lt;batch&gt;md2907&lt;/batch&gt; 
+      &lt;/metadata&gt; 
+
+      val jsonResponse = Json.obj("metadata" -&gt; Json.arr( 
+        Json.obj("company" -&gt; "TinySensors"), 
+         Json.obj("batch" -&gt; "md2907")) 
+      ) 
+      render { 
+         case Accepts.Xml() =&gt; Ok(xmlResponse) 
+        case Accepts.Json() =&gt; Ok(jsonResponse) 
+      } 
+  } </pre></div><p>In this snippet, <code class="literal">Accepts.Xml()</code> and <code class="literal">Accepts.Json()</code> are Play's helper methods that check to see if the request <a id="id61" class="indexterm"/>accepts the response of the <code class="literal">application/xml</code> and <code class="literal">applicat</code>
+<code class="literal">ion/json</code> types, respectively. There are currently four predefined accepts and these are tabulated here:</p><div class="informaltable"><table border="1"><colgroup><col style="text-align: left"/><col style="text-align: left"/></colgroup><thead><tr><th style="text-align: left" valign="bottom">
+<p>Request accept helper</p>
+</th><th style="text-align: left" valign="bottom">
+<p>Accept header value</p>
+</th></tr></thead><tbody><tr><td style="text-align: left" valign="top">
+<p>XML</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">application/xml</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>JSON</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">application/json</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>HTML</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">text/html</code>
+</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>JavaScript</p>
+</td><td style="text-align: left" valign="top">
+<p>
+<code class="literal">text/javascript</code>
+</p>
+</td></tr></tbody></table></div><p>This is facilitated by the <code class="literal">RequestExtractors</code> trait and the <code class="literal">AcceptExtractors</code> trait. <code class="literal">RequestExtractors</code> is also extended by the controller trait. Let's look at the extractor traits here:</p><div class="informalexample"><pre class="programlisting">trait RequestExtractors extends AcceptExtractors {
+
+  //Convenient extractor allowing to apply two extractors. 
+  object &amp; { 
+    def unapply(request: RequestHeader): Option[(RequestHeader, RequestHeader)] = Some((request, request)) 
+  } 
+
+}
+
+//Define a set of extractors allowing to pattern match on the Accept HTTP header of a request 
+trait AcceptExtractors {
+
+  //Common extractors to check if a request accepts JSON, Html, etc. 
+  object Accepts { 
+    import play.api.http.MimeTypes 
+    val Json = Accepting(MimeTypes.JSON) 
+    val Html = Accepting(MimeTypes.HTML) 
+    val Xml = Accepting(MimeTypes.XML) 
+    val JavaScript = Accepting(MimeTypes.JAVASCRIPT) 
+  } 
+
+}
+
+//Convenient class to generate extractors checking if a given mime type matches the Accept header of a request. 
+case class Accepting(val mimeType: String) {
+  def unapply(request: RequestHeader): Boolean = request.accepts(mimeType) 
+  def unapply(mediaRange: play.api.http.MediaRange): Boolean = mediaRange.accepts(mimeType) 
+}</pre></div><p>From this code, all that we need to define a custom accepts is the value we would expect the request's accept header to have. For example, to define a helper for <code class="literal">image/png</code>, we use this code:</p><div class="informalexample"><pre class="programlisting">val AcceptsPNG = Accepting("image/png") </pre></div><p>We also notice that <a id="id62" class="indexterm"/>
+<code class="literal">RequestExtractors</code> has an <code class="literal">&amp;</code> object, and we can use this when we wish to send the same response to multiple accept types. So, in the <code class="literal">getConfig</code> method shown in the preceding code, if the same response response is sent for <code class="literal">application/json</code> and <code class="literal">text/javascript</code>, we will modify it as follows:</p><div class="informalexample"><pre class="programlisting">def fooBar = Action { 
+    implicit request =&gt; 
+      val xmlResponse: Node = &lt;metadata&gt; 
+        &lt;company&gt;TinySensors&lt;/company&gt; 
+        &lt;batch&gt;md2907&lt;/batch&gt; 
+      &lt;/metadata&gt; 
+
+      val jsonResponse = Json.obj("metadata" -&gt; Json.arr( 
+        Json.obj("company" -&gt; "TinySensors"), 
+        Json.obj("batch" -&gt; "md2907")) 
+      ) 
+      
+      render { 
+        case Accepts.Xml() =&gt; Ok(xmlResponse) 
+        case Accepts.Json() &amp; Accepts.JavaScript() =&gt; Ok(jsonResponse) 
+      }
+  }</pre></div><p>The <code class="literal">render</code> object can be <a id="id63" class="indexterm"/>used similarly when defining an asynchronous Action.</p></div>
+<div class="section" title="Filters"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec17"/>Filters</h1></div></div></div><p>In most applications, we <a id="id64" class="indexterm"/>need to perform the same operation for all requests. We might be required to add a few fields to all the responses at a later stage, after we have already defined all the actions needed for our application.</p><p>So, in this case, will we have to update all the Actions?</p><p>No. This is where the filter API comes to our rescue. We don't need to modify how we define our Actions to solve the problem. All we need to do is define a filter and use it.</p><p>Let's see how we can define our filter:</p><div class="informalexample"><pre class="programlisting">import org.joda.time.DateTime 
+import org.joda.time.format.DateTimeFormat
+import play.api.mvc._
+import play.api.http.HeaderNames._ 
+import play.api.libs.concurrent.Execution.Implicits.defaultContext 
+
+object HeadersFilter {
+  val noCache = Filter { 
+    (nextFilter, rh) =&gt; 
+      nextFilter(rh) map { 
+        case result: Result =&gt; addNoCacheHeaders(result) 
+      } 
+  } 
+
+  private def addNoCacheHeaders(result: Result): Result = { 
+    result.withHeaders(PRAGMA -&gt; "no-cache", 
+      CACHE_CONTROL -&gt; "no-cache, no-store, must-revalidate, max-age=0", 
+      EXPIRES -&gt; serverTime) 
+  } 
+
+  private def serverTime = { 
+    val now = new DateTime() 
+    val dateFormat = DateTimeFormat.forPattern( 
+      "EEE, dd MMM yyyy HH:mm:ss z") 
+    dateFormat.print(now) 
+  } 
+} </pre></div><p>The <code class="literal">HeadersFilter.noCache</code> filter adds all the headers to a response, which are required to disable caching in browsers. <code class="literal">PRAGMA</code>, <code class="literal">CACHE_CONTROL</code>, and <code class="literal">EXPIRES</code> are constants provided by <code class="literal">play.api.http.HeaderNames</code>.</p><p>Now, to use this filter, we would need to update the global settings for the application.</p><p>The global settings for <a id="id65" class="indexterm"/>any Play-based application can be configured using a global object. This is an object that's defined with the name <code class="literal">Global</code> and is placed in the app directory. We will find out more about global settings in <a class="link" href="ch07.html" title="Chapter 7. Playing with Globals">Chapter 7</a>, <span class="emphasis"><em>Playing with Globals</em></span>.</p><p>There are two ways of defining how the filter should be used. These are:</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Extending the <code class="literal">WithFilters</code> class instead of <code class="literal">GlobalSettings</code> for the global object.</li><li class="listitem">Invoking the filter manually in the global object.<p>An example of using <code class="literal">WithFilters</code> is:</p><div class="informalexample"><pre class="programlisting">object Global extends WithFilters(HeadersFilter.noCache) { 
+  // ... 
+}</pre></div><p>Now, let's see how this can be done manually:</p><div class="informalexample"><pre class="programlisting">object Global extends GlobalSettings {
+  override def doFilter(action: EssentialAction): EssentialAction = HeadersFilter.noCache(action) 
+}</pre></div><p>In Play, a filter is defined similar to Action—there is a filter trait, which extends <code class="literal">EssentialFilter</code> and a helper filter object. The helper filter is defined as:</p><div class="informalexample"><pre class="programlisting">object Filter {
+  def apply(filter: (RequestHeader =&gt; Future[Result], RequestHeader) =&gt; Future[Result]): Filter = new Filter { 
+    def apply(f: RequestHeader =&gt; Future[Result])(rh: RequestHeader): Future[Result] = filter(f, rh) 
+  } 
+}</pre></div><p>In this code snippet, the <code class="literal">apply</code> method calls a new filter, which is the filter trait.</p><p>Multiple filters can be applied for a single application. If <code class="literal">WithFilters</code> is used, they are applied in the specified order. If they are set manually, we <a id="id66" class="indexterm"/>can use the filters object used internally by the apply method of the <code class="literal">WithFilters</code> class. The <code class="literal">Filters</code> object is defined as follows:</p><div class="informalexample"><pre class="programlisting">object Filters {
+  def apply(h: EssentialAction, filters: EssentialFilter*) = h match { 
+    case a: EssentialAction =&gt; FilterChain(a, filters.toList) 
+    case h =&gt; h 
+  } 
+}</pre></div><p>
+<code class="literal">FilterChain</code> is another helper object used to compose <code class="literal">EssentialAction</code> from a combination of <code class="literal">EssentialAction</code> and multiple <code class="literal">EssentialFilters</code>:</p><div class="informalexample"><pre class="programlisting">object FilterChain {
+  def apply[A](action: EssentialAction, filters: List[EssentialFilter]): EssentialAction = new EssentialAction { 
+    def apply(rh: RequestHeader): Iteratee[Array[Byte], Result] = { 
+      val chain = filters.reverse.foldLeft(action) { (a, i) =&gt; i(a) } 
+      chain(rh) 
+    } 
+  } 
+}</pre></div></li><li class="listitem">Filters are recommended when some operation is to be performed indiscriminately for <a id="id67" class="indexterm"/>all routes. Play provides a filter module, which has <a id="id68" class="indexterm"/>a <code class="literal">GzipFilter</code>, <code class="literal">SecurityHeadersFilter</code>, and <code class="literal">CSRFFilter</code>.</li></ol></div></div>
+<div class="section" title="Action composition"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec18"/>Action composition</h1></div></div></div><p>Defining an <a id="id69" class="indexterm"/>Action for a request is merely the act of using the Action helper object, which is defined as follows:</p><div class="informalexample"><pre class="programlisting">object Action extends ActionBuilder[Request] {
+  def invokeBlock[A](request: Request[A], block: (Request[A]) =&gt; Future[Result]) = block(request) 
+}</pre></div><p>The code which we write <a id="id70" class="indexterm"/>within an action block goes on to be the <code class="literal">invokeBlock</code> method. This method is inherited from <code class="literal">ActionBuilder</code>. This is a trait that provides helper methods to generate an Action. All the different ways in which we define an Action, such as async, synchronous, with or without specifying a parser, and so on are declared in <code class="literal">ActionBuilder</code>.</p><p>We can also define our custom Actions by extending <code class="literal">ActionBuilder</code> and defining a custom invoke block.</p><div class="section" title="The need for an Action composition"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec10"/>The need for an Action composition</h2></div></div></div><p>Let's take a case study. A lot <a id="id71" class="indexterm"/>of applications these days keep track of requests, such as the IP address of the machine it was instigated from, the time it was received, or even the whole request as is. It would be a crime to add the same code in almost every Action defined for such an application.</p><p>Now, assume that we need to persist a request using a <code class="literal">persistReq</code> method every time it is encountered for a specific module: the administrator user, for example. Then, in this case, we could define a custom Action to be used only within this module. Let's see how we can define a custom Action to persist a request before processing it:</p><div class="informalexample"><pre class="programlisting">import play.api.mvc._
+import scala.concurrent.Future
+
+object TrackAction extends ActionBuilder[Request] {
+  override protected def invokeBlock[A](request: Request[A], block: (Request[A]) =&gt; Future[Result]) = { 
+    persistReq(request) 
+    block(request) 
+  } 
+
+  private def persistReq[A](request: Request[A]) = { 
+    ...  
+  } 
+} </pre></div><p>Within our application, we could use it similar to the default Action:</p><div class="informalexample"><pre class="programlisting">def viewAdminProfile(id: Long) = TrackAction {
+    request =&gt; 
+      ... 
+  } 
+
+def updateAdminProfile(id: Long) = TrackAction(parse.json) { 
+    request =&gt; 
+      ... 
+  } </pre></div><p>Another way to define a custom Action is by extending the Action trait. So, we can also define <code class="literal">TrackAction</code> as follows:</p><div class="informalexample"><pre class="programlisting">case class TrackAction[A](action: Action[A]) extends Action[A] { 
+
+  def apply(request: Request[A]): Future[Result] = { 
+    persistReq(request) 
+    action(request) 
+  } 
+
+  private def persistReq(request: Request[A]) = { 
+    …  
+    } 
+  
+  lazy val parser = action.parser 
+}</pre></div><p>Its usage would be <a id="id72" class="indexterm"/>something similar to this:</p><div class="informalexample"><pre class="programlisting">def viewAdminProfile(id: Long) = TrackAction {
+    Action {request =&gt; 
+        … 
+  } 
+} 
+
+def updateAdminProfile(id: Long) = TrackAction { 
+    Action(parse.json) {	request =&gt; 
+        … 
+   } 
+   } </pre></div><p>Notice that we need to wrap the Action definition again within the action object. We could remove this additional overhead of wrapping an action object every time by defining <code class="literal">ActionBuilder</code>, which uses the <code class="literal">composeAction</code> method:</p><div class="informalexample"><pre class="programlisting">object TrackingAction extends ActionBuilder[Request] { 
+  def invokeBlock[A](request: Request[A], block: (Request[A]) =&gt; Future[Result]) = { 
+    block(request) 
+  } 
+  override def composeAction[A](action: Action[A]) = new TrackAction(action) 
+}</pre></div><p>Now, the usage <a id="id73" class="indexterm"/>will be:</p><div class="informalexample"><pre class="programlisting">def viewAdminProfile(id: Long) = TrackingAction {
+    request =&gt; 
+      ... 
+  } 
+
+def updateAdminProfile(id: Long) = TrackingAction(parse.json) { 
+    request =&gt; 
+      ... 
+    }</pre></div></div><div class="section" title="Differentiating between Action composition and filters"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec11"/>Differentiating between Action composition and filters</h2></div></div></div><p>
+<span class="strong"><strong>Action composition</strong></span> is an Action that extends <code class="literal">EssentialAction</code> and returns a result. It is more <a id="id74" class="indexterm"/>suitable when we need to perform <a id="id75" class="indexterm"/>an operation on a few routes or Actions only. Action composition is more powerful than a filter and is more apt at handling specific concerns, such as authentication.</p><p>It provides support to read, modify, and even block a request. There is also a provision to define Actions for custom request types.</p></div><div class="section" title="Customized requests"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec12"/>Customized requests</h2></div></div></div><p>First, let's see how <a id="id76" class="indexterm"/>to define custom requests. We can also define custom requests using the <code class="literal">WrappedRequest</code> class. This is defined as follows:</p><div class="informalexample"><pre class="programlisting">class WrappedRequest[A](request: Request[A]) extends Request[A] { 
+     def id = request.id 
+    def tags = request.tags 
+    def body = request.body 
+    def headers = request.headers 
+    def queryString = request.queryString 
+    def path = request.path 
+    def uri = request.uri 
+    def method = request.method 
+    def version = request.version 
+    def remoteAddress = request.remoteAddress 
+    def secure = request.secure 
+   } </pre></div><p>Suppose we wish to <a id="id77" class="indexterm"/>pass the time at which a request was received with every request, we could define this as:</p><div class="informalexample"><pre class="programlisting">class TimedRequest[A](val time: DateTime, request: Request[A]) extends WrappedRequest[A](request) </pre></div><p>Now, let's see how we can manipulate the incoming requests and transform them into <code class="literal">TimedRequest</code>:</p><div class="informalexample"><pre class="programlisting">def timedAction[A](action: Action[A]) = Action.async(action.parser) {
+  request =&gt; 
+    val time = new DateTime()
+    val newRequest = new AppRequest(time, request)
+    action(newRequest)
+}</pre></div><p>Therefore, the <code class="literal">timedAction</code> Action can be used within controllers in this way:</p><div class="informalexample"><pre class="programlisting">def getUserList = timedAction {
+    Action {
+      request =&gt; 
+        val users= User.getAll
+        Ok(Json.toJson(users))
+    }
+  }</pre></div><p>Now, suppose we wish to block all the requests from certain browsers; it can be done in this way:</p><div class="informalexample"><pre class="programlisting">def timedAction[A](action: Action[A]) = Action.async(action.parser) {
+  request =&gt; 
+    val time = new DateTime()
+    val newRequest = new AppRequest[A](time, request)
+    request.headers.get(USER_AGENT).collect {
+      case agent if isCompatibleBrowser(agent) =&gt; 
+        action(newRequest)
+      }.getOrElse{
+     Future.successful(Ok(views.html.main()))
+  }
+}</pre></div><p>Here, the <code class="literal">isCompatibleBrowser</code> method checks if the browser is supported.</p><p>We can also manipulate the response; let's add the duration it took to process the request in the response headers:</p><div class="informalexample"><pre class="programlisting">def timedAction[A](action: Action[A]) = Action.async(action.parser) { 
+   request =&gt; 
+    val time = new DateTime() 
+    val newRequest = new AppRequest(time, request) 
+    action(newRequest).map(_.withHeaders("processTime" -&gt; new DateTime().minus(time.getMillis).getMillis.toString())) 
+}</pre></div><p>Now, let's see how we define an Action for a custom request. You may wonder why we need a custom request. Take <a id="id78" class="indexterm"/>the example where our application has a facility for the users to use e-mail, chat, block, upload, share, and so on. In this case, we could tie these so that we can have a user object as part of the request internally.</p></div><div class="section" title="The need for a user object"><div class="titlepage"><div><div><h2 class="title"><a id="ch02lvl2sec13"/>The need for a user object</h2></div></div></div><p>Our REST API only <a id="id79" class="indexterm"/>sends <code class="literal">userId</code>, which is a number. For all these operations, we need the user's <code class="literal">emailId</code>, <code class="literal">userName</code>, and profile picture, if any. Let's define <code class="literal">UserRequest</code> in<code class="literal"> </code>the following way:</p><div class="informalexample"><pre class="programlisting">class UserRequest[A](val user: User, request: Request[A]) extends WrappedRequest[A](request) </pre></div><p>Now, let's define an Action, which uses this request:</p><div class="informalexample"><pre class="programlisting">def UserAction(userId: Long) = new ActionBuilder[UserRequest] { 
+  def invokeBlock[A](request: Request[A], block: (UserRequest[A]) =&gt; Future[Result]) = { 
+      User.findById(userId).map { user:User =&gt; 
+         block(new UserRequest(user, request)) 
+      } getOrElse { 
+        Future.successful(Redirect(views.html.login)) 
+      } 
+    } 
+  } </pre></div><p>So, in our Action, we find the user corresponding to the given <code class="literal">userId</code>, else we redirect to the login page.</p><p>Here, we can see how to use <code class="literal">UserAction</code>:</p><div class="informalexample"><pre class="programlisting">def initiateChat(userId:Long,chatWith:Long) = UserRequest{ 
+    request=&gt; 
+      val status:Boolean = ChatClient.initiate(request.user,chatWith) 
+       if(status){ 
+        Ok 
+      }else{ 
+         Unauthorized 
+      } 
+  } </pre></div><p>The chat client initiates <a id="id80" class="indexterm"/>a method and sends a message to the user with <code class="literal">userId.chatWith</code> that a user, whose profile is <code class="literal">request.user</code>, wants to chat. It returns <code class="literal">true</code> if the other user agrees, else it returns <code class="literal">false</code>.</p></div></div>
+<div class="section" title="Troubleshooting"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec19"/>Troubleshooting</h1></div></div></div><p>Here are the <a id="id81" class="indexterm"/>scenarios you might come across where you may need to troubleshoot:</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Coming across an error during compilation: you cannot find any HTTP request header here.<p>You get this error even after you have defined the Action using a <code class="literal">RequestHeader</code>.</p><p>Most of the methods used in Play that deal with requests, expect an implicit <code class="literal">RequestHeader</code>. This convention has been followed in order to keep the code simple. For example, let's look at the controller trait here:</p><div class="informalexample"><pre class="programlisting">trait Controller extends Results with BodyParsers with HttpProtocol with Status with HeaderNames with ContentTypes with RequestExtractors with Rendering { 
+
+  //Provides an empty `Action` implementation: the result is a standard 'Not implemented yet' result page. 
+  val TODO = Action { 
+     NotImplemented[play.api.templates.Html](views.html.defaultpages.todo()) 
+  } 
+
+  //Retrieves the session implicitly from the request. 
+  implicit def session(implicit request: RequestHeader) = request.session 
+
+  //Retrieve the flash scope implicitly from the request. 
+  implicit def flash(implicit request: RequestHeader) = request.flash 
+
+  implicit def lang(implicit request: RequestHeader) = { 
+    play.api.Play.maybeApplication.map { implicit app =&gt; 
+      val maybeLangFromCookie = request.cookies.get(Play.langCookieName).flatMap(c =&gt; Lang.get(c.value)) 
+        maybeLangFromCookie.getOrElse(play.api.i18n.Lang.preferred(request.acceptLanguages)) 
+    }.getOrElse(request.acceptLanguages.headOption.getOrElse(play.api.i18n.Lang.defaultLang)) 
+  } 
+}</pre></div><p>Notice that the <code class="literal">session</code>, <code class="literal">flash</code>, and <code class="literal">lang</code> methods accept an implicit parameter, such as a request, which is <code class="literal">RequestHeader</code>. It is in such cases that we need to mark the request header in our Action definition as implicit. Generally, it's safer to mark all the request headers as implicit in a Play application. So, to fix this error, we would need to modify our <code class="literal">Action</code> definition as follows:</p><div class="informalexample"><pre class="programlisting">def foo = Action {
+    implicit request =&gt; 
+    … 
+}</pre></div></li><li class="listitem">The request body for my GET request is not parsed. You may wonder why. The GET request <a id="id82" class="indexterm"/>is not expected to have a request body. Though the HTTP specification is not clear on this, in general practice, browsers do not forward the request body. Play body parser checks to see if the request is allowed to have a request body, that is, if the request is not a GET request, before parsing it.<p>It is better to avoid a request body in your GET and DELETE requests. If you need to add a request body to these requests, maybe you should redesign the REST API for your application.</p></li><li class="listitem">You're not able to use the Play filters: <code class="literal">GzipFilter</code>, <code class="literal">SecurityHeadersFilter</code>, or <code class="literal">CSRFFilter</code>. You get an error: the object <code class="literal">filters</code> is not a member of package play, in line import <code class="literal">play.filters</code>.<p>Filters is a separate module and needs to be included explicitly. You should add it the <code class="literal">build.sbt</code> file as the <code class="literal">libraryDependencies += filters</code>, and then reload the project.</p></li><li class="listitem">Coming across a compilation error when using Future: if you cannot find an implicit <code class="literal">ExecutionContext</code>, either require one for yourself or import<code class="literal"> ExecutionContext.Implicits.global</code>. Why should this be done, though?<p>Future requires an <code class="literal">ExecutionContext</code>, which defines the thread pool where threads will be allotted for an operation. Hence, you might get a compilation error when no <code class="literal">ExecutionContext</code> is available for Future. Refer to the <span class="emphasis"><em>Scala docs Futures (</em></span>
+<a class="ulink" href="http://docs.scala-lang.org/overviews/core/futures.html">http://docs.scala-lang.org/overviews/core/futures.html</a>
+<span class="emphasis"><em>)</em></span> section for more on this.</p></li><li class="listitem">Coming across a <a id="id83" class="indexterm"/>runtime error while using the JSON parser: <code class="literal">JsResultException</code>:<div class="informalexample"><pre class="programlisting">JsResultException(errors:List((,List(ValidationError(error.expected.jsstring,WrappedArray())))))] </pre></div><p>This generally happens when the field being extracted from JSON is not present in the request body. This could be because there is a typo, for example, instead of <code class="literal">emailId</code>, and you might be sending an e-mail. You could use the <code class="literal">asOpt</code> method instead of <code class="literal">as</code>. For example:</p><div class="informalexample"><pre class="programlisting">val emailId = (body\"emailId"). asOpt[String]</pre></div><p>Then you could throw an error with a human-friendly message if that or any field is missing. Alternatively, you could pass default values using <code class="literal">getOrElse</code>.</p></li></ol></div></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch02lvl1sec20"/>Summary</h1></div></div></div><p>In this chapter, we saw how to define and extend the key components of a controller. We saw how to define an application-specific Action with default parsers and results, as well as with custom parsers and results. In addition to this, we also saw how to manage application-specific concerns using filters and <code class="literal">ActionComposition</code>. In the process, we saw how to define a custom request.</p></div></body></html>
