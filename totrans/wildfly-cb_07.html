@@ -1,0 +1,622 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;7.&#xA0;Load Balancing WildFly"><div class="titlepage"><div><div><h1 class="title"><a id="ch07"/>Chapter 7. Load Balancing WildFly</h1></div></div></div><p>In this chapter, we will cover the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Installing and configuring Apache HTTPD</li><li class="listitem" style="list-style-type: disc">Installing and configuring mod_cluster for Apache</li><li class="listitem" style="list-style-type: disc">Balancing WildFly using auto advertising – UDP</li><li class="listitem" style="list-style-type: disc">Balancing WildFly using a list of available balancers – TCP</li><li class="listitem" style="list-style-type: disc">Balancing using the HTTP connector instead of AJP</li><li class="listitem" style="list-style-type: disc">Preserve WildFly workers while restarting Apache</li><li class="listitem" style="list-style-type: disc">Balancing the same context for different applications</li><li class="listitem" style="list-style-type: disc">Rolling updates</li></ul></div><div class="section" title="Introduction"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec63"/>Introduction</h1></div></div></div><p>In this chapter, you will learn how to load balance your WildFly instances. Load balancing is the capability to distribute the workload across multiple nodes, in our case, WildFly nodes. This technique is used for optimizing resources, minimizing the response time, and maximizing the application throughput.</p><p>To achieve load balancing, we need a component which fronts our WildFly nodes, and distributes the workload across them. A common pattern of distributing the workload is to forward client requests in a round-robin manner, so that every node serves the same number of requests.</p><p>What about the real workload that a request can generate into a node? For example, a long-running request or a request which involves heavy tasks would make the node much busier than the others that are handling just static page requests.</p><p>This is not a fair workload distribution! We need something to better calibrate this workload distribution, depending on how busy the nodes really are.</p><p>We've already got the Apache HTTP Server (also known as HTTPD), that can balance towards our WildFly nodes. We also have a component called <code class="literal">mod_cluster</code> in both HTTPD and WildFly, to get the real workload distribution.</p><p>The <code class="literal">mod_cluster</code> component for Apache HTTP Server is a set of modules, as we will see later in this chapter, while <code class="literal">mod_cluster</code> for WildFly is a subsystem named <code class="literal">mod_cluster</code>.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note27"/>Note</h3><p>The <code class="literal">mod_cluster</code> <a id="id529" class="indexterm"/>component decouples the frontend from the backend. Basically, the Apache HTTP Server doesn't have any reference to the WildFly nodes, and WildFly doesn't have any reference to the HTTPD balancers—as long as multicast advertisement is used. Furthermore, <code class="literal">mod_cluster</code> supports AJP, HTTP, and HTTPS protocols. More information can be obtained by reading the official documentation, at the following URL: <a class="ulink" href="http://docs.jboss.org/mod_cluster/1.2.0/html/">http://docs.jboss.org/mod_cluster/1.2.0/html/</a>.</p></div></div><p>Load balancing does not affect WildFly's operational mode that you are running it in (domain or standalone). You can do load balancing between instances running in both domain mode and standalone mode. For our purpose, we will first start using the standalone mode, and then we will switch to the domain mode.</p></div></div>
+<div class="section" title="Installing and configuring Apache HTTPD"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec64"/>Installing and configuring Apache HTTPD</h1></div></div></div><p>In this recipe, you will learn how to install and configure Apache HTTPD. We will first download the <a id="id530" class="indexterm"/>software and then install it to the source. If you <a id="id531" class="indexterm"/>want, you can choose to obtain the Apache HTTP Server by using a package manager such as <code class="literal">YUM</code>, but I think understanding and learning how to build it from source is much more interesting.</p><p>We will be using Apache HTTPD Version 2.2.29 because the 2.2.x version is one of the most used versions in the production environment to run with <code class="literal">mod_cluster</code>. It already comes with the APR and APR-Util lib, along with the PCRE.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec161"/>Getting ready</h2></div></div></div><p>To download the Apache HTTP Server, visit <a class="ulink" href="http://httpd.apache.org/download.cgi">http://httpd.apache.org/download.cgi</a>. When you first visit this site, you can choose between <a id="id532" class="indexterm"/>two stable versions: 2.2 and 2.4. Obviously, version 2.4 is newer and it has some new features. It also has a different syntax for its configuration files.</p><p>On the other hand, version 2.2 has been around for a long time and it might be more stable. Nonetheless, the 2.2 bundle provides the APR, APR-Util, and the PCRE packages, so you don't have to download and install them separately, as in version 2.4.</p><p>Having said that, we will be using the Apache HTTP Server version 2.2.29. Furthermore, we will need the <code class="literal">openssl-devel</code> (development) version installed in your system. To install it:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">For Fedora 21, use the following command:<div class="informalexample"><pre class="programlisting">sudo yum-y install gcc openssl openssl-devel wget tar unzip</pre></div></li><li class="listitem" style="list-style-type: disc">For Fedora 22, use the following command:<div class="informalexample"><pre class="programlisting">sudo yum-y install gcc openssl openssl-devel wget tar unzip <code class="literal">findutils</code>
+</pre></div></li></ul></div><p>Download all the software into the <code class="literal">~/WFC/</code> folder.</p></div><div class="section" title="How to do it..."><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec162"/>How to do it...</h2></div></div></div><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Once the <a id="id533" class="indexterm"/>download is complete, open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd ~/WFC
+$ sudo tar zxvf httpd-2.2.29.tar.gz</pre></div><p>Now that we have all the software unpacked, we are ready to configure, compile, and build our Apache HTTPD.</p></li><li class="listitem">Execute the following commands for Fedora 21/22:<div class="informalexample"><pre class="programlisting">$ cd httpd-2.2.29
+sudo ./configure --prefix=/home/<code class="literal">&lt;USER&gt;</code>/WFC/httpd --with-mpm=worker --enable-mods-shared=most --enable-maintainer-mode --with-expat=builtin --enable-ssl --enable-proxy --enable-proxy-http --enable-proxy-ajp --disable-proxy-balancer --with-included-apr</pre></div><p>Here,  <code class="literal">&lt;USER&gt;</code> must be replaced with your username. In my case, this is <code class="literal">luigi</code>; thus the <code class="literal">--prefix</code> directive will be <code class="literal">--prefix=/home/luigi/WFC/httpd</code>. So, let's start executing the following commands:</p><div class="informalexample"><pre class="programlisting">...
+$ sudo make
+...
+$ sudo make install
+...
+Installing configuration files
+mkdir /home/luigi/WFC/httpd/conf
+mkdir /home/luigi/WFC/httpd/conf/extra
+mkdir /home/luigi/WFC/httpd/conf/original
+mkdir /home/luigi/WFC/httpd/conf/original/extra
+Installing HTML documents
+mkdir /home/luigi/WFC/httpd/htdocs
+Installing error documents
+mkdir /home/luigi/WFC/httpd/error
+Installing icons
+mkdir /home/luigi/WFC/httpd/icons
+mkdir /home/luigi/WFC/httpd/logs
+Installing CGIs
+mkdir /home/luigi/WFC/httpd/cgi-bin
+Installing header files
+Installing build system files
+Installing man pages and online manual
+mkdir /home/luigi/WFC/httpd/man
+mkdir /home/luigi/WFC/httpd/man/man1
+mkdir /home/luigi/WFC/httpd/man/man8
+mkdir /home/luigi/WFC/httpd/manual</pre></div></li><li class="listitem">Okay, now we are <a id="id534" class="indexterm"/>ready to launch our Apache. Navigate to its <code class="literal">bin</code> folder and execute it, as shown in the following commands:<div class="informalexample"><pre class="programlisting">$ cd ~/WFC/httpd/bin
+<span class="strong"><strong>$ ./httpd -k start -f ~/WFC/httpd/conf/httpd.conf</strong></span>
+<span class="strong"><strong>httpd: Could not reliably determine the server's fully qualified domain name, using mylaptop for ServerName</strong></span>
+<span class="strong"><strong>(13)Permission denied: make_sock: could not bind to address [::]:80</strong></span>
+<span class="strong"><strong>(13)Permission denied: make_sock: could not bind to address 0.0.0.0:80</strong></span>
+<span class="strong"><strong>no listening sockets available, shutting down</strong></span>
+<span class="strong"><strong>Unable to open logs</strong></span>
+</pre></div></li><li class="listitem">Ouch... Apache listens on port <code class="literal">80</code>, which is a privileged port; we got to the root. Let's try again with <code class="literal">sudo</code>:<div class="informalexample"><pre class="programlisting">$ sudo ./httpd -k start -f /opt/httpd/conf/httpd.conf
+<span class="strong"><strong>httpd: Could not reliably determine the server's fully qualified domain name, using mylaptop for ServerName</strong></span>
+</pre></div><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note28"/>Note</h3><p>Bear in mind that in a production environment, the Apache HTTP Server should not be run as a root user for security reasons. It goes now, even if we have a warning complaining about a <code class="literal">ServerName</code> directive not settled. Let's get rid of this now.</p></div></div></li><li class="listitem">Edit the <code class="literal">/opt/httpd/conf/httpd.conf</code> file and look for the following comment line <code class="literal">#ServerName www.example.com:80</code>. Replace it with the following entry:<div class="informalexample"><pre class="programlisting">ServerName balancer-one.com:80</pre></div></li><li class="listitem">Now, as a root user, open and edit the <code class="literal">/etc/hosts</code> file and add the following directive:<div class="informalexample"><pre class="programlisting">127.0.0.1 balancer-one.com</pre></div></li><li class="listitem">Now going back to the Apache <code class="literal">bin</code> folder, run the <code class="literal">httpd</code> script again:<div class="informalexample"><pre class="programlisting">$ sudo ./httpd -k restart -f /opt/httpd/conf/httpd.conf</pre></div></li><li class="listitem">The warning <a id="id535" class="indexterm"/>disappears. Let's test if everything is working by opening a browser and pointing it to <code class="literal">http://balancer-one.com</code>. You should see the following page:<div class="mediaobject"><img src="graphics/3744_07_01.jpg" alt="How to do it..."/><div class="caption"><p>Apache HTTPD working and serving its default page</p></div></div></li></ol></div></div><div class="section" title="See also"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec163"/>See also</h2></div></div></div><p>Every issue you find while installing the Apache HTTPD software can be mitigated by reading the Apache <a id="id536" class="indexterm"/>documentation at the following site <a class="ulink" href="http://httpd.apache.org/docs/2.2/">http://httpd.apache.org/docs/2.2/</a>.</p></div></div>
+<div class="section" title="Installing and configuring mod_cluster for Apache"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec65"/>Installing and configuring mod_cluster for Apache</h1></div></div></div><p>In this <a id="id537" class="indexterm"/>recipe, we will learn how to install and configure <a id="id538" class="indexterm"/><code class="literal">mod-cluster</code> within your Apache <a id="id539" class="indexterm"/>HTTPD installation. This recipe requires a working Apache <a id="id540" class="indexterm"/>HTTPD and it assumes that its installation directory is <code class="literal">/opt/httpd</code>. If you do not have Apache installed in your environment, please follow the instructions in the previous recipe.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec164"/>Getting ready</h2></div></div></div><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">First of all, download <a id="id541" class="indexterm"/>mod-cluster modules from the following site <a class="ulink" href="http://mod-cluster.jboss.org/downloads/1-2-6-Final-bin">http://mod-cluster.jboss.org/downloads/1-2-6-Final-bin</a>.</li><li class="listitem">Download all the software into the <code class="literal">/opt/httpd/modules</code> folder.</li><li class="listitem">If you prefer, you can install <code class="literal">mod_cluster</code> via your OS package manager which, in a Fedora-like system, is as follows:<div class="informalexample"><pre class="programlisting">sudo yum install mod_cluster</pre></div></li></ol></div></div><div class="section" title="How to do it…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec165"/>How to do it…</h2></div></div></div><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Once the download is complete, open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/modules
+$ tar zxvf mod_cluster-1.2.6.Final-linux2-x64-so.tar.gz
+mod_advertise.so
+mod_manager.so
+mod_proxy_cluster.so
+mod_slotmem.so</pre></div><p>Now that we have all the software unpacked, we are ready to configure <code class="literal">mod_cluster</code>. To better configure and administer <code class="literal">mod_cluster</code>, let's create a private network interface for internal communication, that is between Apache and WildFly.</p></li><li class="listitem">Open a terminal window and execute the following commands:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:1 10.0.0.1 netmask 255.255.255.0</pre></div><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note29"/>Note</h3><p>If you didn't follow the previous recipe, you may need to edit the <code class="literal">httpd.conf</code> file and disable the <code class="literal">proxy-balancer</code> module, which conflicts with <code class="literal">mod_cluster</code> modules.</p></div></div></li><li class="listitem">Edit the <code class="literal">/opt/httpd/conf/httpd.conf</code> file and look for the following comment line <code class="literal">LoadModule proxy_balancer_module modules/mod_proxy_balancer.so</code>. Replace it with the following entry:<div class="informalexample"><pre class="programlisting">#LoadModule proxy_balancer_module modules/mod_proxy_balancer.so</pre></div></li><li class="listitem">In the <a id="id542" class="indexterm"/>terminal window, create a new <a id="id543" class="indexterm"/>file named <code class="literal">mod_cluster.conf</code> <a id="id544" class="indexterm"/>and place it into the <code class="literal">opt/httpd/conf/extra</code> folder as follows:<div class="informalexample"><pre class="programlisting">$ touch /opt/httpd/conf/extra/mod_cluster.conf
+$ vim /opt/httpd/conf/extra/mod_cluster.conf</pre></div></li><li class="listitem">Now <a id="id545" class="indexterm"/>add the following code:<div class="informalexample"><pre class="programlisting">LoadModule slotmem_module modules/mod_slotmem.so
+LoadModule manager_module modules/mod_manager.so
+LoadModule proxy_cluster_module modules/mod_proxy_cluster.so
+LoadModule advertise_module modules/mod_advertise.so
+
+Listen 10.0.0.1:80
+Listen 10.0.0.1:6666
+
+&lt;VirtualHost 10.0.0.1:80&gt;
+  &lt;Location /mcm&gt;
+    SetHandler mod_cluster-manager
+    Order deny,allow
+    Deny from all
+    Allow from 10.0.0.1
+  &lt;/Location&gt;
+&lt;/VirtualHost&gt;
+
+&lt;VirtualHost 10.0.0.1:6666&gt;
+  &lt;Directory /&gt;
+    Order deny,allow
+    Deny from all
+    Allow from 10.0.0.1
+  &lt;/Directory&gt;
+  ServerAdvertise on http://10.0.0.1:6666
+  EnableMCPMReceive
+&lt;/VirtualHost&gt;</pre></div></li><li class="listitem">Now, let's edit the <code class="literal">httpd.conf</code> file again and add the following directive at the end. It is pretty much self-explanatory:<div class="informalexample"><pre class="programlisting"># mod_cluster settings
+Include conf/extra/mod_cluster.conf</pre></div><p>This will load the preceding file, featuring all our <code class="literal">mod_cluster</code> configuration.</p></li><li class="listitem">Let's <a id="id546" class="indexterm"/>start our Apache with the following <a id="id547" class="indexterm"/>commands:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/bin
+$ sudo ./httpd -k start -f /opt/httpd/conf/httpd.conf</pre></div></li><li class="listitem">Now <a id="id548" class="indexterm"/>point your browser to the following URLs:<div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">http://10.0.0.1</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">http://10.0.0.1/mcm</code></li></ul></div><p>You should see pages as depicted in the following screenshots:</p><div class="mediaobject"><img src="graphics/3744_07_02.jpg" alt="How to do it…"/><div class="caption"><p>Apache HTTPD and mod_cluster manager serving on a private network interface</p></div></div></li></ol></div></div><div class="section" title="How it works…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec166"/>How it works…</h2></div></div></div><p>Let's analyze what we have done so far:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">First, we copied all the <code class="literal">mod_cluster</code> modules into Apache's <code class="literal">modules</code> directory. Then we referenced them by adding a <code class="literal">LoadModule</code> directive into the <code class="literal">mod_cluster.conf</code> file, in order to load the modules. Furthermore, we referenced the <code class="literal">mod_cluster.conf</code> file into the default Apache configuration file <code class="literal">httpd.conf</code>, with the <code class="literal">Include</code> directive.<p>This gave us the glue to stick Apache and <code class="literal">mod_cluster</code> together.</p></li><li class="listitem" style="list-style-type: disc">Why did we <a id="id549" class="indexterm"/>create a private network interface? It's <a id="id550" class="indexterm"/>due to design and security reasons. Design might be a good practice, but security is a must. Internal communication should be exposed to a private network, but not to a public network. Nevertheless, in an enterprise environment, you are very likely to have servers with two network interfaces to accomplish exactly this purpose. Thus, to simulate an enterprise environment and give you a good design, we just created another network interface.</li><li class="listitem" style="list-style-type: disc">So, due to <a id="id551" class="indexterm"/>the the reason stated in the previous <a id="id552" class="indexterm"/>point, we bound the private interface between the <code class="literal">mod_cluster</code> management page <code class="literal">/mcm</code> and all the <a id="id553" class="indexterm"/>communications between Apache and WildFly. It is, essentially, about exchanging messages between the <code class="literal">mod_cluster</code> on Apache and the <code class="literal">mod_cluster</code> component on WildFly.</li><li class="listitem" style="list-style-type: disc">This basically provides balancing; a WildFly <code class="literal">mod_cluster</code> sends a signal to the <code class="literal">10.0.0.1:6666</code> multicast address, <code class="literal">Hi there, I'm here</code>. On the other side, at Apache, the <code class="literal">mod_cluster</code> component reads the message and enables that WildFly node by balancing it for new requests.</li></ul></div><p>Later in this chapter, we will need to change some of the preceding settings, adding more directives. The ones discussed here are just the basics to get started with.</p></div></div>
+<div class="section" title="Balancing WildFly using auto advertising &#x2013; UDP"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec66"/>Balancing WildFly using auto advertising – UDP</h1></div></div></div><p>In this <a id="id554" class="indexterm"/>recipe, we will learn how to balance two <a id="id555" class="indexterm"/>WildFly nodes running in the standalone mode. Default <code class="literal">mod_cluster</code> settings provide auto advertising as enabled, using a multicast address. Furthermore, in this recipe we will use a cluster configuration also to provide a better test feeling. If you need more information about clustering with WildFly, read <a class="link" href="ch06.html" title="Chapter 6. Clustering WildFly">Chapter 6</a>, <span class="emphasis"><em>Clustering WildFly</em></span>.</p><p>The entire WildFly configuration used for this recipe will not relay on any previous one. On the contrary, we assume that the Apache HTTPD installation and configuration are based on the first two recipes of this chapter.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec167"/>Getting ready</h2></div></div></div><p>For this recipe, we will need an application named <code class="literal">balancing-test</code>, that you can find in my GitHub repository. If you skipped the <span class="emphasis"><em>Managing applications using the deployments folder</em></span> recipe in <a class="link" href="ch02.html" title="Chapter 2. Running WildFly in Standalone Mode">Chapter 2</a>, <span class="emphasis"><em>Running WildFly in Standalone Mode</em></span>, please refer to it to download all the source code and projects that you will need.</p><p>To build the application, give the following commands:</p><div class="informalexample"><pre class="programlisting">$ cd ~/WFC/github/wildfly-cookbook
+$ cd balancing-test
+$ mvn clean package</pre></div></div><div class="section" title="How to do it…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec168"/>How to do it…</h2></div></div></div><p>Let's create two <a id="id556" class="indexterm"/>folders from the WildFly installation directory <code class="literal">$WILDFLY_HOME</code>, each one representing a server node.</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ cp -a standalone bl-std-node-1
+$ cp -a standalone bl-std-node-2</pre></div></li><li class="listitem">Now, let's copy the <code class="literal">balancing-test.war</code> application into the <code class="literal">deployments</code> folder of each node that we have just created. Do as follows:<div class="informalexample"><pre class="programlisting">$ cp balancing-test.war bl-std-node-1/deployments/
+$ cp balancing-test.war bl-std-node-2/deployments/</pre></div><p>Now, let's generate a virtual IP for each of the nodes:</p><div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:2 10.0.1.1 netmask 255.255.255.0
+$ sudo ifconfig eth0:3 10.0.1.2 netmask 255.255.255.0</pre></div></li><li class="listitem">If it's not already running, let's launch the Apache and its logs, by executing the following commands:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/bin
+$ sudo ./httpd -k start -f /opt/httpd/conf/httpd.conf
+$ tail -f ../logs/{access,error}_log
+==&gt; ../logs/access_log &lt;==
+
+==&gt; ../logs/error_log &lt;==
+[Sun Oct 12 16:10:29 2014] [notice] SIGHUP received.  Attempting to restart
+[Sun Oct 12 16:10:29 2014] [notice] Digest: generating secret for digest authentication ...
+[ Sun Oct 12 16:10:29 2014] [notice] Digest: done
+[ Sun Oct 12 16:10:29 2014] [warn] httpd version 2.2.29 mismatch detected
+[ Sun Oct 12 16:10:29 2014] [notice] Advertise initialized for process 26675
+[ Sun Oct 12 16:10:29 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations</pre></div></li><li class="listitem">Okay, now <a id="id557" class="indexterm"/>Apache is up. Let's start our first node by issuing the following command into a new terminal window:<div class="informalexample"><pre class="programlisting">$ ./bin/standalone.sh -Djboss.server.base.dir=bl-std-node-1 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.1 -Djboss.management.http.port=19990 -Djboss.node.name=node-1
+...
+16:13:58,472 INFO  [org.jboss.as] (Controller Boot Thread) JBAS015874: WildFly 8.1.0.Final "Kenny" started in 6531ms - Started 289 of 400 services (179 services are lazy, passive or on-demand)</pre></div></li><li class="listitem">Now, a few <a id="id558" class="indexterm"/>seconds after <code class="literal">node-1</code> starts you should see the following entries in <code class="literal">access_log</code> of the Apache logs:<div class="informalexample"><pre class="programlisting">==&gt; ../logs/access_log &lt;==
+10.0.0.1 - - [12/Oct/2014:16:14:05 +0200] "INFO / HTTP/1.1" 200 -
+10.0.0.1 - - [12/Oct/2014:16:14:05 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [12/Oct/2014:16:14:05 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [12/Oct/2014:16:14:05 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [12/Oct/2014:16:14:15 +0200] "STATUS / HTTP/1.1" 200 46</pre></div><p>Those are <code class="literal">mod_cluster</code> logs stating that they received an information message, a configuration message, and then it enabled the application provided by WildFly <code class="literal">node-1</code>.</p></li><li class="listitem">Now, open <a id="id559" class="indexterm"/>the <code class="literal">mod_cluster-manager</code> page that we defined in the file <code class="literal">mod_cluster.conf</code>—Apache side—at the following URL:<div class="informalexample"><pre class="programlisting">http://10.0.0.1/mcm</pre></div><p>You should see the following page:</p><div class="mediaobject"><img src="graphics/3744_07_03.jpg" alt="How to do it…"/><div class="caption"><p>mod_cluster manager page displaying a running node and its contexts.</p></div></div></li><li class="listitem">Let's start <a id="id560" class="indexterm"/>the other node <code class="literal">node-2</code> in <a id="id561" class="indexterm"/>a new terminal window, as follows:<div class="informalexample"><pre class="programlisting">$ ./bin/standalone.sh -Djboss.server.base.dir=bl-std-node-2 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.2 -Djboss.management.http.port=29990 -Djboss.node.name=node-2
+...
+16:13:58,472 INFO  [org.jboss.as] (Controller Boot Thread) JBAS015874: WildFly 8.1.0.Final "Kenny" started in 6531ms - Started 289 of 400 services (179 services are lazy, passive or on-demand)</pre></div><p>Now,  a few seconds after <code class="literal">node-2</code> starts, you should see the following entries in the Apache logs, that is, in <code class="literal">access_log</code>:</p><div class="informalexample"><pre class="programlisting">...
+10.0.0.1 - - [12/Oct/2014:16:23:45 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [12/Oct/2014:16:23:55 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [12/Oct/2014:16:24:05 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [12/Oct/2014:16:24:15 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "INFO / HTTP/1.1" 200 331
+10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [12/Oct/2014:16:24:25 +0200] "STATUS / HTTP/1.1" 200 46</pre></div></li><li class="listitem">Let's <a id="id562" class="indexterm"/>refresh the <code class="literal">mcm</code> page:<div class="mediaobject"><img src="graphics/3744_07_04.jpg" alt="How to do it…"/><div class="caption"><p>mod_cluster manager page displaying both running nodes and their contexts.</p></div></div><p>Now <a id="id563" class="indexterm"/>that everything is up and running, let's play with our marvelous application.</p></li><li class="listitem">Point your browser to the following URL and refresh the page a few times:<div class="informalexample"><pre class="programlisting">http://10.0.0.1/balancing-test</pre></div><p>You should see a page like the following:</p><div class="mediaobject"><img src="graphics/3744_07_05.jpg" alt="How to do it…"/><div class="caption"><p>Apache serving balancing-test application on node-1</p></div></div><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note30"/>Note</h3><p>In my case, the request landed on server <code class="literal">node-1</code>; yours might land on <code class="literal">node-2</code>. Also, keep in mind that the WildFly <code class="literal">mod_cluster</code> comes with some balancing default settings such as:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">sticky-session="true"</code>: which sticks subsequent requests for the same session, to the same node, if still alive</li><li class="listitem" style="list-style-type: disc"><code class="literal">sticky-session-force="true"</code>: which forces Apache to respond with an error in case subsequent requests cannot be routed to the same node</li><li class="listitem" style="list-style-type: disc"><code class="literal">sticky-session-remove="false"</code>: which indicates if Apache should remove sticky behavior in case subsequent requests cannot be routed to the same node.<p>That's <a id="id564" class="indexterm"/>why, while refreshing <a id="id565" class="indexterm"/>the page, the node name never changes. By the way, let's stop the serving node and refresh the page one more time. If everything worked as expected, you should end up with a page like the one seen in the following screenshot:</p><div class="mediaobject"><img src="graphics/3744_07_06.jpg" alt="How to do it…"/><div class="caption"><p>Apache serving balancing-test application on node-2</p></div></div></li></ul></div></div></div></li></ol></div><p>Yes, we got it!</p></div><div class="section" title="How it works…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec169"/>How it works…</h2></div></div></div><p>If you <a id="id566" class="indexterm"/>noticed, we didn't change any particular <code class="literal">mod_cluster</code> setting on WildFly, in both nodes. This is because the WildFly <code class="literal">mod_cluster</code> <a id="id567" class="indexterm"/>configuration relays on defaults that are the same as on the Apache side. The entire configuration resides in the <code class="literal">mod_cluster</code> subsystem and in the socket-binding-group. Follow this configuration:</p><div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;mod-cluster-config advertise-socket="mod_cluster" advertise="true" connector="ajp"&gt;
+        &lt;dynamic-load-provider&gt;
+            &lt;load-metric type="cpu"/&gt;
+        &lt;/dynamic-load-provider&gt;
+    &lt;/mod-cluster-config&gt;
+&lt;/subsystem&gt;</pre></div><p>The preceding code describes how <code class="literal">mod_cluster</code> should inform its counterpart in Apache, concerning its workload. By default, the workload is calculated against the CPU.</p><div class="informalexample"><pre class="programlisting">&lt;socket-binding-group name="standard-sockets" default-interface="public" port-offset="${jboss.socket.binding.port-offset:0}"&gt;
+    &lt;socket-binding name="management-http" interface="management" port="${jboss.management.http.port:9990}"/&gt;
+    &lt;socket-binding name="management-https" interface="management" port="${jboss.management.https.port:9993}"/&gt;
+    &lt;socket-binding name="ajp" port="${jboss.ajp.port:8009}"/&gt;
+    &lt;socket-binding name="http" port="${jboss.http.port:8080}"/&gt;
+    &lt;socket-binding name="https" port="${jboss.https.port:8443}"/&gt;
+    &lt;socket-binding name="jgroups-mping" port="0" multicast-address="${jboss.default.multicast.address:230.0.0.4}" multicast-port="45700"/&gt;
+    &lt;socket-binding name="jgroups-tcp" port="7600"/&gt;
+    &lt;socket-binding name="jgroups-tcp-fd" port="57600"/&gt;
+    &lt;socket-binding name="jgroups-udp" port="55200" multicast-address="${jboss.default.multicast.address:230.0.0.4}" multicast-port="45688"/&gt;
+    &lt;socket-binding name="jgroups-udp-fd" port="54200"/&gt;
+    &lt;socket-binding name="modcluster" port="0" multicast-address="224.0.1.105" multicast-port="23364"/&gt;
+    &lt;socket-binding name="txn-recovery-environment" port="4712"/&gt;
+    &lt;socket-binding name="txn-status-manager" port="4713"/&gt;
+    &lt;outbound-socket-binding name="mail-smtp"&gt;
+        &lt;remote-destination host="localhost" port="25"/&gt;
+    &lt;/outbound-socket-binding&gt;
+&lt;/socket-binding-group&gt;</pre></div><p>The preceding code describes how <code class="literal">mod_cluster</code> communicates with its counterpart in Apache, concerning its availability and workload. By default, the multicast address is settled to <code class="literal">224.0.1.105</code>.</p><p>If you need to <a id="id568" class="indexterm"/>change the multicast address, for any reason, remember to change its counterpart setting in Apache, with the following <a id="id569" class="indexterm"/>directive:</p><div class="informalexample"><pre class="programlisting">AdvertiseGroup http://MULTICAST_ADDR:PORT</pre></div><div class="section" title="Dissecting processes"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec23"/>Dissecting processes</h3></div></div></div><p>A list of processes <a id="id570" class="indexterm"/>where you can check IPs and port bindings, provided by the <code class="literal">netstat</code> tool, is shown in the following image:</p><div class="mediaobject"><img src="graphics/3744_07_07.jpg" alt="Dissecting processes"/><div class="caption"><p>The netstat tool showing IPs and ports binding by processes</p></div></div><p>When Apache starts, a process is actually being executed—PID <code class="literal">9524</code> (as depicted in the <code class="literal">netstat</code> figure)—which listens on ports <code class="literal">80</code> and <code class="literal">6666</code> for the <code class="literal">10.0.0.1</code> IP; the process also listens on port <code class="literal">23364</code> for any interface (<code class="literal">0.0.0.0</code>).</p><p>When the WildFly node <code class="literal">node-1</code> starts, a process is actually being executed—PID <code class="literal">9674</code> (as depicted in the <code class="literal">netstat</code> figure)—which listens on various ports and IPs:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">port <code class="literal">8080</code>, bound to IP <code class="literal">10.0.1.1</code>, is used by the HTTP connector</li><li class="listitem" style="list-style-type: disc">port <code class="literal">19990</code>, bound to IP <code class="literal">127.0.0.1</code>, is used by the host-controller to allow remote management</li><li class="listitem" style="list-style-type: disc">port <code class="literal">8009</code>, bound to IP <code class="literal">10.0.1.1</code>, is used by the AJP connector</li><li class="listitem" style="list-style-type: disc">port <code class="literal">23364</code>, bound <a id="id571" class="indexterm"/>to IP <code class="literal">224.0.1.105</code>, is used by <code class="literal">mod_cluster</code></li><li class="listitem" style="list-style-type: disc">port <code class="literal">45688</code>, bound to IP <code class="literal">230.0.0.4</code>, is used by <code class="literal">jgroups</code> to form the cluster</li></ul></div><p>When WildFly node <code class="literal">node-2</code> starts, a process is actually being executed—PID <code class="literal">9853</code> (as depicted in the <code class="literal">netstat</code> figure)—which listens on various ports and IPs:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">port <code class="literal">8080</code>, bound to IP <code class="literal">10.0.1.2</code>, is used by the HTTP connector</li><li class="listitem" style="list-style-type: disc">port <code class="literal">29990</code>, bound to IP <code class="literal">127.0.0.1</code>, is used by the host-controller to allow remote management</li><li class="listitem" style="list-style-type: disc">port <code class="literal">8009</code>, bound to IP <code class="literal">10.0.1.2</code>, is used by the AJP connector</li><li class="listitem" style="list-style-type: disc">port <code class="literal">23364</code>, bound to IP <code class="literal">224.0.1.105</code>, is used by <code class="literal">mod_cluster</code></li><li class="listitem" style="list-style-type: disc">port <code class="literal">45688</code>, bound to IP <code class="literal">230.0.0.4</code>, is used by <code class="literal">jgroups</code> to form the cluster</li></ul></div><p>There are bindings that are not relevant for the moment, so we will not discuss them. What you should notice, is that there are identical bindings for both WildFly nodes.</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">224.0.1.105:23364</code> is used by both to advertise themselves to the <code class="literal">mod_cluster</code> on the Apache side.</li><li class="listitem" style="list-style-type: disc"><code class="literal">230.0.0.4:45688</code> is used by both to create the UDP cluster, so having the same binding <a id="id572" class="indexterm"/>allows them to join the same cluster.</li></ul></div></div><div class="section" title="Dissecting communications"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec24"/>Dissecting communications</h3></div></div></div><p>Let's analyze <a id="id573" class="indexterm"/>how all the components involved in load balancing communicate to each other. First, look at the following image that is worth a thousand words:</p><div class="mediaobject"><img src="graphics/3744_07_08.jpg" alt="Dissecting communications"/><div class="caption"><p>Architecture diagram showing balancing and clustering communication configuration with UDP</p></div></div><p>Skipping the steps when the clients/users ask for a resource, and when the request hits the switch which routes it to the Apache balancer, let's concentrate on the sequence of events in the communication between Apache and WildFly and see what happens in the middle.</p><p>The sequence of events is as follows:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Apache listens on <code class="literal">224.0.1.105:23364</code> for workers to balance</li><li class="listitem" style="list-style-type: disc">When the WildFly nodes get started, they advertise themselves to <code class="literal">224.0.1.105:23364</code></li><li class="listitem" style="list-style-type: disc">Apache <a id="id574" class="indexterm"/>receives the following messages:<div class="informalexample"><pre class="programlisting">10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "INFO / HTTP/1.1" 200 331
+10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [12/Oct/2014:16:24:21 +0200] "STATUS / HTTP/1.1" 200 46</pre></div></li><li class="listitem" style="list-style-type: disc">Apache starts balancing the nodes, via the AJP protocol, to <code class="literal">10.0.1.1/2:8009</code> depending on the workload received with the <code class="literal">STATUS</code> message</li><li class="listitem" style="list-style-type: disc">WildFly nodes receive the requests and elaborate them responding back to Apache</li><li class="listitem" style="list-style-type: disc">Meantime, <code class="literal">jgroups</code> serialize and de-serialize the http sessions between cluster members</li><li class="listitem" style="list-style-type: disc">Simultaneously, the WildFly nodes send <code class="literal">STATUS</code> messages to Apache concerning the actual workload, and so on</li></ul></div><p>This is pretty much what's beyond balancing a cluster of WildFly, via UDP.</p><p>You can easily balance a non-clustered environment, which is fine for stateless services; the configuration is the same, except that you will have to use a "non-ha" profile.</p></div></div><div class="section" title="There's more…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec170"/>There's more…</h2></div></div></div><p>As previously mentioned, the WildFly <code class="literal">mod_cluster</code> manages the calculation of workload, which is CPU by default.</p><p>The following are some other types of load metrics:</p><div class="informaltable"><table border="1"><colgroup><col style="text-align: left"/><col style="text-align: left"/></colgroup><thead><tr><th style="text-align: left" valign="bottom">
+<p>Type</p>
+</th><th style="text-align: left" valign="bottom">
+<p>Load metric</p>
+</th></tr></thead><tbody><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">cpu</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the system CPU load</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">mem</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the system memory usage</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">heap</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the heap memory usage as a percentage of max heap size</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">sessions</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Given a capacity, returns the percentage based on activeSessions/Capacity</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">requests</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the number of requests/sec</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">send-traffic</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the outgoing request traffic in KB/sec</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">receive-traffic</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the incoming request POST traffic in KB/sec</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">busyness</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the percentage of connector threads from the thread pool that are busy servicing requests</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p>
+<code class="literal">connection-pool</code>
+</p>
+</td><td style="text-align: left" valign="top">
+<p>Returns the percentage of connections from a connection pool that are in use</p>
+</td></tr></tbody></table></div><p>You can add a <a id="id575" class="indexterm"/>load-metric to the mod-cluster subsystem for <code class="literal">node-1</code> as follows:</p><div class="informalexample"><pre class="programlisting">$ ./bin/jboss-cli.sh
+You are disconnected at the moment. Type 'connect' to connect to the server or 'help' for the list of supported commands.
+[disconnected /] connect 127.0.0.1:19990
+[standalone@127.0.0.1:19990 /] /subsystem=modcluster/mod-cluster-config=configuration:add-metric(type=mem, weight=2, capacity=1)
+{
+    "outcome" =&gt; "success",
+    "response-headers" =&gt; {
+        "operation-requires-reload" =&gt; true,
+        "process-state" =&gt; "reload-required"
+    }
+}
+[standalone@127.0.0.1:19990 /] :reload()
+{
+    "outcome" =&gt; "success",
+    "result" =&gt; undefined
+}
+[standalone@127.0.0.1:19990 /]</pre></div><p>This basically adds a new load-metric for system memory usage. If we look into the <code class="literal">standalone-ha.xml</code> file, we will find the following:</p><div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;mod-cluster-config advertise-socket="modcluster" advertise="true" connector="ajp"&gt;
+        &lt;dynamic-load-provider&gt;
+            &lt;load-metric type="cpu"/&gt;
+            &lt;load-metric type="mem" weight="2" capacity="1"/&gt;
+        &lt;/dynamic-load-provider&gt;
+    &lt;/mod-cluster-config&gt;
+&lt;/subsystem&gt;</pre></div><p>Hereby, <code class="literal">mod_cluster</code> will inform its Apache counterpart with a load factor based on both metrics. This can be <a id="id576" class="indexterm"/>quite helpful if you have WildFly installed in a heterogeneous environment, say a server with different resource capabilities—a server might have less RAM than others, or less cores then others. Thus, adding and removing metrics gives you the freedom to adjust your workload distribution properly.</p></div><div class="section" title="See also"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec171"/>See also</h2></div></div></div><p>For cluster configuration, please refer to <a class="link" href="ch05.html" title="Chapter 5. Managing the Datasource Subsystems with the CLI">Chapter 5</a>, <span class="emphasis"><em>Managing the Datasource Subsystems with the CLI</em></span>, of this book.</p></div></div>
+<div class="section" title="Balancing WildFly using a list of available balancers &#x2013; TCP"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec67"/>Balancing WildFly using a list of available balancers – TCP</h1></div></div></div><p>In this <a id="id577" class="indexterm"/>recipe, we will learn how to balance two WildFly nodes running in the standalone mode, using TCP balancing. Instead of sending information messages to a multicast address, the WildFly <code class="literal">mod_cluster</code> sends everything directly to Apache.</p><p>Furthermore, in this recipe we will also use a cluster configuration, to provide a better test feeling. If you need more information about clustering with WildFly, refer to <a class="link" href="ch05.html" title="Chapter 5. Managing the Datasource Subsystems with the CLI">Chapter 5</a>, <span class="emphasis"><em>Managing the Datasource Subsystems with the CLI</em></span>. By the way, the entire WildFly configuration used for this recipe will not relay on any previous one. On the contrary, we assume that Apache HTTPD installation and configuration are based on the first two recipes of this chapter.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec172"/>Getting ready</h2></div></div></div><p>For this recipe, we will need an application named <code class="literal">balancing-test</code>, that you can find in my GitHub repository. If you skipped the <span class="emphasis"><em>Managing applications using the deployments folder</em></span> recipe in <a class="link" href="ch02.html" title="Chapter 2. Running WildFly in Standalone Mode">Chapter 2</a>, <span class="emphasis"><em>Running WildFly in Standalone Mode</em></span>, please refer to it to download all the source code and projects that you will need.</p><p>To build the application, give the following commands:</p><div class="informalexample"><pre class="programlisting">$ cd ~/WFC/github/wildfly-cookbook
+$ cd balancing-test
+$ mvn clean package</pre></div></div><div class="section" title="How to do it..."><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec173"/>How to do it...</h2></div></div></div><p>From the <a id="id578" class="indexterm"/>WildFly installation directory <code class="literal">$WILDFLY_HOME</code>, let's create two folders, each one representing a server node.</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ cp -a standalone bl-tcp-std-node-1
+$ cp -a standalone bl-tcp-std-node-2</pre></div></li><li class="listitem">Now, let's copy the <code class="literal">balancing-test.war</code> application into the <code class="literal">deployments</code> folder of each node that we have just created. Do as follows:<div class="informalexample"><pre class="programlisting">$ cp balancing-test.war bl-tcp-std-node-1/deployments/
+$ cp balancing-test.war bl-tcp-std-node-2/deployments/</pre></div></li><li class="listitem">Now, let's generate a virtual IP for each of the nodes:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:2 10.0.1.1 netmask 255.255.255.0
+$ sudo ifconfig eth0:3 10.0.1.2 netmask 255.255.255.0</pre></div></li><li class="listitem">Now, let's go back to the Apache configuration and edit <code class="literal">mod_cluster.conf</code>, disabling advertising as follows:<div class="informalexample"><pre class="programlisting">&lt;VirtualHost 10.0.0.1:6666&gt;
+        &lt;Directory /&gt;
+                Order deny,allow
+                Deny from all
+                Allow from 10.0.0.1
+        &lt;/Directory&gt;
+        <span class="strong"><strong>ServerAdvertise off</strong></span>
+        EnableMCPMReceive
+&lt;/VirtualHost&gt;</pre></div></li><li class="listitem">If it's not already running, let's launch Apache and its logs by executing the following commands:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/bin
+$ sudo ./httpd -k start -f /opt/httpd/conf/httpd.conf
+$ tail -f ../logs/{access,error}_log
+==&gt; ../logs/access_log &lt;==
+
+==&gt; ../logs/error_log &lt;==
+[Sat Oct 18 23:10:29 2014] [notice] SIGHUP received.  Attempting to restart
+[Sat Oct 18 23:10:29 2014] [notice] Digest: generating secret for digest authentication ...
+[Sat Oct 18 23:10:29 2014] [notice] Digest: done
+[Sat Oct 18 23:10:29 2014] [warn] httpd version 2.2.29 mismatch detected
+[Sat Oct 18 23:10:29 2014] [notice] Advertise initialized for process 26675
+[Sat Oct 18 23:10:29 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations</pre></div></li><li class="listitem">Now we <a id="id579" class="indexterm"/>need to tell the WildFly <code class="literal">mod_cluster</code> to communicate directly with Apache by adding some attributes to the <code class="literal">mod_cluster</code> subsystem of the <code class="literal">standalone-ha.xml</code> file, as follows:<div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;mod-cluster-config advertise-socket="modcluster" advertise="false" proxy-list="10.0.0.1:6666" connector="ajp"&gt;
+        &lt;dynamic-load-provider&gt;
+            &lt;load-metric type="cpu"/&gt;
+        &lt;/dynamic-load-provider&gt;
+    &lt;/mod-cluster-config&gt;
+&lt;/subsystem&gt;</pre></div></li><li class="listitem">As emphasized in the preceding code, we are telling <code class="literal">mod_cluster</code> to disable autoadvertising, and to advertise itself to the proxy specified in the <code class="literal">proxy-list</code> attribute. To specify more than one proxy, use a comma <code class="literal">,</code> as a delimiter:<div class="informalexample"><pre class="programlisting">proxy-list="10.0.0.1:6666,10.0.0.2:6666"</pre></div></li><li class="listitem">Now that Apache is up and running, and that we have configured our node, let's start it by issuing the following command in a new terminal window:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ ./bin/standalone.sh -Djboss.server.base.dir=bl-tcp-std-node-1 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.1 -Djboss.management.http.port=19990 -Djboss.node.name=node-1
+...
+23:13:58,472 INFO  [org.jboss.as] (Controller Boot Thread) JBAS015874: WildFly 8.1.0.Final "Kenny" started in 6531ms - Started 289 of 400 services (179 services are lazy, passive or on-demand)</pre></div></li><li class="listitem"> A few seconds after <code class="literal">node-1</code> starts you should see the following entries in the Apache logs, the <code class="literal">access_log</code>:<div class="informalexample"><pre class="programlisting">==&gt; ../logs/access_log &lt;==
+10.0.0.1 - - [18/Oct/2014:23:14:05 +0200] "INFO / HTTP/1.1" 200 -
+10.0.0.1 - - [18/Oct/2014:23:14:05 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [18/Oct/2014:23:14:05 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [18/Oct/2014:23:14:05 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [18/Oct/2014:23:14:15 +0200] "STATUS / HTTP/1.1" 200 46</pre></div><p>Those are <code class="literal">mod_cluster</code> logs stating that it received an information message, a configuration message, and then it enabled the application provided by WildFly <code class="literal">node-1</code>.</p></li><li class="listitem">Replicate <a id="id580" class="indexterm"/>the WildFly <code class="literal">mod_cluster</code> configuration for <code class="literal">node-2</code> as well, and then start it in a new terminal window, as follows:<div class="informalexample"><pre class="programlisting">$ ./bin/standalone.sh -Djboss.server.base.dir=bl-tcp-std-node-2 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.2 -Djboss.management.http.port=29990 -Djboss.node.name=node-2
+...
+23:13:58,472 INFO  [org.jboss.as] (Controller Boot Thread) JBAS015874: WildFly 8.1.0.Final "Kenny" started in 6531ms - Started 289 of 400 services (179 services are lazy, passive or on-demand)</pre></div></li><li class="listitem">A few seconds after <code class="literal">node-2</code> starts, you should see the following entries in the Apache logs, the <code class="literal">access_log</code>:<div class="informalexample"><pre class="programlisting">...
+10.0.0.1 - - [18/Oct/2014:23:23:45 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [18/Oct/2014:23:23:55 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [18/Oct/2014:23:24:05 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [18/Oct/2014:23:24:15 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [18/Oct/2014:23:24:21 +0200] "INFO / HTTP/1.1" 200 331
+10.0.0.1 - - [18/Oct/2014:23:24:21 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [18/Oct/2014:23:24:21 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [18/Oct/2014:23:24:21 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [18/Oct/2014:23:24:25 +0200] "STATUS / HTTP/1.1" 200 46</pre></div></li><li class="listitem">Now, open <a id="id581" class="indexterm"/>the <code class="literal">mod_cluster-manager</code> page that we defined in the file <code class="literal">mod_cluster.conf</code>—Apache side—at the following URL:<div class="informalexample"><pre class="programlisting">http://10.0.0.1/mcm</pre></div><p>You should see the following page:</p><div class="mediaobject"><img src="graphics/3744_07_04.jpg" alt="How to do it..."/><div class="caption"><p>mod_cluster manager page displaying both running nodes and their contexts—TCP</p></div></div><p>Now that everything is up and running, let's play with our marvelous application.</p></li><li class="listitem">Point your browser to the following URL and refresh the page a few times:<div class="informalexample"><pre class="programlisting">http://10.0.0.1/balancing-test</pre></div><p>You should see a page like the following screenshot:</p><div class="mediaobject"><img src="graphics/3744_07_05.jpg" alt="How to do it..."/><div class="caption"><p>Apache serving balancing-test application on node-1</p></div></div></li><li class="listitem">In my case, the request landed on the server <code class="literal">node-1</code>, yours might land on <code class="literal">node-2</code>. Let's <a id="id582" class="indexterm"/>stop the serving node and refresh the page one more time. If everything works as expected, you should end up with a page like the one seen in the following screenshot:<div class="mediaobject"><img src="graphics/3744_07_06.jpg" alt="How to do it..."/><div class="caption"><p>Apache serving balancing-test application on node-2</p></div></div></li></ol></div><p>We got it to work exactly as it worked for balancing with auto-advertising.</p></div><div class="section" title="How it works…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec174"/>How it works…</h2></div></div></div><p>What is <a id="id583" class="indexterm"/>different in this case, from balancing with auto-advertising enabled, is that <code class="literal">mod_cluster</code> connects directly to Apache to communicate its <code class="literal">STATUS</code> information, as depicted in the following image:</p><div class="mediaobject"><img src="graphics/3744_07_09.jpg" alt="How it works…"/><div class="caption"><p>Architecture diagram showing balancing and clustering communication configuration with TCP</p></div></div><p>Nevertheless, WildFly scales out in the same way; you can add as many WildFly nodes as you want, and <a id="id584" class="indexterm"/>they will automatically be balanced by Apache. The drawback is that if you add another Apache instance, you need to add its reference into the WildFly <code class="literal">mod_cluster</code> configuration through the <code class="literal">proxy-list</code> attribute of the <code class="literal">mod_cluster</code> subsystem; the change eventually requires a server reload.</p></div></div>
+<div class="section" title="Balancing using the HTTP connector instead of AJP"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec68"/>Balancing using the HTTP connector instead of AJP</h1></div></div></div><p>In this recipe, we <a id="id585" class="indexterm"/>will learn how to balance a WildFly node using an HTTP connector instead of the binary protocol, AJP. The purpose of this recipe is to show you how to use a different connector, not how to really balance a service provided by WildFly. For this reason, we will use just a WildFly node, fronted by Apache. We also assume that Apache HTTPD installation and configuration are based on the first two recipes of this chapter.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec175"/>Getting ready</h2></div></div></div><p>For this recipe, we will need an application named <code class="literal">balancing-test</code>, that you can find in my GitHub repository. If you skipped the <span class="emphasis"><em>Managing applications using the deployments folder</em></span> recipe in <a class="link" href="ch02.html" title="Chapter 2. Running WildFly in Standalone Mode">Chapter 2</a>, <span class="emphasis"><em>Running WildFly in Standalone Mode</em></span>, please refer to it to download all the source code and projects that you will need.</p><p>To build the application, give the following commands:</p><div class="informalexample"><pre class="programlisting">$ cd ~/WFC/github/wildfly-cookbook
+$ cd balancing-test
+$ mvn clean package</pre></div></div><div class="section" title="How to do it…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec176"/>How to do it…</h2></div></div></div><p>From the WildFly <a id="id586" class="indexterm"/>installation directory <code class="literal">$WILDFLY_HOME</code>, let's create a folder representing a server node.</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ cp -a standalone bl-http-std-node-1</pre></div></li><li class="listitem">Now, let's copy the <code class="literal">balancing-test.war</code> application into the <code class="literal">deployments</code> folder of the node that we have just created. Type the following command:<div class="informalexample"><pre class="programlisting">$ cp balancing-test.war bl-http-std-node-1/deployments/</pre></div></li><li class="listitem">Now, let's generate a virtual IP for the node:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:1 10.0.1.1 netmask 255.255.255.0</pre></div></li><li class="listitem">If it's not running already, let's launch Apache and its logs, by executing the following commands:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/bin
+$ sudo ./httpd -k start -f /opt/httpd/conf/httpd.conf
+$ tail -f ../logs/{access,error}_log
+==&gt; ../logs/access_log &lt;==
+
+==&gt; ../logs/error_log &lt;==
+[Sun Oct 12 16:10:29 2014] [notice] SIGHUP received.  Attempting to restart
+[Sun Oct 12 16:10:29 2014] [notice] Digest: generating secret for digest authentication ...
+[Sun Oct 12 16:10:29 2014] [notice] Digest: done
+[Sun Oct 12 16:10:29 2014] [warn] httpd version 2.2.29 mismatch detected
+[Sun Oct 12 16:10:29 2014] [notice] Advertise initialized for process 26675
+[Sun Oct 12 16:10:29 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations</pre></div></li><li class="listitem">Now it's time to configure our WildFly node <code class="literal">node-1</code>. Edit the <code class="literal">standalone-ha.xml</code> file in the <code class="literal">bl-http-std-node-1/configuration</code> folder, and configure the undertow subsystem as follows:<div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;buffer-cache name="default"/&gt;
+    &lt;server name="default-server"&gt;
+        &lt;http-listener name="http" socket-binding="http" enabled="true"/&gt;
+        &lt;ajp-listener name="ajp" socket-binding="ajp" enabled="false"/&gt;
+        &lt;host name="default-host" alias="localhost"&gt;
+            &lt;location name="/" handler="welcome-content"/&gt;
+            &lt;filter-ref name="server-header"/&gt;
+            &lt;filter-ref name="x-powered-by-header"/&gt;
+        &lt;/host&gt;
+    &lt;/server&gt;
+    &lt;servlet-container name="default"&gt;
+        &lt;jsp-config/&gt;
+    &lt;/servlet-container&gt;
+    &lt;handlers&gt;
+        &lt;file name="welcome-content" 
+        path="${jboss.home.dir}/welcome-content"/&gt;
+    &lt;/handlers&gt;
+    &lt;filters&gt;
+        &lt;response-header name="server-header" header-
+        name="Server" header-value="WildFly/8"/&gt;
+        &lt;response-header name="x-powered-by-header" header-name="X-Powered-By" header-value="Undertow/1"/&gt;
+    &lt;/filters&gt;
+&lt;/subsystem&gt;</pre></div></li><li class="listitem">We disabled the <a id="id587" class="indexterm"/>AJP listener by adding the attribute <code class="literal">enabled</code> and setting it to <code class="literal">false</code>. Based on these changes, we need to update the <code class="literal">mod_cluster</code> subsystem as follows:<div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;mod-cluster-config advertise-socket="modcluster" connector="http"&gt;
+        &lt;dynamic-load-provider&gt;
+            &lt;load-metric type="cpu"/&gt;
+        &lt;/dynamic-load-provider&gt;
+    &lt;/mod-cluster-config&gt;
+&lt;/subsystem&gt;</pre></div></li><li class="listitem">We changed the connector reference from AJP to HTTP. Now we need to update the connector reference in the remoting subsystem which references the connector with its default name, which is <code class="literal">default</code>. Apply the following changes:<div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;endpoint worker="default"/&gt;
+    &lt;http-connector name="http-remoting-connector" connector-ref="default" security-realm="ApplicationRealm"/&gt;
+&lt;/subsystem&gt;</pre></div></li><li class="listitem">That's it; we are done with our configuration. Let's start our node by issuing the following command into a new terminal window:<div class="informalexample"><pre class="programlisting">$ ./bin/standalone.sh -Djboss.server.base.dir=bl-http-std-node-1 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.1 -Djboss.management.http.port=19990 -Djboss.node.name=node-1
+...
+18:03:57,734 INFO  [org.jboss.as] (Controller Boot Thread) JBAS015874: WildFly 8.1.0.Final "Kenny" started in 6670ms - Started 287 of 399 services (179 services are lazy, passive or on-demand)</pre></div></li><li class="listitem">Now, a few <a id="id588" class="indexterm"/>seconds after <code class="literal">node-1</code> starts, you should see the following entries in the Apache logs, that is, in <code class="literal">access_log</code>:<div class="informalexample"><pre class="programlisting">==&gt; ../logs/access_log &lt;==
+...
+10.0.0.1 - - [16/Oct/2014:18:04:03 +0200] "INFO / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:04:03 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:04:03 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:04:03 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [16/Oct/2014:18:04:13 +0200] "STATUS / HTTP/1.1" 200 46</pre></div><p>Those are mod-cluster logs stating that it received an information message and a configuration message, and then it enabled the application provided by WildFly <code class="literal">node-1</code>.</p></li><li class="listitem">Let's test our application by opening a browser and pointing it to the following URL:<div class="informalexample"><pre class="programlisting">http://10.0.0.1/balancing-test</pre></div><p>You should see a page like the following screenshot:</p><div class="mediaobject"><img src="graphics/3744_07_10.jpg" alt="How to do it…"/><div class="caption"><p>Apache serving balancing-test application on node-1 via HTTP connector</p></div></div></li></ol></div></div><div class="section" title="How it works…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec177"/>How it works…</h2></div></div></div><p>If you were expecting to change something on the Apache side, you were wrong. WildFly <code class="literal">mod_cluster</code> connects <a id="id589" class="indexterm"/>to Apache and says <code class="literal">Hi there, I need to be balanced. Here is how I'm reachable</code>. So when Apache receives all the information about applications, topology, and the communication strategy, it starts dispatching requests to WildFly.</p><p>This is exactly what we have done. We configured the new communication channel through the HTTP connector, disabled the AJP connector, and that's it! Pretty easy, isn't it?</p></div></div>
+<div class="section" title="Preserve WildFly workers while restarting Apache"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec69"/>Preserve WildFly workers while restarting Apache</h1></div></div></div><p>Many times, you <a id="id590" class="indexterm"/>need to restart Apache and all your WildFly instances become unavailable for a few seconds. So, this annoying <span class="strong"><strong>404</strong></span> error may be a problem. In this recipe, we will learn how to mitigate this problem in a simple way. We also assume that the Apache HTTPD installation and configuration are based on the first two recipes of this chapter.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec178"/>Getting ready</h2></div></div></div><p>For this recipe, we will need an application named <code class="literal">balancing-test</code>, that you can find in my GitHub repository. If you skipped the <span class="emphasis"><em>Managing applications using the deployments folder</em></span> recipe in <a class="link" href="ch02.html" title="Chapter 2. Running WildFly in Standalone Mode">Chapter 2</a>, <span class="emphasis"><em>Running WildFly in Standalone Mode</em></span>, please refer to it to download all the source code and projects that you will need.</p><p>To build the application, give the following commands:</p><div class="informalexample"><pre class="programlisting">$ cd ~/WFC/github/wildfly-cookbook
+$ cd balancing-test
+$ mvn clean package</pre></div></div><div class="section" title="How to do it…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec179"/>How to do it…</h2></div></div></div><p>From the WildFly <a id="id591" class="indexterm"/>installation directory <code class="literal">$WILDFLY_HOME</code>, let's create a folder representing a server node.</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ cp -a standalone bl-persist-std-node-1</pre></div></li><li class="listitem">Now, let's copy the <code class="literal">balancing-test.war</code> application into the <code class="literal">deployments</code> folder of the node that we have just created. Type the following command:<div class="informalexample"><pre class="programlisting">$ cp balancing-test.war bl-persist-std-node-1/deployments/</pre></div></li><li class="listitem">Now, let's generate a virtual IP for the node:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:1 10.0.1.1 netmask 255.255.255.0</pre></div></li><li class="listitem">If it's not running already, let's launch Apache and its logs, by executing the following commands:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/bin
+$ sudo ./httpd -k start -f /opt/httpd/conf/httpd.conf
+$ tail -f ../logs/{access,error}_log
+==&gt; ../logs/access_log &lt;==
+
+==&gt; ../logs/error_log &lt;==
+[Thu Oct 16 18:51:51 2014] [warn] Init: Session Cache is not configured [hint: SSLSessionCache]
+[Thu Oct 16 18:51:51 2014] [warn] httpd version 2.2.29 mismatch detected
+[Thu Oct 16 18:51:51 2014] [notice] Digest: generating secret for digest authentication ...
+[Thu Oct 16 18:51:51 2014] [notice] Digest: done
+[Thu Oct 16 18:51:51 2014] [warn] httpd version 2.2.29 mismatch detected
+[Thu Oct 16 18:51:51 2014] [notice] Advertise initialized for process 15525
+[Thu Oct 16 18:51:51 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations</pre></div></li><li class="listitem">Let's start our node, by issuing the following command in a new terminal window:<div class="informalexample"><pre class="programlisting">$ ./bin/standalone.sh -Djboss.server.base.dir=bl-persist-std-node-1 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.1 -Djboss.management.http.port=19990 -Djboss.node.name=node-1
+...
+18:55:37,613 INFO  [org.jboss.as] (Controller Boot Thread) JBAS015874: WildFly 8.1.0.Final "Kenny" started in 6723ms - Started 289 of 400 services (179 services are lazy, passive or on-demand)</pre></div><p>Now, a few <a id="id592" class="indexterm"/>seconds after <code class="literal">node-1</code> starts, you should see the following entries in the Apache logs, that is, <code class="literal">access_log</code>:</p><div class="informalexample"><pre class="programlisting">==&gt; ../logs/access_log &lt;==
+...
+10.0.0.1 - - [16/Oct/2014:18:55:43 +0200] "INFO / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:55:43 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:55:43 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:55:43 +0200] "STATUS / HTTP/1.1" 200 54
+10.0.0.1 - - [16/Oct/2014:18:55:53 +0200] "STATUS / HTTP/1.1" 200 54</pre></div><p>Those are <code class="literal">mod_cluster</code> logs stating that it received an information message and a configuration message, and then it enabled the application provided by WildFly <code class="literal">node-1</code>.</p></li><li class="listitem">Now let's restart Apache by executing the following command:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/bin
+$ ./httpd -k restart -f /opt/httpd/conf/httpd.conf</pre></div><p>In the Apache logs, you should see statements similar to the following:</p><div class="informalexample"><pre class="programlisting">==&gt; ../logs/error_log &lt;==
+...
+<span class="strong"><strong>[Thu Oct 16 18:57:23 2014] [warn] manager_handler STATUS error: MEM: Can't read node</strong></span>
+
+==&gt; ../logs/access_log &lt;==
+<span class="strong"><strong>10.0.0.1 - - [16/Oct/2014:18:57:23 +0200] "STATUS / HTTP/1.1" 500 535</strong></span>
+</pre></div><p>In the WildFly logs, you should see the following log entry:</p><div class="informalexample"><pre class="programlisting">18:57:23,879 ERROR [org.jboss.modcluster] (UndertowEventHandlerAdapter - 1) MODCLUSTER000042: Error MEM sending STATUS command to 10.0.0.1/10.0.0.1:6666, configuration will be reset: MEM: Can't read node</pre></div><p>Wait for <a id="id593" class="indexterm"/>just a few seconds, and now you should see WildFly sending its messages to Apache as follows:</p><div class="informalexample"><pre class="programlisting">==&gt; ../logs/access_log &lt;==
+<span class="strong"><strong>10.0.0.1 - - [16/Oct/2014:18:57:23 +0200] "STATUS / HTTP/1.1" 500 535</strong></span>
+10.0.0.1 - - [16/Oct/2014:18:57:33 +0200] "INFO / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:57:33 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:57:33 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:18:57:33 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [16/Oct/2014:18:57:43 +0200] "STATUS / HTTP/1.1" 200 46</pre></div><p>While restarting, users would have seen a <span class="strong"><strong>NOT FOUND</strong></span> error page for your application, as follows:</p><div class="mediaobject"><img src="graphics/3744_07_11.jpg" alt="How to do it…"/><div class="caption"><p>Apache could not find the application context after a restart</p></div></div></li><li class="listitem">So, to mitigate this problem, you can tell Apache to persist somehow with the WildFly node <a id="id594" class="indexterm"/>information before it shuts down, and then read the information back again at startup.<p>Edit the <code class="literal">mod_cluster.conf</code> file in the <code class="literal">/opt/httpd/conf/extra</code> folder, and add the following directive outside the virtual hosts declaration:</p><div class="informalexample"><pre class="programlisting">...
+Listen 10.0.0.1:80
+Listen 10.0.0.1:6666
+
+<span class="strong"><strong>PersistSlots On</strong></span>
+
+&lt;VirtualHost 10.0.0.1:80&gt;
+...</pre></div></li><li class="listitem">Let's see if it works. Stop both Apache and WildFly, and then restart them. After a few seconds, we should have the following entries:<div class="informalexample"><pre class="programlisting">==&gt; ../logs/error_log &lt;==
+[Thu Oct 16 19:14:39 2014] [warn] Init: Session Cache is not configured [hint: SSLSessionCache]
+[Thu Oct 16 19:14:39 2014] [warn] httpd version 2.2.29 mismatch detected
+[Thu Oct 16 19:14:39 2014] [notice] Digest: generating secret for digest authentication ...
+[Thu Oct 16 19:14:39 2014] [notice] Digest: done
+[Thu Oct 16 19:14:39 2014] [warn] httpd version 2.2.29 mismatch detected
+[Thu Oct 16 19:14:39 2014] [notice] Advertise initialized for process 16529
+[Thu Oct 16 19:14:39 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations
+
+==&gt; ../logs/access_log &lt;==
+10.0.0.1 - - [16/Oct/2014:19:15:01 +0200] "INFO / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:19:15:01 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:19:15:01 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [16/Oct/2014:19:15:01 +0200] "STATUS / HTTP/1.1" 200 55</pre></div></li><li class="listitem">Now restart <a id="id595" class="indexterm"/>Apache and look at its logs:<div class="informalexample"><pre class="programlisting">==&gt; ../logs/error_log &lt;==
+[Thu Oct 16 19:17:05 2014] [notice] SIGHUP received.  Attempting to restart
+[Thu Oct 16 19:17:05 2014] [notice] Digest: generating secret for digest authentication ...
+[Thu Oct 16 19:17:05 2014] [notice] Digest: done
+[Thu Oct 16 19:17:05 2014] [warn] httpd version 2.2.29 mismatch detected
+[Thu Oct 16 19:17:05 2014] [notice] Advertise initialized for process 16529
+[Thu Oct 16 19:17:05 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations
+
+==&gt; ../logs/access_log &lt;==
+10.0.0.1 - - [16/Oct/2014:19:17:11 +0200] "STATUS / HTTP/1.1" 200 46
+10.0.0.1 - - [16/Oct/2014:19:17:21 +0200] "STATUS / HTTP/1.1" 200 46</pre></div></li></ol></div><p>See, no more <code class="literal">INFO</code>, <code class="literal">CONFIG</code>, and <code class="literal">ENABLE-APP</code> messages from WildFly! The WildFly log didn't catch anything, and <a id="id596" class="indexterm"/>our application is served as fast as Apache starts up.</p></div></div>
+<div class="section" title="Balancing the same context for different applications"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec70"/>Balancing the same context for different applications</h1></div></div></div><p>A large <a id="id597" class="indexterm"/>enterprise environment might be composed of several application servers providing lots of applications. Sometimes, it happens that applications have the same context path while running on different nodes (eventually, even different server-groups in the case of WildFly in the domain mode), but they share the same balancer, that is, Apache.</p><p>In this recipe, we will learn how to balance the same application context coming from different applications from different nodes.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec180"/>Getting ready</h2></div></div></div><p>For this recipe, we will need an application named <code class="literal">balancing-test</code>, that you can find in my GitHub repository. If you skipped the <span class="emphasis"><em>Managing applications using the deployments folder</em></span> recipe in <a class="link" href="ch02.html" title="Chapter 2. Running WildFly in Standalone Mode">Chapter 2</a>, <span class="emphasis"><em>Running WildFly in Standalone Mode</em></span>, please refer to it to download all the source code and projects that you will need.</p><p>To build the application, give the following commands:</p><div class="informalexample"><pre class="programlisting">$ cd ~/WFC/github/wildfly-cookbook
+$ cd balancing-test
+$ mvn clean package</pre></div></div><div class="section" title="How to do it…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec181"/>How to do it…</h2></div></div></div><p>From the WildFly installation directory <code class="literal">$WILDFLY_HOME</code>, let's create two folders, each one representing a server node.</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ cp -a standalone bl-std-node-bar
+$ cp -a standalone bl-std-node-foo</pre></div></li><li class="listitem">Now, let's copy the two web applications in the <code class="literal">deployments</code> folder, to their corresponding node. Type the following commands:<div class="informalexample"><pre class="programlisting">$ cp app-bar-with-this-context.war bl-std-node-bar/deployments/
+$ cp app-foo-with-this-context.war bl-std-node-foo/deployments/</pre></div></li><li class="listitem">Now, let's generate a virtual IP for each of the nodes:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:1 10.0.1.1 netmask 255.255.255.0
+$ sudo ifconfig eth0:2 10.0.1.2 netmask 255.255.255.0</pre></div></li><li class="listitem">Now, let's <a id="id598" class="indexterm"/>go back to the Apache configuration and edit <code class="literal">mod_cluster.conf</code>. We need to replace the entire configuration, as follows:<div class="informalexample"><pre class="programlisting">LoadModule slotmem_module modules/mod_slotmem.so
+LoadModule manager_module modules/mod_manager.so
+LoadModule proxy_cluster_module modules/mod_proxy_cluster.so
+LoadModule advertise_module modules/mod_advertise.so
+
+PersistSlots On
+ServerAdvertise Off
+
+Listen 10.0.0.3:80
+&lt;VirtualHost 10.0.0.3:80&gt;
+
+        ServerName mcm.com
+
+        &lt;Location /&gt;
+                SetHandler mod_cluster-manager
+                Order deny,allow
+                Deny from all
+                Allow from all
+        &lt;/Location&gt;
+
+&lt;/VirtualHost&gt;
+
+Listen 10.0.0.1:80
+&lt;VirtualHost 10.0.0.1:80&gt;
+
+        ServerName bar.com
+
+        &lt;Directory /&gt;
+                Order deny,allow
+                Deny from all
+                Allow from all
+        &lt;/Directory&gt;
+
+        EnableMCPMReceive On
+
+        CreateBalancers 1
+        ProxyPass / balancer://barBalancer/this
+
+&lt;/VirtualHost&gt;
+
+Listen 10.0.0.2:80
+&lt;VirtualHost 10.0.0.2:80&gt;
+
+        ServerName foo.com
+
+        &lt;Directory /&gt;
+                Order deny,allow
+                Deny from all
+                Allow from all
+        &lt;/Directory&gt;
+
+        EnableMCPMReceive On
+
+        CreateBalancers 1
+        ProxyPass / balancer://fooBalancer/this
+
+&lt;/VirtualHost&gt;</pre></div></li><li class="listitem">As you can <a id="id599" class="indexterm"/>see, we changed virtual hosts bindings, so let's create the appropriate virtual IPs for them:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:3 10.0.0.1 netmask 255.255.255.0
+$ sudo ifconfig eth0:4 10.0.0.2 netmask 255.255.255.0
+$ sudo ifconfig eth0:5 10.0.0.3 netmask 255.255.255.0</pre></div></li><li class="listitem">Now we need to map the <code class="literal">ServerName</code> directive into the <code class="literal">/etc/hosts</code> file, as follows:<div class="informalexample"><pre class="programlisting">10.0.0.3 mcm.com
+10.0.0.1 bar.com
+10.0.0.2 foo.com</pre></div></li><li class="listitem">Now, let's check if our configuration is okay—at least the Apache configuration—by starting Apache HTTPD in a new terminal window, as follows:<div class="informalexample"><pre class="programlisting">$ cd /opt/httpd/bin
+$ ./httpd -k restart -f /opt/httpd/conf/httpd.conf
+In the Apache logs, you should see entries similar to the following:
+==&gt; ../logs/access_log &lt;==
+
+==&gt; ../logs/error_log &lt;==
+[Fri Oct 17 00:12:57 2014] [warn] Init: Session Cache is not configured [hint: SSLSessionCache]
+[Fri Oct 17 00:12:57 2014] [warn] httpd version 2.2.29 mismatch detected
+[Fri Oct 17 00:12:57 2014] [notice] Digest: generating secret for digest authentication ...
+[Fri Oct 17 00:12:57 2014] [notice] Digest: done
+[Fri Oct 17 00:12:57 2014] [warn] httpd version 2.2.29 mismatch detected
+[Fri Oct 17 00:12:57 2014] [notice] Advertise initialized for process 23907
+[Fri Oct 17 00:12:57 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations</pre></div></li><li class="listitem">Open the <a id="id600" class="indexterm"/>browser and point it to the following URL:<div class="informalexample"><pre class="programlisting">http://mcm.com</pre></div><p>You should see the <code class="literal">mod_cluster-manager</code> page, as follows:</p><div class="mediaobject"><img src="graphics/3744_07_12.jpg" alt="How to do it…"/><div class="caption"><p>mod_cluster-manager page served by Apache through the mcm.com address</p></div></div></li><li class="listitem">Now, let's configure our first node, <code class="literal">node-bar</code>. We need to adjust our <code class="literal">mod_cluster</code> subsystem, as follows:<div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;mod-cluster-config advertise-socket="modcluster" advertise="false" proxy-list="${proxy.list}" connector="ajp" balancer="${balancer.name}"&gt;
+        &lt;dynamic-load-provider&gt;
+            &lt;load-metric type="cpu"/&gt;
+        &lt;/dynamic-load-provider&gt;
+    &lt;/mod-cluster-config&gt;
+&lt;/subsystem&gt;</pre></div></li><li class="listitem">Now we <a id="id601" class="indexterm"/>can start our <code class="literal">node-bar</code> by executing the following commands:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ ./bin/standalone.sh -Djboss.server.base.dir=bl-std-node-bar --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.1 -Djboss.management.http.port=19990 -Djboss.node.name=node-bar -Dbalancer.name=barBalancer -Dproxy.list=10.0.0.1:80 -Djboss.default.multicast.address=230.0.1.4
+...
+00:24:20,643 INFO  [org.wildfly.extension.undertow] (MSC service thread 1-1) WFLYUT0021: Registered web context: /this
+...</pre></div><p>Apache should have caught the following log entries:</p><div class="informalexample"><pre class="programlisting">10.0.0.1 - - [17/Oct/2014:00:24:16 +0200] "INFO / HTTP/1.1" 200 -
+10.0.0.1 - - [17/Oct/2014:00:24:16 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [17/Oct/2014:00:24:16 +0200] "STATUS / HTTP/1.1" 200 48
+10.0.0.1 - - [17/Oct/2014:00:24:20 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [17/Oct/2014:00:24:20 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [17/Oct/2014:00:24:26 +0200] "STATUS / HTTP/1.1" 200 48</pre></div></li><li class="listitem">Now, apply the same changes that we made to the <code class="literal">mod_cluster</code> subsystem, to <code class="literal">node-foo</code> as well. Once done, start the node as follows:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ ./bin/standalone.sh -Djboss.server.base.dir=bl-std-node-foo --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.2 -Djboss.management.http.port=29990 -Djboss.node.name=node-foo -Dbalancer.name=fooBalancer -Dproxy.list=10.0.0.2:80 -Djboss.default.multicast.address=230.0.2.4
+...
+00:24:39,689 INFO  [org.wildfly.extension.undertow] (MSC service thread 1-5) WFLYUT0021: Registered web context: /this
+...</pre></div><p>Apache <a id="id602" class="indexterm"/>should have caught the following log entries:</p><div class="informalexample"><pre class="programlisting">10.0.0.1 - - [17/Oct/2014:00:24:32 +0200] "INFO / HTTP/1.1" 200 325
+10.0.0.1 - - [17/Oct/2014:00:24:32 +0200] "CONFIG / HTTP/1.1" 200 -
+10.0.0.1 - - [17/Oct/2014:00:24:32 +0200] "STATUS / HTTP/1.1" 200 48
+10.0.0.1 - - [17/Oct/2014:00:24:36 +0200] "STATUS / HTTP/1.1" 200 48
+
+==&gt; ../logs/error_log &lt;==
+[Fri Oct 17 00:24:39 2014] [warn] ENABLE: context /this is in balancer fooBalancer and barBalancer
+
+==&gt; ../logs/access_log &lt;==
+10.0.0.1 - - [17/Oct/2014:00:24:39 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+
+==&gt; ../logs/error_log &lt;==
+[Fri Oct 17 00:24:39 2014] [warn] ENABLE: context /this is in balancer fooBalancer and barBalancer
+
+==&gt; ../logs/access_log &lt;==
+10.0.0.1 - - [17/Oct/2014:00:24:39 +0200] "ENABLE-APP / HTTP/1.1" 200 -
+10.0.0.1 - - [17/Oct/2014:00:24:42 +0200] "STATUS / HTTP/1.1" 200 48
+10.0.0.1 - - [17/Oct/2014:00:24:46 +0200] "STATUS / HTTP/1.1" 200 48</pre></div><p>As you can see, Apache warns you about the context <code class="literal">/this</code> using the two balancers, which is fine; this is exactly what we wanted.</p></li><li class="listitem">Now let's refresh the <code class="literal">mcm.com</code> site:<div class="mediaobject"><img src="graphics/3744_07_19.jpg" alt="How to do it…"/><div class="caption"><p>mod_cluster manger page showing both nodes with the same application context path</p></div></div></li><li class="listitem">Now it's <a id="id603" class="indexterm"/>time to see if our two sites, <code class="literal">bar.com</code> and <code class="literal">foo.com</code> are correctly balanced and served by our Apache configuration:<div class="mediaobject"><img src="graphics/3744_07_13.jpg" alt="How to do it…"/><div class="caption"><p>The bar.com and foo.com sites showing their welcome page</p></div></div><p>To be <a id="id604" class="indexterm"/>sure that everything worked correctly, you should find the following entries in the <code class="literal">node-bar</code> logs:</p><div class="informalexample"><pre class="programlisting">00:37:42,053 INFO  [stdout] (default task-1) ********************************+
+00:37:42,054 INFO  [stdout] (default task-1) I'm serving your request and I'm "app-bar-with-this-context"
+00:37:42,054 INFO  [stdout] (default task-1) ********************************+</pre></div><p>And for <code class="literal">node-foo</code>, you should find the following log entries:</p><div class="informalexample"><pre class="programlisting">00:37:43,709 INFO  [stdout] (default task-1) ********************************+
+00:37:43,709 INFO  [stdout] (default task-1) I'm serving your request and I'm "app-foo-with-this-context"
+00:37:43,709 INFO  [stdout] (default task-1) ********************************+</pre></div></li></ol></div><p>Great, everything worked as expected!</p></div><div class="section" title="How it works..."><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec182"/>How it works...</h2></div></div></div><p>Most of the configuration is on the Apache side and is about how we configured our virtual hosts. We <a id="id605" class="indexterm"/>needed to specify one <code class="literal">mod_cluster</code> directive, that is, <code class="literal">CreateBalancers</code>. They define how balancers are created in the enclosing virtual host, thus you can control which balancer handles your requests (as in our case).</p><p>This <code class="literal">mod_cluster</code> directive can have the following values:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">0</code>: Creates balancers in all VirtualHosts defined in the Apache HTTPD</li><li class="listitem" style="list-style-type: disc"><code class="literal">1</code>: Does not create balancers (requires at least one <code class="literal">ProxyPass</code>/<code class="literal">ProxyPassMatch</code> to define the balancer names)</li><li class="listitem" style="list-style-type: disc"><code class="literal">2</code>: Creates only the main balancer named <code class="literal">myclsuter</code>, and it is the default setting.</li></ul></div><p>As per the preceding definition, for the <code class="literal">bar.com</code> site, we used the following definition:</p><div class="informalexample"><pre class="programlisting">Listen 10.0.0.1:80
+&lt;VirtualHost 10.0.0.1:80&gt;
+        <span class="strong"><strong>ServerName bar.com</strong></span>
+        &lt;Directory /&gt;
+                Order deny,allow
+                Deny from all
+                Allow from all
+        &lt;/Directory&gt;
+        EnableMCPMReceive On
+        <span class="strong"><strong>CreateBalancers 1</strong></span>
+        <span class="strong"><strong>ProxyPass / balancer://barBalancer/this</strong></span>
+&lt;/VirtualHost&gt;</pre></div><p>For the <code class="literal">foo.com</code> site, we used the following definition:</p><div class="informalexample"><pre class="programlisting">Listen 10.0.0.2:80
+&lt;VirtualHost 10.0.0.2:80&gt;
+        <span class="strong"><strong>ServerName foo.com</strong></span>
+        &lt;Directory /&gt;
+                Order deny,allow
+                Deny from all
+                Allow from all
+        &lt;/Directory&gt;
+        EnableMCPMReceive On
+        <span class="strong"><strong>CreateBalancers 1</strong></span>
+        <span class="strong"><strong>ProxyPass / balancer://fooBalancer/this</strong></span>
+&lt;/VirtualHost&gt;</pre></div><p>So we commanded Apache to use the balancer <code class="literal">barBalancer</code> to handle the <code class="literal">bar.com</code> requests, and to use <code class="literal">fooBalancer</code> to handle the <code class="literal">foo.com</code> requests. On the WildFly side, we had to match the balancer name in the <code class="literal">mod_cluster</code> subsystem to the relative node.</p><p>We achieved this by defining the attribute <code class="literal">balancer</code> in the <code class="literal">mod_cluster</code> subsystem. The attribute is valued to a property to pass at start up, named <code class="literal">balancer.name</code>. The following was our configuration:</p><div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;mod-cluster-config advertise-socket="modcluster" advertise="false" proxy-list="${proxy.list}" connector="ajp" balancer="${balancer.name}"&gt;
+        &lt;dynamic-load-provider&gt;
+            &lt;load-metric type="cpu"/&gt;
+        &lt;/dynamic-load-provider&gt;
+    &lt;/mod-cluster-config&gt;
+&lt;/subsystem&gt;</pre></div><p>We also needed to specify which Apache was serving our requests, by using the <code class="literal">proxy-list</code> attribute, settled with a property named <code class="literal">proxy.list</code>, which we passed at the command line.</p></div><div class="section" title="See also"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec183"/>See also</h2></div></div></div><p>For understanding Apache <a id="id606" class="indexterm"/>directives better, check the documentation at <a id="id607" class="indexterm"/>the following sites:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><a class="ulink" href="http://docs.jboss.org/mod_cluster/1.2.0/html/native.config.html">http://docs.jboss.org/mod_cluster/1.2.0/html/native.config.html</a></li><li class="listitem" style="list-style-type: disc"><a class="ulink" href="http://httpd.apache.org/docs/2.2/mod/mod_proxy.html#proxypass">http://httpd.apache.org/docs/2.2/mod/mod_proxy.html#proxypass</a></li></ul></div></div></div>
+<div class="section" title="Rolling updates"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec71"/>Rolling updates</h1></div></div></div><p>In this <a id="id608" class="indexterm"/>recipe, you will learn how to update your application, using rolling updates, while still providing service availability. To achieve this, we need to configure quite a few things from Apache to WildFly, and code the tester application. We also assume that Apache HTTPD installation and configuration are based on the first two recipes of this chapter.</p><div class="section" title="Getting ready"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec184"/>Getting ready</h2></div></div></div><p>For this recipe, we will need the application named <code class="literal">rolling-test</code>, that you can find in my GitHub repository. If you skipped the <span class="emphasis"><em>Managing applications using the deployments folder</em></span> recipe in <a class="link" href="ch02.html" title="Chapter 2. Running WildFly in Standalone Mode">Chapter 2</a>, <span class="emphasis"><em>Running WildFly in Standalone Mode</em></span>, please refer to it to download all the source code and projects that you will need.</p><p>To build the application, do as follows:</p><div class="informalexample"><pre class="programlisting">$ cd ~/WFC/github/wildfly-cookbook
+$ cd rolling-test
+$ mvn -e clean package</pre></div></div><div class="section" title="How to do it…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec185"/>How to do it…</h2></div></div></div><p>Let's create four <a id="id609" class="indexterm"/>folders from the WildFly installation directory <code class="literal">$WILDFLY_HOME</code>, each one representing a server node.</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Open a terminal and execute the following commands:<div class="informalexample"><pre class="programlisting">$ cd $WILDFLY_HOME
+$ cp -a standalone bl-rolling-node-1
+$ cp -a standalone bl-rolling-node-2
+$ cp -a standalone bl-rolling-node-3
+$ cp -a standalone bl-rolling-node-4</pre></div></li><li class="listitem">Now, let's copy the <code class="literal">rolling-test-1.0.war</code> web application into the <code class="literal">deployments</code> folder of each node that we just created, as follows:<div class="informalexample"><pre class="programlisting">$ cp ~/WFC/github/wildfly-cookbook/rolling-test/target/rolling-test-1.0.war bl-rolling-node-1/deployments/
+$ cp ~/WFC/github/wildfly-cookbook/rolling-test/target/rolling-test-1.0.war bl-rolling-node-2/deployments/
+$ cp ~/WFC/github/wildfly-cookbook/rolling-test/target/rolling-test-1.0.war bl-rolling-node-3/deployments/
+$ cp ~/WFC/github/wildfly-cookbook/rolling-test/target/rolling-test-1.0.war bl-rolling-node-4/deployments/</pre></div></li><li class="listitem">Now, let's generate a virtual IP for each of the nodes:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:2 10.0.1.1 netmask 255.255.255.0
+$ sudo ifconfig eth0:3 10.0.1.2 netmask 255.255.255.0
+$ sudo ifconfig eth0:4 10.0.1.3 netmask 255.255.255.0
+$ sudo ifconfig eth0:5 10.0.1.4 netmask 255.255.255.0</pre></div></li><li class="listitem">Edit the file <code class="literal">standalone-ha.xml</code> of each WildFly node, and replace the <code class="literal">cache-container</code> XML element named <code class="literal">web</code> of the <code class="literal">infinispan</code> subsystem, with the following XML code:<div class="informalexample"><pre class="programlisting">&lt;cache-container name="web" default-cache="repl" module="org.wildfly.clustering.web.infinispan"&gt;
+  &lt;transport lock-timeout="60000"/&gt;
+  &lt;replicated-cache name="repl" mode="SYNC"batching="true"&gt;
+    &lt;locking isolation="REPEATABLE_READ"/&gt;
+  &lt;/replicated-cache&gt;
+  &lt;distributed-cache name="dist" mode="ASYNC" batching="true" l1-lifespan="0" owners="2"&gt;
+    &lt;file-store/&gt;
+  &lt;/distributed-cache&gt;
+&lt;/cache-container&gt;</pre></div></li><li class="listitem">Now, let's <a id="id610" class="indexterm"/>go back to the Apache configuration and edit <code class="literal">mod_cluster.conf</code>. We need to replace the entire configuration, as follows:<div class="informalexample"><pre class="programlisting">LoadModule slotmem_module modules/mod_slotmem.so
+LoadModule manager_module modules/mod_manager.so
+LoadModule proxy_cluster_module modules/mod_proxy_cluster.so
+LoadModule advertise_module modules/mod_advertise.so
+
+Listen 10.0.0.1:80
+&lt;VirtualHost 10.0.0.1:80&gt;
+        &lt;Location /mcm&gt;
+                SetHandler mod_cluster-manager
+                Order deny,allow
+                Deny from all
+                Allow from 10.0.0.1
+        &lt;/Location&gt;
+&lt;/VirtualHost&gt;
+
+Listen 10.0.0.1:6666
+&lt;VirtualHost 10.0.0.1:6666&gt;
+        &lt;Directory /&gt;
+                Order deny,allow
+                Deny from all
+                Allow from 10.0.0.1
+        &lt;/Directory&gt;
+        ServerAdvertise on http://10.0.0.1:6666
+        EnableMCPMReceive
+&lt;/VirtualHost&gt;
+ 
+Listen 10.0.0.2:80
+&lt;VirtualHost 10.0.0.2:80&gt;
+        ServerName rolling.com
+        &lt;Directory /&gt;
+                Order deny,allow
+                Deny from all
+                Allow from all
+        &lt;/Directory&gt;
+        EnableMCPMReceive On
+
+        RewriteEngine On
+        RewriteCond %{REQUEST_URI} !^/(rolling/.*)$
+        RewriteRule ^/(.*)$ /rolling/$1 [P,L]
+
+        ProxyPass / balancer://mycluster/rolling stickysession=JSESSIONID|jsessionid nofailover=Off
+        ProxyPassReverse /rolling /
+        ProxyPassReverseCookieDomain / rolling.com
+        ProxyPassReverseCookiePath /rolling /
+&lt;/VirtualHost&gt;</pre></div></li><li class="listitem">Add another <a id="id611" class="indexterm"/>virtual IP for the second virtual host, as follows:<div class="informalexample"><pre class="programlisting">$ sudo ifconfig eth0:6 10.0.0.2 netmask 255.255.255.0</pre></div></li><li class="listitem">Now, as root user, edit the <code class="literal">/etc/hosts</code> file and add the following directive:<div class="informalexample"><pre class="programlisting">10.0.0.2 rolling.com</pre></div></li><li class="listitem">Now we are ready to start Apache and all four WildFly nodes.<p>For Apache, do as follows:</p><div class="informalexample"><pre class="programlisting">$ sudo ./httpd -k restart -f /opt/httpd/conf/httpd.conf
+$ tail -f ../logs/{access,error}_log
+==&gt; ../logs/access_log &lt;==
+
+==&gt; ../logs/error_log &lt;==
+[Fri Oct 17 15:22:34 2014] [warn] Init: Session Cache is not configured [hint: SSLSessionCache]
+[Fri Oct 17 15:22:34 2014] [warn] httpd version 2.2.29 mismatch detected
+[Fri Oct 17 15:22:34 2014] [notice] Digest: generating secret for digest authentication ...
+[Fri Oct 17 15:22:34 2014] [notice] Digest: done
+[Fri Oct 17 15:22:34 2014] [warn] httpd version 2.2.29 mismatch detected
+[Fri Oct 17 15:22:34 2014] [notice] Advertise initialized for process 26498
+[Fri Oct 17 15:22:34 2014] [notice] Apache/2.2.29 (Unix) mod_ssl/2.2.29 OpenSSL/1.0.1e-fips DAV/2 mod_cluster/1.2.6.Final configured -- resuming normal operations</pre></div></li><li class="listitem">For WildFly <a id="id612" class="indexterm"/>nodes, open four different terminal windows, and in each of them, do as follows:<div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">For <code class="literal">node-1</code>:<div class="informalexample"><pre class="programlisting">./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-1 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.1 -Djboss.management.http.port=19990 -Djboss.node.name=node-1</pre></div></li><li class="listitem" style="list-style-type: disc">For <code class="literal">node-2</code>:<div class="informalexample"><pre class="programlisting">./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-2 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.2 -Djboss.management.http.port=29990 -Djboss.node.name=node-2</pre></div></li><li class="listitem" style="list-style-type: disc">For <code class="literal">node-3</code>:<div class="informalexample"><pre class="programlisting">./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-3 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.3 -Djboss.management.http.port=39990 -Djboss.node.name=node-3</pre></div></li><li class="listitem" style="list-style-type: disc">For <code class="literal">node-4</code>:<div class="informalexample"><pre class="programlisting">./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-4 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.4 -Djboss.management.http.port=49990 -Djboss.node.name=node-4</pre></div></li></ul></div></li><li class="listitem">Open the browser and point it to the following site, refreshing the page a couple of times:<div class="informalexample"><pre class="programlisting">http://rolling.com</pre></div><p>You should see the following:</p><div class="mediaobject"><img src="graphics/3744_07_14.jpg" alt="How to do it…"/><div class="caption"><p>Apache serving the rolling application via the server name rolling.com</p></div></div></li><li class="listitem">Without <a id="id613" class="indexterm"/>spending too much time watching the logs, let's stop the <code class="literal">node-1</code>, or whichever node you landed on. Refresh the page a few times:<div class="mediaobject"><img src="graphics/3744_07_15.jpg" alt="How to do it…"/><div class="caption"><p>Rolling application provided by another member of the cluster, node-2</p></div></div><p>OK, it worked. Now suppose that our super boss wants to go into production with the latest version of our great application. Obviously he wants it done for yesterday, and obviously he does not want to give a <span class="strong"><strong>Service unavailable</strong></span> to customers.</p><p>You know the answer: <span class="strong"><strong>Yes Sir, yes!</strong></span>.</p></li><li class="listitem">Edit the <code class="literal">index.jsp</code> file of the <code class="literal">rolling-test</code> application and change its content by replacing the <code class="literal">&lt;h3&gt;...&lt;/h3&gt;</code> HTML tag with the following one:<div class="informalexample"><pre class="programlisting">&lt;h3 style="color:#ccff00;"&gt;I'm running version 1.1&lt;/h3&gt;</pre></div></li><li class="listitem">Now we need to increment the application version; we can do this by editing the <code class="literal">pom.xml</code> Maven file of the <code class="literal">rolling-test</code> project, and change its <code class="literal">&lt;version&gt;</code> tag, as follows:<div class="informalexample"><pre class="programlisting">&lt;version&gt;1.1&lt;/version&gt;</pre></div></li><li class="listitem">Now we can build the project again as follows:<div class="informalexample"><pre class="programlisting">$ cd ~/WFC/github/wildfly-cookbook
+$ cd rolling-test
+$ mvn -e clean package</pre></div></li><li class="listitem">Stop <a id="id614" class="indexterm"/><code class="literal">node-2</code> and update the application by removing the old package and copying the new one, to <code class="literal">node-1</code> and <code class="literal">node-2</code> as follows:<div class="informalexample"><pre class="programlisting">$ rm -rf /opt/wildfly/bl-rolling-node-1/deployments/rolling-test-1.0.war
+$ rm -rf /opt/wildfly/bl-rolling-node-2/deployments/rolling-test-1.0.war
+$ cp rolling-test-1.1.war /opt/wildfly/bl-rolling-node-1/deployments/
+$ cp rolling-test-1.1.war /opt/wildfly/bl-rolling-node-2/deployments/</pre></div><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="tip11"/>Tip</h3><p>We can do this as we are using the standalone mode. Nonetheless, remember to disable hot-deployments in the production environment, just in case.</p></div></div></li><li class="listitem">Now, restart both nodes as usual:<div class="informalexample"><pre class="programlisting">$ ./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-1 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.1 -Djboss.management.http.port=19990 -Djboss.node.name=node-1
+$ ./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-2 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.2 -Djboss.management.http.port=29990 -Djboss.node.name=node-2</pre></div></li><li class="listitem">Go back to the browser and refresh the page; you should get the new functionality desired by our super boss, as follows:<div class="mediaobject"><img src="graphics/3744_07_16.jpg" alt="How to do it…"/><div class="caption"><p>Rolling application with its new functionality</p></div></div><p>And yes, we didn't even loose the session. Now we need to upgrade the other <a id="id615" class="indexterm"/>two nodes, <code class="literal">node-3</code> and <code class="literal">node-4</code>, otherwise a user might get the following page by accessing the application:</p><div class="mediaobject"><img src="graphics/3744_07_17.jpg" alt="How to do it…"/><div class="caption"><p>Rolling application needs to be updated in every node of the cluster</p></div></div></li><li class="listitem">So, let's stop <a id="id616" class="indexterm"/><code class="literal">node-3</code> and <code class="literal">node-4</code>, remove the old artifact, and deploy the new one as follows:<div class="informalexample"><pre class="programlisting">$ rm -rf /opt/wildfly/bl-rolling-node-3/deployments/rolling-test-1.0.war
+$ rm -rf /opt/wildfly/bl-rolling-node-4/deployments/rolling-test-1.0.war
+$ cp rolling-test-1.1.war /opt/wildfly/bl-rolling-node-3/deployments/
+$ cp rolling-test-1.1.war /opt/wildfly/bl-rolling-node-4/deployments/</pre></div></li><li class="listitem">Now, restart both nodes as usual:<div class="informalexample"><pre class="programlisting">$ ./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-3 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.3 -Djboss.management.http.port=39990 -Djboss.node.name=node-3
+$ ./bin/standalone.sh -Djboss.server.base.dir=bl-rolling-node-4 --server-config=standalone-ha.xml -Djboss.bind.address=10.0.1.4 -Djboss.management.http.port=49990 -Djboss.node.name=node-4</pre></div></li><li class="listitem">Now that all nodes have the same application, by stopping one node at a time and refreshing the page, obviously leaving one node up, we should have a scenario as depicted in the following screenshot:<div class="mediaobject"><img src="graphics/3744_07_18.jpg" alt="How to do it…"/><div class="caption"><p>Rolling update completed on all 4 nodes</p></div></div></li></ol></div><p>Perfect! Let's go to the boss's office and tell him we are done!</p></div><div class="section" title="How it works…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec186"/>How it works…</h2></div></div></div><p>Well, actually the <a id="id617" class="indexterm"/>entire configuration is on the Apache side. In WildFly we didn't do much. As you saw, we configured a replicated-cache, just for demonstration purpose. The difference between a replicated cache and a distributed cache is that in the first one, all information is replicated to all nodes while in the second one, sessions are replicated to just select nodes. Those nodes, if not otherwise specified, are selected randomly.</p><p>From the configuration you can tell the cache how many nodes to distribute the session on, by the attribute owners.</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">We also relayed on the <code class="literal">standalone-ha</code> profile, with its defaults, and started it along with some custom bindings for each node.</li><li class="listitem" style="list-style-type: disc">We created one cluster composed of four nodes. Each node had its own copy of the application.</li><li class="listitem" style="list-style-type: disc">We then stopped two nodes. Stopping two nodes lets the users use our application, as their requests would be balanced on the other available nodes.<div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note31"/>Note</h3><p>Rolling updates might be much harder; it all depends on the backward compatibility of the application, concerning functionalities, and the domain model, which is what goes into a session. In our example, the data shared across cluster nodes was the same for the first version of the application as well as the last one.</p></div></div></li></ul></div></div><div class="section" title="There's more…"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec187"/>There's more…</h2></div></div></div><p>In a domain mode, it's pretty much the same:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">First you <a id="id618" class="indexterm"/>need to logically split the cluster in two, as we did during our rolling updates. To do this, we should configure a server-group which would represent the first half of the cluster—let's call it <code class="literal">sg-rolling-1</code>—and then configure another server-group, naming it <code class="literal">sg-rolling-2</code>, which in turn would represent the second half of the cluster.</li><li class="listitem" style="list-style-type: disc">When doing the first rolling update, you would stop the first server-group, undeploy the old application, and then deploy the new one. Once the deployment has finished, you can restart the server-group.</li><li class="listitem" style="list-style-type: disc">When all the nodes are up and running, you can repeat this operation for the second server group. That's pretty much what you should do using the domain mode.</li></ul></div></div><div class="section" title="See also"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec188"/>See also</h2></div></div></div><p>If you need a deeper understanding of clustering WildFly, refer to <a class="link" href="ch05.html" title="Chapter 5. Managing the Datasource Subsystems with the CLI">Chapter 5</a>, <span class="emphasis"><em>Managing the Datasource Subsystems with the CLI</em></span>.</p></div></div></body></html>
