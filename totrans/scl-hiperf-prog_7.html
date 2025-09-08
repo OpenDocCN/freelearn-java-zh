@@ -1,0 +1,604 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;7.&#xA0;Architecting for Performance"><div class="titlepage"><div><div><h1 class="title"><a id="ch07"/>Chapter 7. Architecting for Performance</h1></div></div></div><p>We have come a long way in our exploration of Scala and various techniques to write performant code. In this final chapter, we look at more open-ended topics. The final topics are largely applicable beyond Scala and the JVM. We dive into various tools and practices to improve the architecture and the design of an application. In this chapter, we explore the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Conflict-free replicated data types (CRDTs)</li><li class="listitem" style="list-style-type: disc">Throughput and latency impact of queueing</li><li class="listitem" style="list-style-type: disc">The Free monad</li></ul></div><div class="section" title="Distributed automated traders"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec36"/>Distributed automated traders</h1></div></div></div><p>Thanks to our hard work, MVT is thriving. The sales department is signing contracts like there is no tomorrow, and the sales bell is ringing from sunrise to sunset. The order book is able to handle more orders, and as a result of the increase in traffic, another product offered by MVT is incurring performance issues: the automated trading system. The automated trader receives orders from the order book and applies various trading strategies in real time to automatically place orders on behalf of the customers. As the order book is processing an order of magnitude of more trade orders, the automated trading system is unable to keep up, and, therefore, cannot efficiently apply its strategies. Several big customers recently lost a lot of money due to bad decisions made by the algorithm and the high latency of execution. The engineering team needs to solve this performance issue. Alice, your technical lead, has tasked you with finding a solution and preventing the company from losing newly-acquired customers.</p><p>In the previous chapter, we studied and took advantage of concurrency. We learned how to design code to leverage the power of multicore hardware. The automated trader is already optimized to run concurrent code and utilize all the CPU resources on the machine. The truth is, there is only so much one machine can handle, even with several cores. To scale the system and keep up with the traffic coming from the order book, we will have to start implementing a distributed system.</p><div class="section" title="A glimpse into distributed architectures"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec56"/>A glimpse into distributed architectures</h2></div></div></div><p>Distributed computing is a rich topic, and we cannot pretend to address it entirely in a single chapter. This short section gives a brief and incomplete description of distributed computing. We will try to give you an overview of the paradigm and point to some of the main benefits and challenges of distributed systems.</p><p>The idea behind distributed computing is to design a system involving several components, which runs on different machines and communicates with each other (for example, over a network) to achieve a task or provide a service. A distributed system can involve components of different natures, each component providing a specific service and participating in the realization of the task. For example, a web server can be deployed to receive HTTP requests. To service a request, the web server may communicate over the network to query an authentication service to validate credentials and a database server in order to store and retrieve data and complete the request. Together, the web server, the authentication service, and the database form a distributed system.</p><p>A distributed system can also involve several instances of the same component. These instances form a cluster of nodes, and they can be used to divide the work among them. This topology allows a system to scale out and support a higher load by adding more instances to the cluster. As an example, if a web server is able to handle 20,000 requests per second, it may be possible to run a cluster of three identical servers to handle 60,000 requests per second (assuming that your architecture allows your application to scale linearly). Distributed clusters also help achieve high availability. If one of the nodes crashes, the others are still up and able to fulfill requests while the crashed instance is restarted or recovers. As there is no single-point of failure, there is no interruption of service.</p><p>For all their benefits, distributed systems come with their drawbacks and challenges. The communication between components is subject to failure and network disruptions. The application needs to implement a retry mechanism and error handling, and then deal with lost messages. Another challenge is managing shared state. For example, if all the nodes use a single database server to save and retrieve information, the database has to implement some form of a locking mechanism to ensure that concurrent modifications do not collide. It is also possible that once the cluster node count grows sufficiently large, the database will not be able to serve them all efficiently and will become a bottleneck.</p><p>Now that you have been briefly introduced to distributed systems, we will go back to MVT. The team has decided to turn the automated trader into a distributed application to be able to scale the platform. You have been tasked with the design of the system. Time to go to the whiteboard.</p></div><div class="section" title="The first attempt at a distributed automated trader"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec57"/>The first attempt at a distributed automated trader</h2></div></div></div><p>Your first strategy is simple. You plan to deploy several instances of the automated trader to form a cluster of nodes. These nodes can share the work and handle each part of the incoming orders. A load balancer in front of the cluster can distribute the load evenly among the nodes. This new architecture helps scale out the automated trader. However, you are facing a common problem with distributed systems: the nodes have to share a common state to operate. To understand this requirement, we explore one of the features of the automated trader. To be able to use MVT's automated trading system, customers have to open an account with MVT and provision it with enough money to cover their trades. This is used as a safety net by MVT to execute orders on behalf of its clients without running the risk of a customer being unable to honor their transactions. To ensure that the automated strategies do not overspend, the automated trader keeps track of the current balance of each customer and checks the balance of a customer before placing an automated order on their behalf.</p><p>Your plan consists of deploying several instances of the automated trading system. Each instance receives a portion of the orders processed by the order book, runs a strategy and places matching order on behalf of a customer. Now that the system consists of several identical instances running in parallel, each instance can place orders on behalf of the same customer. To be able to perform the balance validation, they all need to be aware of the current balance of all customers. Customer balances become a shared state that has to be synchronized in the cluster. To solve this problem, you envision a balance monitor server deployed as an independent component and holding the state of each customer's balance. When a trade order is received by a node of the automated trading cluster, the node interrogates the balance monitor server to verify that a customer's account has enough funds to place an automated trade. Similarly, when a trade is executed, a node instructs the balance monitor server to update the balance of the customer.</p><p>
+</p><div class="mediaobject"><img src="graphics/image_07_001.jpg" alt="The first attempt at a distributed automated trader"/></div><p>
+</p><p>The preceding diagram describes various interactions between the components of your architecture. <span class="strong"><strong>Automated Trader 1</strong></span> receives an incoming trade and queries the balance monitor server to check whether the client has enough funds to perform a trade. The balance monitor server either authorizes or rejects the order. At the same time, <span class="strong"><strong>Automated Trader 3</strong></span> sends an order that was previously approved by the balance monitor server and updates the client's balance.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note50"/>Note</h3><p>You probably spotted a flaw in this design. It is possible to run into a race condition where two different instances of the automated trader may validate the balance of the same customer, receive an authorization from the <span class="strong"><strong>Balance Monitor Server</strong></span>, place both trades in parallel and go over the limit of the client's account. This is comparable to a race condition that you can encounter with a concurrent system running on a single machine. In practice, the risk is low and is accepted by companies that are similar to MVT. The limit used to cut-off a client is usually set lower than the actual balance to account for this risk. Designing a platform to handle this case would increase the latency of the system because we would have to introduce more drastic synchronization across the nodes. This is a good example of business and technical domains working together to optimize the solution.</p></div></div><p>At the end of this design session, you take a short walk to clear your mind while drinking a bottle of carbonated water. As you return to the whiteboard, the crude reality hits you. Like a flat bottle of carbonated water, your idea has fizzled out. You realize that all these arrows linking rectangles are in reality messages that are traveling over the network. Currently, while a single automated trader relies on its internal state to execute strategies and place orders, this new design requires the automated trader to query an external system over the network and wait for the answer. This query happens on the critical path. This is another common issue with distributed systems: components with focused roles need to communicate with each other to accomplish their tasks. This communication comes at a cost. It involves serialization, I/O operations, and transfer over a network. You share your reflections with Alice, who confirms that this is a problem. The automated trader has to keep the internal latency as low as possible for its decisions to be relevant. After a short discussion, you agree that it would endanger performance for the automated trader to perform a remote call on the critical path. You are now left with the task of implementing a distributed system with components sharing a common state without communicating with each other on the critical path. This is where we can start talking about CRDTs.</p></div><div class="section" title="Introducing CRDTs"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec58"/>Introducing CRDTs</h2></div></div></div><p>
+<span class="strong"><strong>CRDT</strong></span> stands for <span class="strong"><strong>Conflict-free Replicated Data Types</strong></span>. CRDTs were formally defined by Marc Shapiro and Nuno Preguiça in their paper, <span class="emphasis"><em>Designing a commutative replicated data type</em></span> (refer to <a class="ulink" href="https://hal.inria.fr/inria-00177693/document">https://hal.inria.fr/inria-00177693/document</a>). A CRDT is a data structure that is specifically designed to ensure eventual consistency across multiple components without the need for synchronization. Eventual consistency is a well-known concept in distributed system, which is not exclusive to CRDTs. This model guarantees that eventually, if a piece of data is no longer modified, all nodes in a cluster will end up with the same value for this piece of data. Nodes send each other update notifications to keep their state synchronized. The difference with strong consistency is that at a given time, some nodes may see a slightly outdated state until they receive the update notice:</p><p>
+</p><div class="mediaobject"><img src="graphics/image_07_002.jpg" alt="Introducing CRDTs"/></div><p>
+</p><p>The preceding diagram shows an example of eventual consistency. All the nodes of the cluster hold the same piece of data (A = 0). Node 1 receives an update to set the value of A to 1. After updating its internal state, it broadcasts the update to the rest of the cluster. The messages reach their targets at different instants, which means that until we reach step 4, A has a different value depending on the node. If a client queries node 4 for the value of A at step 3, they receive an older value as the change has not yet been reflected in node 4.</p><p>A problem that may arise with eventual consistency is the resolution of conflicts. Imagine a simple example where nodes in a cluster share the state of an array of integers. The following table describes a sequence of events involving updating the state of this array:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Instant</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Event</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>State change</strong></span>
+</p>
+</td></tr><tr><td>
+<p>
+<span class="strong"><strong>T0</strong></span>
+</p>
+</td><td>
+<p>Initialization of the cluster</p>
+</td><td>
+<p>Nodes 1 and 2 hold the same value for the array of integers: <code class="literal">[1,2,3]</code>
+</p>
+</td></tr><tr><td>
+<p>
+<span class="strong"><strong>T1</strong></span>
+</p>
+</td><td>
+<p>Node 1 receives a request to update the value at index 1 from 2 to 4</p>
+</td><td>
+<p>Node 1 updates its internal state to <code class="literal">[1,4,3]</code> and sends an update message to node 2</p>
+</td></tr><tr><td>
+<p>
+<span class="strong"><strong>T2</strong></span>
+</p>
+</td><td>
+<p>Node 2 receives a request to update the value at index 1 from 2 to 5</p>
+</td><td>
+<p>Node 2 updates its internal state to <code class="literal">[1,5,3]</code> and sends an update message to node 1</p>
+</td></tr><tr><td>
+<p>
+<span class="strong"><strong>T3</strong></span>
+</p>
+</td><td>
+<p>Node 1 receives the update from node 2</p>
+</td><td>
+<p>Node 1 needs to decide whether it should ignore or take into account the update message</p>
+</td></tr></tbody></table></div><p>Our cluster now needs to resolve the conflict. Should node 1 update its state when receiving the update from node 2? If node 2 does the same, we end up with two nodes holding a different state. What about the other nodes? Some may receive the broadcast from node 2 before the one from node 1 and vice versa.</p><p>Various strategies exist to deal with this problem. Some protocols use timestamps or vector clocks to determine which update was performed later in time and should take precedence. Others simply assume that the last writer wins. This is not a simple problem and CRDTs are designed to completely avoid conflicts altogether. Actually, CRDTs are defined to make conflicts mathematically impossible. To be defined as a CRDT, a data structure has to support only commutative updates. That is, regardless of the ordering in which the update operations are applied, the end state must always be the same. This is the secret of eventual consistency without merge conflict. When a system uses CRDTs, all the nodes can send each other update messages without a need for strict synchronization. The messages can be received in any order, and all the local states will converge to the same value eventually.</p><p>
+</p><div class="mediaobject"><img src="graphics/image_07_003.jpg" alt="Introducing CRDTs"/></div><p>
+</p><p>In the preceding diagram, we see that node 3 and node 1 receive two different changes. They send this update information to all the other nodes. Note that we are not concerned with the order in which the updates are received by the other nodes. As the updates are commutative, their order has no impact on the final state that will be computed by each node. They are guaranteed to hold the same piece of data once all of them have received all the update broadcasts.</p><p>There exist two types of CRDT:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Operation-based</li><li class="listitem" style="list-style-type: disc">State-based</li></ul></div><p>They are equivalent in that it is always possible to define a state-based CRDT for each operation-based CRDT and vice-versa. However, their implementations differ and provide different guarantees in terms of error-recovery and performance. We define each type and consider its characteristics. As an example, we implement each version of the simplest CRDT: an increase-only counter.</p><div class="section" title="The state-based increase-only counter"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec42"/>The state-based increase-only counter</h3></div></div></div><p>With this model, when a CRDT receives an operation to perform from a client, it updates its state accordingly and sends an update message to all the other CRDTs in the cluster. This update message contains the full state of the CRDT. When the other CRDTs receive this message, they perform a merge of their state with the received new state. This merge operation has to guarantee that the end state will always be the same. It has to be commutative, associative, and idempotent. Let's look at a possible implementation of this data type:</p><pre class="programlisting">case class CounterUpdate(i: Int) &#13;
+case class GCounterState(uid: Int, counter: Int) &#13;
+ &#13;
+class StateBasedGCounter( &#13;
+ uid: Int, count: Int, otherCounters: Map[Int, Int]) { &#13;
+ &#13;
+ def value: Int = count + otherCounters.values.sum &#13;
+ &#13;
+ def update( &#13;
+   change: CounterUpdate): (StateBasedGCounter, GCounterState) = &#13;
+   (new StateBasedGCounter(uid, count + change.i, otherCounters), &#13;
+     GCounterState(uid, count)) &#13;
+ &#13;
+ def merge(other: GCounterState): StateBasedGCounter = { &#13;
+   val newValue = other.counter max otherCounters.getOrElse(other.uid,0) &#13;
+   new StateBasedGCounter(uid, count, otherCounters.+(other.uid -&gt; newValue) ) &#13;
+ } &#13;
+} &#13;
+</pre><p>The <code class="literal">update</code> method can be used by clients to increase the value of the counter. This returns a new state-based counter containing an updated count, and it generates a <code class="literal">CounterState</code> object that can be sent to all the other CRDTs in the cluster. The <code class="literal">merge</code> is used to handle these <code class="literal">CounterState</code> messages and merge the new state of the other counters with the local state. A counter has a unique ID in the cluster. The internal state is composed of the local state (that is, <code class="literal">count</code>) and the states of all the other counters in the cluster. We keep these counters in a map that we update in the <code class="literal">merge</code> method when receiving state information from a different counter. Merging is a simple operation. We compare the incoming value with the one that we have in the map and keep the greatest one. This is to ensure that if we receive two update messages in the wrong order, we do not override the latest state (that is, the greatest number) with an older update message that was delayed.</p></div><div class="section" title="The operation-based increase-only counter"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec43"/>The operation-based increase-only counter</h3></div></div></div><p>Operation-based CRDTs are similar to state-based CRDTs with the difference that update messages only contain a description of the operation that was just performed. These CRDTs do not send their full-state in an update message, but they are merely a copy of the operation that they just performed to update their own state. This ensures that all the other CRDTs in the cluster perform the same operation and maintain their state in sync. The updates can be received in a different order by each node of the cluster. To guarantee that the end state is the same for all the nodes, the updates have to be commutative. You can see an example of this data structure, as follows:</p><pre class="programlisting">class OperationBasedCounter(count: Int) { &#13;
+ &#13;
+ def value: Int = count &#13;
+ &#13;
+ def update(change: CounterUpdate): (OperationBasedCounter, CounterUpdate) &#13;
+ = &#13;
+   new OperationBasedCounter(count + change.i) -&gt; change &#13;
+ &#13;
+ def merge(operation: CounterUpdate): OperationBasedCounter = &#13;
+   update(operation)._1 &#13;
+} &#13;
+</pre><p>This implementation is shorter than the state-based example. The <code class="literal">update</code> method still returns an updated instance of the counter, and the <code class="literal">CounterUpdate</code> object that was applied. For an operation-based counter, it is enough to broadcast the operation that was applied. This update is received by the <code class="literal">merge</code> method of the other instances to apply the same operation to their own internal state. Note that <code class="literal">update</code> and <code class="literal">merge</code> are equivalent, <code class="literal">merge</code> is even implemented in terms of <code class="literal">update</code>. In this model, there is no need for a unique ID per counter.</p><p>Operation-based CRDTs use potentially smaller messages because they only send each discrete operation as opposed to their full internal state. In our example, the state-based update contains two integers, as opposed to only one for the operation-based update. Smaller messages can help reduce bandwidth usage and improve the throughput of your system. However, they are sensitive to communication failures. If an update message is lost during the transmission and does not reach a node, this node will be out of sync with the rest of the cluster with no way of recovering. If you decide to use operation-based CRDTs, you have to be able to trust your communication protocol and be confident that all update messages reach their destination and are properly processed. State-based CRDTs do not suffer from this issue because they always send their entire state in an update message. If a message is lost and does not reach a node, this node will only be out of sync until it receives the next update message. It is possible to make this model even more robust by implementing a periodic broadcast of the node's state, even when no updates are performed. This would force all nodes to regularly send their current state and ensure that the cluster is always eventually consistent.</p></div></div><div class="section" title="CRDTs and automated traders"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec59"/>CRDTs and automated traders</h2></div></div></div><p>Based on the requirements of our system, it seems that CRDTs are a good fit for our implementation. Each node can keep the current state of each customer's balance in memory as a counter, update it when placing orders, and broadcast update messages to the rest of the system. This broadcast can be done outside the critical path, and we do not have to worry about handling conflicts, as this is what CRDTs are designed for. Eventually, all nodes will have in memory the same value for each balance, and they will be able to locally check for trade authorization. The balance monitor server can be removed entirely.</p><p>To implement the state of the balance as a CRDT, we need a more sophisticated counter than the one we previously explored. The balance cannot be represented as an increase-only counter because, occasionally, orders are canceled and the system must credit the customer's account. The counter has to be able to handle both increment and decrement operations. Luckily, such a counter exists. Let's look at a simple implementation of a state-based counter:</p><pre class="programlisting">case class PNCounterState(incState: GCounterState, decState: GCounterState) &#13;
+ &#13;
+class StateBasedPNCounter private( &#13;
+ incCounter: StateBasedGCounter, &#13;
+ decCounter: StateBasedGCounter) { &#13;
+ &#13;
+ def value = incCounter.value - decCounter.value &#13;
+ &#13;
+ def update(change: CounterUpdate): (StateBasedPNCounter, PNCounterState) = { &#13;
+   val (newIncCounter, newDecCounter, stateUpdate) = &#13;
+     change match { &#13;
+       case CounterUpdate(c) if c &gt;= 0 =&gt; &#13;
+         val (iC, iState) = incCounter.update(change) &#13;
+         val dState = GCounterState(decCounter.uid, decCounter.value) &#13;
+         (iC, decCounter, PNCounterState(iState, dState)) &#13;
+       case CounterUpdate(c) if c &lt; 0 =&gt; &#13;
+         val (dC, dState) = decCounter.update(change) &#13;
+         val iState = GCounterState(incCounter.uid, incCounter.value) &#13;
+         (incCounter, dC, PNCounterState(iState, dState)) &#13;
+     } &#13;
+ &#13;
+   (new StateBasedPNCounter(newIncCounter, newDecCounter), stateUpdate) &#13;
+ } &#13;
+ &#13;
+ def merge(other: PNCounterState): StateBasedPNCounter = &#13;
+   new StateBasedPNCounter( &#13;
+     incCounter.merge(other.incState), &#13;
+     decCounter.merge(other.decState) &#13;
+   ) &#13;
+} &#13;
+</pre><p>The PN counter leverages our previous implementation of an increase-only counter to provide the decrement capability. To be able to represent a counter as a state-based CRDT, we need to keep track of the state of both increment and decrement operations. This is necessary to guarantee that we do not lose information if our update messages are received in the wrong order by other nodes.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="tip51"/>Tip</h3><p>Remember that the increase-only counter guarantees conflict resolution by assuming that the highest value of the counter is necessarily the most up-to-date. This invariant does not hold true for the PN counter.</p></div></div><p>This implementation shows you another interesting property of CRDTs: simple and basic structures can be composed to create more complex and feature-rich CRDTs. Should we proceed to demonstrate the implementation of an operation-based counter? As it turns out and we are sure you spotted this earlier, our previous increase-only counter already supports decrement operations. Applying a positive or a negative delta is handled by the operation-based counter.</p></div><div class="section" title="When the balance is not enough"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec60"/>When the balance is not enough</h2></div></div></div><p>You have finished the implementation of the proof-of-concept and call Alice to get some feedback. She spends a few minutes studying your new design and your code. "Looks good to me. Do not forget to synchronize the account blacklist as well." What is she talking about? "Checking the account balance is only one of the criteria to allow or block an automated trade. Other attributes of the client need to be taken into consideration. Today, the automated trader runs a trust algorithm in the background, and it calculates a score for each customer. If the score falls below a certain threshold, the account is blacklisted until the end of the trading day, and all automated orders are denied. I like your design, but you need to incorporate this blacklist into the new system." Faced with this new challenge, you think that the best solution would be to implement the blacklist as a CRDT as well, provided that it fits your current design.</p><div class="section" title="A new CRDT - the grow-only set"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec44"/>A new CRDT - the grow-only set</h3></div></div></div><p>One CRDT is designed to handle our new use case. The grow-only set data type implements a set that only supports the addition of new elements without duplicates. We can implement the blacklist as a grow-only set. Each node can run its own trust algorithm and can decide whether a client should be blacklisted and denied automated trading for the rest of the day. At the end of the day, the system can clear the set. We display a possible implementation of a state-based grow-only set, as follows:</p><pre class="programlisting">case class AddElement[A](a: A) &#13;
+case class GSetState[A](set: Set[A]) &#13;
+ &#13;
+class StateBasedGSet[A](val value: Set[A]) { &#13;
+ &#13;
+ def contains(a: A): Boolean = value.contains(a) &#13;
+ &#13;
+ def update(a: AddElement[A]): (StateBasedGSet[A], GSetState[A]) = { &#13;
+   val newSet = new StateBasedGSet(value + a.a) &#13;
+   (newSet, GSetState(newSet.value)) &#13;
+ } &#13;
+ &#13;
+ def merge(other: GSetState[A]): StateBasedGSet[A] = { &#13;
+   new StateBasedGSet(value ++ other.set) &#13;
+ } &#13;
+ &#13;
+} &#13;
+</pre><p>Our implementation supports adding an element by calling the <code class="literal">update</code> method. It returns a new instance of <code class="literal">StateBasedGSet</code> with an updated set, as well as a <code class="literal">GSetState</code> instance to be broadcast to the other nodes. This update contains the entire state of the counter, that is, the internal set. An operation-based implementation is trivial and left as an exercise for the reader (a possible solution is provided in the code repository). Similar to the increment-decrement counter explored earlier, it is possible to create a set that supports both adding and removing an element. There is one caveat though: as adding and removing an element are not commutative operations, one must take precedence on the other. In practice, a 2P-set can be created to support adding and removing items, but once removed, an element cannot be added again. The remove operation takes precedence and guarantees that the operations are commutative and can be handled without conflicts. A possible implementation is to combine two grow-only sets, one for adding elements, and the other to remove them. Again, we see the power of simple CRDTs that can be combined to create more powerful data types.</p></div></div></div></div>
+<div class="section" title="Free trading strategy performance improvements"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec37"/>Free trading strategy performance improvements</h1></div></div></div><p>You stare at your agile burn down chart and discover that you completed all your story points before the sprint ends tomorrow. You are excited to have delivered this week's features early, but you are left wondering whether or not you will have yet another discussion with the scrum master about estimation. Instead of spending mental energy on estimating, you instead return your attention to an issue that Dave raised. At a recent lunch together, Dave talked about how the company's trading strategies lose money when trading decisions are made based on stale information. Even several milliseconds can make the difference between extremely profitable trades and losses. His words piqued your interest to see if you can improve the performance of MVT's trading strategies.</p><p>MVT's trading strategies are downstream consumers of the order book. The trading strategies listen for changes in the best bid and offer (BBO) in order to determine when to submit buy or sell orders. At lunch, Dave explained that tracking the BBO has historically proven to give the most signals for MVT's trading strategies. The best bid refers to the bid with the highest price, and the best offer refers to the offer with the lowest price. When either side of the BBO changes due to a cancellation, execution, or new limit order, then a BBO update event is transmitted to downstream trading strategies. The model representing this event is <code class="literal">BboUpdated</code>, and it looks like the following:</p><pre class="programlisting">case class Bid(value: BigDecimal) extends AnyVal &#13;
+case class Offer(value: BigDecimal) extends AnyVal &#13;
+case class Ticker(value: String) extends AnyVal &#13;
+case class BboUpdated(ticker: Ticker, bid: Bid, offer: Offer) &#13;
+</pre><p>MVT deploys each trading strategy within its own JVM to ensure that failures do not affect other running strategies. When deployed, each trading strategy maintains BBO subscriptions for the set of tickers it trades.</p><p>Having spent a significant amount of time working on the order book, you hope to find opportunities to apply your functional programming knowledge to yield better performance. During your lunch with Dave, you discovered that "better performance" has a slightly different meaning for trading strategy development than it does for other systems. You asked Dave, "If you could choose between an improvement in latency or throughput, which would you choose?" Dave sarcastically replied, "Why do I have to choose? I want both!" Afterwards, he went on to say, "Latency! Almost every time a trading strategy makes a decision using old BBO updates, we lose money. In fact, if we could, I would rather throw away old BBO updates. We only trade high-volume tickers, so we are pretty much guaranteed to see another BBO update immediately." As you start looking into the code base, you wonder whether you can utilize Dave's thinking to improve trading strategy performance.</p><div class="section" title="Benchmarking the trading strategy"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec61"/>Benchmarking the trading strategy</h2></div></div></div><p>Recalling the lessons that you learned when working on the order book, your first step is to benchmark. You select one of MVT's production trading strategies and adapt the benchmark that you wrote to exercise the order book, <code class="literal">FinalLatencyBenchmark</code>, to send the <code class="literal">BboUpdated</code> events to the trading strategy. Originally, the benchmark focused on displaying the 99<sup>th</sup> percentile latency and higher. As you know that latency is the most important factor in your performance investigation, you modify the benchmark to also emit the median and 75<sup>th</sup> percentile latencies. This will give you a more holistic view into the latency of trading strategy performance.</p><p>Looking at the production metrics system, you see a time series trading volume chart for the system that you want to benchmark. It shows that it is a low-volume day, only about 4,000 BBO updated events per second. You dig through historical metrics to find the highest volume day in the last few weeks. The market has been volatile again, so a recent high-volume day is likely a good proxy for a high throughput rate to benchmark. About two weeks ago, there was a trading day with a sustained peak of 12,000 BBO updated events per second. You plan to begin benchmarking at the lower end of the spectrum with 4,000 events per second, ramping up to 12,000 events per second to see how performance changes.</p><p>The testing methodology is to measure latency for an equivalent number of events across throughput rates while ensuring a thorough test at each throughput level. To accomplish this goal, you multiply the higher throughput, 12,000 events per second, by 30 trials for a sum total of 360,000 events. At 4,000 events per second, running the benchmark for 90 trials produces the equivalent of 360,000 events. Running the benchmarks in a test environment replicating production gives the results displayed in the following table. The table abbreviates events per second as EPS:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Percentile</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>4,000 EPS</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>12,000 EPS</strong></span>
+</p>
+</td></tr><tr><td>
+<p>50<sup>th</sup> (median)</p>
+</td><td>
+<p>0.0 ms</p>
+</td><td>
+<p>1,063.0 ms</p>
+</td></tr><tr><td>
+<p>75<sup>th</sup></p>
+</td><td>
+<p>0.0 ms</p>
+</td><td>
+<p>1,527.0 ms</p>
+</td></tr><tr><td>
+<p>99<sup>th</sup></p>
+</td><td>
+<p>10.0 ms</p>
+</td><td>
+<p>2,063.0 ms</p>
+</td></tr><tr><td>
+<p>99.9<sup>th</sup></p>
+</td><td>
+<p>22.0 ms</p>
+</td><td>
+<p>2,079.0 ms</p>
+</td></tr><tr><td>
+<p>100<sup>th</sup> (maximum)</p>
+</td><td>
+<p>36.0 ms</p>
+</td><td>
+<p>2,079.0 ms</p>
+</td></tr></tbody></table></div><p>These results illustrate a startling contrast in performance. At 4,000 events per second, the trading strategy appears to perform well. 99% of events are responded to within 10 ms, and we observe that up to the 75<sup>th</sup> percentile, the strategy is responding with miniscule delay. This suggests that on low-volume days, this trading strategy is able to decide on information quickly, which should bode well for profitability. Unfortunately, at 12,000 events per second, the performance is unacceptable. Having not yet looked at the code, you wonder whether you can spot any sudden changes in performance by sweeping several more throughputs. You try a binary search between 4,000 and 12,000 events per second and get the following results:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Percentile</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>9,000 EPS</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>10,000 EPS</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>11,000 EPS</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>11,500 EPS</strong></span>
+</p>
+</td></tr><tr><td>
+<p>50<sup>th</sup> (median)</p>
+</td><td>
+<p>0.0 ms</p>
+</td><td>
+<p>4.0 ms</p>
+</td><td>
+<p>41.0 ms</p>
+</td><td>
+<p>487.0ms</p>
+</td></tr><tr><td>
+<p>75<sup>th</sup></p>
+</td><td>
+<p>5.0 ms</p>
+</td><td>
+<p>9.0 ms</p>
+</td><td>
+<p>66.0 ms</p>
+</td><td>
+<p>715.0 ms</p>
+</td></tr><tr><td>
+<p>99<sup>th</sup></p>
+</td><td>
+<p>32.0 ms</p>
+</td><td>
+<p>47.0 ms</p>
+</td><td>
+<p>126.0 ms</p>
+</td><td>
+<p>871.0 ms</p>
+</td></tr><tr><td>
+<p>99.9<sup>th</sup></p>
+</td><td>
+<p>58.0 ms</p>
+</td><td>
+<p>58.0 ms</p>
+</td><td>
+<p>135.0 ms</p>
+</td><td>
+<p>895.0 ms</p>
+</td></tr><tr><td>
+<p>100<sup>th</sup> (maximum)</p>
+</td><td>
+<p>67.0ms</p>
+</td><td>
+<p>62.0 ms</p>
+</td><td>
+<p>138.0 ms</p>
+</td><td>
+<p>895.0 ms</p>
+</td></tr></tbody></table></div><p>You chose 9,000 events per second as a starting point because it divided evenly into the total event count, 360,000. At this level of throughput, the strategy's profile is qualitatively closer to the 4,000 events per second profile. As results looked reasonable at this level, you increased the throughput approximately halfway between 9,000 and 12,000 events per second to the next level that divides evenly into 360,000. At 10,000 events per second, we once again observe a profile that remains similar to the 4,000 events per second profile. There is a discernible increase in the median and 75<sup>th</sup> percentile latencies, suggesting the strategy's performance is beginning to degrade. Next, you increase the throughput to the midpoint, 11,000 events per second. As you cannot run 32.72 trials, you instead round up to 33 trials for a total of 363,000 events. These results are qualitatively worse than the 4,000 events per second results by approximately an order of magnitude at each measured percentile. Admittedly, these are weak performance results, but does this profile closely resemble the profile at 12,000 events per second?</p><p>You are now a bit alarmed because 11,000 events per second is approximately 90% of the throughput at 12,000 events per second. Yet, the results do not display close to 90% similarity. If the trading strategy decreased linearly you would expect to see latencies approximating 90% of the latencies that were observed at 12,000 events per second. Unsatisfied with this performance profile, you try one more throughput, 11,500 events per second. At this throughput level, you run the benchmark for 31 trials, totaling 356,500 events. Increasing the throughput by approximately 5% resulted in an observed median latency that is roughly 11 times greater and an observed 99<sup>th</sup> percentile latency that is nearly six times greater. These results make it clear that the strategy's runtime performance degrades exponentially. To better reason about the results, you quickly throw together the following bar graph:</p><p>
+</p><div class="mediaobject"><img src="graphics/image_07_004.jpg" alt="Benchmarking the trading strategy"/></div><p>
+</p><p>This bar graph visualizes the exponential decay in performance. Interestingly, we observe that all measured latency percentiles follow consistent patterns of decay, further substantiating the hypothesis that the strategy has exhausted its capacity to process requests. Before jumping into improving the trading strategy performance, you ponder, "How can I bound the exponential increases in latency?"</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note52"/>Note</h3><p>Instead of seeing consistent decay across all measured latency percentiles, imagine that the median and 75<sup>th</sup> percentiles remained qualitatively constant across all configured throughput levels. Does this profile suggest the same types of performance impediment as the scenario that we are working through? Take a moment to consider what could cause such a distribution to arise.</p></div></div></div><div class="section" title="The danger of unbounded queues"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec62"/>The danger of unbounded queues</h2></div></div></div><p>Benchmarking revealed a universal truth about performance tuning: unbounded queues kill performance. Here, we use the term queue to broadly mean a waiting line, instead of specifically focusing on the queue data structure. For example, this benchmark queues events to be transmitted at specific points in time in a <code class="literal">List</code>. In a production environment, this queue exists at multiple levels. The sender of the <code class="literal">BboUpdated</code> events likely queues events at the application-level, and subsequently, the network protocol (for example, TCP) may employ its own sets of queues to manage transmission to the consumer. When events are processed at a rate slower than they are produced, the system becomes unstable because the backlog of work always increases. Given infinite memory and zero response time guarantees, it is possible for an application to continue processing an ever-growing queue of items. However, in practice, when a system cannot stabilize itself by increasing its consumption rate to match or exceed the production rate, the system eventually spirals out of control. A system's hardware resources are finite, and as a consumer falls behind, it will require increasing amounts of memory to cope with the growing backlog. Taken to an extreme, increasing memory requirements causes more frequent garbage collections, which in turn, further slow down consumption. This is a cyclical problem that will eventually exhaust memory resources, causing a system to crash.</p><p>By inspecting the trading system code, you will discover that there is a queue for message processing within the trading system. This application-level queue is a <code class="literal">LinkedBlockingQueue</code> that separates the network I/O thread from the application thread. In the benchmark, the thread driving the benchmark adds events directly to the queue, simulating the behavior of a production network thread receiving events from the outside world. It is a common practice to group together logical parts of an application into separate thread pools in order to gain efficiencies by parallelizing processing work.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note53"/>Note</h3><p>When we previously explored concurrency with <code class="literal">Future</code> and <code class="literal">Task</code>, we indirectly worked with queues. The <code class="literal">ExecutorService</code> that receives submissions from <code class="literal">Future</code> and <code class="literal">Task</code> manages its workload by enqueuing tasks into a <code class="literal">BlockingQueue</code>. The factory methods that are provided in <code class="literal">Executors</code> do not allow the caller to provide a queue. If you explore the implementation of these factory methods you discover the kind and the size of <code class="literal">BlockingQueue</code> created.</p></div></div><p>Adding a buffer between the network layer and the application layer typically bodes well for performance. A queue can enable an application to tolerate momentary consumption slowdowns and bursts of messages from a producer. However, as we have seen in our benchmarking, buffers are a double-edged sword. The default constructor for <code class="literal">LinkedBlockingQueue</code> is effectively unbounded, setting a limit that is equal to the maximum supported integer value. By buffering messages indefinitely when the rate of production is consistently higher than the consumption rate, the trading system's performance degrades to an unusable state.</p></div><div class="section" title="Applying back pressure"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec63"/>Applying back pressure</h2></div></div></div><p>What would happen if we instead chose to bound the queue that is receiving events to a smaller limit? When the production rate exceeds the consumption rate and the queue reaches capacity, one option is for the system to block until a spot is available in the queue. Blocking forces event production to halt, which describes a strategy for applying back pressure. In this context, pressure refers to the queue of events to be processed. The pressure manifests itself with increasing resource usage (for example, memory). By adopting a policy of blocking further production, the system is applying pressure back to the producer. Any queues that exist between the application-level consumer and the producer will also eventually reach capacity, forcing the producer to change its production rate in order to continue transmitting events.</p><p>To implement this back pressure policy, all queues must be bounded to a size that avoids excessive resource usage, and production into queues must block when full. This is straightforward to implement with implementations of the JDK-provided <code class="literal">BlockingQueue</code> interface. For example, the following snippet displays this strategy with <code class="literal">LinkedBlockingQueue</code>:</p><pre class="programlisting">val queue = new LinkedBlockingQueue[Message](1000) &#13;
+queue.put(m) &#13;
+</pre><p>In this snippet, we see construction of a <code class="literal">LinkedBlockingQueue</code> with a capacity limit of 1,000 messages. Based on knowledge of the production environment, you feel comfortable retaining up to 1,000 messages in-memory without exhausting memory resources. The second line in the snippet demonstrates a blocking operation to enqueue an element via <code class="literal">put</code>.</p><p>When applying back pressure, the choice in queue size is critical. To illustrate why, let's assume that we measured the maximum trading system processing latency to be 0.5 ms once a message is consumed from the event queue. At maximum, the total processing latency for an event is equal to 0.5 ms plus the time spent waiting to be processed. Consider the scenario where the queue has a size of 1,000 and 999 events are queued when a new event arrives. In the worst case scenario, the new event waits 499.5 ms for the 999 other events that are already enqueued to be processed, plus 0.5 ms to be processed. Configuring a queue size of 1,000 yielded a maximum latency of 500 ms, showing that maximum latency is directly proportional to queue size.</p><p>A more disciplined approach to sizing queues involves considering environment resources and understanding the maximum latency that is tolerated by the business. From informal discussions with Dave, we learned that even several milliseconds can make or break a trading strategy's profitability. Until we have a moment to check in with him, let's assume that 10 ms is the maximum delay the strategy can tolerate without risking significant trading losses. Using this information, we can calculate a queue size that ensures that the 10 ms latency limit is respected. In the previous example, we performed the following worst-case scenario arithmetic:</p><pre class="programlisting">maximum total processing latency = queue size * maximum processing time &#13;
+</pre><p>We can rearrange this formula to solve for queue size, as follows:</p><pre class="programlisting">queue size = maximum total processing latency / maximum processing time &#13;
+</pre><p>From this arithmetic, we substitute in known values to compute queue size, as follows:</p><pre class="programlisting">queue size = 10ms / 0.5ms = 20 &#13;
+</pre><p>The arithmetic suggests that we bound the queue size for twenty elements to ensure that in the worst case scenario an event can be enqueued and processed within 10 ms. To explore back pressure deeper, we encourage you to read the following blog post by Martin Thompson at <a class="ulink" href="http://mechanical-sympathy.blogspot.com/2012/05/apply-back-pressure-when-overloaded.html">http://mechanical-sympathy.blogspot.com/2012/05/apply-back-pressure-when-overloaded.html</a>. Martin is an authority on high-performance software development, and this particular blog post was an invaluable learning source for back pressure.</p></div><div class="section" title="Applying load-control policies"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec64"/>Applying load-control policies</h2></div></div></div><p>Back pressure is a strategy that works well when the message producer respects consumers that operate at different rates and does not penalize slow consumers. Particularly when dealing with third-party systems, there are situations where applying back pressure to force the producer to slow down will not be well received. In these scenarios, we need to consider additional strategies that improve the capacity of our systems without requiring algorithmic improvements to our business logic.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note54"/>Note</h3><p>The authors have worked in the <span class="strong"><strong>real-time bidding</strong></span> (<span class="strong"><strong>RTB</strong></span>) space where a bidding system participates in auctions to bid on opportunities to display advertisements. In this industry, there is low tolerance for bidding systems that are unable to cope with the configured auction rate. Failure to respond to a high percentage of auctions with a bidding decision (either bid or no-bid) in a timely manner results in the bidding system being penalty-boxed. While in the penalty box, the bidding systems received a reduced auction rate. Bidding systems that remain in the penalty box for extended periods of time may be disallowed from participating in any auctions until their performance improves.</p></div></div><p>Let's revisit a scenario that we considered when describing back pressure to motivate our discussion. The precondition to apply back pressure is reaching the capacity of a queue. When a queue is filled, our first strategy blocks further additions until there is room available. Another option that we can investigate is to discard the event because the system is saturated. Discarding the event requires extra domain knowledge to understand the semantics of what it means to abruptly terminate processing. In the trading system domain, the trading strategy is only required to send back a response when a bid or an offer is made. The trading strategy is not required to send back a response when it does not decide to make either a bid or an offer. For the trading system domain, discarding an event simply means halting processing. In other domains, such as RTB, discarding an event implies halting processing and responding with a message indicating that there will not be a bid placed in this auction.</p><p>Additionally, it is relevant that that each event is a snapshot of the best bid and offer. In contrast to the snapshot, imagine if instead of <code class="literal">BboUpdated</code>, the trading strategy received discrete events for changes in the best bid and offer. This is analogous to the state-based versus operation-based CRDT operations that we explored. Discarding an event would mean having partial information until a subsequent event is received. In this scenario, it is important to work with domain experts and product owners to determine if and for how long operating with partial information is acceptable.</p><p>Introducing load-control policies is another shift in thinking when working on high performance systems. Like the introduction of back pressure, this is another opportunity to reconsider assumptions that are made along the way to improve performance. Our lunchtime discussion with Dave provided great insight into a load-control policy that we can apply. Dave stated that he believes latent <code class="literal">BboUpdated</code> events cause more harm than good for trading strategy profitability. There are two assumptions we can challenge:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">All events must be processed</li><li class="listitem" style="list-style-type: disc">An event being processed must complete processing</li></ul></div><p>We can challenge these assumptions because Dave also indicated that MVT trades only high-volume tickers. If a BBO update is discarded, Dave is confident that a new BBO update is sure to follow quickly. Let's take a deeper look at how these policies can be defined.</p><div class="section" title="Rejecting work"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec45"/>Rejecting work</h3></div></div></div><p>Rejecting work is not about rejecting sprint tasks, sorry! When we discuss work in this context, the term refers to processing effort. In the case of the benchmarked trading system, the work in hand is processing a new <code class="literal">BboUpdated</code> event. Although we have not dived into the code yet, we do know from previous benchmarking work that there is a queue used to accept the <code class="literal">BboUpdated</code> events from the network for application-level processing. This queue is the entry point into the application, and it represents the first application-level opportunity to reject the event due to capacity constraints.</p><p>From our earlier domain investigation, we learned that to reject a request, it can simply be dropped on the floor without response. A trading strategy is only required to respond when it wishes to trade. This means that the policy of rejecting work can be implemented by dropping the request on the floor when the queue is at capacity.</p><p>By inspecting the trading system source code, we see that the architecture is quite barebones. At start-up, a <code class="literal">LinkedBlockingQueue</code> is created to buffer the <code class="literal">BboUpdated</code> events, and a consumer thread is started to consume from the queue. The following snippet shows this logic:</p><pre class="programlisting">val queue = new LinkedBlockingQueue[(MessageSentTimestamp, BboUpdated)](20) &#13;
+    val eventThread = new Thread(new Runnable { &#13;
+      def run(): Unit = while (true) { &#13;
+        Option(queue.poll(5, TimeUnit.SECONDS)) match { &#13;
+          case Some((ts, e)) =&gt; // process event &#13;
+          case None =&gt; // no event found &#13;
+        } &#13;
+      } &#13;
+    }) &#13;
+    eventThread.setDaemon(true) &#13;
+    eventThread.start() &#13;
+</pre><p>As per our earlier work, we see that the work queue is sized with twenty elements to ensure a maximum processing latency of 10 ms. After the queue is instantiated, the consumer thread is created and started. The processing logic is omitted from this snippet, but we observe that the sole purpose of this thread is to consume events as they become available. The logic to add work to the queue is trivial. This snippet assumes a <code class="literal">MessageSentTimestamp</code> and a <code class="literal">BboUpdated</code> event are in lexical scope with the names, <code class="literal">ts</code> and <code class="literal">e</code>, respectively:</p><pre class="programlisting">queue.put((ts, e)) &#13;
+</pre><p>Our exploration of back pressure application indicated that <code class="literal">put</code> is a blocking call. As our intent is now to discard work,  <code class="literal">put</code> is no longer a viable strategy. Instead, we can make use of <code class="literal">offer</code>. As per the API documentation, <code class="literal">offer</code> returns a <code class="literal">boolean</code> value, indicating whether or not the element was added to the queue. When the queue is full, it returns false. These are exactly the semantics that we wish to enforce. We can modify this snippet accordingly:</p><pre class="programlisting">queue.offer((ts, e)) match { &#13;
+  case true =&gt; // event enqueued &#13;
+  case false =&gt; // event discarded &#13;
+} &#13;
+</pre><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note55"/>Note</h3><p>The pattern matching in the preceding snippet provides a good entry point to introduce application metrics for introspection and transparency. For example, it is likely an interesting business metric to track how many events a trading system discards over time. This information may also be useful to the data science team for offline analysis in order to determine interesting patterns between discarded events and profitability. Whenever you encounter state changes, it is worth considering whether a metric should be recorded or whether an event should be emitted. Take a moment to consider state changes in your application. Are you making state changes available for introspection to nontechnical team members?</p></div></div><p>Performing a benchmark with 12,000 events per second and 30 trials, totaling 360,000 events processed, yields the following result:</p><div class="informaltable"><table border="1"><colgroup><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Metric</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>12,000 EPS with queue size = 20</strong></span>
+</p>
+</td></tr><tr><td>
+<p>50<sup>th</sup> (median) latency</p>
+</td><td>
+<p>0.0 ms</p>
+</td></tr><tr><td>
+<p>75<sup>th</sup> latency</p>
+</td><td>
+<p>0.0 ms</p>
+</td></tr><tr><td>
+<p>99<sup>th</sup> latency</p>
+</td><td>
+<p>3.0 ms</p>
+</td></tr><tr><td>
+<p>99.9<sup>th</sup> latency</p>
+</td><td>
+<p>11.0 ms</p>
+</td></tr><tr><td>
+<p>100<sup>th</sup> (maximum) latency</p>
+</td><td>
+<p>45.0 ms</p>
+</td></tr><tr><td>
+<p>Mean latency</p>
+</td><td>
+<p>0.1 ms</p>
+</td></tr><tr><td>
+<p>Events processed as percentage of total events</p>
+</td><td>
+<p>31.49%</p>
+</td></tr></tbody></table></div><p>This table introduces two rows to record the observed mean latency and the percentage of events processed out of the 360,000 that are provided. This row is important because the system now rejects events, which is an example of trading throughput for latency improvements. The latency profile looks great in comparison to the first benchmarking attempt at 12,000 events per second. The maximum latency is four times larger than our desired maximum latency. This suggests that our performance model is optimistic. The higher maximum latency can be attributed to an unlucky garbage collection pause in combination with wrongly estimating the actual processing latency. Even so, the maximum latency is two orders of magnitude lower than the maximum latency that was observed during the first benchmarking trial. We also observe that 99.9% of requests have a latency less than or equal to 11 ms, which is within 10% of our stated maximum latency goal.</p><p>While the latency profile looks excellent, the same cannot be said about the throughput. Due to our new load-control policy, only approximately 30% of the provided events were processed. When an event is processed, it is processed quickly, but unfortunately events are discarded two-thirds of the time. Another takeaway from performance tuning with load-control policies is that you will likely require multiple iterations to properly tune a policy for the right balance between trading throughput for latency and vice-versa. Reviewing the results of the benchmark, you note the mean observed latency is 0.1 ms. As a next step, you choose to calibrate the queue size according to the mean latency. By tuning according to the mean latency, you are implying that you are willing to introduce latency in exchange for improved throughput. Performing the arithmetic reveals the new queue size:</p><pre class="programlisting">queue size = maximum total processing latency / maximum processing time = 10ms / 0.1ms = 100 &#13;
+</pre><p>After re-running the benchmark with the new queue size, you observe the following results:</p><div class="informaltable"><table border="1"><colgroup><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Metric</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>12,000 EPS with queue size = 100</strong></span>
+</p>
+</td></tr><tr><td>
+<p>50<sup>th</sup> (median) latency</p>
+</td><td>
+<p>3.0 ms</p>
+</td></tr><tr><td>
+<p>75<sup>th</sup> latency</p>
+</td><td>
+<p>5.0 ms</p>
+</td></tr><tr><td>
+<p>99<sup>th</sup> latency</p>
+</td><td>
+<p>19.0 ms</p>
+</td></tr><tr><td>
+<p>99.9<sup>th</sup> latency</p>
+</td><td>
+<p>43.0 ms</p>
+</td></tr><tr><td>
+<p>100<sup>th</sup> (maximum) latency</p>
+</td><td>
+<p>163.0 ms</p>
+</td></tr><tr><td>
+<p>Mean latency</p>
+</td><td>
+<p>3.9 ms</p>
+</td></tr><tr><td>
+<p>Events processed as percentage of total events</p>
+</td><td>
+<p>92.69%</p>
+</td></tr></tbody></table></div><p>As expected, the latency profile lost ground when compared to the trial with a queue size of 20. Except for the maximum latency, each percentile experienced at least a doubling in latency. The good news from this experiment is that the tail latencies did not experience exponential growth. The throughput picture is dramatically changed as well. We observe more than a doubling in throughput, yielding nearly 93% of all events processed. The mean latency is 39 times larger than the previously recorded 0.1 ms mean latency. For comparative purposes, the mean reflects the significant increase in median and 75<sup>th</sup> percentile latencies.</p><p>As a final test, out of curiosity, you try doubling the throughput rate while retaining a queue size of 100 elements. Will the trading system crash and burn, will it process all the requests, or will it do something different? Running the benchmark produces the following results:</p><div class="informaltable"><table border="1"><colgroup><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Metric</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>24,000 EPS with queue size = 100</strong></span>
+</p>
+</td></tr><tr><td>
+<p>50<sup>th</sup> (median) latency</p>
+</td><td>
+<p>7.0 ms</p>
+</td></tr><tr><td>
+<p>75<sup>th</sup> latency</p>
+</td><td>
+<p>8.0 ms</p>
+</td></tr><tr><td>
+<p>99<sup>th</sup> latency</p>
+</td><td>
+<p>23.0 ms</p>
+</td></tr><tr><td>
+<p>99.9<sup>th</sup> latency</p>
+</td><td>
+<p>55.0 ms</p>
+</td></tr><tr><td>
+<p>100<sup>th</sup> (maximum) latency</p>
+</td><td>
+<p>72.0 ms</p>
+</td></tr><tr><td>
+<p>Mean latency</p>
+</td><td>
+<p>8.4 ms</p>
+</td></tr><tr><td>
+<p>Events processed as percentage of total events</p>
+</td><td>
+<p>44.58%</p>
+</td></tr></tbody></table></div><p>The good news is that the trading system did not crash and burn. It withstood receiving double the throughput that previously caused second delays with a latency profile qualitatively similar to the same trial at 12,000 events per second. This suggests that the work rejection policy has made the trading system significantly more robust to high volumes of incoming events.</p><p>The tradeoff for improved durability and acceptable processing latencies at higher volumes is lower throughput. These experiments revealed the value of bounding queue sizes, which we learned about when studying how to apply back pressure along with the value of rejecting work. After implementing the load-control policy and only tuning queue size, we are able to produce dramatically different results. There is definitely room for further analysis and tuning. Further analysis should involve product owners to weigh the throughput versus latency tradeoffs. It is important to remember that although the load control policy's implementation relies on knowledge of highly technical topics, the benefit should be measured in terms of business value.</p></div><div class="section" title="Interrupting expensive processing"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec46"/>Interrupting expensive processing</h3></div></div></div><p>A second idea that we can explore is to halt processing before it completes. This is a powerful technique to ensure processing cycles are not spent on work that is already stale. Consider a request that is taken from the queue and undergoes partial processing before being interrupted by a garbage collection cycle. If the garbage collection cycle takes more than a couple of milliseconds, the event is now stale and will likely harm trading strategy profitability. Worse, all subsequent events in the queue are also now more likely to be stale as well.</p><p>To address this shortcoming, we can apply a technique that is analogous to rejecting work by imposing latency limits throughout processing. By carrying a timestamp that indicates when processing was started, it is possible to evaluate a computation's latency at discrete points in time. Let's consider a manufactured example to illustrate the idea. Consider the following processing pipeline, which runs arbitrary business logic for an event after journaling the event and updating metrics:</p><pre class="programlisting">def pipeline(ts: MessageSentTimestamp, e: Event): Unit = { &#13;
+    val enriched = enrichEvent(e) &#13;
+    journalEvent(enriched) &#13;
+    performPreTradeBalanceChecks(enriched) &#13;
+    runBusinessLogic(enriched) &#13;
+  } &#13;
+} &#13;
+</pre><p>To avoid processing latent events, we may write logic similar to the following:</p><pre class="programlisting">def pipeline(ts: MessageSentTimestamp, e: Event): Unit = { &#13;
+    if (!hasEventProcessingExpiryExpired(ts)) { &#13;
+      val enriched = enrichEvent(e) &#13;
+      if (!hasEventProcessingExpiryExpired(ts)) journalEvent(enriched) &#13;
+      if (!hasEventProcessingExpiryExpired(ts)) performPreTradeBalanceChecks(enriched) &#13;
+      if (!hasEventProcessingExpiryExpired(ts)) runBusinessLogic(enriched) &#13;
+    } &#13;
+  } &#13;
+} &#13;
+</pre><p>In this snippet, a <code class="literal">hasEventProcessingExpiryExpired</code> method is introduced to branch processing, which is based on time. The implementation of this method is omitted, but you can imagine that system time is queried and compared to a known and allowed processing duration (for example, 5 ms). While this approach accomplishes our goal of interrupting latent event processing, the code is now cluttered with multiple concerns. Even in this trivial example, it becomes more challenging to follow the sequence of processing steps.</p><p>The pain point with this code is that the business logic is intertwined with the cross-cutting concern of interrupting latent processing. One way to improve the readability of this code is to separate the description of what is being accomplished from how this description is executed. There is a construct in functional programming, known as the free monad that can help us do exactly this. Let's take a deeper look at the free monad to see how we can use it to improve the trading strategy's performance.</p></div></div><div class="section" title="Free monads"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec65"/>Free monads</h2></div></div></div><p>Monads and their mathematical underpinnings in the subject of category theory are dense subjects deserving a dedicated exploration. As your sprint ends tomorrow and you want to deliver improved trading strategy performance, we instead provide a practitioner's perspective on free monads to show how you can use them to address a real-world problem. To demonstrate the power of applying free monads to our problem, we start by showing the end result and work backwards to develop an intuition about how free monads work. To begin, let's consider the sequence of processing steps that are required for a trading strategy to process a <code class="literal">BboUpdated</code> event once picked up from the work queue:</p><pre class="programlisting">    val enriched = enrichEvent(bboEvent) &#13;
+    journalEvent(enriched) &#13;
+    performPreTradeBalanceChecks(enriched) &#13;
+    val decision = strategy.makeTradingDecision(enriched) &#13;
+    decision.foreach(sendTradingDecision) &#13;
+</pre><p>There are three steps that happen before the trading strategy makes a trading decision. If the trading decision is to submit a bid or an offer, the decision is sent to the exchange. <code class="literal">strategy</code> is an implementation of the <code class="literal">TradingStrategy</code> trait, which looks like the following:</p><pre class="programlisting">trait TradingStrategy { &#13;
+  def makeTradingDecision(e: BboUpdated): Option[Either[Bid, Offer]] &#13;
+} &#13;
+</pre><p>Next, let's look at how we can translate this processing sequence into the free monad and also add in early termination logic.</p><div class="section" title="Describing a program"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec47"/>Describing a program</h3></div></div></div><p>To build our new version of the trading strategy pipeline, we use the Scalaz-provided free monad implementation, <code class="literal">scalaz.Free</code>. The end result of our efforts to use the free monad in conjunction with a domain-specific language (DSL) for simpler construction looks like the following:</p><pre class="programlisting">val pipeline = for { &#13;
+    enriched &lt;- StartWith(enrichEvent) within (8 millis) orElse (e =&gt; &#13;
+      enrichmentFailure(e.ticker)) &#13;
+    _ &lt;- Step(journalEvent(enriched)) within (9 millis) orElse &#13;
+      tradeAuthorizationFailure &#13;
+    _ &lt;- Step(performPreTradeBalanceChecks(enriched)) within (10 millis) &#13;
+      orElse metricRecordingFailure &#13;
+    decision &lt;- MakeTradingDecision(enriched) &#13;
+  } yield decision &#13;
+</pre><p>Recall that our first attempt at implementing short-circuiting logic involved a series of if-statements. Instead of if-statements, the free monad-based snippet shows that the processing pipeline can now be defined as a for-comprehension. This approach removes the branching statements, making it simpler to understand what is happening. Without seeing how the DSL is made, you likely can already infer what this pipeline will do. For example, you likely inferred that if <code class="literal">journalEvent</code> takes more than 10 ms to execute, then the processing is halted and neither <code class="literal">performPreTradeBalanceChecks</code> nor <code class="literal">MakeTradingDecision</code> will be invoked.</p><p>The construction of the pipeline is only one half of the story. Underlying the implementation of this for-comprehension is the free monad. Creating a free monad involves two parts:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Building a description of a program</li><li class="listitem" style="list-style-type: disc">Writing an interpreter to execute the description</li></ul></div><p>The for-comprehension represents our description of a program. It is a description of how to process the <code class="literal">BboUpdated</code> events that also defines execution delay constraints. To execute this description, we must build an interpreter.</p></div><div class="section" title="Building an interpreter"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec48"/>Building an interpreter</h3></div></div></div><p>Our interpreter looks like the following:</p><pre class="programlisting">  def runWithFoldInterpreter( &#13;
+    recordProcessingLatency: ProcessingLatencyMs =&gt; Unit, &#13;
+    strategy: TradingStrategy, &#13;
+    ts: MessageSentTimestamp, &#13;
+    e: BboUpdated): Unit = { &#13;
+    val (_, decision) = pipeline.free.foldRun( &#13;
+      PipelineState(ts, strategy, e)) { &#13;
+      case (state, StartProcessing(whenActive, whenExpired, limitMs)) =&gt; &#13;
+        state -&gt; (hasProcessingTimeExpired(state.ts, limitMs) match { &#13;
+          case true =&gt; whenExpired(e) &#13;
+          case false =&gt; whenActive(e) &#13;
+        }) &#13;
+      case (state, Timed(whenActive, whenExpired, limitMs)) =&gt; &#13;
+        state -&gt; (hasProcessingTimeExpired(state.ts, limitMs) match { &#13;
+          case true =&gt; whenExpired() &#13;
+          case false =&gt; whenActive() &#13;
+        }) &#13;
+      case (state, TradingDecision(runStrategy)) =&gt; &#13;
+        state -&gt; runStrategy(state.strategy) &#13;
+    } &#13;
+ &#13;
+    decision.fold(logFailure, { &#13;
+      case Some(order) =&gt; &#13;
+        sendTradingDecision(order) &#13;
+        recordProcessingLatency(ProcessingLatencyMs( &#13;
+          System.currentTimeMillis() - ts.value)) &#13;
+      case None =&gt; &#13;
+        recordProcessingLatency(ProcessingLatencyMs( &#13;
+          System.currentTimeMillis() - ts.value)) &#13;
+    }) &#13;
+  } &#13;
+</pre><p>The <code class="literal">foldRun</code> method is a method that is provided by <code class="literal">Free</code> to execute the description of the program that we wrote. Analogous to the signature of <code class="literal">foldLeft</code>, <code class="literal">foldRun</code> accepts a value representing an initial state, a curried function that accepts the current state, and the next processing step from our processing pipeline. The next processing step is represented as an ADT named <code class="literal">Thunk</code> with the following members:</p><pre class="programlisting">sealed trait Thunk[A] &#13;
+case class Timed[A]( &#13;
+  whenActive: () =&gt; A, &#13;
+  whenExpired: () =&gt; A, &#13;
+  limit: LimitMs) extends Thunk[A] &#13;
+case class StartProcessing[A]( &#13;
+  whenActive: BboUpdated =&gt; A, &#13;
+  whenExpired: BboUpdated =&gt; A, &#13;
+  limit: LimitMs) extends Thunk[A] &#13;
+case class TradingDecision[A]( &#13;
+  makeDecision: TradingStrategy =&gt; A) extends Thunk[A] &#13;
+</pre><p>The <code class="literal">Thunk</code> algebra defines the possible operations that can be transcribed into the free monad. The pipeline that we previously showed is constructed by composing together combinations of the <code class="literal">Thunk</code> members. This pipeline hides the construction behind the DSL to eliminate verbosity and to improve readability. The following table maps each processing step to its associated <code class="literal">Thunk</code>:</p><div class="informaltable"><table border="1"><colgroup><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Step DSL</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Thunk</strong></span>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">StartWith</code>
+</p>
+</td><td>
+<p>
+<code class="literal">StartProcessing</code>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">Step</code>
+</p>
+</td><td>
+<p>
+<code class="literal">Timed</code>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">MakeTradingDecision</code>
+</p>
+</td><td>
+<p>
+<code class="literal">TradingDecision</code>
+</p>
+</td></tr></tbody></table></div><p>Returning to the curried <code class="literal">foldRun</code> function, we see that the interpreter pattern matches to determine which <code class="literal">Thunk</code> is the next processing step. These pattern match statements are how the interpreter applies the behavior that is described by our program's description. <code class="literal">StartProcessing</code> and <code class="literal">Timed</code> use system time to determine which method to execute, based on the provided millisecond expiry (<code class="literal">LimitMs</code>). <code class="literal">StartProcessing</code> and <code class="literal">TradingDecision</code> require states from the outside world to support execution. For <code class="literal">StartProcessing</code>, the <code class="literal">BboUpdated</code> event from the work queue must be supplied, and for <code class="literal">TradingDecision</code>, a <code class="literal">Strategy</code> must be provided to yield a trading decision.</p><p>The return value of <code class="literal">foldRun</code> is a tuple of the accumulated state, which is discarded in the snippet, and the return value of interpreting the free monad. The return value of executing the sequence of <code class="literal">Thunk</code>s that is defined by <code class="literal">pipeline</code> is <code class="literal">\/[BboProcessingFailure, Option[Either[Bid,Offer]]]</code>. The return value is a disjunction to account for failure scenarios, which can occur as part of the business logic or because the processing expiry expired. These failures are represented with an ADT of type <code class="literal">BboProcessingFailure</code>. The right side of the disjunction matches the return type of <code class="literal">TradingStrategy</code>, indicating that completing all steps in <code class="literal">pipeline</code> yields a trading decision. The final step is to fold over the trading decision to record processing latency when the pipeline was completed (that is, a <code class="literal">\/-</code> was returned) and to conditionally send the order to the exchange.</p><p>At this juncture, the intuition that you should have developed is that we have separated the description of what we would like to have happen from how it happens. The free monad allows us to do this by first creating a description of our program, and then secondly, building an interpreter to execute the instructions that are provided by the description. As a concrete example, our program description in <code class="literal">pipeline</code> is not bogged down with providing a strategy for how to implement early termination. Instead, it only describes that certain steps in the processing sequence are subject to time constraints. The interpreter provided to <code class="literal">foldRun</code> enforces this constraint using system time. Having built a functioning version of the trading strategy pipeline, let's benchmark again to see what effect our changes had.</p></div><div class="section" title="Benchmarking the new trading strategy pipeline"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec49"/>Benchmarking the new trading strategy pipeline</h3></div></div></div><p>Running the benchmark at 12,000 and 24,000 events per second using the new trading strategy pipeline yields the following results. The results columns show two values per row. The value before the slash is the result from running with the new implementation that provides early termination. The value after the slash is the copied over result from running without the early termination for comparative purposes:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Metric</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>12,000 EPS with queue size = 100</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>24,000 EPS with queue size = 100</strong></span>
+</p>
+</td></tr><tr><td>
+<p>50<sup>th</sup> (median) latency</p>
+</td><td>
+<p>1.0 ms / 3.0 ms</p>
+</td><td>
+<p>6.0 ms / 7.0 ms</p>
+</td></tr><tr><td>
+<p>75<sup>th</sup> latency</p>
+</td><td>
+<p>3.0 ms / 5.0 ms</p>
+</td><td>
+<p>7.0 ms / 8.0 ms</p>
+</td></tr><tr><td>
+<p>99<sup>th</sup> latency</p>
+</td><td>
+<p>7.0 ms / 19.0 ms</p>
+</td><td>
+<p>8.0 ms / 23.0 ms</p>
+</td></tr><tr><td>
+<p>99.9<sup>th</sup> latency</p>
+</td><td>
+<p>10.0 ms / 44.0 ms</p>
+</td><td>
+<p>16.0 ms / 55.0 ms</p>
+</td></tr><tr><td>
+<p>100<sup>th</sup> (maximum) latency</p>
+</td><td>
+<p>197.0 ms / 163.0 ms</p>
+</td><td>
+<p>26.0 ms / 72.0 ms</p>
+</td></tr><tr><td>
+<p>Mean latency</p>
+</td><td>
+<p>2.0 ms / 3.9 ms</p>
+</td><td>
+<p>6.0 ms / 8.4 ms</p>
+</td></tr><tr><td>
+<p>Events processed as percentage of total events</p>
+</td><td>
+<p>90.43% / 92.69%</p>
+</td><td>
+<p>36.62% / 44.58%</p>
+</td></tr></tbody></table></div><p>From a latency perspective, early termination appears to be a clear win. Excluding maximum latency, early termination yielded lower latencies at each percentile. For example, at 12,000 events per second, half of all requests are processed in one-third of the time, a mere millisecond, as compared to the median when processing is not interrupted. At 12,000 events per second, the observed maximum latency increases, which is likely indicative of garbage collection pauses after the early termination checks. There are two possible improvements to make to our implementation:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Check the processing duration after invoking <code class="literal">performPreTradeBalanceChecks</code> before the <code class="literal">TradingStrategy</code> is executed</li><li class="listitem" style="list-style-type: disc">Check the processing duration after the trading decision is created</li></ul></div><p>In both scenarios, processing could be interrupted if the latency exceeds a threshold. It is straightforward to see that these two steps of the processing require attention to reduce the maximum latency because of the clear separation of concerns provided by our free monad implementation. Consider how much more challenging it would be to reason about execution with the pipeline and early termination logic intertwined.</p><p>From a throughput perspective, we see a reduction in throughput in both trials. The throughput drop arises from the latent events that are discarded. Here, we again see the tradeoff between throughput and latency. We sacrificed throughput for a better latency profile. Arguably, it is a worthy tradeoff because the higher throughput included stale events, which are more likely to yield trading losses.</p></div><div class="section" title="A Task interpreter"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec50"/>A Task interpreter</h3></div></div></div><p>Our efforts so far have yielded a significantly improved latency profile while sacrificing throughput. What if we could have the best of both worlds? An improved latency profile with higher throughput would be ideal but seems to be out of reach. One strategy for improved throughput is to introduce concurrency. Perhaps, we can make the trading strategy execution concurrent to take advantage of hardware with multiple cores. Before diving in, you ping Gary, your colleague who helped you discover the lineage of the order book implementations. You double-check with Gary to confirm that MVT strategies are thread-safe. He responds with a thumbs up emoji, which gives us the green light to parallelize execution of trading strategies.</p><p>In our exploration of the free monad thus far, we have seen the relationship between the program description and the interpreter. The program description, which is represented with the <code class="literal">Thunk</code> ADT, is agnostic to the interpreter. This statement represents the essence of the free monad and is best stated by Adam Warski in his excellent free monad blog post at <a class="ulink" href="https://softwaremill.com/free-monads/">https://softwaremill.com/free-monads/</a>. The semantics of the term "free" in free monad is that the monad is free to be interpreted in any way. We will see this idea in practice by demonstrating that we can transform our existing interpreter to a <code class="literal">Task</code> interpreter. To do this, we must map <code class="literal">Thunk</code> to <code class="literal">Task</code>. Scalaz provides a trait to express this mapping, called <code class="literal">NaturalTransformation</code>, with a type alias of <code class="literal">~&gt;</code>. The following snippet shows how to map from <code class="literal">Thunk</code> to <code class="literal">Task</code> via a <code class="literal">NaturalTransformation</code>:</p><pre class="programlisting">  private def thunkToTask(ps: PipelineState): Thunk ~&gt; Task = &#13;
+    new (Thunk ~&gt; Task) { &#13;
+    def apply[B](t: Thunk[B]): Task[B] = t match { &#13;
+      case StartProcessing(whenActive, whenExpired, &#13;
+        limitMs) =&gt; Task.suspend( &#13;
+        hasProcessingTimeExpired(ps.ts, limitMs) match { &#13;
+          case true =&gt; Task.now(whenExpired(ps.event)) &#13;
+          case false =&gt; Task.now(whenActive(ps.event)) &#13;
+        }) &#13;
+      case Timed(whenActive, whenExpired, limitMs) =&gt; Task.suspend( &#13;
+        hasProcessingTimeExpired(ps.ts, limitMs) match { &#13;
+          case true =&gt; Task.now(whenExpired()) &#13;
+          case false =&gt; Task.now(whenActive()) &#13;
+        }) &#13;
+      case TradingDecision(runStrategy) =&gt; &#13;
+        Task.fork(Task.now(runStrategy(ps.strategy))) &#13;
+    } &#13;
+  } &#13;
+</pre><p>The trait defines one method to be implemented that is provided a <code class="literal">Thunk</code> and returns a <code class="literal">Task</code>. As with our previous interpreter within <code class="literal">foldRun</code>, the interpreter requires the same state to provide the <code class="literal">BboUpdated</code> event, <code class="literal">MessageSentTimestamp</code>, and <code class="literal">TradingStrategy</code>. We use pattern matching to handle the mapping of each ADT member. Note the usage of <code class="literal">Task.suspend</code>, which has the following signature:</p><pre class="programlisting">def suspend[A](a: =&gt; Task[A]): Task[A] &#13;
+</pre><p>In contrast to <code class="literal">Task.now</code>, <code class="literal">suspend</code> defers evaluation of the argument. This is necessary because the interpreter has the side-effect of checking the system clock when invoking <code class="literal">hasProcessingTimeExpired</code>. Using <code class="literal">suspend</code> defers the call to the system clock until the <code class="literal">Task</code> is run instead of executing at <code class="literal">Task</code> construction time.</p><p>A second interesting implementation note is the usage of <code class="literal">Task.fork</code> when translating <code class="literal">TradingDecision</code>. Here is the introduction of concurrency to the trading strategy pipeline. With our transformation complete, the remaining step is to run the interpreter. Fortunately, <code class="literal">Free</code> provides a method analogous to <code class="literal">foldRun</code> that accepts a <code class="literal">NaturalTransformation</code> named <code class="literal">foldMap</code>. The following snippet shows how the existing <code class="literal">Thunk</code> pipeline can be executed using <code class="literal">Task</code>:</p><pre class="programlisting">pipeline.free.foldMap(thunkToTask(PipelineState(ts, strategy, event))) &#13;
+      .unsafePerformAsync { &#13;
+        case -\/(ex) =&gt; logException(ex) &#13;
+        case \/-(\/-(decision)) =&gt; &#13;
+          decision.foreach(sendTradingDecision) &#13;
+          recordProcessingLatency(ProcessingLatencyMs( &#13;
+            System.currentTimeMillis() - ts.value)) &#13;
+        case \/-(-\/(failure)) =&gt; logFailure(failure) &#13;
+      } &#13;
+</pre><p>Invoking <code class="literal">foldMap</code> applies the transformation, yielding a <code class="literal">Task</code>. The <code class="literal">Task</code> is executed asynchronously via <code class="literal">unsafePerformAsync</code>. Let's run a benchmark at 24,000 events per second with our new implementation and compare the results against the <code class="literal">foldRun</code> interpreter:</p><div class="informaltable"><table border="1"><colgroup><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Metric</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>24,000 EPS with queue size = 100</strong></span>
+</p>
+</td></tr><tr><td>
+<p>50<sup>th</sup> (median) latency</p>
+</td><td>
+<p>0.0 ms / 6.0 ms</p>
+</td></tr><tr><td>
+<p>75<sup>th</sup> latency</p>
+</td><td>
+<p>0.0 ms / 7.0 ms</p>
+</td></tr><tr><td>
+<p>99<sup>th</sup> latency</p>
+</td><td>
+<p>4.0 ms / 8.0 ms</p>
+</td></tr><tr><td>
+<p>99.9<sup>th</sup> latency</p>
+</td><td>
+<p>13.0 ms / 16.0 ms</p>
+</td></tr><tr><td>
+<p>100<sup>th</sup> (maximum) latency</p>
+</td><td>
+<p>178.0 ms / 26.0 ms</p>
+</td></tr><tr><td>
+<p>Mean latency</p>
+</td><td>
+<p>0.13 ms / 6.0 ms</p>
+</td></tr><tr><td>
+<p>Events processed as percentage of total events</p>
+</td><td>
+<p>96.60 % / 36.62%</p>
+</td></tr></tbody></table></div><p>Running the <code class="literal">Task</code> interpreter on a computer with four cores yields a substantive difference in latency and performance. From a throughput perspective, nearly all events can be processed, in contrast to the 36% processing rate previously. The throughput improvement is indicative of the extra capacity gained by use of <code class="literal">Task.fork</code>, which is providing runtime parallelism. We also observe a significant reduction in lower percentile latencies, which can also be attributed to the use of <code class="literal">Task.fork</code> on a multicore machine. Interestingly, the higher percentile latencies remain quite similar. As we previously noted, this is because we are still not defending against latent events at the end of the processing pipeline. The takeaway from this benchmark is that judicious usage of <code class="literal">Task</code> yields double the throughput with an improved latency profile. This is an exciting result to have achieved by treating the trading strategy as a black box and only changing how the system interacts with the trading strategy.</p></div><div class="section" title="Exploring free monads further"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec51"/>Exploring free monads further</h3></div></div></div><p>Our exploration into free monads has deliberately avoided a deep dive into monads and instead focused on showing you the practical results from using this approach. With free monads, we have shown you that we can separate the description of a program from its execution. This allowed us to cleanly introduce logic to interrupt the processing of latent events. We also added concurrency to the processing pipeline without affecting its construction by writing a <code class="literal">Task</code> interpreter. The core business logic remains pure while retaining excellent runtime characteristics. Here, we see the salient point about the free monad. The description of our program is a value and the interpreter is responsible for handling side-effects.</p><p>At this point, you can see the benefits of applying this technique, but you are still in the dark about the underlying mechanisms. A full treatment of monads is beyond the scope of our exploration. By studying the source code that is associated with these examples and exploring other learning sources, you will gain a deeper understanding of how to apply this technique in your own systems. We recommend reading Adam Warski's aforementioned blog post in-depth and reviewing the presentation linked from another free monad example built by Ken Scrambler that is available at <a class="ulink" href="https://github.com/kenbot/free">https://github.com/kenbot/free</a>. To get a deeper understanding of monads, we encourage you to read, <span class="emphasis"><em>Functional Programming in Scala</em></span> by Paul Chiusano and Rúnar Bjarnason.</p></div></div></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec38"/>Summary</h1></div></div></div><p>In this chapter, we focused on high-performance system design in a more language-agnostic context. We introduced distributed architectures and explained how they can help scale a platform. We presented some of the challenges that such a paradigm involves, and we focused on solving the problem of shared state inside a cluster. We used CRDTs to implement efficient and performant synchronization among the nodes of a cluster. Using these data types, we were able to simplify our architecture and avoid creating a bottleneck by eliminating the need for a standalone service that is dedicated to storing the shared state. We also kept the latency low by avoiding remote calls on the critical path.</p><p>In the second part of this chapter, we analyzed how queues impact latency, and how we can apply load control policies to control latency. By benchmarking the trading strategy pipeline, we discovered the importance of applying back pressure and bounding queue sizes in order to reason about maximum latency. Unbounded queues will eventually lead to disastrous production performance. The formal name for the study of queues is a branch of mathematics known as queueing theory. Queueing theory, like monads, is a topic that deserves a more formal treatment. We focused on using empirical observations to drive improvements. Studying queueing theory will provide you with a stronger theoretical background and the ability to build models for system performance.</p><p>We extended the policy of rejecting work to interrupting work that is taking too long. In doing so, we explored a new functional programming technique in the form of the free monad. The free monad allowed us to maintain clean business logic describing what the pipeline does without focusing on how the pipeline accomplishes its goals. This separation of concerns enabled us to also add concurrency to the pipeline without complicating the pipeline description. The principles that we discussed enable you to write high-throughput and low-latency systems that remain robust when the system is at capacity, while retaining an emphasis on functional design.</p></div></body></html>

@@ -1,0 +1,964 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Fetching and Persisting Bitcoin Market Data</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, we will develop a data pipeline to fetch, store, and, later on, analyze bitcoin transaction data.</p>
+<p>After an introduction to Apache Spark, we will see how to call a REST API to fetch transactions from a cryptocurrency exchange. A cryptocurrency exchange allows customers to trade digital currencies, such as bitcoin, for fiat currencies, such as the US dollar. The transaction data will allow us to track the price and quantity exchanged at a certain point in time.</p>
+<p class="mce-root">We will then introduce the Parquet format. This is a columnar data format that is widely used for big data analytics. After that, we will build a standalone application that will produce a history of bitcoin/USD transactions and save it in Parquet. In the following chapter, we will use Apache Zeppelin to query and analyze the data interactively.</p>
+<p class="mce-root">The volume of data that we will deal with is not very large, but the tools and techniques used will be the same if the data were to grow or if we were to store the data for more currencies or from different exchanges. The benefit of using Apache Spark is that it can scale horizontally and that you can just add more machines to your cluster to speed up your processing, without having to change your code.</p>
+<p class="mce-root">Another advantage of using Spark is that it makes it easy to manipulate table-like data structures and to load and save them from/to different formats. This advantage remains even when the volume of data is small.</p>
+<p>In this chapter, we will cover the following topics:</p>
+<ul>
+<li>Apache Spark</li>
+<li>Calling the REST API of a cryptocurrency exchange</li>
+<li>Parquet format and partitioning</li>
+</ul>
+<p>After we are done with this chapter, we have learned a few things such as the following:</p>
+<ul>
+<li class="mce-root">How to store large volumes of data</li>
+<li class="mce-root">How to use the Spark Dataset API</li>
+<li class="mce-root">How to use the IO <kbd>Monad</kbd> to control side effects</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Setting up the project</h1>
+                </header>
+            
+            <article>
+                
+<p>Create a new SBT project. In IntelliJ, go to <strong><span class="packt_screen">File</span></strong> | <strong><span class="packt_screen">New</span></strong> | <strong><span class="packt_screen">Project</span></strong> | <strong><span class="packt_screen">Scala</span></strong> | <strong><span class="packt_screen">sbt</span></strong>.</p>
+<p>Then edit <kbd>build.sbt</kbd> and paste the following:</p>
+<pre><span>name </span><span>:= </span><span>"bitcoin-analyser"<br/></span><span><br/></span><span>version </span><span>:= </span><span>"0.1"<br/></span><span><br/></span><span>scalaVersion </span><span>:= </span><span>"2.11.11"<br/></span><span>val </span>sparkVersion = <span>"2.3.1"<br/><br/></span><span>libraryDependencies </span><span>++= </span><span>Seq</span>(<br/>  <span>"org.lz4" </span><span>% </span><span>"lz4-java" </span><span>% </span><span>"1.4.0"</span>,<br/>  <span>"org.apache.spark" </span><span>%% </span><span>"spark-core" </span><span>% </span>sparkVersion <span>% </span><span>Provided</span>,<br/>  <span>"org.apache.spark" </span><span>%% </span><span>"spark-core" </span><span>% </span>sparkVersion <span>% </span><span>Test </span><span>classifier <br/>  </span><span>"tests"</span>,<br/>  <span>"org.apache.spark" </span><span>%% </span><span>"spark-sql" </span><span>% </span>sparkVersion <span>% </span><span>Provided</span>,<br/>  <span>"org.apache.spark" </span><span>%% </span><span>"spark-sql" </span><span>% </span>sparkVersion <span>% </span><span>Test </span><span>classifier   </span><span>"tests"</span>,<br/>  <span>"org.apache.spark" </span><span>%% </span><span>"spark-catalyst" </span><span>% </span>sparkVersion <span>% </span><span>Test     </span><span>classifier </span><span>"tests"</span>,<br/>  <span>"com.typesafe.scala-logging" </span><span>%% </span><span>"scala-logging" </span><span>% </span><span>"3.9.0"</span>,<br/>  <span>"org.scalatest" </span><span>%% </span><span>"scalatest" </span><span>% </span><span>"3.0.4" </span><span>% </span><span>"test"</span>,<br/>  <span>"org.typelevel" </span><span>%% </span><span>"cats-core" </span><span>% </span><span>"1.1.0"</span>,<br/>  <span>"org.typelevel" </span><span>%% </span><span>"cats-effect" </span><span>% </span><span>"1.0.0-RC2"</span>,<br/>  <span>"org.apache.spark" </span><span>%% </span><span>"spark-streaming" </span><span>% </span>sparkVersion <span>% </span><span>Provided</span>,<br/>  <span>"org.apache.spark" </span><span>%% </span><span>"spark-sql-kafka-0-10" </span><span>% </span>sparkVersion <span>% <br/>    </span><span>Provided </span><span>exclude </span>(<span>"net.jpountz.lz4"</span>, <span>"lz4"</span>),<br/>  <span>"com.pusher" </span><span>% </span><span>"pusher-java-client" </span><span>% </span><span>"1.8.0"</span>)<br/><br/><span>    scalacOptions </span><span>+= </span><span>"-Ypartial-unification"<br/></span><span><br/></span><span>// Avoids SI-3623<br/></span><span>target </span><span>:= </span><span>file</span>(<span>"/tmp/sbt/bitcoin-analyser"</span>)</pre>
+<p>We use Scala 2.11 because, at the time of writing, Spark does not provide its libraries for Scala 2.12. We are going to use the following:</p>
+<ul>
+<li><kbd>spark-core</kbd> and <kbd>spark-sql</kbd> for reading the transactions and saving them to Parquet. The <kbd>Provided</kbd> configuration will make SBT exclude these libraries when we package the application in an assembly JAR file.</li>
+<li>ScalaTest for testing our code.</li>
+<li><kbd>scala-logging</kbd>, a convenient and fast logging library that wraps SLF4J.</li>
+<li><kbd>cats-core</kbd> and <kbd>cats-effects</kbd> for managing our side effects with the IO <kbd>Monad</kbd>.</li>
+<li><kbd>spark-streaming</kbd>, <kbd>spark-sql-kafka</kbd>, and <kbd>pusher</kbd> for the next chapter.</li>
+</ul>
+<p>The <kbd>-Ypartial-unification</kbd> compiler option is required by <kbd>cats</kbd>.</p>
+<p>The last line makes SBT write the classes to the <kbd>/tmp</kbd> folder, in order to avoid a <em>file name too long</em> bug with the Linux encrypted home folders. You might not need it on your platform.</p>
+<p>If you do not wish to retype the code examples, you can check out the complete project code from GitHub at <a href="https://github.com/PacktPublishing/Scala-Programming-Projects">https://github.com/PacktPublishing/Scala-Programming-Projects</a>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Understanding Apache Spark</h1>
+                </header>
+            
+            <article>
+                
+<p>Spark is an open source framework built to perform analytics on large datasets. Unlike other tools such as R, Python, and MathLab that are using in-memory processing, Spark gives you the possibility to scale out. And thanks to its expressiveness and interactivity, it also improves developer productivity.</p>
+<p>There are entire books dedicated to Spark. It has a vast number of components and lots of areas to explore. In this book, we aim to get you started with the fundamentals. You should then be more comfortable exploring the documentation if you want to.</p>
+<p>The purpose of Spark is to perform analytics on a collection. This collection could be in-memory and you could run your analytics using multiple threads, but if your collection is becoming too large, you are going to reach the memory limit of your system.</p>
+<p>Spark solved this issue by creating an object to hold all of this data. Instead of keeping everything in the local computer's memory, Spark chunks the data into multiple collections and distributes it on multiple computers. This object is called an <strong>RDD</strong> (short for <strong>Resilient Distributed Dataset</strong>). RDD keeps references to all of the <span>distributed </span>chunks.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">RDD, DataFrame, and Dataset</h1>
+                </header>
+            
+            <article>
+                
+<p>The core concept of Spark is the RDD. From the user's point of view, for a given type <kbd>A</kbd>, <kbd>RDD[A]</kbd> looks similar to a standard Scala collection, such as <kbd>Vector[A]</kbd>: they are both <strong>immutable</strong> and share many well-known methods, such as <kbd>map</kbd>, <kbd>reduce</kbd>, <kbd>filter</kbd>, and <kbd>flatMap</kbd>.</p>
+<p>However, the RDD has some unique characteristics. They are as follows:</p>
+<ul>
+<li>
+<p><strong>Lazy</strong>: When you call a <strong>transformation</strong> function, such as <kbd>map</kbd> or <kbd>filter</kbd>, nothing happens immediately. The function call is just added to a computation graph that is stored in the RDD class. This computation graph is executed when you subsequently call an <strong>action</strong> function, such as <kbd>collect</kbd> or <kbd>take</kbd>.</p>
+</li>
+<li>
+<p><strong>Distributed</strong>: The data in the RDD is split in several partitions that are scattered across different <strong>executors</strong> in a cluster. A <strong>task</strong> represents a chunk of data and the transformation that must be applied to it.</p>
+</li>
+<li>
+<p><strong>Resilient</strong>: If one of the executors dies when you execute a job, Spark automatically resends the tasks that were lost to another executor.</p>
+</li>
+</ul>
+<p>Given two types, <kbd>A</kbd> and <kbd>B</kbd>, <kbd>RDD[A]</kbd> and <kbd>RDD[B]</kbd> can be joined together to obtain <kbd>RDD[(A, B)]</kbd>. For instance, consider <kbd>case class Household(id: Int, address: String)</kbd> and  <kbd>case class ElectrictyConsumption(houseHoldId: Int, kwh: Double)</kbd>. If you want to count the number of households consuming more than 2 kWh, you could do either of the following:</p>
+<ul>
+<li>Join <kbd>RDD[HouseHold]</kbd> with <kbd>RDD[ElectricityConsumption]</kbd> and then apply <kbd>filter</kbd> on the result</li>
+<li>Apply <kbd>filter</kbd> to <kbd>RDD[ElectricityConsumption]</kbd> first, and then join it with <kbd>RDD[HouseHold]</kbd></li>
+</ul>
+<p>The result will be the same but the performances will be different; the second algorithm will be faster. Wouldn't it be nice if Spark could perform this kind of optimization for us?</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Spark SQL</h1>
+                </header>
+            
+            <article>
+                
+<p>The answer is yes and the module is called Spark SQL. Spark SQL sits on top of Spark <span><span>C</span></span>ore and allows the manipulation of structured data. Unlike with the basic RDD API, the <kbd>DataFrame</kbd> API provides more information to the Spark engine. Using this information, it can change the execution plan and optimize it.</p>
+<p><span>You can also use the module to execute SQL queries as you would with a relational database. It makes it easy for people comfortable with SQL to run queries on heterogeneous sources of data. You can, for instance, join a data table coming from a CSV file with another one stored in Parquet in a Hadoop filesystem and with yet another one coming from a relational database.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Dataframe</h1>
+                </header>
+            
+            <article>
+                
+<p>Spark SQL is composed of three main APIs:</p>
+<ul>
+<li>The SQL literal syntax</li>
+<li>The <kbd>DataFrame</kbd> API</li>
+<li><kbd>DataSet</kbd></li>
+</ul>
+<p><kbd>DataFrame</kbd> is conceptually the same as a table in the relational database. The data is distributed in the same way as in an RDD. <kbd>DataFrame</kbd> has a schema but is untyped. You can create <kbd>DataFrame</kbd> from an RDD or manually build it. Once created, <kbd>DataFrame</kbd> will contain a schema that maintains the name and type for each column (field).</p>
+<p>If you then want to use <kbd>DataFrame</kbd> in an SQL query, all you need to do is create a named view (equivalent to the table name in the relational database) using the <kbd>Dataframe.createTempView(viewName: String)</kbd> method. In the SQL query, the fields that are available in the <kbd>SELECT</kbd> statement will come from the schema of <kbd>DataFrame</kbd> and the name of the table used in the <kbd>FROM</kbd> statement will come from <kbd>viewName</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Dataset</h1>
+                </header>
+            
+            <article>
+                
+<p>As Scala developers, we are used to working with types and with a friendly compiler that infers types and tells us our mistakes. The problem with <kbd>DataFrame</kbd> API and Spark SQL is that you can write a query such as <kbd>Select lastname From people</kbd>, but in your <kbd>DataFrame</kbd>, you might not have a <kbd>lastname</kbd> column, but <kbd>surname</kbd> one. In this case, you are only going to discover that mistake at runtime with a nasty exception!</p>
+<p>Wouldn't it be nice to have a compilation error instead?</p>
+<p>This is why Spark introduced <kbd>Dataset</kbd> in version 1.6. <kbd>Dataset</kbd> attempts to unify the RDD and the <kbd>DataFrame</kbd> APIs. <kbd>Dataset</kbd> has a type parameter, and you can use anonymous functions to manipulate the data as you would with an RDD or a vector.</p>
+<p>Actually, <kbd>DataFrame</kbd> is, in fact, a type alias for <kbd>DataSet[Row]</kbd>. This means you can <span>seamlessly </span>mix the two APIs and use in the same query a filter using a Lambda expression followed by another filter using a <kbd>DataFrame</kbd> operator.</p>
+<p>In the next sections, we are only going to use <kbd>Dataset</kbd>, which is a good compromise between code quality and performance.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Exploring the Spark API with the Scala console</h1>
+                </header>
+            
+            <article>
+                
+<p>If you are not already familiar with Spark, it can be a bit intimidating to write Spark jobs straight away. To make it easier, we are first going to explore the API using a Scala console. Start a new Scala console (<em>Ctrl</em> + <em>Shift</em> + <em>D</em> in IntelliJ), and type the following code:</p>
+<pre>import org.apache.spark.sql.SparkSession<br/>val spark = SparkSession.builder().master("local[*]").getOrCreate()<br/>import spark.implicits._</pre>
+<p>This will initialize a new Spark session and bring some handy implicit in scope. The master <kbd>"local[*]"</kbd> URL means that we will use all of the cores available on the localhost when running jobs.</p>
+<p class="mce-root">The Spark session is available to accept new jobs. Let's use it to create <kbd>Dataset</kbd> containing a single string:</p>
+<pre class="western">import org.apache.spark.sql.Dataset<br/><br/>val dsString: Dataset[String] = Seq("1", "2", "3").toDS()<br/>// dsString: org.apache.spark.sql.Dataset[String] = [value: string]</pre>
+<p>The implicit that we imported earlier let us use the <kbd>.toDS()</kbd> function on <kbd>Seq</kbd> to produce <kbd>Dataset</kbd>. We can observe that the <kbd>.toString</kbd> method that was called by the Scala console was output by the schema of <kbd>Dataset</kbd>—it has a single column <kbd>value</kbd> of the <kbd>string</kbd> type.</p>
+<p>However, we could not see the content of <kbd>Dataset</kbd>. This is because <kbd>Dataset</kbd> is a lazy data structure; it just stores a computation graph, which is not evaluated until we call one of the action methods. Still, for debugging, it is very handy to be able to evaluate <kbd>Dataset</kbd> and print its content. For that we need to call <kbd>show</kbd>:</p>
+<pre class="western">dsString.show()</pre>
+<p>You should see the following output:</p>
+<pre class="western">+-----+<br/>|value|<br/>+-----+<br/>|    1|<br/>|    2|<br/>|    3|<br/>+-----+</pre>
+<p><kbd>show()</kbd> is an <strong>action</strong>; it will submit a job to the Spark cluster, collect the results in the driver, and print them. By default, <kbd>show</kbd> limits the number of rows to 20 and truncates the columns. You can call it with extra parameters if you want more information.</p>
+<p>Now we would like to convert each string to <kbd>Int</kbd>, in order to obtain <kbd>Dataset[Int]</kbd>. We have two ways of doing that.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Transforming rows using map</h1>
+                </header>
+            
+            <article>
+                
+<p>Type the following in the Scala console:</p>
+<pre>val dsInt = dsString.map(_.toInt)<br/>// dsInt: org.apache.spark.sql.Dataset[Int] = [value: int]<br/>dsInt.explain()</pre>
+<p>You should see something similar to this:</p>
+<pre class="western">== Physical Plan ==<br/>*(1) SerializeFromObject [input[0, int, false] AS value#96]<br/>+- *(1) MapElements &lt;function1&gt;, obj#95: int<br/>   +- *(1) DeserializeToObject value#91.toString, obj#94: <br/>    java.lang.String<br/>      +- LocalTableScan [value#91]</pre>
+<p>The <kbd>explain()</kbd> method shows the execution plan that will be run if we call an action method, such as <kbd>show()</kbd> or <kbd>collect()</kbd>.</p>
+<p>From this plan, we can deduce that calling <kbd>map</kbd> is not very efficient. Indeed, Spark stores the rows of <kbd>Dataset</kbd> off-heap in binary format. Whenever you call <kbd>map</kbd>, it has to deserialize this format, apply your function, and serialize the result in binary format.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Transforming rows using select</h1>
+                </header>
+            
+            <article>
+                
+<p>A more efficient way to transform rows is to use <kbd>select(cols: Column*)</kbd>:</p>
+<pre class="western">import org.apache.spark.sql.DataFrame<br/>import org.apache.spark.sql.types.IntegerType<br/><br/>val df = ds.select($"value".cast(IntegerType))<br/>// df: org.apache.spark.sql.DataFrame = [value: int]<br/>val dsInt = df.as[Int]<br/>// dsInt: org.apache.spark.sql.Dataset[Int] = [value: int]</pre>
+<p>The implicits that we imported earlier let us use the <kbd>$"columnName"</kbd> notation to produce a <kbd>Column</kbd> object from <kbd>String</kbd>. The string after the <kbd>$</kbd> sign must refer to a column that exists in the <kbd>DataFrame</kbd> <span>source;</span> otherwise, you would get an exception.</p>
+<p>We then call the <kbd>.cast</kbd> method to transform each <kbd>String</kbd> into <kbd>Int</kbd>. But, at this stage, the resulting <kbd>df</kbd> object is not of the <kbd>Dataset[Int];</kbd> type; it is <kbd>DataFrame</kbd>. <kbd>DataFrame</kbd> is actually a type alias for <kbd>Dataset[Row]</kbd>, and <kbd>Row</kbd> is akin to a list of key-value pairs. <kbd>DataFrame</kbd> is a representation of the distributed data in an untyped way. The compiler does not know the type or names of each column; they are only known at runtime.</p>
+<p>In order to obtain <kbd>Dataset[Int]</kbd>, we need to cast the type of the elements using <kbd>.as[Int]</kbd>. This would fail at runtime if the elements of <kbd>DataFrame</kbd> cannot be cast to the target type.</p>
+<div class="packt_tip">Force a specific type for the elements of your <kbd>Dataset</kbd>; this will make your programs safer. You should only expose <kbd>DataFrame</kbd> in a function if it genuinely does not know what the types of the columns will be at runtime; for instance, if you are reading or writing arbitrary files.</div>
+<p>Let's see what our <kbd>explain</kbd> plan looks like now:</p>
+<pre class="western">dsInt.explain()</pre>
+<p>You should see this:</p>
+<pre class="western">== Physical Plan ==<br/>LocalTableScan [value#122]</pre>
+<p>This time we can see that there is no extra serialization/deserialization step. The evaluation of this <kbd>Dataset</kbd> will be faster than when we used <kbd>map</kbd>.</p>
+<div class="packt_infobox">Exercise: Filter the elements of <kbd>Dataset[Int]</kbd> to keep only the elements that are greater than 2. First use <kbd>filter(func: Int =&gt; Boolean)</kbd>, and then use <kbd>filter(condition: Column)</kbd>. Compare the execution plans for both implementations.</div>
+<p class="mce-root">The conclusion of this is that you should prefer functions that use <kbd>Column</kbd> arguments whenever possible. They can fail at runtime, as opposed to the type-safe alternatives because they can refer to column names that do not exist in your <kbd>Dataset</kbd>. However, they are more efficient.</p>
+<p>Fortunately, there is an open source library called <strong>Frameless</strong> that can let you use these efficient methods in a type-safe way. If you are writing large programs that use <kbd>Dataset</kbd>, I recommend that you check it out here: <a href="https://github.com/typelevel/frameless">https://github.com/typelevel/frameless.</a></p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Execution model</h1>
+                </header>
+            
+            <article>
+                
+<p>The methods available in <kbd>Dataset</kbd> and the RDD are of two kinds:</p>
+<ul>
+<li><strong>Transformations</strong>: They return a new <kbd>Dataset</kbd> API that will apply the transformation later when an action method is called. For instance, <kbd>map</kbd>, <kbd>filter</kbd>, <kbd>join</kbd>, and <kbd>flatMap</kbd>.</li>
+<li><strong>Actions</strong>: They trigger the execution of a Spark job, for instance, <kbd>collect</kbd>, <kbd>take</kbd>, and <kbd>count</kbd>.</li>
+</ul>
+<p>When a <strong>job</strong> is triggered by an action method, it is divided into several <strong>stages</strong>. A stage is a part of a job that can be run without having to <strong>shuffle</strong> the data across different nodes of the cluster. It can encompass several transformations, such as <kbd>map</kbd> and <kbd>filter</kbd>. But as soon as one transformation, such as <kbd>join</kbd>, requires the data be moved (shuffling), another stage must be introduced.</p>
+<p>The data contained in <kbd>Dataset</kbd> is split into several <strong>partitions</strong>. The combination of a stage (code to execute) with a partition (data used by the stage) is a <strong>task</strong>. The ideal parallelism would be achieved when you have <em>nb of tasks</em> = <em>nb of cores</em> in the cluster. When you need to optimize a job, it can be beneficial to repartition your data to better match the number of cores at your disposal.</p>
+<p>When Spark starts executing a job, the <strong>Driver</strong> program distributes the tasks to all the executors of the cluster:</p>
+<p class="CDPAlignCenter CDPAlign"><img src="assets/a6d611c2-4d81-4318-938e-ada40bc6e02f.png" style="width:40.83em;height:19.50em;"/></p>
+<p>The preceding diagram is described as follows:</p>
+<ul>
+<li>The driver is on the same JVM as the code that called the action method</li>
+<li>An executor runs on its own JVM on a remote node of the cluster. It can use many cores to execute several tasks in parallel</li>
+</ul>
+<p>The Spark <strong>master</strong> coordinates several <strong>worker</strong> nodes in a cluster. When you start a Spark application, you have to specify the URL of the master. It will then ask its worker to spawn executor processes that will be dedicated to the jobs of your application. At a given point in time, a worker can manage several executors running completely different applications.</p>
+<p>When you want to quickly run or test an application without using a cluster, you can use a <strong>local</strong> master. In this special mode, only one JVM is used for the master, driver, and executor.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Implementing the transaction batch producer</h1>
+                </header>
+            
+            <article>
+                
+<p>In this section, we will first discuss how to call a REST API to fetch BTC/USD transactions. Then we will see how to use Spark to deserialize the JSON payload into a well-typed distributed <kbd>Dataset</kbd>.</p>
+<p>After that, we will introduce the parquet format and see how Spark makes it easy to save our transactions in this format.</p>
+<p>With all of these building blocks, we will then implement our program in a purely functional way using the <strong>Test-Driven-Development</strong> (<strong>TDD</strong>) technique.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Calling the Bitstamp REST API</h1>
+                </header>
+            
+            <article>
+                
+<p>Bitstamp is a cryptocurrency exchange that people use to trade a cryptocurrency, such as bitcoin, for a conventional currency, such as US dollar or euro. One of the good things about Bitstamp is that it provides a REST API, which can be used to get information about the latest trades, and can also be used to send orders if you have an account.</p>
+<p>You can find out more here: <a href="https://www.bitstamp.net/api/">https://www.bitstamp.net/api/.</a></p>
+<p>For this project, the only endpoint we are interested in is the one that gets the latest transactions that happened on the exchange. It will give us an indication of the price and of the quantity of currency exchanged in a given period of time. This endpoint can be called with the following URL: <a href="https://www.bitstamp.net/api/v2/transactions/btcusd/?time=hour">https://www.bitstamp.net/api/v2/transactions/btcusd/?time=hour.</a></p>
+<p>If you paste this URL in your favorite browser, you should see a JSON array containing all of the BTC (Bitcoin)/USD (US dollar) transactions that happened during the last hour. It should look similar to this:</p>
+<pre class="western">[<br/>  {<br/>    "date": "1534582650",<br/>    "tid": "72519377",<br/>    "price": "6488.27",<br/>    "type": "1",<br/>    "amount": "0.05000000"<br/>  },<br/>  {<br/>    "date": "1534582645",<br/>    "tid": "72519375",<br/>    "price": "6488.27",<br/>    "type": "1",<br/>    "amount": "0.01263316"<br/>  },<br/>  ...<br/>]</pre>
+<p>In the previous result, if we inspect the first transaction, we can see that 0.05 bitcoins were sold (<kbd>"type": "1"</kbd> means sell) at a price of 6488.27 USD for 1 BTC.</p>
+<p>There are many Java and Scala libraries to call a REST endpoint, but to keep things simple, we are just going to use the Scala and Java SDK to call the endpoint. Start a new Scala console, and run this code:</p>
+<pre class="western">import java.net.URL<br/>import scala.io.Source<br/><br/>val transactions = Source.fromURL(new URL("https://www.bitstamp.net/api/v2/transactions/btcusd/?time=hour")).mkString</pre>
+<p>With the help of the <kbd>scala.io.Source</kbd> class, we can get the HTTP response in a string. This is the first building block of our program. The next thing we need to do is parse the JSON objects into a collection of Scala objects to make them easier to manipulate.</p>
+<div class="packt_infobox">As we read the whole HTTP response in a string in one go, we need enough memory on the driver process to keep that string in the heap. You might think that it would be better to read it with <kbd>InputStream</kbd>, but unfortunately, it is not possible with Spark Core to split a stream of data. You would have to use Spark Streaming to do this.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Parsing the JSON response</h1>
+                </header>
+            
+            <article>
+                
+<p>We have observed that when we call the Bitstamp endpoint, we get a string containing a JSON array, and each element of the array is a JSON object that represents a transaction. But it would be nicer to have the information in a Spark <kbd>Dataset</kbd>. This way, we will be able to use all of the powerful Spark functions to store, filter, or aggregate the data.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Unit testing jsonToHttpTransaction</h1>
+                </header>
+            
+            <article>
+                
+<p>First, we can start by defining a case class that represents the same data as in our JSON payload. Create a new package, <kbd>coinyser</kbd>, and then a class, <kbd>coinyser.HttpTransaction</kbd>, in <kbd>src/main/scala</kbd>:</p>
+<pre class="western">package coinyser<br/><br/>case class HttpTransaction(date: String,<br/>                           tid: String,<br/>                           price: String,<br/>                           `type`: String,<br/>                           amount: String)</pre>
+<div class="packt_tip">In Scala, if you want to use a variable name already defined as a Scala keyword, you can enclose the variable with backticks such as the <kbd>type</kbd> variable name in this example: <kbd>`type`: String</kbd>.</div>
+<p>This class has the same attribute names with the same types (all string) as the JSON objects. The first step is to implement a function that transforms a JSON string into <kbd>Dataset[HttpTransaction]</kbd>. For this purpose, let's create a new test class, <kbd>coinyser.BatchProducerSpec</kbd>, in <kbd>src/test/scala</kbd>:</p>
+<pre class="western">package coinyser<br/><br/>import org.apache.spark.sql._<br/>import org.apache.spark.sql.test.SharedSparkSession<br/>import org.scalatest.{Matchers, WordSpec}<br/><br/>class BatchProducerSpec extends WordSpec with Matchers with SharedSparkSession {<br/>  val httpTransaction1 = <br/>    HttpTransaction("1532365695", "70683282", "7740.00", "0", <br/>    "0.10041719")<br/>  val httpTransaction2 = <br/>    HttpTransaction("1532365693", "70683281", "7739.99", "0", <br/>    "0.00148564")<br/><br/>  "BatchProducer.jsonToHttpTransaction" should {<br/>    "create a Dataset[HttpTransaction] from a Json string" in {<br/>      val json =<br/>        """[{"date": "1532365695", "tid": "70683282", "price": <br/>            "7740.00", "type": "0", "amount": "0.10041719"},<br/>          |{"date": "1532365693", "tid": "70683281", "price": <br/>            "7739.99", "type": "0", "amount": <br/>            "0.00148564"}]""".stripMargin<br/><br/>      val ds: Dataset[HttpTransaction] = <br/>        BatchProducer.jsonToHttpTransactions(json)<br/>      ds.collect() should contain theSameElementsAs <br/>        Seq(httpTransaction1, httpTransaction2)<br/>    }<br/>  }<br/>}</pre>
+<p>Our test extends <kbd>SharedSparkSession</kbd>. This trait provides an implicit <kbd>SparkSession</kbd> that can be shared across several tests.</p>
+<p>First, we defined a string containing a JSON array with two transactions that we extracted from Bitstamp's endpoint. We defined two instances of <kbd>HttpTransaction</kbd> that we expect to have in our <kbd>Dataset</kbd> outside of the test because we will reuse them in another test later on.</p>
+<p>After the call to <kbd>jsonToHttpTransaction</kbd> that we are going to implement, we obtain <kbd>Dataset[HttpTransaction]</kbd>. However, Spark's <kbd>Dataset</kbd> is lazy—at this stage, nothing has been processed yet. In order to <em>materialize</em> <kbd>Dataset</kbd>, we need to force its evaluation by calling <kbd>collect()</kbd>. The return type of <kbd>collect()</kbd> here is <kbd>Array[HttpTransaction]</kbd>, and we can therefore use ScalaTest's assertion, <kbd>contain theSameElementsAs</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Implementing jsonToHttpTransaction</h1>
+                </header>
+            
+            <article>
+                
+<p>Create the <kbd>coinyser.BatchProducer</kbd> class and type the following code:</p>
+<pre class="western">package coinyser<br/><br/>import java.time.Instant<br/>import java.util.concurrent.TimeUnit<br/><br/>import cats.Monad<br/>import cats.effect.{IO, Timer}<br/>import cats.implicits._<br/>import org.apache.spark.sql.functions.{explode, from_json, lit}<br/>import org.apache.spark.sql.types._<br/>import org.apache.spark.sql.{Dataset, SaveMode, SparkSession}<br/><br/>import scala.concurrent.duration._<br/>object BatchProducer {<br/><br/>  def jsonToHttpTransactions(json: String)(implicit spark: <br/>  SparkSession): Dataset[HttpTransaction] = {<br/>    import spark.implicits._<br/>    val ds: Dataset[String] = Seq(json).toDS()<br/>    val txSchema: StructType = Seq.empty[HttpTransaction].schema<br/>    val schema = ArrayType(txSchema)<br/>    val arrayColumn = from_json($"value", schema)<br/>    ds.select(explode(arrayColumn).alias("v"))<br/>      .select("v.*")<br/>      .as[HttpTransaction]<br/>  }<br/>}</pre>
+<p>Some of the imports will be used later. Do not worry if they show up as being unused in IntelliJ. Let's explain, step by step, what is happening here. I would encourage you to run each step in a Scala console and call <kbd>.show()</kbd> after each <kbd>Dataset</kbd> transformation:</p>
+<pre class="western">def jsonToHttpTransactions(json: String)(implicit spark: SparkSession)<br/>: Dataset[HttpTransaction] =</pre>
+<p>As specified in the unit test, the signature of our function takes <kbd>String</kbd> containing a JSON array of transactions and returns <kbd>Dataset[HttpTransaction].</kbd> As we need to produce <kbd>Dataset</kbd>, we also need to pass a <kbd>SparkSession</kbd> object. It is a good practice to pass it as an implicit parameter, as there is only one instance of this class in a typical application:</p>
+<pre class="western">import spark.implicits.
+val ds: Dataset[String] = Seq(json).toDS()</pre>
+<p>The first step is to produce <kbd>Dataset[String]</kbd> from our JSON string. This <kbd>Dataset</kbd> will have a single row containing the whole JSON array of transactions. For this, we use the <kbd>.toDS()</kbd> method that was made available when we called <kbd>import spark.implicits:</kbd></p>
+<pre class="western">  val txSchema: StructType = Seq.empty[HttpTransaction].toDS().schema<br/>  val schema = ArrayType(txSchema)<br/>  val arrayColumn = from_json($"value".cast(StringType), schema)</pre>
+<p>We have seen in the previous section that it is more efficient to use Spark functions that take <kbd>Column</kbd> as an argument. In order to parse the JSON, we use the <kbd>from_jso</kbd> function, which is in the <kbd>org.apache.spark.sql.functions</kbd> package. We use this particular signature: <kbd>def from_json(e: Column, schema: StructType): Column</kbd>:</p>
+<ul>
+<li>
+<p>The first parameter is the column we want to parse. We pass the <kbd>"value"</kbd> column, which is the default column name for our single-column <kbd>Dataset</kbd>.</p>
+</li>
+<li>
+<p>The second argument is the target schema. <kbd>StructType</kbd> represents the structure of <kbd>Dataset</kbd>—the names, types, and order of its columns. The schema we pass to the function must match the names and types of the JSON string. You can create a schema by hand but, to make things easier, we first create <kbd>txSchema</kbd> using an empty <kbd>Dataset[HttpTransaction]</kbd>. <kbd>txSchema</kbd> is the schema for a single transaction, but as our JSON string contains an array of transactions, we must wrap <kbd>txSchema</kbd> in <kbd>ArrayType</kbd>:</p>
+</li>
+</ul>
+<pre class="western" style="padding-left: 60px">ds.select(explode(arrayColumn).alias("v"))<br/>   .select("v.*")<br/>   .as[HttpTransaction]</pre>
+<p>If we just select <kbd>arrayColumn</kbd>, we would obtain <kbd>Dataset[Seq[HttpTransaction]]</kbd>—one row containing a collection. But what we want is <kbd>Dataset[HttpTransaction]</kbd>—one row per element of the array.</p>
+<p>For this purpose, we use the <kbd>explode</kbd> function, which is similar to flatten for vectors. After <kbd>explode</kbd>, we obtain several rows, but at this stage, each row has a single <kbd>StructType</kbd> column that contains the desired columns—<kbd>date</kbd>, <kbd>tid</kbd>, and <kbd>price</kbd>. Our transaction data is actually wrapped in an object. In order to unwrap it, we first rename this <kbd>StructType</kbd> column <kbd>"v"</kbd>, and then call <kbd>select("v.*")</kbd>. We obtain <kbd>DataFrame</kbd> with the <kbd>date</kbd>, <kbd>tid</kbd>, and <kbd>price</kbd> columns, so that we can safely cast to <kbd>HttpTransaction</kbd>.</p>
+<p>You can run the unit test; it should pass now.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Unit testing httpToDomainTransactions</h1>
+                </header>
+            
+            <article>
+                
+<p>We now have all of the pieces to fetch transactions and put them in <kbd>Dataset[HttpTransaction]</kbd>. But it would not be wise to store these objects as they are and then run some analytics with them, because of the following:</p>
+<ul>
+<li>
+<p>The API could change in the future, but we would want to keep the same storage format regardless of these changes</p>
+</li>
+<li>
+<p>As we will see in the next chapter, the Bitstamp WebSocket API for receiving live transactions uses a different format</p>
+</li>
+<li>
+<p>All of the attributes of <kbd>HttpTransaction</kbd> are of the <kbd>String</kbd> type. It would be easier to run analytics if the attributes were properly typed</p>
+</li>
+</ul>
+<p>For these reasons, it would better to have a different class that represents a transaction. Let's create a new class called <kbd>coinyser.Transaction</kbd>:</p>
+<pre class="western">package coinyser<br/><br/>import java.sql.{Date, Timestamp}<br/>import java.time.ZoneOffset<br/><br/>case class Transaction(timestamp: Timestamp,<br/>                       date: Date,<br/>                       tid: Int,<br/>                       price: Double,<br/>                       sell: Boolean,<br/>                       amount: Double)</pre>
+<p>It has the same attributes as <kbd>HttpTransaction</kbd>, but with better types. We have to use <kbd>java.sql.Timestamp</kbd> and <kbd>java.sql.Date</kbd>, because they are the types exposed externally by Spark for timestamps and dates. We also added a <kbd>date</kbd> attribute that will contain the date of the transaction. The information is already contained in <kbd>timestamp</kbd>, but this denormalization will be useful later on when we want to filter transactions for a specific date range.</p>
+<p>In order to avoid having to pass the date, we can create a new <kbd>apply</kbd> method in the companion object:</p>
+<pre class="western">object Transaction {<br/>  def apply(timestamp: Timestamp,<br/>            tid: Int,<br/>            price: Double,<br/>            sell: Boolean,<br/>            amount: Double) =<br/>    new Transaction(<br/>      timestamp = timestamp,<br/>      date = Date.valueOf(<br/>        timestamp.toInstant.atOffset(ZoneOffset.UTC).toLocalDate),<br/>      tid = tid,<br/>      price = price,<br/>      sell = sell,<br/>      amount = amount)<br/>}</pre>
+<p>Now we can write a unit test for a new function, <kbd>httpToDomainTransactions</kbd>, that you need to create inside the existing <kbd>BatchProducerSpec</kbd>:</p>
+<pre class="western">  "BatchProducer.httpToDomainTransactions" should {<br/>    "transform a Dataset[HttpTransaction] into a Dataset[Transaction]" <br/>    in {<br/>      import testImplicits._<br/>      val source: Dataset[HttpTransaction] = Seq(httpTransaction1, <br/>        httpTransaction2).toDS()<br/>      val target: Dataset[Transaction] = <br/>        BatchProducer.httpToDomainTransactions(source)<br/>      val transaction1 = Transaction(timestamp = new <br/>        Timestamp(1532365695000L), tid = 70683282, price = 7740.00, <br/>        sell = false, amount = 0.10041719)<br/>      val transaction2 = Transaction(timestamp = new <br/>        Timestamp(1532365693000L), tid = 70683281, price = 7739.99, <br/>        sell = false, amount = 0.00148564)<br/><br/>      target.collect() should contain theSameElementsAs <br/>        Seq(transaction1, transaction2)<br/>    }</pre>
+<p>The test is quite straightforward. We build <kbd>Dataset[HttpTransaction]</kbd>, call the <kbd>httpToDomainTransactions</kbd> function, and make sure that the result contains the expected <kbd>Transaction</kbd> objects.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Implementing httpToDomainTransactions</h1>
+                </header>
+            
+            <article>
+                
+<p>This implementation uses <kbd>select</kbd> to avoid an extra serialization/deserialization. Add the following function in <kbd>BatchProducer</kbd>:</p>
+<pre class="western">  def httpToDomainTransactions(ds: Dataset[HttpTransaction]): <br/>    Dataset[Transaction] = {<br/>    import ds.sparkSession.implicits._<br/>    ds.select(<br/>      $"date".cast(LongType).cast(TimestampType).as("timestamp"),<br/>      $"date".cast(LongType).cast(TimestampType).<br/>       cast(DateType).as("date"),<br/>      $"tid".cast(IntegerType),<br/>      $"price".cast(DoubleType),<br/>      $"type".cast(BooleanType).as("sell"),<br/>      $"amount".cast(DoubleType))<br/>      .as[Transaction]<br/>  }</pre>
+<p>We use <kbd>cast</kbd> to convert the string columns into the appropriate types. For converting in to <kbd>TimeStampType</kbd>, we have to first convert in to <kbd>LongType</kbd>, and for converting in to <kbd>DateType</kbd>, we have to first convert in to <kbd>TimestampType</kbd>. Since all the types match the target <kbd>Transaction</kbd> object, we can call <kbd>.as[Transaction]</kbd> at the end to obtain <kbd>Dataset[Transaction]</kbd>.</p>
+<p>You can now run <kbd>BatchProducerSpec</kbd> and make sure the two tests pass.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Saving transactions</h1>
+                </header>
+            
+            <article>
+                
+<p>We now have all of the functions required to fetch the last 24 hours of transactions from the Bitstamp API, and produce well-typed transaction objects inside <kbd>Dataset</kbd>. What we need after that is to persist this data on disk. This way, once we have run our program for many days, we will be able to retrieve transactions that happened in the past.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Introducing the Parquet format</h1>
+                </header>
+            
+            <article>
+                
+<p>Spark supports many different formats for persisting <kbd>Datasets</kbd>: CSV, Parquet, ORC, JSON, and many others, such as Avro, with the appropriate library.</p>
+<p>With a row format, such as CSV, JSON, or Avro, the data is saved row by row. With a columnar format, such as Parquet or ORC, the data in the file is stored by columns.</p>
+<p>For instance, we might have the following dataset of transactions:</p>
+<pre class="western">+-------------------+--------+-------+-----+-------+<br/>|timestamp          |tid     |price  |sell |amount |<br/>+-------------------+--------+-------+-----+-------+<br/>|2018-08-02 07:22:34|       0|7657.58|true |0.1    |<br/>|2018-08-02 07:22:47|       1|7663.85|false|0.2    |<br/>|2018-08-02 07:23:09|       2|7663.85|false|0.3    |<br/>+-------------------+--------+-------+-----+-------+</pre>
+<p>If we write using a row format, the file would look like this:</p>
+<pre class="western">2018-08-02 07:22:34|0|7657.58|1|0.1;2018-08-02 07:22:47|1|7663.85|0|0.2;2018-08-02 07:23:09|2|7663.85|0|0.3  </pre>
+<p>In contrast, if we write using a columnar format, the file would look like this:</p>
+<pre class="western">2018-08-02 07:22:34|2018-08-02 07:22:47|2018-08-02 07:23:09;0|1|2;7657.58|7663.85|7663.85;true|false|false;0.1|0.2|0.3</pre>
+<p>Using a columnar data format offers several performance benefits when reading the data, including the following:</p>
+<ul>
+<li>
+<p>Projection push-down: When you need to select a few columns, you do not need to read the whole row. In the preceding example, if I am only interested in the evolution of the price of transactions, I can select only the timestamp and price, and the rest of the data will not be read from the disk.</p>
+</li>
+<li>
+<p>Predicate push-down: When you want to retrieve only the rows where a column has a specific value, you can quickly find these rows by scanning the column data. In the preceding example, if I want to retrieve the transactions that happened between 07:22:00 and 07:22:30, the columnar storage will allow me to find these rows by only reading the timestamp column on the disk.</p>
+</li>
+<li>
+<p>Better compression: Row formats can be compressed before being stored on the disk, but the columnar format has a better compression ratio. The data is indeed more homogeneous, as consecutive column values differ less than consecutive rows.</p>
+</li>
+<li>
+<p>Splittable: When a Spark cluster runs a job that reads or writes to Parquet, the job's tasks are distributed across many executors. Each executor will read/write chunks of rows from/to its own set of files in parallel.</p>
+</li>
+</ul>
+<p>All these benefits make a columnar format particularly well suited for running analytics queries. This is why, for our project, we are going to use Parquet to store transactions. The choice is a bit arbitrary; ORC would work equally well.</p>
+<div class="packt_tip">In a typical Spark cluster production setting, you have to store files in a <strong>distributed filesystem</strong>.<br/>
+Every node of the cluster must indeed have access to any chunk of the data. If one of your Spark nodes were to die, you would still want to have access to the data that was saved by it. You would not be able to do so if the files were stored on the local filesystem. Generally, people use the <strong>Hadoop</strong> filesystem or <strong>Amazon S3</strong> to store their parquet files. They both offer a distributed, reliable way of storing files, and they have good parallelism characteristics.</div>
+<p class="mce-root">In a production project, it can be beneficial to benchmark the performance of different formats. Depending on the shape of your data and the type of queries, one format might be better suited than the others.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Writing transactions in Parquet</h1>
+                </header>
+            
+            <article>
+                
+<p>Add the following <kbd>import</kbd> and function declaration in <kbd>BatchProducer</kbd>:</p>
+<pre class="western">import java.net.URI<br/>def unsafeSave(transactions: Dataset[Transaction], path: URI): Unit = ???</pre>
+<p>Let's have a look in more detail:</p>
+<ul>
+<li>
+<p>Writing to a file is a side effect; this is why we prefixed our function with <kbd>unsafe</kbd>. As functional programmers, we strive to control side effects, and it is a good practice to name any side effecting function explicitly. We will see in the next section how to use the IO <kbd>Monad</kbd> to push this side effect to the boundaries of our application.</p>
+</li>
+<li>
+<p>We use <kbd>java.net.URI</kbd> to pass the path to the directory where our files will be written. This makes sure that the path we pass to the function is really a path. As usual, we try to avoid using strings for our parameters to make our code more robust.</p>
+</li>
+</ul>
+<p>The corresponding test will actually write to the filesystem; hence, it is rather more an integration test than a unit test. We are therefore going to create a new test with the <kbd>IT</kbd> <span>suffix </span>for the integration test.</p>
+<p>Create a new test called <kbd>coinyser.BatchProducerIT</kbd> in <kbd>src/test/scala</kbd>:</p>
+<pre class="western">package coinyser<br/><br/>import java.sql.Timestamp<br/><br/>import cats.effect.{IO, Timer}<br/>import org.apache.spark.sql.test.SharedSparkSession<br/>import org.scalatest.{Matchers, WordSpec}<br/><br/>class BatchProducerIT extends WordSpec with Matchers with SharedSparkSession {<br/><br/>  import testImplicits._<br/><br/>  "BatchProducer.unsafeSave" should {<br/>    "save a Dataset[Transaction] to parquet" in withTempDir { tmpDir =&gt;<br/>      val transaction1 = Transaction(timestamp = new <br/>        Timestamp(1532365695000L), tid = 70683282, price = 7740.00, <br/>        sell = false, amount = 0.10041719)<br/>      val transaction2 = Transaction(timestamp = new <br/>        Timestamp(1532365693000L), tid = 70683281, price = 7739.99, <br/>        sell = false, amount = 0.00148564)<br/>      val sourceDS = Seq(transaction1, transaction2).toDS()<br/><br/>      val uri = tmpDir.toURI<br/>      BatchProducer.unsafeSave(sourceDS, uri)<br/>      tmpDir.list() should contain("date=2018-07-23")<br/>      val readDS = spark.read.parquet(uri.toString).as[Transaction]<br/>          sourceDS.collect() should contain theSameElementsAs <br/>        readDS.collect()<br/>    }<br/>  }<br/>}</pre>
+<p>We use the handy <kbd>withTempDir</kbd> function from <kbd>SharedSparkSession</kbd>. It creates a temporary directory and deletes it after the test is finished. Then, we create a sample <kbd>Dataset[Transaction]</kbd>, and call the function we want to test.</p>
+<p>After having written the dataset, we assert that the target path contains a directory named <kbd>date=2018-07-23</kbd>. We indeed want to organize our storage with a <kbd>date</kbd> partition to make it faster to retrieve a specific date range.</p>
+<p>Finally, when we read back the file, we should get the same elements as in the original <kbd>Dataset</kbd>. Run the test and make sure it fails as expected.</p>
+<p>Now that we have a failing test, we can implement <kbd>BatchProducer.unsafeSave</kbd>:</p>
+<pre class="western">  def unsafeSave(transactions: Dataset[Transaction], path: URI): Unit =
+    transactions
+      .write
+      .mode(SaveMode.Append)
+      .partitionBy("date")
+      .parquet(path.toString)</pre>
+<p>First, <kbd>transactions.write</kbd> creates <kbd>DataFrameWriter</kbd>. This is an interface that lets us configure some options before calling a final action method, such as <kbd>parquet(path: String): Unit</kbd>.</p>
+<p>We configure the <kbd>DataFrameWriter</kbd> with the following options:</p>
+<ul>
+<li>
+<p><kbd>mode(SaveMode.Append)</kbd>: With this option, if there is already some data saved in the path, the content of <kbd>Dataset</kbd> will be appended to it. This will be useful when we call <kbd>unsafeSave</kbd> at regular intervals to get new transactions.</p>
+</li>
+<li>
+<p><kbd>partitionBy("date")</kbd>: In the context of storage, a partition is an intermediate directory that will be created under the path. It will have a name, such as <kbd>date=2018-08-16</kbd>. Partitioning is a good technique for optimizing the storage layout. This will allow us to speed up all the queries that only need the data for a specific date range.</p>
+</li>
+</ul>
+<div class="packt_tip">Do not confuse a storage partition (an intermediate folder in the filesystem) with a Spark partition (a chunk of the data, stored on a node in the cluster).</div>
+<p>You can now run the integration test; it should pass.</p>
+<p>An interesting property of storage partitioning is that it further reduces file sizes. You might be worried that by storing both the timestamp and date, we would waste some storage space to store the date. It turns out that when the date is a storage partition, it is not stored in the Parquet files at all.</p>
+<p>To convince yourself, add the following line in the unit test, just after the call to <kbd>unsafeSave</kbd>:</p>
+<pre class="western">      spark.read.parquet(uri + "/date=2018-07-23").show()</pre>
+<p>Then run the unit test again. You should see this in the console:</p>
+<pre class="western">+-------------------+--------+-------+-----+----------+<br/>|          timestamp|     tid|  price| sell|    amount|<br/>+-------------------+--------+-------+-----+----------+<br/>|2018-07-23 18:08:15|70683282| 7740.0|false|0.10041719|<br/>|2018-07-23 18:08:13|70683281|7739.99|false|0.00148564|<br/>+-------------------+--------+-------+-----+----------+</pre>
+<p>The date column is missing! This means that the <kbd>date</kbd> column is not stored at all in the Parquet files. In the unit test, when we were reading from the URI, Spark detected that there was a partition, <kbd>date=2018-07-23</kbd>, under that directory and added a column, <kbd>date</kbd>, containing the value <kbd>2018-07-23</kbd> for all values.</p>
+<div class="packt_tip">If you want to add a new column that has the same value for all rows, the easiest way is to create an intermediate directory, <kbd>myColum=value</kbd>.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Using the IO Monad</h1>
+                </header>
+            
+            <article>
+                
+<p>We mentioned earlier that our function, <kbd>unsafeSave</kbd>, has a side effect, which is to write to a file. But as functional programmers, we try to only write pure functions that have no side effects. However, at the end of the program, you still want this side effect to happen; otherwise, there would be no point in running it!</p>
+<p>A common way of solving this dilemma is to use a parametrized type that encapsulates the side effect to run it asynchronously. A good candidate for that is the <kbd>cats.effect.IO</kbd> class in the <kbd>cats.effect</kbd> library (see <a href="https://typelevel.org/cats-effect/datatypes/io.html">https://typelevel.org/cats-effect/datatypes/io.html</a>).</p>
+<p>Here is an example that you can try in a Scala Console:</p>
+<pre class="western">import cats.effect.IO<br/><br/>val io = IO{ println("Side effect!"); 1 }<br/>// io: cats.effect.IO[Int] = …<br/>io.unsafeRunSync()<br/>// Side effect!<br/>// res1: Int = 1</pre>
+<p>We can observe that nothing happened when we declared the <kbd>io</kbd> variable. At this point, the block passed to the <kbd>IO</kbd> constructor is only registered and will be executed later. The actual execution only happens when we call <kbd>unsafeRunSync()</kbd>. Our <kbd>io</kbd> variable is a pure, immutable value, and hence preserves referential transparency.</p>
+<p><kbd>IO</kbd> is <kbd>Monad</kbd>, and as such we can use <kbd>map</kbd>, <kbd>flatMap</kbd> and <kbd>for</kbd> comprehensions to compose side effects:</p>
+<pre class="western">val program = for {<br/>  a &lt;- io<br/>  b &lt;- io<br/>} yield a+b<br/>// program: cats.effect.IO[Int]<br/>program.unsafeRunSync()<br/>// IO is run!<br/>// IO is run!<br/>// res2: Int = 2</pre>
+<p>We can reuse the <kbd>io</kbd> variable many times; the side effect that it encapsulates will be run as many times as necessary <em>at the end of the world</em> when we call <kbd>unsafeRunSync()</kbd>.</p>
+<div class="packt_infobox">If we had used <kbd>scala.concurrent.Future</kbd> instead of <kbd>cats.effect.IO</kbd>, the side effect would have been only run once. This is because <kbd>Future</kbd> memorizes the result. The behavior of <kbd>Future</kbd> may be desirable in some cases, but in some other cases, you really want your effects to be performed as many times as you define them in your code. The approach of <kbd>IO</kbd> also avoids shared state and memory leaks.</div>
+<p><kbd>IO</kbd> values can also be run in parallel. They can effectively replace <kbd>scala.concurrent.Future</kbd>:</p>
+<pre class="western">import cats.effect.IO<br/>import cats.implicits._<br/>import scala.concurrent.ExecutionContext.Implicits.global<br/><br/>val io = IO{ Thread.sleep(100); Thread.currentThread().getName }<br/>val program = (io, io, io).parMapN((a, b, c) =&gt; s"$a\n$b\n$c")<br/>program.unsafeRunSync()<br/>// res2: String =<br/>// ForkJoinPool-1-worker-5<br/>// ForkJoinPool-1-worker-3<br/>// ForkJoinPool-1-worker-1</pre>
+<p>The <kbd>IO</kbd> block returns the current thread's name as a string. We create a program of the <kbd>IO[String]</kbd> type using <kbd>parMapN</kbd> to indicate that we want to execute the <kbd>IO</kbd> values in the tuple in parallel. The output of <kbd>unsafeRunSync</kbd> shows that the program was executed in three different threads.</p>
+<p>Going back to our transaction saving, all we have to do to make our <kbd>unsafeSave</kbd> function safe is to wrap it in <kbd>IO</kbd>:</p>
+<pre class="western">  def save(transactions: Dataset[Transaction], path: URI): IO[Unit] =<br/>    IO(unsafeSave(transactions, path))</pre>
+<p>Alternatively, you can inline <kbd>unsafeSave</kbd> and change the integration test to call <kbd>save</kbd> instead:</p>
+<pre class="western">      BatchProducer.save(sourceDS, uri).unsafeRunSync()</pre>
+<p>We can now save transactions while controlling side effects and keeping our functions pure.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Putting it all together</h1>
+                </header>
+            
+            <article>
+                
+<p>At this point, we can read transactions from the REST API, transform the JSON payload in <kbd>Dataset[Transaction]</kbd>, and save it to parquet. It is time to put all these pieces together.</p>
+<p>The Bitstamp API allows us to get the transactions that happened in the last 24 hours, in the last hour, or in the last minute. At the end of the day, we would like to build an application that regularly fetches and saves new transactions for long-term analysis. This application is our <em>batch</em> layer, and it is not meant to get real-time transactions. Therefore, it will be enough to get the transactions for the last hour. In the next chapter, we will build a <em>speed</em> layer to process the live transactions.</p>
+<p>Our <kbd>BatchProducer</kbd> application will work as follows:</p>
+<ol>
+<li>On startup, fetch the last 24 hours of transactions. Set <kbd>start</kbd> = current day at midnight UTC and <kbd>end</kbd> = last transaction's timestamp.</li>
+<li>Filter the transactions to only keep those between <kbd>start</kbd> and <kbd>end</kbd> and save them to Parquet.</li>
+<li>Wait 59 minutes.</li>
+</ol>
+<ol start="4">
+<li>Fetch the last one hour of transactions. We have a one minute overlap to make sure that we do not miss any transaction. Set the <kbd>start</kbd> = <kbd>end</kbd> and <kbd>end</kbd> = <kbd>last</kbd> transaction timestamps.</li>
+<li>Go to step 2.</li>
+</ol>
+<p>To implement this algorithm, we are going to write a <kbd>processOneBatch</kbd> function that encompasses steps 2 to 4, and after that, we will implement step 1 and the infinite loop.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Testing processOneBatch</h1>
+                </header>
+            
+            <article>
+                
+<p>Our function will need a few configuration parameters and implicit values. To keep our signature tidy, we are going to put them in a class. Create a new class, <kbd>coinyser.AppContext</kbd>:</p>
+<pre><span>class </span><span>AppContext</span>(<span>val </span><span>transactionStorePath</span>: <span>URI</span>)<br/>                (<span>implicit val </span><span>spark</span>: <span>SparkSession</span>,<br/>                 <span>implicit val </span><span>timer</span>: <span>Timer</span>[<span>IO</span>])</pre>
+<p><kbd>AppContext</kbd> contains the target location for the Parquet files, the <kbd>SparkSession</kbd> object, and a <kbd>Timer[IO]</kbd> object that is required by <kbd>cats.effect</kbd> when we need to call <kbd>IO.sleep</kbd>.</p>
+<p>Then declare the <kbd>processOneBach</kbd> function in <kbd>BatchProducer</kbd>:</p>
+<pre><span>def </span><span>processOneBatch</span>(<span>fetchNextTransactions</span>: <span>IO</span>[<span>Dataset</span>[<span>Transaction</span>]],<br/>                    <span>transactions</span>: <span>Dataset</span>[<span>Transaction</span>],<br/>                    <span>saveStart</span>: <span>Instant</span>,<br/>                    <span>saveEnd</span>: <span>Instant</span>)(<span>implicit </span><span>appCtx</span>: <span>AppContext</span>)<br/>: <span>IO</span>[(<span>Dataset</span>[<span>Transaction</span>], <span>Instant</span>, <span>Instant</span>)] = ???</pre>
+<p>The function accepts these parameters:</p>
+<ul>
+<li><kbd>fetchNextTransactions</kbd> is an <kbd>IO</kbd> operation that will return the transactions of the past hour when run. We pass it as a parameter so that we can simulate the call to the Bitstamp API in a unit test.</li>
+<li><kbd>transactions</kbd> is <kbd>Dataset</kbd> containing the last transactions that were read (steps 1 or 4 in our algorithm).</li>
+<li><kbd>saveStart</kbd> and <kbd>saveEnd</kbd> is the time interval used to filter <kbd>transactions</kbd> before saving them.</li>
+<li><kbd>appCtx</kbd> is as described previously.</li>
+</ul>
+<p>Our function will have to perform side effects; hence, it returns <kbd>IO</kbd>. This <kbd>IO</kbd> will contain a tuple with the following:</p>
+<ul>
+<li><kbd>Dataset[Transaction]</kbd> that will be obtained by running <kbd>fetchNextTransactions</kbd></li>
+<li>The next <kbd>saveStart</kbd> and the next <kbd>saveEnd</kbd></li>
+</ul>
+<p>Now that we have a good declaration of our function, we can write an integration test for it. The test is quite long; hence, we are going to describe it bit by bit. Create a new integration test in <kbd>BatchProducerIT</kbd>:</p>
+<pre><span>"BatchProducer.processOneBatch" </span><span>should </span>{<br/>  <span>"filter and save a batch of transaction, wait 59 mn, fetch the next <br/>    batch" </span><span>in withTempDir </span>{ tmpDir =&gt;<br/>    <span>implicit object </span>FakeTimer <span>extends </span><span>Timer</span>[<span>IO</span>] {<br/>      private <span>var </span><span>clockRealTimeInMillis</span>: <span>Long </span>=<br/>        Instant.<span>parse</span>(<span>"2018-08-02T01:00:00Z"</span>).<span>toEpochMilli<br/></span><span><br/></span><span>      </span><span>def </span><span>clockRealTime</span>(<span>unit</span>: <span>TimeUnit</span>): <span>IO</span>[<span>Long</span>] =<br/>        <span>IO</span>(<span>unit</span>.<span>convert</span>(<span>clockRealTimeInMillis</span>, <span>TimeUnit</span>.<span>MILLISECONDS</span>))<br/><br/>      <span>def </span><span>sleep</span>(<span>duration</span>: <span>FiniteDuration</span>): <span>IO</span>[<span>Unit</span>] = <span>IO </span>{<br/>        <span>clockRealTimeInMillis </span>= <span>clockRealTimeInMillis </span>+ <br/>        <span>duration</span>.<span>toMillis<br/></span><span>      </span>}<br/><br/>      <span>def </span><span>shift</span>: <span>IO</span>[<span>Unit</span>] = <span>???<br/></span><span>      </span><span>def </span><span>clockMonotonic</span>(<span>unit</span>: <span>TimeUnit</span>): <span>IO</span>[<span>Long</span>] = <span>???<br/></span><span>    </span>}<br/>    <span>implicit val </span>appContext: <span>AppContext </span>= <span>new <br/>      </span><span>AppContext</span>(<span>transactionStorePath </span>= tmpDir.<span>toURI</span>)</pre>
+<p>We first define <kbd>FakeTimer</kbd> that implements the <kbd>Timer[IO]</kbd> interface. This timer lets us simulate a clock that starts at <kbd>2018-08-02T01:00:00Z</kbd>. This way, we will not have to wait 59 minutes to run our test. The implementation uses <kbd>var clockRealTimeInMillis</kbd> that keeps the current time of our fake clock and updates it when <kbd>sleep</kbd> is called.</p>
+<p>Then, we create <kbd>AppContext</kbd> using the temporary directory, and the implicits that are in scope: <kbd>FakeTimer</kbd> and <kbd>SparkSession</kbd>.</p>
+<p>The next portion of the test defines some transactions:</p>
+<pre> <span>implicit def </span><span>toTimestamp</span>(<span>str</span>: <span>String</span>): <span>Timestamp </span>= <br/>   Timestamp.<span>from</span>(Instant.<span>parse</span>(<span>str</span>))<br/> <span>val </span>tx1 = <span>Transaction</span>(<span>"2018-08-01T23:00:00Z"</span>, <span>1</span>, <span>7657.58</span>, <span>true</span>, <br/>    <span>0.021762</span>)<br/> <span>val </span>tx2 = <span>Transaction</span>(<span>"2018-08-02T01:00:00Z"</span>, <span>2</span>, <span>7663.85</span>, <span>false</span>, <br/>    <span>0.01385517</span>)<br/> <span>val </span>tx3 = <span>Transaction</span>(<span>"2018-08-02T01:58:30Z"</span>, <span>3</span>, <span>7663.85</span>, <span>false</span>, <br/>    <span>0.03782426</span>)<br/> <span>val </span>tx4 = <span>Transaction</span>(<span>"2018-08-02T01:58:59Z"</span>, <span>4</span>, <span>7663.86</span>, <span>false</span>, <br/>    <span>0.15750809</span>)<br/> <span>val </span>tx5 = <span>Transaction</span>(<span>"2018-08-02T02:30:00Z"</span>, <span>5</span>, <span>7661.49</span>, <span>true</span>, <span>0.1</span>)<br/><br/><span> </span><span>val </span>txs0 = <span>Seq</span>(tx1)<br/><span> </span><span>val </span>txs1 = <span>Seq</span>(tx2, tx3)<br/><span> </span><span>val </span>txs2 = <span>Seq</span>(tx3, tx4, tx5)<span><br/></span><span> </span><span>val </span>txs3 = <span>Seq</span>.<span>empty</span>[<span>Transaction</span>]</pre>
+<p>The <kbd>implicit</kbd> conversion <kbd>toTimestamp</kbd> lets us declare our transaction objects with <kbd>String</kbd> instead of <kbd>Timestamp</kbd>. This makes the test easier to read. We use it to declare five <kbd>Transaction</kbd> objects with timestamps ranging around the initial clock of <kbd>FakeTimer</kbd>.</p>
+<p>Then, we declare batches of transactions that simulate what would have been read from the Bitstamp API. We cannot indeed call the real Bitstamp API from our integration test; the data would be random and our integration test could fail if the API is not available:</p>
+<ul>
+<li><kbd>txs0</kbd> is <kbd>Seq[Transaction]</kbd>, which simulates an initial batch of transactions that we read at 01:00. If you remember the <kbd>BatchProducer</kbd> algorithm, this initial batch would contain the last 24 hours of transactions. In our example, this batch only contains <kbd>tx1</kbd>, even though <kbd>tx2</kbd>'s timestamp is 01:00. This is because, with the real API, we would not get a transaction that happened exactly at the same time. There is always a bit of lag.</li>
+<li><kbd>txs1</kbd> is the batch of transactions that we read 59 minutes after, at 01:59. In this batch, we consider that the API lag makes us miss <kbd>tx4</kbd>, which happens at 01:58:59.</li>
+<li><kbd>txs2</kbd> is the batch that we read 59 minutes after <kbd>txs1</kbd>, at 02:58.</li>
+<li><kbd>txs3</kbd> is the batch that we read 59 minutes after <kbd>txs2</kbd>, at 03:57.</li>
+</ul>
+<p>The following portion actually calls the function under test, <kbd>processOneBatch</kbd>, three times:</p>
+<pre><span>val </span>start0 = Instant.<span>parse</span>(<span>"2018-08-02T00:00:00Z"</span>)<br/><span>val </span>end0 = Instant.<span>parse</span>(<span>"2018-08-02T00:59:55Z"</span>)<br/><span>val </span>threeBatchesIO =<br/>  <span>for </span>{<br/>    tuple1 &lt;- BatchProducer.<span>processOneBatch</span>(<span>IO</span>(txs1.<span>toDS</span>()), <br/>      txs0.<span>toDS</span>(), start0, end0) <span><br/></span><span>    </span>(ds1, start1, end1) = tuple1<br/><br/>    tuple2 &lt;- BatchProducer.<span>processOneBatch</span>(<span>IO</span>(txs2.<span>toDS</span>()), ds1, <br/>      start1, end1)<br/>    (ds2, start2, end2) = tuple2<br/><br/>    _ &lt;- BatchProducer.<span>processOneBatch</span>(<span>IO</span>(txs3.<span>toDS</span>()), ds2, start2, <br/>    end2)<br/>  } <span>yield </span>(ds1, start1, end1, ds2, start2, end2)<br/><span>val </span>(ds1, start1, end1, ds2, start2, end2) =   <br/>  threeBatchesIO.<span>unsafeRunSync</span>()</pre>
+<p>For the first call, we pass the following:</p>
+<ul>
+<li><kbd>txs0.toDS()</kbd> represents the initial batch of transactions. This would cover the last 24 hours of transactions.</li>
+<li><kbd>start0</kbd> = 00:00. In our algorithm, we choose to cut the first batch to start at midnight. This way, we won't save partial data for the previous day.</li>
+<li><kbd>end0</kbd> = 00:59:55. Our clock starts at 01:00, but the API has always some lag for making a transaction visible. We estimate that lag to not exceed five seconds.</li>
+<li><kbd>IO(txs1.toDS())</kbd> represents the next batch of transactions to be fetched. It will be fetched 59 minutes after the initial one.</li>
+</ul>
+<p>The subsequent calls pass the results of the previous calls, as well as the <kbd>IO</kbd> value to fetch the following batch.</p>
+<p>We then run the three calls with <kbd>unsafeRunSync()</kbd>, and obtain the results of the two first calls in <kbd>ds1</kbd>, <kbd>start1</kbd>, <kbd>end1</kbd>, <kbd>ds2</kbd>, <kbd>start2</kbd>, and <kbd>end2</kbd>. This allows us to verify the results with the following assertions:</p>
+<pre>ds1.<span>collect</span>() <span>should </span><span>contain </span><span>theSameElementsAs </span>txs1<br/>start1 <span>should ===</span>(end0)<br/>end1 <span>should ===</span>(Instant.<span>parse</span>(<span>"2018-08-02T01:58:55Z"</span>))<span><br/></span><span><br/></span>ds2.<span>collect</span>() <span>should </span><span>contain </span><span>theSameElementsAs </span>txs2<br/>start2 <span>should ===</span>(end1)<br/>end2 <span>should ===</span>(Instant.<span>parse</span>(<span>"2018-08-02T02:57:55Z"</span>))<br/><br/><span>val </span>lastClock = Instant.<span>ofEpochMilli</span>(<br/>  FakeTimer.<span>clockRealTime</span>(<span>TimeUnit</span>.<span>MILLISECONDS</span>).<span>unsafeRunSync</span>())<br/>lastClock <span>should === </span>(Instant.<span>parse</span>(<span>"2018-08-02T03:57:00Z"</span>))</pre>
+<p>Lets have a look in detail at the preceding code:</p>
+<ul>
+<li><kbd>ds1</kbd> is the batch that was obtained by running the <kbd>IO(txs1.toDS())</kbd>. It must, therefore, be the same as <kbd>txs1</kbd></li>
+<li><kbd>start1</kbd> must be equal to <kbd>end0</kbd>—we need to shift the time period without any gap</li>
+<li><kbd>end1</kbd> must be equal to the initial clock <em>(01:00) + 59 mn (wait time) - 5 seconds</em> (API lag)</li>
+<li><kbd>ds2</kbd>, <kbd>start2</kbd>, and <kbd>end2</kbd> follow the same logic</li>
+<li><kbd>lastClock</kbd> must be equal to the initial clock <em>+ 3 * 59</em> mn</li>
+</ul>
+<p>Finally, we can assert that the right transactions were saved to disk:</p>
+<pre class="western"><span><span><span>val savedTransactions = spark.read.parquet(tmpDir.toString).as[Transaction].collect()<br/>val expectedTxs = Seq(tx2, tx3, tx4, tx5)<br/>savedTransactions should contain theSameElementsAs expectedTxs</span></span></span></pre>
+<p>The assertion excludes <kbd>tx1</kbd>, as it happened in the previous day. It also verifies that even though our batches, <kbd>txs1</kbd> and <kbd>txs2</kbd>, had some overlap, there is no duplicate transaction in our Parquet file.</p>
+<p>You can compile and run the integration test. It should fail with <kbd>NotImplementedError</kbd> as expected.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Implementing processOneBatch</h1>
+                </header>
+            
+            <article>
+                
+<p>Here is the implementation of  <kbd>BatchProducer.processOneBatch</kbd>. As is often the case, the implementation is much shorter than the test:</p>
+<pre class="western"><span><span><span>val WaitTime: FiniteDuration = 59.minute<br/>val ApiLag: FiniteDuration = 5.seconds<br/><br/>def processOneBatch(fetchNextTransactions: IO[Dataset[Transaction]],<br/>                    transactions: Dataset[Transaction],<br/>                    saveStart: Instant,<br/>                    saveEnd: Instant)(implicit appCtx: AppContext)<br/>: IO[(Dataset[Transaction], Instant, Instant)] = {<br/>  import appCtx._<br/>  val transactionsToSave = filterTxs(transactions, saveStart, saveEnd)<br/>  for {<br/>    _ &lt;- BatchProducer.save(transactionsToSave, <br/>    appCtx.transactionStorePath)<br/>    _ &lt;- IO.sleep(WaitTime)<br/>    beforeRead &lt;- currentInstant<br/>    end = beforeRead.minusSeconds(ApiLag.toSeconds)<br/>    nextTransactions &lt;- fetchNextTransactions<br/>  } yield (nextTransactions, saveEnd, end)<br/>}</span></span></span></pre>
+<p>We first filter the transactions using a <kbd>filterTxs</kbd> function that we will define shortly. Then, using a <kbd>for</kbd> comprehension, we <span>chain</span> several <kbd>IO</kbd> values:</p>
+<ol>
+<li><span>Save the filtered transactions, using the</span> <kbd>save</kbd> <span>function that we implemented earlier</span></li>
+<li>Wait 59 minutes, using the implicit <kbd>Timer</kbd> that was brought in scope with <kbd>import appCtx._</kbd></li>
+<li>Get the current time, using a <kbd>currentInstant</kbd> function that we will define shortly</li>
+<li>Fetch the next transactions using the first argument</li>
+</ol>
+<p>Here is the implementation of the helper function, <kbd>filterTxs</kbd>:</p>
+<pre><span>def </span><span>filterTxs</span>(<span>transactions</span>: <span>Dataset</span>[<span>Transaction</span>], <br/>              <span>fromInstant</span>: <span>Instant</span>, <span>untilInstant</span>: <span>Instant</span>): <span>Dataset</span>[<span>Transaction</span>] = {<br/>  <span>import </span><span>transactions</span>.<span>sparkSession</span>.implicits._<br/>  <span>transactions</span>.<span>filter</span>(<br/>    (<span>$"timestamp" </span><span>&gt;= <br/></span><span>    lit</span>(<span>fromInstant</span>.<span>getEpochSecond</span>).<span>cast</span>(TimestampType)) <span>&amp;&amp;<br/></span><span>      </span>(<span>$"timestamp" </span><span>&lt;     <br/>    </span><span>lit</span>(<span>untilInstant</span>.<span>getEpochSecond</span>).<span>cast</span>(TimestampType)))<br/>}</pre>
+<p>We did not need to pass an implicit <kbd>SparkSession</kbd>, as it is already available in the transaction <kbd>Dataset</kbd>. We only keep transactions for the interval <kbd>(fromInstant, untilInstant)</kbd>. The end instant is excluded so that we do not have any overlap when we loop over <kbd>processOneBatch</kbd>.</p>
+<p>Here is the definition of <kbd>currentInstant</kbd>:</p>
+<pre class="western"><span><span><span><span>def currentInstant(implicit timer: Timer[IO]): IO[Instant] =<br/>  timer.clockRealTime(TimeUnit.SECONDS) map Instant.ofEpochSecond</span></span></span></span></pre>
+<p>We use the <kbd>Timer</kbd> class to get the current time. As we saw while writing the integration test, this allowed us to use a fake timer to simulate a clock.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Implementing processRepeatedly</h1>
+                </header>
+            
+            <article>
+                
+<p>We are now ready to implement the algorithm of our <kbd>BatchProducer</kbd> application, which will loop repeatedly over <kbd>processOneBatch</kbd>. We are not going to write an integration test for it, as it merely assembles other parts that have been tested. Ideally, in a production system, you should write an end-to-end test that would start the application and connect to a fake REST server.</p>
+<p class="mce-root">Here is the implementation of <kbd>processRepeatedly</kbd>:</p>
+<pre><span>def </span>processRepeatedly(initialJsonTxs: IO[Dataset[Transaction]], <br/>                      jsonTxs: IO[Dataset[Transaction]])<br/>                     (<span>implicit </span>appContext: AppContext): IO[Unit] = {<br/>  <span>import </span>appContext._<br/><br/>  <span>for </span>{<br/>    beforeRead &lt;- currentInstant<br/>    firstEnd = beforeRead.minusSeconds(ApiLag.toSeconds)<br/>    firstTxs &lt;- initialJsonTxs<br/>    firstStart = truncateInstant(firstEnd, <span>1</span>.day)<br/>    _ &lt;- Monad[IO].tailRecM((firstTxs, firstStart, firstEnd)) {<br/>      <span>case </span>(txs, start, instant) =&gt;<br/>        processOneBatch(jsonTxs, txs, start, instant).map(_.asLeft)<br/>    }<br/>  } <span>yield </span>()<br/>}</pre>
+<p>In the function's signature, we have the following:</p>
+<ul>
+<li>A parameter <kbd>initialJsonTxs</kbd>, which is <kbd>IO</kbd>  that will fetch the last 24 hours of transactions in <kbd>Dataset</kbd></li>
+<li>A second parameter, <kbd>jsonTxs</kbd>, which fetches the last hour of transactions</li>
+<li>A return type, <kbd>IO[Unit]</kbd>, which will run infinitely when we call <kbd>unsafeRunSync</kbd> in the main application</li>
+</ul>
+<p>The functions' body is a <kbd>for</kbd> comprehension that chains the <kbd>IO</kbd> values as follows:</p>
+<ol>
+<li>We first calculate <kbd>firstEnd</kbd>= current time - 5 seconds. By using an <kbd>ApiLag</kbd> of 5 seconds, when we then fetch transactions using <kbd>initialJsonTxs</kbd>, we are certain that we will get all the transactions until <kbd>firstEnd</kbd>.</li>
+<li><kbd>firstStart</kbd> is set to midnight on the current day. For the initial batch, we want to filter out transactions from the previous day.</li>
+</ol>
+<ol start="3">
+<li>We fetch the last 24 hours of transactions in <kbd>firstTxs</kbd>, of the <kbd>Dataset[Transaction]</kbd> type.</li>
+<li>We call <kbd>tailRecM</kbd> from <kbd>Monad</kbd>. It calls the anonymous function in the block until it returns <kbd>Monad[Right[Unit]]</kbd>. But since our function always returns <kbd>Left</kbd>, it will loop infinitely.</li>
+</ol>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Implementing BatchProducerApp</h1>
+                </header>
+            
+            <article>
+                
+<p>Finally, all we need to do is create an application that will call <kbd>processRepeatedly</kbd> with the right parameters.</p>
+<p>Create a new class, <kbd>coinyser.BatchProducerApp</kbd>, in <kbd>src/main/scala</kbd> and type the following:</p>
+<pre><span>package </span>coinyser<br/><br/><span>import </span>java.io.{<span>BufferedReader</span>, <span>InputStreamReader</span>}<br/><span>import </span>java.net.{<span>URI</span>, <span>URL</span>}<br/><br/><span>import </span>cats.effect.{ExitCode, IO, <span>IOApp</span>}<br/><span>import </span>coinyser.BatchProducer.{<span>httpToDomainTransactions</span>, <span>jsonToHttpTransactions</span>}<br/><span>import </span>com.typesafe.scalalogging.<span>StrictLogging<br/></span><span>import </span>org.apache.spark.sql.{<span>Dataset</span>, SparkSession}<br/><br/><span>import </span>scala.io.Source<br/><br/><span>class </span>BatchProducerApp <span>extends </span><span>IOApp </span><span>with </span><span>StrictLogging </span>{<br/><br/>  <span>implicit val </span><span>spark</span>: <span>SparkSession </span>= <br/>  SparkSession.<span>builder</span>.<span>master</span>(<span>"local[*]"</span>).<span>getOrCreate</span>()<br/>  <span>implicit val </span><span>appContext</span>: <span>AppContext </span>= <span>new </span><span>AppContext</span>(<span>new <br/>    </span><span>URI</span>(<span>"./data/transactions"</span>))<br/><br/>  <span>def </span><span>bitstampUrl</span>(<span>timeParam</span>: <span>String</span>): <span>URL </span>=<br/>    <span>new </span><span>URL</span>(<span>"https://www.bitstamp.net/api/v2/transactions/btcusd?time=" <br/>    </span>+ <span>timeParam</span>)<br/><br/>  <span>def </span><span>transactionsIO</span>(<span>timeParam</span>: <span>String</span>): <span>IO</span>[<span>Dataset</span>[<span>Transaction</span>]] = {<br/>    <span>val </span>url = <span>bitstampUrl</span>(<span>timeParam</span>)<br/>    <span>val </span>jsonIO = <span>IO </span>{<br/>      <span>logger</span>.<span>info</span>(<span>s"calling </span><span>$</span>url<span>"</span>)<br/>      Source.<span>fromURL</span>(url).<span>mkString<br/></span><span>    </span>}<br/>    jsonIO.<span>map</span>(json =&gt; <br/>    <span>httpToDomainTransactions</span>(<span>jsonToHttpTransactions</span>(json)))<br/>  }<br/><span><br/></span><span>  </span><span>val </span><span>initialJsonTxs</span>: <span>IO</span>[<span>Dataset</span>[<span>Transaction</span>]] = <span>transactionsIO</span>(<span>"day"</span>)<br/>  <span>val </span><span>nextJsonTxs</span>: <span>IO</span>[<span>Dataset</span>[<span>Transaction</span>]] = <span>transactionsIO</span>(<span>"hour"</span>)<br/><span><br/></span><span>  </span><span>def </span><span>run</span>(<span>args</span>: <span>List</span>[<span>String</span>]): <span>IO</span>[<span>ExitCode</span>] =<br/>    BatchProducer.<span>processRepeatedly</span>(<span>initialJsonTxs</span>, <span>nextJsonTxs</span>).<span>map</span>(_ <br/>    =&gt; ExitCode.<span>Success</span>)<br/>}<br/><span><br/>object </span>BatchProducerAppSpark <span>extends </span><span>BatchProducerApp</span></pre>
+<p class="mce-root">The class extends <kbd>cats.effect.IOApp</kbd>. It is a helper trait that will call <kbd>unsafeRunSync</kbd> on <kbd>IO</kbd> returned by the <kbd>run</kbd> method. It also extends <kbd>StrictLogging</kbd>. This trait brings an attribute <kbd>logger</kbd> in scope that we will use to log messages. The body of our object defines the following members:</p>
+<ul>
+<li><kbd>spark</kbd> is the <kbd>SparkSession</kbd>, required for manipulating datasets. The master is set to <kbd>local[*]</kbd>, which means that Spark will use all of the cores available on the localhost to execute our jobs. But, as we will see in the next section, this can be overridden when using a Spark cluster.</li>
+<li><kbd>appContext</kbd> requires the path for saving our transaction. Here, we use a relative directory on the local filesystem. In a production environment, you would typically use an S3 or HDFS location. <kbd>AppContext</kbd> also requires two implicits: <kbd>SparkSession</kbd> and <kbd>Timer[IO]</kbd>. We already defined the former, and the latter is provided by <kbd>IOApp</kbd>.</li>
+<li><kbd>bitstampUrl</kbd> is a function that returns the URL that is used to retrieve the transactions that happened in the last day or in the last hour</li>
+<li><kbd>transactionsIO</kbd> fetches the transactions by calling the Bitstamp URL. As seen at the beginning of this chapter, we use <kbd>scala.io.Source</kbd> to create a string from the HTTP response. We then transform it into <kbd>Dataset[Transaction]</kbd> using the two functions, <kbd>jsonToHttpTransactions</kbd> and  <kbd>httpToDomainTransactions</kbd>, that we implemented earlier.</li>
+<li><kbd>initialJsonTxs</kbd> and <kbd>nextJsonTxs</kbd> are the IO values that, respectively, retrieve the last 24 hours of transactions and the last hour of transactions.</li>
+<li>
+<p><kbd>run</kbd> implements the only abstract method of <kbd>IOApp</kbd>. It produces <kbd>IO[ExitCode]</kbd> to be run as an application. Here we just call <kbd>processRepeatedly</kbd> with <kbd>vals</kbd> that were defined previously. Then, we have to map to change the unit result to <kbd>ExitCode.Success</kbd> in order to type check. Actually, this exit code will never be returned, because <kbd>processRepeatedly</kbd> loops infinitely.</p>
+</li>
+</ul>
+<p>If you now try to run <kbd>BatchProducerAppSpark</kbd>, you will get <kbd>ClassNotFoundException</kbd> about a Spark class. This is because in <kbd>build.sbt</kbd><span class="packt_screen"><strong>,</strong></span> we declared some libraries as <kbd>% Provided</kbd>. As we shall see, this configuration is useful for packaging the application, but right now it prevents us from testing our program easily.</p>
+<p>The trick to avoid that is to create another object, <kbd>coinyser.BatchProducerAppIntelliJ</kbd>, in the <kbd>src/test/scala</kbd> directory, that also extends the class <kbd>BatchProducerApp</kbd>. IntelliJ indeed brings all of the provided dependencies to the test runtime classpath:</p>
+<pre><span>package </span>coinyser<br/><br/><span>object </span>BatchProducerAppIntelliJ <span>extends </span><span>BatchProducerApp</span></pre>
+<p>This is why we defined a class and an object in <kbd>BatchProducerApp.scala</kbd><span class="packt_screen">.</span> We can have one implementation that will be used with <kbd>spark-submit</kbd>, and one that we can run from IntelliJ.</p>
+<p>Now run the <kbd>BatchProducerAppIntelliJ</kbd> application. After a couple of seconds, you should see something similar to this in the console:</p>
+<pre>(...)<br/>18/09/02 22:29:08 INFO BatchProducerAppIntelliJ$: calling https://www.bitstamp.net/api/v2/transactions/btcusd?time=day<br/>18/09/02 22:29:15 WARN TaskSetManager: Stage 0 contains a task of very large size (1225 KB). The maximum recommended task size is 100 KB.<br/>18/09/02 22:29:15 INFO CodecPool: Got brand-new compressor [.snappy]<br/>18/09/02 22:29:16 INFO FileOutputCommitter: Saved output of task 'attempt_20180902222915_0000_m_000000_0' to file:/home/mikael/projects/Scala-Programming-Projects/bitcoin-analyser/data/transactions/_temporary/0/task_20180902222915_0000_m_000000</pre>
+<p>After this point, you should have a Parquet file in the <kbd>data/transactions/date=&lt;current date&gt;</kbd> directory, containing all of the transactions that happened from midnight on the current day. If you wait one more hour, you will get another Parquet file containing the transactions of the last hour.</p>
+<p>If you do not want to wait one hour to see it happening, you can fetch transactions every minute instead:</p>
+<ul>
+<li>
+<p>Change <kbd>BatchProducerApp.nextJsonTxs</kbd> to <kbd>jsonIO("?time=minute")</kbd></p>
+</li>
+<li>
+<p>Change <kbd>BatchProducer.WaitTime</kbd> to <kbd>45.seconds</kbd> to have a 15 seconds overlap</p>
+</li>
+</ul>
+<div class="packt_infobox">The <kbd>WARN</kbd> message in the console tells us that <kbd>"Stage 0 contains a task of very large size"</kbd>. This is because <kbd>String</kbd> that contains the HTTP response is sent as a whole to one Spark task. If we had a much larger payload (several hundreds of MB), it would be less memory intensive to split it and write it to a file.</div>
+<p>In the next chapter, we will see how to use Zeppelin to query these Parquet files and plot some charts. But we can already check them using the Scala Console. Start a new Scala Console and type the following:</p>
+<pre>import org.apache.spark.sql.SparkSession<br/>implicit val spark = SparkSession.builder.master("local[*]").getOrCreate()<br/>val ds = spark.read.parquet("./data/transactions")<br/>ds.show()</pre>
+<p>Feel free to play around with the Dataset API. You can try to count the transactions, filter them for a specific period, and find the maximum price or quantity.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running the application with spark-submit</h1>
+                </header>
+            
+            <article>
+                
+<p>We have run our application in a standalone way, but when you want to process large datasets you would need to use a Spark cluster. It is out of the scope of this book to explain how to set up a Spark cluster. If you want to set up one, you can refer to the Spark documentation or use an off-the-shelf cluster from a cloud computing vendor.</p>
+<p>Nonetheless, the submission process is the same whether we run Spark in local mode or in cluster mode.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Installing Apache Spark</h1>
+                </header>
+            
+            <article>
+                
+<p>We are going to install Spark to run it in local mode. This mode only uses the CPU cores of the localhost to run jobs. For this, download Spark 2.3.1 from this page: <a href="https://spark.apache.org/downloads.html">https://spark.apache.org/downloads.html</a>.</p>
+<p>Then extract it to some folder for instance, <kbd>~/</kbd> for your <kbd>home</kbd> folder on Linux or macOS:</p>
+<pre>tar xfvz spark-2.3.1-bin-hadoop2.7.tgz ~/</pre>
+<p>You can try running <kbd>spark shell</kbd> to verify that the installation is correct:</p>
+<pre>cd ~/spark-2.3.1-bin-hadoop2.7/bin<br/>./spark-shell</pre>
+<p>After a couple of seconds, you should see a welcome message followed by the same <kbd>scala&gt;</kbd> prompt that we had in the Scala console:</p>
+<pre>(...)<br/>Spark context Web UI available at http://192.168.0.11:4040<br/>Spark context available as 'sc' (master = local[*], app id = local-1536218093431).<br/>Spark session available as 'spark'.<br/>Welcome to<br/>      ____              __<br/>     / __/__  ___ _____/ /__<br/>    _\ \/ _ \/ _ `/ __/  '_/<br/>   /___/ .__/\_,_/_/ /_/\_\   version 2.3.1<br/>      /_/<br/>         <br/>Using Scala version 2.11.8 (Java HotSpot(TM) 64-Bit Server VM, Java 1.8.0_112)<br/>Type in expressions to have them evaluated.<br/>Type :help for more information.<br/><br/>scala&gt; </pre>
+<p>A Spark shell is actually a Scala Console connected to a Spark cluster. In our case, it is a Spark local cluster, as you can see with <kbd>master = local[*]</kbd>. Spark-shell provides a variable, <kbd>spark: SparkSession</kbd>, that you can use to manipulate datasets. It can be a handy tool, but I generally prefer using IntelliJ's console and create <kbd>SparkSession</kbd> by hand. IntelliJ's console has the benefit of having syntax highlighting and better code completion.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Packaging the assembly JAR</h1>
+                </header>
+            
+            <article>
+                
+<p>In order to run our application with a Spark distribution, we need to package our compiled classes and their dependencies in a JAR file. This is what we call an assembly JAR or fat JAR: its size can be quite large if you have many dependencies. To do that, we have to modify our SBT build files.</p>
+<p>First, we need to enable the assembly plugin. Add a new file, <kbd>assembly.sbt</kbd><span class="packt_screen"><strong>,</strong></span> in the <kbd>bitcoin-analyser/project</kbd> folder and type the following:</p>
+<pre><span>addSbtPlugin</span>(<span>"com.eed3si9n" </span><span>% </span><span>"sbt-assembly" </span><span>% </span><span>"0.14.7"</span></pre>
+<p>We also need to exclude all the Spark dependencies from our assembly JAR. There is no point in having them as they are already present in the Spark distribution. Excluding them will save space and build time. For this, we had already scoped these dependencies to <kbd>% Provided</kbd> in <kbd>build.sbt</kbd>. This will make sure that the dependencies are present for compiling the project and running the tests, but are excluded when building the assembly JAR.</p>
+<p>Then we have to add a few configuration options at the end of <kbd>build.sbt</kbd>:</p>
+<pre><span>assemblyOption </span><span>in </span><span>assembly </span><span>:= </span>(<span>assemblyOption </span><span>in   <br/></span><span>  assembly</span>).<span>value</span>.copy(<span>includeScala </span>= <span>false</span>)<br/><span>test </span><span>in </span><span>assembly </span><span>:= </span>{}<br/><span>mainClass </span><span>in </span><span>assembly </span><span>:= </span><span>Some</span>(<span>"coinyser.BatchProducerAppSpark"</span>)</pre>
+<p class="mce-root">Here is a short explanation talking about what line performs what action:</p>
+<ul>
+<li class="mce-root"><span>The first line excludes all Scala runtime JARs.</span></li>
+<li>The second line tells SBT to skip the tests when running the assembly task</li>
+<li>The last line declares what is our main class. This declaration will end up in the <kbd>MANIFEST.MF</kbd> file, and will be used by Spark to bootstrap our program.</li>
+</ul>
+<p>Our build files are ready; we can run the assembly task. Open the SBT shell in IntelliJ (<em>Ctrl</em> + <em>Shift</em> + <em>S</em>), and type <kbd>assembly</kbd> after the <kbd>sbt&gt;</kbd> prompt. This should compile the project and package the assembly JAR. The output of your SBT shell should look like this:</p>
+<pre>[IJ]sbt:bitcoin-analyser&gt; assembly<br/>[info] Strategy 'discard' was applied to 3 files (Run the task at debug level to see details)[info] Packaging /tmp/sbt/bitcoin-analyser/scala-2.11/bitcoin-analyser-assembly-0.1.jar <br/>...<br/>[info] Done packaging.</pre>
+<p>The assembly JAR is ready; we can submit it to Spark.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Running spark-submit</h1>
+                </header>
+            
+            <article>
+                
+<p>Using a console, go to the Spark distribution's <kbd>bin</kbd> folder, and <kbd>run spark-submit</kbd> with the path of the assembly JAR:</p>
+<pre>cd ~/spark-2.3.1-bin-hadoop2.7/bin<br/>./spark-submit /tmp/sbt/bitcoin-analyser/scala-2.11/bitcoin-analyser-assembly-0.1.jar</pre>
+<p><kbd>spark-submit</kbd> has lots of options that let you change the Spark master, the number of executors, their memory requirements, and so on. You can find out more by running <kbd>spark-submit -h</kbd>. After having submitted our JAR, you should see something like this in your console (we only show the most important parts):</p>
+<pre>(...)<br/>2018-09-07 07:55:27 INFO  SparkContext:54 - Running Spark version 2.3.1<br/>2018-09-07 07:55:27 INFO  SparkContext:54 - Submitted application: coinyser.BatchProducerAppSpark<br/>(...)<br/>2018-09-07 07:55:28 INFO  Utils:54 - Successfully started service 'SparkUI' on port 4040.<br/>(...)<br/>2018-09-07 07:55:28 INFO  SparkContext:54 - Added JAR file:/tmp/sbt/bitcoin-analyser/scala-2.11/bitcoin-analyser-assembly-0.1.jar at spark://192.168.0.11:38371/jars/bitcoin-analyser-assembly-0.1.jar with timestamp 1536303328633<br/>2018-09-07 07:55:28 INFO  Executor:54 - Starting executor ID driver on host localhost<br/>(...)<br/>2018-09-07 07:55:28 INFO  NettyBlockTransferService:54 - Server created on 192.168.0.11:37370<br/>(...)<br/>2018-09-07 07:55:29 INFO  BatchProducerApp$:23 - calling https://www.bitstamp.net/api/v2/transactions/btcusd?time=day<br/>(...)<br/>2018-09-07 07:55:37 INFO  SparkContext:54 - Starting job: parquet at BatchProducer.scala:115<br/>(...)<br/>2018-09-07 07:55:39 INFO  DAGScheduler:54 - Job 0 finished: parquet at BatchProducer.scala:115, took 2.163065 s</pre>
+<p>You would see a similar output if you were using a remote cluster:</p>
+<ul>
+<li>The line <kbd>Submitted application</kbd>: Tells us what <kbd>main</kbd> class we submitted. This corresponds to the <kbd>mainClass</kbd> setting that we put in our SBT file. This can be overridden with the <kbd>--class</kbd> option in <kbd>spark-submit</kbd>.</li>
+<li>A few lines after, we can see that Spark started a <strong>SparkUI</strong> web server on port <kbd>4040</kbd>. With your web browser, go to the URL <kbd>http://localhost:4040</kbd> to explore this UI. It allows you to see the progress of running jobs, their execution plan, how many executors they use, the logs of the executors, and so on. SparkUI is a precious tool when you need to optimize your jobs.</li>
+<li>
+<p><kbd>Added JAR file</kbd>: Before Spark can run our application, it must distribute the assembly JAR to all the cluster nodes. For doing this, we can see that it starts a server on port <kbd>37370</kbd>. The executors would then connect to that server to download the JAR file.</p>
+</li>
+<li><kbd>Starting Executor ID driver</kbd>: The driver process coordinates the execution of jobs with the executors. The following line shows that it listens on port <kbd>37370</kbd> to receive updates from the executors.</li>
+<li><kbd>Calling https//</kbd>: This corresponds to what we logged in our code, <kbd>logger.info(s"calling $url")</kbd>.</li>
+<li><kbd>Starting job</kbd>: Our application started a Spark job. Line 115 in <kbd>BatchProducer</kbd> corresponds to the <kbd>.parquet(path.toString)</kbd> instruction in <kbd>BatchProducer.save</kbd>. This <kbd>parquet</kbd> method is indeed an action and as such triggers the evaluation of <kbd>Dataset</kbd>.</li>
+<li><kbd>Job 0 finished</kbd>: The job finishes after a few seconds.</li>
+</ul>
+<p>After this point, you should have a <kbd>parquet</kbd> file saved with the last transactions. If you let the application continue for 1 hour, you will see that it starts another job to get the last hour of transactions.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>By now, you should be more comfortable using Spark's <kbd>Dataset</kbd> API. Our little program is focused on fetching BCT/USD transactions, but it could be interesting to enhance it. For instance, you could f<span>etch and save other currency pairs, such as ETH/EUR or XRP/USD. </span><span>Use a different cryptocurrency exchange. This would allow you to compare prices in different exchanges, and possibly work out an arbitrage strategy. Arbitrage is a simultaneous purchase and sale of an asset in different marketplaces to profit from an imbalance in the price. </span>You could get data for traditional currency pairs, such as EUR/USD, or use Frameless to refactor the <kbd>Dataset</kbd> manipulations and make them more type-safe. See the website for further clarification <a href="https://github.com/typelevel/frameless">https://github.com/typelevel/frameless.</a></p>
+<p>In the next chapter, we are going to exploit saved transaction data to perform some analytics queries.</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

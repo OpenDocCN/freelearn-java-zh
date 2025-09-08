@@ -1,0 +1,910 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;6.&#xA0;Concurrency in Scala"><div class="titlepage"><div><div><h1 class="title"><a id="ch06"/>Chapter 6. Concurrency in Scala</h1></div></div></div><p>In this chapter, we will switch our focus from collections to a different topic: concurrency. Being able to take advantage of all the CPU resources that your hardware provides is critical to writing performant software. Unfortunately, writing concurrent code is not an easy task because it is easy to write unsafe programs. If you come from Java, you may still have nightmares involving <code class="literal">synchronized</code> blocks and locks! The <code class="literal">java.util.concurrent</code> package provides numerous tools that make writing concurrent code simpler. However, designing stable and reliable concurrent applications can still be a daunting challenge. In this chapter, we will explore the tools that are provided by the Scala standard library to take advantage of concurrency. After a short presentation of the main abstraction, <code class="literal">Future</code>, we will study its behavior and usage pitfalls that we should avoid. We will end this chapter by exploring a possible alternative to <code class="literal">Future</code> named <code class="literal">Task</code>, which is provided by the Scalaz library. In this chapter, we will explore the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">Concurrency versus parallelism</li><li class="listitem" style="list-style-type: disc">Future usage considerations</li><li class="listitem" style="list-style-type: disc">Blocking calls and callbacks</li><li class="listitem" style="list-style-type: disc">Scalaz Task</li></ul></div><div class="section" title="Parallelizing backtesting strategies"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec32"/>Parallelizing backtesting strategies</h1></div></div></div><p>The data scientists are off and running with the data analysis tools that you built for them to research trading strategies. However, they have hit a wall because backtesting strategies is becoming too expensive. As they have built more sophisticated strategies that require more historical data, and employ more stateful algorithms, backtesting has taken longer. Once again, you are being called upon to help out at MVT by leveraging Scala and the functional paradigm to deliver performant software.</p><p>The data scientists have incrementally built out a backtesting tool that allows the team to determine a strategy's performance by replaying historical data. This works by providing a preset strategy to run, the ticker to test against, and the time interval of historical data to replay. The backtester loads market data and applies the strategy to generate trading decisions. Once the backtester finishes replaying historical data, it summarizes and displays strategy performance results. The backtester is heavily depended on to determine the efficacy of proposed trading strategies before putting them into production for live trading.</p><p>To begin familiarizing yourself with the backtester, you look into the code, as follows:</p><pre class="programlisting">  sealed trait Strategy &#13;
+  case class PnL(value: BigDecimal) extends AnyVal &#13;
+  case class BacktestPerformanceSummary(pnl: PnL) &#13;
+  case class Ticker(value: String) extends AnyVal &#13;
+ &#13;
+  def backtest( &#13;
+    strategy: Strategy, &#13;
+    ticker: Ticker, &#13;
+    testInterval: Interval): BacktestPerformanceSummary = ??? &#13;
+</pre><p>In the preceding snapshot from the data analysis repository, you see the primary method that drives backtesting. Given a <code class="literal">Strategy</code>, <code class="literal">Ticker</code>, and <code class="literal">Interval</code>, it can produce <code class="literal">BacktestPerformanceSummary</code>. Scanning the repository, you find a file named <code class="literal">CrazyIdeas.scala</code> that shows Dave as the only commit author. In here, you see example invocations of the backtester:</p><pre class="programlisting">def lastMonths(months: Int): Interval = &#13;
+    new Interval(new DateTime().minusMonths(months), new DateTime()) &#13;
+backtest(Dave1, Ticker("AAPL"), lastMonths(3)) &#13;
+backtest(Dave1, Ticker("GOOG"), lastMonths(3)) &#13;
+backtest(Dave2, Ticker("AAPL"), lastMonths(3)) &#13;
+backtest(Dave2, Ticker("GOOG"), lastMonths(3)) &#13;
+</pre><p>The usage of the backtester gives you a clue to a possible performance improvement. It looks like when Dave has a new idea, he wants to evaluate its performance on multiple symbols and compare it against other strategies. In its current form, backtests are performed sequentially. One way to improve the execution speed of the backtester is to parallelize the execution of all backtesting runs. If each invocation of the backtester is parallelized and if there are spare hardware resources, then backtesting multiple strategies and symbols will finish faster. To understand how to parallelize the backtester, we first need to dive into the topic of asynchronous programming and then see how Scala supports concurrency.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note43"/>Note</h3><p>Before diving into the code, we need to enrich our vocabulary to discuss the properties of asynchronous programming. Concurrency and parallelism are often used interchangeably, but there is an important distinction between these two terms. Concurrency involves two (or more) tasks that are started and executed in overlapping time periods. Both tasks are in-progress (that is, they are running) at the same time, but only one task may be performing actual work at any instant in time. This is the case when you write concurrent code on a single-core machine. Only one task can progress at a time, but multiple tasks are ongoing concurrently.</p><p>Parallelism exists only when both tasks are truly running at the same time. With a dual-core machine, you can execute two tasks at the same time. From this definition, we see that parallelism depends on the hardware that is available for use. This means that the property of concurrency can be added to a program, but parallelism is outside the control of the software.</p><p>To better illustrate these concepts, consider the example of painting a room. If there is only one painter, the painter can paint the first coat on a wall, move on to the next wall, go back to the first wall for the second coat and then finish the second wall. The painter is painting both walls concurrently, but can only spend time on one wall at any given time. If two painters are on the job, they can each focus on one wall and paint them in parallel.</p></div></div><div class="section" title="Exploring Future"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec47"/>Exploring Future</h2></div></div></div><p>The primary construct in Scala to drive concurrent programming is <code class="literal">Future</code>. Found in the <code class="literal">scala.concurrent</code> package, <code class="literal">Future</code> can be seen as a container for a value that may not yet exist. Let's look at a simple example to illustrate usage:</p><pre class="programlisting">scala&gt; import scala.concurrent.Future &#13;
+import scala.concurrent.Future &#13;
+ &#13;
+scala&gt; import scala.concurrent.ExecutionContext &#13;
+import scala.concurrent.ExecutionContext &#13;
+ &#13;
+scala&gt; val context: ExecutionContext = scala.concurrent.ExecutionContext.global &#13;
+context: scala.concurrent.ExecutionContext = scala.concurrent.impl.ExecutionContextImpl@3fce8fd9 &#13;
+ &#13;
+scala&gt; def example(){ &#13;
+  println("Starting the example") &#13;
+  Future{  &#13;
+    println("Starting the Future") &#13;
+    Thread.sleep(1000)  // simulate computation &#13;
+    println("Done with the computation")   &#13;
+ }(context) &#13;
+ &#13;
+println("Ending example") &#13;
+} &#13;
+</pre><p>The preceding example shows a short method, creating a <code class="literal">Future</code> value simulates an expensive computation and prints a couple of lines to make it easier for us to understand the flow of the application. When running <code class="literal">example</code>, we see the following output:</p><pre class="programlisting">scala&gt; example() &#13;
+Starting the example &#13;
+Ending example &#13;
+Starting the future &#13;
+// a pause &#13;
+Done with the computation &#13;
+</pre><p>We can see that <code class="literal">Future</code> was executed after the end of the <code class="literal">example</code> method. This is because when a <code class="literal">Future</code> is created, it starts its computation concurrently. You may be wondering, "What is this <code class="literal">context</code> object of the <code class="literal">ExecutionContext</code> type that is used when creating the <code class="literal">Future</code>?" We will explore <code class="literal">ExecutionContext</code> in-depth shortly, but for now, we treat it as the the object that is responsible for the execution of the <code class="literal">Future</code>. We import <code class="literal">scala.concurrent.ExecutionContext.global</code>, which is a default object that is created by the standard library to be able to execute the <code class="literal">Future</code>.</p><p>A <code class="literal">Future</code> object is a stateful object. It is either not yet complete when the computation is underway or completed once the computation finishes. Furthermore, a completed <code class="literal">Future</code> can be either a success when the computation was able to complete, or it can be a failure if an exception was thrown during the computation.</p><p>The <code class="literal">Future</code> API provides combinators to compose the <code class="literal">Future</code> instances and manipulate the result that they contain:</p><pre class="programlisting">scala&gt; import scala.concurrent.ExecutionContext.Implicits.global &#13;
+import scala.concurrent.ExecutionContext.Implicits.global &#13;
+ &#13;
+scala&gt; import scala.concurrent.Future &#13;
+import scala.concurrent.Future &#13;
+ &#13;
+scala&gt; Future(1).map(_ + 1).filter(_ % 2 == 0).foreach(println) &#13;
+ &#13;
+2 &#13;
+</pre><p>This snippet from the Scala console shows construction of a <code class="literal">Future</code> data type that wraps a constant integer value. We see that the integer contained in the <code class="literal">Future</code> data type is transformed using functions that are similar to the ones that we expect to find on <code class="literal">Option</code> and collection data types. These transforms are applied once the preceding <code class="literal">Future</code> completes, and return a new <code class="literal">Future</code>.</p><p>As promised, we now look into <code class="literal">ExecutionContext</code>. The <code class="literal">ExecutionContext</code> can be thought of as the machinery behind <code class="literal">Future</code> that provides runtime asynchrony. In the previous snippet, a <code class="literal">Future</code> was created to perform simple addition and modulo division without explicitly providing an <code class="literal">ExecutionContext</code> instance at the call site. Instead, only an import of the <code class="literal">global</code> object was provided. The snippet executes because <code class="literal">global</code> is an implicit value and the signature of <code class="literal">map</code> accepts an implicit <code class="literal">ExecutionContext</code>. Let's look at the following signature of <code class="literal">map</code> to deepen our understanding:</p><pre class="programlisting">def map[S](f: T =&gt; S)(implicit executor: ExecutionContext): Future[S] &#13;
+</pre><p>From the signature of <code class="literal">map</code>, we see that unlike the <code class="literal">map</code> transformation on <code class="literal">List</code>, the <code class="literal">Future</code> requires a curried, implicit <code class="literal">ExecutionContext</code> argument. To understand how an <code class="literal">ExecutionContext</code> provides runtime asynchrony, we need to first understand its operations:</p><pre class="programlisting">trait ExecutionContext { &#13;
+  def execute(runnable: Runnable): Unit &#13;
+  def reportFailure(cause: Throwable): Unit &#13;
+  def prepare(): ExecutionContext = this &#13;
+} &#13;
+</pre><p>The <code class="literal">execute</code> is a side-effecting method that operates on a <code class="literal">java.lang.Runnable</code>. For those familiar with concurrency in Java, you most likely recall that <code class="literal">Runnable</code> is the commonly-used interface to allow threads and other <code class="literal">java.util.concurrent</code> abstractions to execute code concurrently. Although we do not know how <code class="literal">Future</code> achieves runtime asynchrony yet, we do know there is a link between <code class="literal">Future</code> execution and creation of a <code class="literal">Runnable</code>.</p><p>The next question we will answer is, "How do I create an <code class="literal">ExecutionContext</code>? " By studying the companion object, we discover the following signatures:</p><pre class="programlisting">def fromExecutorService(e: ExecutorService, reporter: Throwable =&gt; Unit): ExecutionContextExecutorService &#13;
+def fromExecutorService(e: ExecutorService): ExecutionContextExecutorService &#13;
+def fromExecutor(e: Executor, reporter: Throwable =&gt; Unit): ExecutionContextExecutor &#13;
+def fromExecutor(e: Executor): ExecutionContextExecutor &#13;
+</pre><p>The standard library provides convenient ways to create an <code class="literal">ExecutionContext</code> from either a <code class="literal">java.util.concurrent.Executor</code> or <code class="literal">java.util.concurrent.ExecutorService</code>.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note44"/>Note</h3><p>If you are unfamiliar with the machinery that is provided by the <code class="literal">java.util.concurrent</code> package and you are looking for a deeper treatment than that provided by the API documentation, we encourage you to read <span class="emphasis"><em>Java Concurrency in Practice</em></span> by Brian Goetz (<a class="ulink" href="http://jcip.net/">http://jcip.net/</a>). Although <span class="emphasis"><em>Java Concurrency in Practice</em></span> was written around the release of JDK 6, it contains numerous principles that continue to apply today. Reading this book will provide you with a deep understanding of the JDK-provided concurrency primitives that are utilized by the Scala standard library.</p></div></div><p>The return type of the factory methods is a more specialized version of <code class="literal">ExecutionContext</code>. The standard library defines the following inheritance chain for <code class="literal">ExecutionContext</code>:</p><pre class="programlisting">trait ExecutionContextExecutor extends ExecutionContext with java.util.concurrent.Executor &#13;
+trait ExecutionContextExecutorService extends ExecutionContextExecutor with java.util.concurrent.ExecutorService &#13;
+</pre><p>Also, in the <code class="literal">ExecutionContext</code> companion object, we find the implicit context used in our first example, as follows:</p><pre class="programlisting">def global: ExecutionContextExecutor = Implicits.global &#13;
+</pre><p>The documentation for the definition of <code class="literal">Implicits.global</code> indicates that this <code class="literal">ExecutionContext</code> is backed by a thread pool with a thread count that is equal to the available processor count. Our dive into <code class="literal">ExecutionContext</code> shows us how the simple <code class="literal">Future</code> example runs. We can illustrate how a <code class="literal">Future</code> applies its <code class="literal">ExecutionContext</code> to execute on multiple threads:</p><pre class="programlisting">  Future(1).map(i =&gt; { &#13;
+    println(Thread.currentThread().getName) &#13;
+    i + 1 &#13;
+  }).filter(i =&gt; { &#13;
+    println(Thread.currentThread().getName) &#13;
+    i % 2 == 0 &#13;
+  }).foreach(println) &#13;
+</pre><p>We extend the original snippet to print the name of the thread performing each transformation. When run on a machine with multiple cores, this snippet yields variable output, depending on which threads pick up the transformations. Here is an example output:</p><pre class="programlisting">ForkJoinPool-1-worker-3 &#13;
+ForkJoinPool-1-worker-5 &#13;
+2 &#13;
+</pre><p>This example shows that one <code class="literal">worker-3</code> thread performed the <code class="literal">map</code> transformation while another <code class="literal">worker-5</code> thread performed the <code class="literal">filter</code> transformation. There are two key insights to draw from our simple example about how <code class="literal">Future</code> affects control flow. First, <code class="literal">Future</code> is a data type for concurrency that enables us to break the control flow of a program into multiple logical threads of processing. Second, our example shows that <code class="literal">Future</code> begins execution immediately upon creation. This means that transformations are applied immediately in a different flow of the program. We can use these insights to improve the runtime performance of Dave's crazy ideas.</p></div><div class="section" title="Future and crazy ideas"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec48"/>Future and crazy ideas</h2></div></div></div><p>We apply <code class="literal">Future</code> to Dave's set of backtests to improve performance. We believe there is an opportunity for a performance improvement because Dave's laptop has four CPU cores. This means that by adding concurrency to our program, we will be able to benefit from runtime parallelism. Our first attempt utilizes a for-comprehension:</p><pre class="programlisting">implicit val ec = scala.concurrent.ExecutionContext.Implicits.global &#13;
+for { &#13;
+      firstDaveAapl &lt;- Future(backtest(Dave1, Ticker("AAPL"), lastMonths(3))) &#13;
+      firstDaveGoog &lt;- Future(backtest(Dave1, Ticker("GOOG"), lastMonths(3))) &#13;
+      secondDaveAapl &lt;- Future(backtest(Dave2, Ticker("AAPL"), lastMonths(3))) &#13;
+      secondDaveGoog &lt;- Future(backtest(Dave2, Ticker("GOOG"), lastMonths(3))) &#13;
+    } yield (firstDaveAapl, firstDaveGoog, secondDaveAapl, secondDaveGoog) &#13;
+</pre><p>Each backtest invocation is wrapped with the creation of a <code class="literal">Future</code> instance by calling <code class="literal">Future.apply</code>. This companion object method uses a by-name parameter to defer evaluation of the argument, which, in this case, is the invocation of <code class="literal">backtest</code>:</p><pre class="programlisting">def apply[T](body: =&gt;T)(executor: ExecutionContext): Future[T] &#13;
+</pre><p>After running the new version of <code class="literal">CrazyIdeas.scala</code>, you are disappointed to see the runtime execution has not improved. You quickly double-check the number of CPUs on your Linux box, as follows:</p><pre class="programlisting">$ cat /proc/cpuinfo  | grep processor | wc -l &#13;
+8 &#13;
+</pre><p>Having confirmed there are eight cores available on your laptop, you wonder why the execution time matches the original serial execution time. The solution here is to consider how the for-comprehension is compiled. The for-comprehension is equivalent to the following simpler example:</p><pre class="programlisting">Future(1).flatMap(f1 =&gt; Future(2).flatMap(f2 =&gt; Future(3).map(f3 =&gt; (f1, f2, f3)))) &#13;
+</pre><p>In this desugared representation of the for-comprehension, we see that the second <code class="literal">Future</code> is created and evaluated within the <code class="literal">flatMap</code> transformation of the first <code class="literal">Future</code>. Any transformation applied to a <code class="literal">Future</code> (for example, <code class="literal">flatMap</code>) is only invoked once the value provided to the transform has been computed. This means that the <code class="literal">Future</code> in the preceding example and the for-comprehension are executed sequentially. To achieve the concurrency that we are looking for, we must instead modify <code class="literal">CrazyIdeas.scala</code> to look like the following:</p><pre class="programlisting">    val firstDaveAaplF = Future(backtest(Dave1, Ticker("AAPL"), &#13;
+      lastMonths(3))) &#13;
+    val firstDaveGoogF = Future(backtest(Dave1, Ticker("GOOG"), &#13;
+      lastMonths(3))) &#13;
+    val secondDaveAaplF = Future(backtest(Dave2, Ticker("AAPL"), &#13;
+      lastMonths(3))) &#13;
+    val secondDaveGoogF = Future(backtest(Dave2, Ticker("GOOG"), &#13;
+      lastMonths(3))) &#13;
+    for { &#13;
+      firstDaveAapl &lt;- firstDaveAaplF &#13;
+      firstDaveGoog &lt;- firstDaveGoogF &#13;
+      secondDaveAapl &lt;- secondDaveAaplF &#13;
+      secondDaveGoog &lt;- secondDaveGoogF &#13;
+    } yield (firstDaveAapl, firstDaveGoog, secondDaveAapl, secondDaveGoog) &#13;
+</pre><p>In this snippet, four backtests are kicked off concurrently and the results are transformed into a <code class="literal">Future</code> of a <code class="literal">Tuple4</code> consisting of four <code class="literal">BacktestPerformanceSummary</code> values. Seeing is believing, and after showing Dave the faster runtime of his backtests, he is excited to iterate quickly on new backtest ideas. Dave never misses a chance to throw around a pun, exclaiming, "Using all my cores is making my laptop fans really whiz. Not sure I'm a fan of the noise, but I sure do like the performance!"</p></div><div class="section" title="Future usage considerations"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec49"/>Future usage considerations</h2></div></div></div><p>In the previous example, we illustrated the ease of use of the <code class="literal">Future</code> API by investigating how to introduce concurrency to the backtester. Like any powerful tool, your usage of <code class="literal">Future</code> must be disciplined to ensure correctness and performance. This section evaluates topics that commonly cause confusion and error when using the <code class="literal">Future</code> to add concurrency to your program. We will detail performing side-effects, blocking execution, handling failures, choosing an appropriate execution context, and performance considerations.</p><div class="section" title="Performing side-effects"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec31"/>Performing side-effects</h3></div></div></div><p>When programming with <code class="literal">Future</code>, it is important to remember that <code class="literal">Future</code> is inherently a side-effecting construct. Unless the <code class="literal">success</code> or <code class="literal">failure</code> factory methods are used to lift a value into a <code class="literal">Future</code>, work is scheduled to be executed on a different thread (part of the <code class="literal">ExecutionContext</code> that is used to create the <code class="literal">Future</code>). More importantly, once executed, a <code class="literal">Future</code> cannot be executed again. Consider the following snippet:</p><pre class="programlisting">scala&gt; import scala.concurrent.Future &#13;
+import scala.concurrent.Future &#13;
+ &#13;
+scala&gt; import scala.concurrent.ExecutionContext.Implicits.global &#13;
+import scala.concurrent.ExecutionContext.Implicits.global &#13;
+ &#13;
+scala&gt; val f = Future{ println("FOO"); 40 + 2} &#13;
+FOO &#13;
+f: scala.concurrent.Future[Int] = scala.concurrent.impl.Promise$DefaultPromise@5575e0df &#13;
+ &#13;
+scala&gt; f.value &#13;
+res3: Option[scala.util.Try[Int]] = Some(Success(42)) &#13;
+</pre><p>The <code class="literal">Future</code> is computed and prints <code class="literal">FOO</code> as expected. We can then access the value wrapped in the <code class="literal">Future</code>. Note that when accessing the value, nothing is printing on the console. Once completed, the <code class="literal">Future</code> is merely a wrapper for a realized value. If you want to perform the computation again, you need to create a new instance of <code class="literal">Future</code>.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note45"/>Note</h3><p>Note that the preceding example uses <code class="literal">Future.value</code> to extract the result of the computation. This is for the sake of simplicity. Production code should rarely, if ever, use this method. Its return type is defined as <code class="literal">Option[Try[A]]</code>. An <code class="literal">Option</code> is used to represent the case of a completed <code class="literal">Future</code> with a <code class="literal">Some</code>, and an unrealized <code class="literal">Future</code> with a <code class="literal">None</code>. Furthermore, remember that a realized <code class="literal">Future</code> can have two states: success or failure. This is the purpose of the inner <code class="literal">Try</code>. Like <code class="literal">Option.get</code>, it is almost never a good idea to use <code class="literal">Future.value</code>. To extract a value from a <code class="literal">Future</code>, refer to the additional techniques described next.</p></div></div></div><div class="section" title="Blocking execution"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec32"/>Blocking execution</h3></div></div></div><p>When we added concurrency to the backtester, we wrote a for-comprehension returning <code class="literal">Future[(BacktestPerformanceSummary, BacktestPerformanceSummary, BacktestPerformanceSummary, BacktestPerformanceSummary)]</code>, which may leave you wondering how you access the value wrapped in the <code class="literal">Future</code>. Another way of asking the question is, "Given <code class="literal">Future[T]</code>, how do I return <code class="literal">T</code>?" The short answer is, "You don't!" Programming with many <code class="literal">Future</code> requires a shift in thinking away from synchronous execution towards asynchronous execution. When programming with an asynchronous model, the goal is to avoid working with <code class="literal">T</code> directly because it implies a synchronous contract.</p><p>In practice, there are situations where it is useful to have the <code class="literal">Future[T] =&gt; T</code> function. For example, consider the backtester snippet. If the code from the snippet is used to create a program by defining an <code class="literal">object</code> extending <code class="literal">App</code>, the program will terminate before backtesting completes. As the threads in the <code class="literal">ExecutionContext</code> global are daemon threads, the JVM terminates immediately after creating the <code class="literal">Future</code>. In this scenario, we need a synchronization mechanism to pause execution until the result is ready. By extending the <code class="literal">Awaitable</code> trait, <code class="literal">Future</code> is able to provide such facilities. The <code class="literal">Await</code> module exposes two methods that achieve this goal:</p><pre class="programlisting">def ready[T](awaitable: Awaitable[T], atMost: Duration): awaitable.type &#13;
+def result[T](awaitable: Awaitable[T], atMost: Duration): T &#13;
+</pre><p>As <code class="literal">Future</code> extends <code class="literal">Awaitable</code>, a <code class="literal">Future</code> can be supplied as an argument to either method. The <code class="literal">ready</code> halts program flow until <code class="literal">T</code> is available and returns the completed <code class="literal">Future[T]</code>. In practice, <code class="literal">ready</code> is rarely used because it is conceptually strange to return a <code class="literal">Future[T]</code> from a synchronous call instead of <code class="literal">T</code>. You are more likely to commonly use <code class="literal">result</code>, which provides the desired transformation returning <code class="literal">T</code> given <code class="literal">Future[T]</code>. For example, <code class="literal">CrazyIdeas.scala</code> can be modified to look like the following:</p><pre class="programlisting">    val summariesF = for { &#13;
+      firstDaveAapl &lt;- Future(backtest(Dave1, Ticker("AAPL"), lastMonths(3))) &#13;
+      firstDaveGoog &lt;- Future(backtest(Dave1, Ticker("GOOG"), lastMonths(3))) &#13;
+      secondDaveAapl &lt;- Future(backtest(Dave2, Ticker("AAPL"), lastMonths(3))) &#13;
+      secondDaveGoog &lt;- Future(backtest(Dave2, Ticker("GOOG"), lastMonths(3))) &#13;
+    } yield (firstDaveAapl, firstDaveGoog, secondDaveAapl, secondDaveGoog) &#13;
+ &#13;
+    Await.result(summariesF, scala.concurrent.duration.Duration(1, java.util.concurrent.TimeUnit.SECONDS)) &#13;
+</pre><p>In this snippet, we see the blocking, synchronous invocation of <code class="literal">Await.result</code> to return the <code class="literal">Tuple</code> of <code class="literal">Future[BacktestPerformanceSummary]</code>. This blocking call is parameterized with a timeout to defend against the scenario where the <code class="literal">Future</code> is not computed within a certain amount of time. Using a blocking call to retrieve the backtest results means that the JVM will only exit after the backtest completes or when the timeout expires. When the timeout expires and the backtest is incomplete, <code class="literal">result</code> and <code class="literal">ready</code> throw a <code class="literal">TimeoutException</code>.</p><p>Blocking execution of your program is potentially detrimental to your program's performance, and it should be used with caution. Using the methods on the <code class="literal">Await</code> companion object make blocking calls easy to recognize. As <code class="literal">ready</code> and <code class="literal">result</code> throw an exception when timing out, rather than returning a different data type, you must take extra caution to handle this scenario. You should treat any synchronous call involving asynchrony (that either does not provide a timeout or does not handle the timeout) as a bug.</p><p>Programming asynchronously requires a mindset shift to write a program that describes what to do when the value appears rather than writing programs that require a value to exist before acting on it. You should be suspicious of any use of <code class="literal">Await</code> that interrupts transformation of a to-be-computed value. A set of transformations should be composed by acting upon <code class="literal">Future[T]</code> instead of <code class="literal">T</code>. Usage of <code class="literal">Await</code> should be restricted to scenarios where a program has no other work to perform and requires the result of the transformation, as we saw with the backtester.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note46"/>Note</h3><p>As the standard library models timeout with an exception instead of a different return type, it is hard to enforce that a timeout is always handled One way to improve safety is to write a utility method that returns <code class="literal">Option[T]</code> instead of <code class="literal">T</code> to account for the timeout scenario:</p><div class="informalexample"><pre class="programlisting">object SafeAwait { 
+  def result[T]( 
+    awaitable: Awaitable[T], 
+    atMost: Duration): Option[T] =
+
+    Try(Await.result(awaitable, atMost)) match { 
+      case Success(t) =&gt; Some(t) 
+      case Failure(_: TimeoutException) =&gt; None 
+      case Failure(e) =&gt; throw e 
+    } 
+}</pre></div><p>With this new method, an entire error class is eliminated. As you encounter other unsafe transformations, consider defining methods that return a data type that encodes expected errors to avoid accidentally mishandling the transformation result. What other examples of unsafe transformations come to mind?</p></div></div></div><div class="section" title="Handling failures"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec33"/>Handling failures</h3></div></div></div><p>Working with <code class="literal">Future</code> requires disciplined handling of error scenarios to avoid writing a set of transformations that are difficult to reason about. When an exception is thrown inside a <code class="literal">Future</code> transformation, it bubbles up within the transformation's thread of computation and interrupts downstream transformations. Consider the following motivating example:</p><pre class="programlisting">Future("not-an-integer").map(_.toInt).map(i =&gt; { &#13;
+      println("Multiplying") &#13;
+      i * 2 &#13;
+    }) &#13;
+</pre><p>What do you expect to occur after the first <code class="literal">map</code> transformation? It is clear that the transformation will fail because the provided input cannot be cast to an integer. In this scenario, the <code class="literal">Future</code> is considered to be a failed <code class="literal">Future</code> and downstream transformations operating on the wrapped <code class="literal">Int</code> value, in this example, will not occur. In this simple example, it is obvious that the transformation cannot continue. Imagine a larger code base operating on data more complicated than a single integer with multiple failure scenarios across multiple namespaces and source files. In a real-world setting, it is more challenging to identify where an asynchronous computation broke down.</p><p>
+<code class="literal">Future</code> provides facilities for handling failures. It provides <code class="literal">recover</code> and <code class="literal">recoverWith</code> in order to continue downstream transformations. The signatures are as follows:</p><pre class="programlisting">def recover[U &gt;: T](pf: PartialFunction[Throwable, U])(implicit executor: ExecutionContext): Future[U] &#13;
+def recoverWith[U &gt;: T](pf: PartialFunction[Throwable, Future[U]])(implicit executor: ExecutionContext): Future[U] &#13;
+</pre><p>The difference between these two recovery methods is that the partial function provided to <code class="literal">recover</code> returns <code class="literal">U</code>, while <code class="literal">recoverWith</code> returns <code class="literal">Future[U]</code>. In our previous example, we can use <code class="literal">recover</code> to supply a default value to continue a transformation, as follows:</p><pre class="programlisting">Future("not-an-integer").map(_.toInt).recover { &#13;
+  case _: NumberFormatException =&gt; -2 &#13;
+}.map(i =&gt; { &#13;
+  println("Multiplying") &#13;
+  i * 2 &#13;
+}) &#13;
+</pre><p>Running this snippet produces the following output:</p><pre class="programlisting">Multiplying &#13;
+Multiplication result = -4 &#13;
+</pre><p>This approach allows you to continue a pipeline of transformations when one transform fails, but it suffers from the same shortcoming as the methods on <code class="literal">Await</code>. The returned <code class="literal">Future[T]</code> data type does not reflect the possibility of failure. Using recovery methods is error-prone because it is impossible to know whether the error conditions have been handled without reading through the code.</p><p>The error handling that we investigated is appropriate to handle failures during a computation. It is likely that after a series of transformations complete, you will wish to perform special logic. Imagine you are building a web service that submits trading orders to exchanges. Order submission is successful if the order was submitted to the exchange; otherwise, it is considered a failed submission. As order submission involves communication with an external system, the exchange, you modeled this action with a <code class="literal">Future</code>. Here is what the method handling order submission looks like:</p><pre class="programlisting">  def submitOrder( &#13;
+    ec: ExecutionContext, &#13;
+    sendToExchange: ValidatedOrder =&gt; Future[OrderSubmitted], &#13;
+    updatePositions: OrderSubmitted =&gt; Future[AccountPositions], &#13;
+    o: RawOrder): Unit = { &#13;
+    implicit val iec = ec &#13;
+ &#13;
+    (for { &#13;
+      vo &lt;- ValidatedOrder.fromRawOrder(o).fold(&#13;
+        Future.failed[ValidatedOrder](new Exception(&#13;
+        "Order failed validation")))(Future.successful) &#13;
+      os &lt;- sendToExchange(vo) &#13;
+      ap &lt;- updatePositions(os) &#13;
+    } yield (os, ap)).onComplete { &#13;
+      case Success((os, ap)) =&gt; // Marshal order submission info to caller &#13;
+      case Failure(e) =&gt;  // Marshal appropriate error response to caller &#13;
+    } &#13;
+  } &#13;
+</pre><p>An <code class="literal">ExecutionContext</code>, a way to submit orders, and a way to update a customer's trading positions after the trade is submitted allow a customer provided <code class="literal">RawOrder</code> to be submitted to the exchange. In the first processing step, the <code class="literal">RawOrder</code> is converted into a <code class="literal">ValidatedOrder</code>, and then lifted into a <code class="literal">Future</code>. <code class="literal">Future.failure</code> and <code class="literal">Future.successful</code> are convenient ways to lift or to wrap a computed value into a <code class="literal">Future</code>. The value is lifted into a <code class="literal">Future</code> to allow the entire sequence of steps to be written as a single for-comprehension.</p><p>Following the completion of all processing steps, <code class="literal">onComplete</code> is invoked to asynchronously handle completion of request processing. You can imagine in this context that completing request processing implies creating a serialized version of a response and transmitting this to the caller. Previously, the only mechanism at our disposal to perform work once a value is computed is to block using <code class="literal">Await</code>. <code class="literal">onComplete</code> is an asynchronously invoked callback that registers a function to be invoked when the value is completed. As shown in the example, <code class="literal">onComplete</code> supports handling success and failure cases, which makes it a general-purpose tool to handle the outcome of a <code class="literal">Future</code> transformation. In addition to <code class="literal">onComplete</code>, <code class="literal">Future</code> provides <code class="literal">onFailure</code> specifically for failure cases and <code class="literal">onSuccess</code> and <code class="literal">foreach</code> specifically for success cases.</p><p>These callback methods expose a method signature that returns <code class="literal">Unit</code>. As a functional programmer, you should be leery of invoking these methods because they are side-effecting. The <code class="literal">onComplete</code> invocations should only happen at the absolute end of a computation when a side-effect can no longer be deferred. In the web service example, the side-effect is transmission of the response to the caller. Another common use case for using these side-effecting callbacks is to handle cross-cutting concerns, such as application metrics. Coming back to the web service, here is one way to increment an error counter when order submission to the exchange fails:</p><pre class="programlisting">   (for { &#13;
+      vo &lt;- ValidatedOrder.fromRawOrder(o).fold( &#13;
+        Future.failed[ValidatedOrder]( &#13;
+        new Exception("Order failed validation")))(Future.successful) &#13;
+      os &lt;- { &#13;
+        val f = sendToExchange(vo) &#13;
+        f.onFailure({ case e =&gt; incrementExchangeErrorCount() }) &#13;
+        f &#13;
+      } &#13;
+      ap &lt;- updatePositions(os) &#13;
+    } yield (os, ap)) &#13;
+</pre><p>In this snippet, a side-effect is performed when submission to the exchange fails via the <code class="literal">onFailure</code> callback. In this isolated example, it is straightforward to track where the side-effect is happening. However, in a larger system it can be a challenge to identify when and where callbacks were registered. Additionally, from the <code class="literal">Future</code> API documentation, we learn that callback execution is unordered, which indicates that all callbacks must be treated independently. This is why you must be disciplined about when and where you apply these side-effects.</p><p>An alternative approach to error handling is to use a data type that can encode errors. We have seen this approach applied with <code class="literal">Await</code> when <code class="literal">Option</code> was the returned data type. <code class="literal">Option</code> makes it clear that the computation might fail while remaining convenient to use because its transformations (for example, <code class="literal">map</code>) operate on the wrapped value. Unfortunately, <code class="literal">Option</code> does not allow us to encode the error. In this case, it is helpful to use another tool from the Scalaz library called disjunction. Disjunction is conceptually similar to <code class="literal">Either</code>, which can be used to represent one of two possible types. Disjunction is different from <code class="literal">Either</code> because its operations are right-biased. Let's take a look at a simple example to illustrate this idea:</p><pre class="programlisting">scalaz.\/.right[Throwable, Int](1).map(_ * 2) &#13;
+</pre><p>The <code class="literal">\/</code> is the shorthand symbol used by Scalaz to represent a disjunction. In this example, a right disjunction is created by wrapping the one integer literal. This disjunction either has the <code class="literal">Throwable</code> value or the <code class="literal">Int</code> value, and it is analogous to <code class="literal">Either[Throwable, Int]</code>. In contrast to <code class="literal">Either</code>, the <code class="literal">map</code> transformation operates on the right side of the disjunction. In this example, <code class="literal">map</code> accepts an <code class="literal">Int</code> value as input because the right side of the disjunction is an <code class="literal">Int</code> value. As disjunction is right-biased, it is a natural fit to represent failure and success values. Using the infix notation, it is common to define error handling with <code class="literal">Future</code> as <code class="literal">Future[Throwable \/ T]</code>. In place of <code class="literal">Throwable</code>, one can define an ADT of possible error types to make error handling explicit. This approach is favorable because it enforces handling of failure cases without relying on the author to invoke a recovery method. If you are interested to learn more about how to use disjunction as a tool for error handling, review Eugene Yokota's excellent Scalaz tutorial at <a class="ulink" href="http://eed3si9n.com/learning-scalaz/Either.html">http://eed3si9n.com/learning-scalaz/Either.html</a>.</p></div></div><div class="section" title="Hampering performance through executor submissions"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec50"/>Hampering performance through executor submissions</h2></div></div></div><p>As <code class="literal">Future</code> provides an expressive and easy-to-use API, it is common to perform numerous transforms to complete a computation in a large-scale system. Reflecting on the order submission web service mentioned in the previous section, you can imagine multiple application layers operating on a <code class="literal">Future</code>. A production-ready web service typically composes together multiple layers to service a single request. An example request flow may contain the following stages: request deserialization, authorization, application service invocation, database lookups and/or third-party service callouts, and response translation to a JSON format. If each of these stages in the workflow is modeled with a <code class="literal">Future</code>, then it is common to have five or more transformations to handle a single request.</p><p>Decomposing your software system into small areas of responsibility in a way that is similar to the preceding example is a good engineering practice to support testing in isolation and improving maintainability. However, this approach to software design comes with a performance cost when working with <code class="literal">Future</code>. As we have seen through our example usage, nearly all transforms on a <code class="literal">Future</code> require submitting work to an <code class="literal">Executor</code>. In our example workflow, most stages in the transformation are small. In this scenario, the overhead of submitting work to the executor dominates the execution time of the computation. If the order submission web service services numerous customers with stringent throughput and latency requirements, then it is possible that engineering practices focusing on testability and maintainability will result in poorly performing software.</p><p>
+</p><div class="mediaobject"><img src="graphics/B05368_06_01.jpg" alt="Hampering performance through executor submissions"/></div><p>
+</p><p>If you consider the preceding diagram, you can see a thread pool with four threads being used to apply transforms to a <code class="literal">Future</code>. Each transform is submitted to the pool and there is a chance that a different thread is picked for the computation. This diagram visualizes how multiple small transforms may hamper performance due to the overhead of <code class="literal">Executor</code> submissions.</p><p>Just how large is the overhead of <code class="literal">Executor</code> submissions? This is the motivating question to write a benchmark to quantify the overhead of submitting work to an <code class="literal">Executor</code>. The benchmark focuses on adding 1 to an integer N-times in two ways. One approach is to perform the addition operation within a single <code class="literal">Future</code>, while the second approach is to perform each addition operation with a new <code class="literal">Future</code> transformation. The latter approach is a proxy for the stages of order submission request processing that uses multiple <code class="literal">Future</code> transformations in a larger software system. Performing integer addition is the proxy operation because it is an extremely cheap computation, which means that the execution time will be dominated by <code class="literal">Executor</code> submissions. The benchmarks look like the following:</p><pre class="programlisting">  @Benchmark &#13;
+  def manyTransforms(state: TransformFutureState): Int = { &#13;
+    import scala.concurrent.ExecutionContext.Implicits._ &#13;
+    val init = Future(0) &#13;
+    val res = (1 until state.operations).foldLeft(init)&#13;
+      ((f, _) =&gt; f.map(_ + 1)) &#13;
+    Await.result(res, Duration("5 minutes")) &#13;
+  } &#13;
+ &#13;
+  @Benchmark &#13;
+  def oneTransform(state: TransformFutureState): Int = { &#13;
+    import scala.concurrent.ExecutionContext.Implicits._ &#13;
+    val res = Future { &#13;
+      (1 until state.operations).foldLeft(0)((acc, _) =&gt; acc + 1) &#13;
+    } &#13;
+    Await.result(res, Duration("5 minutes")) &#13;
+  } &#13;
+</pre><p>
+<code class="literal">TransformFutureState</code> allows the number of operations to be parameterized. <code class="literal">manyTransforms</code> represents each addition operation using a <code class="literal">map</code> transformation that involves submitting work to an <code class="literal">Executor</code>. <code class="literal">oneTransform</code> performs all addition operations using a single <code class="literal">Executor</code> submission via <code class="literal">Future.apply</code>. In this controlled test, <code class="literal">Await.result</code> is used as a blocking mechanism to await the completion of the computation. The results of running this test on a two-core machine with five transformations and ten transformations can be seen in the following table:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Benchmark</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Map count</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Throughput (ops per second)</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Error as percentage of throughput</strong></span>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">manyTransforms</code>
+</p>
+</td><td>
+<p>5</p>
+</td><td>
+<p>463,614.88</p>
+</td><td>
+<p>± 1.10</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">oneTransform</code>
+</p>
+</td><td>
+<p>5</p>
+</td><td>
+<p>412,675.70</p>
+</td><td>
+<p>± 0.81</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">manyTransforms</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>118,743.55</p>
+</td><td>
+<p>± 2.34</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">oneTransform</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>316,175.79</p>
+</td><td>
+<p>± 1.79</p>
+</td></tr></tbody></table></div><p>While both scenarios yield comparable results with five transformations, we can see a clear difference with ten transforms being applied. This benchmark makes it clear that <code class="literal">Executor</code> submissions can dominate performance. Although the cost can be high, our advice to you is to model your system without considering this cost up-front. In our experience, it is easier to rework a well-modeled system for performance improvements than it is to extend or to rework a poorly-modeled but performant system. For this reason, we advise against going to great lengths to group <code class="literal">Executor</code> submissions when attempting to put together the initial version of a complex system.</p><p>Once you have a good design in place, the first step is to benchmark and to profile in order to identify whether <code class="literal">Executor</code> submissions are the bottleneck. In the event that you discover that your style of <code class="literal">Future</code> usage is causing performance bottlenecks, there are several courses of action you should consider.</p><p>The lowest cost development option is to replace unnecessarily costly <code class="literal">Future</code> creation with the use of <code class="literal">Future.success</code> or <code class="literal">Future.failure</code>. The order submission web service took advantage of these factory methods to lift values into a <code class="literal">Future</code>. As the value is already computed, these factory methods avoid submitting any tasks to the <code class="literal">Executor</code> that are referenced by the provided <code class="literal">ExecutionContext</code>. Replacing usages of <code class="literal">Future.apply</code> with either <code class="literal">Future.successful</code> or <code class="literal">Future.failure</code> when the value is already computed can yield cost savings.</p><p>A more expensive alternative in terms of development effort is to rework your implementation to group together <code class="literal">Future</code> transformations in a way similar to <code class="literal">manyTransforms</code>. This tactic involves reviewing each application layer to determine whether transforms within a single layer can be combined. If possible, we recommend that you avoid merging transformations across application layers (for example, between request deserialization or authorization and application service processing) because this weakens your model and increases maintenance cost.</p><p>If neither of these options produces acceptable performance, then it may be worthwhile to discuss with the product owners the option of addressing the performance issue with hardware. As your system's design has not been compromised and it reflects solid engineering practices, then it likely can be horizontally scaled or clustered. Depending on the state tracked by your system, this option might be possible without additional development work. Perhaps product owners value a system that can be easily maintained and extended more than performance. If this is the case, adding scale to your system may be a viable way forward.</p><p>Provided that you are unable to buy your way out of the performance challenge, then there are three additional possibilities. One option is to investigate an alternative to <code class="literal">Future</code>, named <code class="literal">Task</code>. This construct, which is provided by the Scalaz library, allows computations to be performed with fewer <code class="literal">Executor</code> submissions. This option involves significant development because the <code class="literal">Future</code> data type will need to be replaced throughout the application with <code class="literal">Task</code>. We will explore <code class="literal">Task</code> at the end of this chapter and investigate the performance benefits that it can provide.</p><p>Independent of using <code class="literal">Task</code>, it can be useful to review your application's model to critically question whether or not there is unnecessary work being done on the critical path. As we saw with MVT's reporting infrastructure and the introduction of stream processing, it is sometimes possible to rethink a design to improve performance. Like the introduction of <code class="literal">Task</code>, reconsidering your system's architecture is a large-scale change. The last resort option is to merge application layers in order to support grouping <code class="literal">Future</code> transformations. We advise against exercising this option, unless all other suggestions have failed. This option results in a code base that is more difficult to reason about because concerns are no longer separated. In the short-run, you may reap performance benefits, but in our experience, these benefits are outweighed in the long-run by the cost of maintaining and extending such a system.</p></div></div></div>
+<div class="section" title="Handling blocking calls and callbacks"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec33"/>Handling blocking calls and callbacks</h1></div></div></div><p>As described in the first part of this chapter, the <code class="literal">Future</code> API provides an elegant way to write concurrent programs. As it is considered a bad practice to block on a <code class="literal">Future</code>, it is not unusual to see <code class="literal">Future</code> being widely used across an entire code base. However, it is unlikely that your system is only composed of your own code. Most real-world applications leverage existing libraries and third-party software to avoid re-implementing existing solutions to some common problems (such as data encoding and decoding, communication over HTTP, database drivers, and so on). Unfortunately, not all libraries use the future API, and it may become a challenge to gracefully integrate them into your system. In this section, we will examine some common pitfalls that you may encounter and mention possible workarounds.</p><div class="section" title="ExecutionContext and blocking calls"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec51"/>ExecutionContext and blocking calls</h2></div></div></div><p>While working on the backtester, you noticed that one module of the code is used to load some historical buy orders from a relational database. Since you started rewriting the application to take advantage of <code class="literal">Future</code>, the module API is fully asynchronous:</p><pre class="programlisting">def findBuyOrders( &#13;
+ client: ClientId, &#13;
+ ticker: Ticker)(implicit ec: ExecutionContext): Future[List[Order]] = ??? &#13;
+</pre><p>However, after profiling the application, you noticed that this part of the code performs quite poorly. You attempted to increase the database connection count, first doubling it, then tripling it, both without success. Attempting to understand the cause of the problem, you look at all the locations where the method is called, and you noticed the following pattern:</p><pre class="programlisting">import scala.concurrent.ExecutionContext.Implicits.global &#13;
+findBuyOrders(clientId, tickerFoo)   &#13;
+</pre><p>All the callers are importing the global <code class="literal">ExecutionContext</code> to be implicitly used by the method. The default thread pool is backed by a <code class="literal">ForkJoinPool</code>, and it is sized based on the available cores on the machine. As such, it is CPU-bound and designed to handle nonblocking, CPU intensive operations. This is a good choice for applications that do not perform blocking calls. However, if your application runs blocking calls asynchronously (that is, in a <code class="literal">Future </code>execution), relying on the default <code class="literal">ExecutionContext</code> will most likely quickly degrade performance.</p><div class="section" title="Asynchronous versus nonblocking"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec34"/>Asynchronous versus nonblocking</h3></div></div></div><p>Before going further, we want to clarify some of the terms used in this section. Nonblocking can be a confusing term in the context of concurrency. When using <code class="literal">Future</code>, we perform asynchronous operations, meaning that we start a computation so it can proceed with the flow of the program. The computation is executed in the background and will eventually yield a result. This behavior is sometimes called nonblocking, meaning that the API call returns immediately. However, blocking and nonblocking most often refer to I/O operations and how they are performed, especially how the thread that is performing the operation is used. For example, writing a sequence of bytes to a local file can be a blocking operation because the thread calling <code class="literal">write</code> will have to wait (block) until the I/O operation is completed. When using nonblocking constructs, such as the ones provided in the <code class="literal">java.nio</code> package, it is possible to perform I/O operations that will be executed without blocking a thread.</p><p>It is possible to implement an API with a combination of the following behaviors:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>API characteristics</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Returns</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Blocks a thread?</strong></span>
+</p>
+</td></tr><tr><td>
+<p>Synchronous/blocking</p>
+</td><td>
+<p>At the end of the computation</p>
+</td><td>
+<p>Yes, the calling thread executes the operation</p>
+</td></tr><tr><td>
+<p>Asynchronous/blocking</p>
+</td><td>
+<p>Immediately</p>
+</td><td>
+<p>Yes, this blocks a thread from a dedicated pool</p>
+</td></tr><tr><td>
+<p>Asynchronous/nonblocking</p>
+</td><td>
+<p>Immediately</p>
+</td><td>
+<p>No, the thread is freed-up while the blocking operation is performed</p>
+</td></tr></tbody></table></div></div><div class="section" title="Using a dedicated ExecutionContext to block calls"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec35"/>Using a dedicated ExecutionContext to block calls</h3></div></div></div><p>Clearly, our problem is that we are using the <code class="literal">ExecutionContext</code> global to perform blocking calls. We are querying a relational database, and most JDBC drivers are implemented to perform blocking calls. The pooled threads call the driver and block while waiting for the query and the response to travel over the network, making them unusable by other computations. An option is to create a dedicated <code class="literal">ExecutionContext</code> to execute the <code class="literal">Future</code>, including blocking operations. This <code class="literal">ExecutionContext</code> is sized with more threads in the anticipation that they will be blocked when performing their computation:</p><pre class="programlisting">val context = ExecutionContext.fromExecutorService( &#13;
+  Executors.newFixedThreadPool(20) &#13;
+) &#13;
+findBuyOrders(clientId, tickerFoo)(context)   &#13;
+</pre><p>The first benefit is that we have more threads available, meaning that we can initiate more queries concurrently. The second benefit is that the other asynchronous computations performed in our system are done on a separate pool (for example, the global context), and they will avoid starvation since no threads are blocked.</p><p>We write a short benchmark to evaluate the performance of our new system. In this example, we use a mock implementation of <code class="literal">findBuyOrders</code> to simulate querying the database:</p><pre class="programlisting">def findBuyOrders( &#13;
+ client: ClientId, &#13;
+ ticker: Ticker)(ec: ExecutionContext): Future[List[Order]] = Future { &#13;
+ Thread.sleep(100) &#13;
+ Order.staticList.filter(o =&gt; o.clientId == client  &#13;
+   &amp;&amp; o.ticker == ticker) &#13;
+}(ec) &#13;
+</pre><p>We pass the <code class="literal">ExecutionContext</code> as a parameter. Our benchmark compares the throughput of an application relying on the default <code class="literal">ExecutionContext</code> and one using an <code class="literal">ExecutionContext</code>, which is dedicated to blocking operations; the latter is initialized with twenty times more threads. The results are as follows:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Benchmark</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Operation count</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Throughput (ops per second)</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Error as percentage of throughput</strong></span>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withDefaultContext</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>3.21</p>
+</td><td>
+<p>± 0.65</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withDedicatedContext</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>9.34</p>
+</td><td>
+<p>± 1.00</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withDefaultContext</code>
+</p>
+</td><td>
+<p>1,000</p>
+</td><td>
+<p>0.04</p>
+</td><td>
+<p>± 2.56</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withDedicatedContext</code>
+</p>
+</td><td>
+<p>1,000</p>
+</td><td>
+<p>0.73</p>
+</td><td>
+<p>± 0.41</p>
+</td></tr></tbody></table></div><p>The results confirm our intuition. The dedicated pool is bigger than the default context in anticipation of threads being blocked waiting for a blocking operation to finish. Having more threads available, it is able to start more blocking operations concurrently, thus achieving a better throughput. Creating a dedicated <code class="literal">ExecutionContext</code> is a good way to isolate blocking operations and make sure that they do not slow down CPU-bound computations. When designing your dedicated thread pool, make sure that you understand how the underlying resources (for example, connections, file handles, and so on) are used. For example, when dealing with a relational database, we know that one connection can only be used to perform one query at a time. A good rule of thumb is to create a thread pool with as many threads as the amount of connections that you want to open with your database server. If the number of connections is less than the thread count, some threads may be waiting for a connection and remain unused. If you have more connections than threads, the opposite situation may occur and some connections may remain unused.</p><p>A good strategy is to rely on the type system and the compiler to ensure that you are not mixing up different <code class="literal">ExecutionContext</code> instances. Unless the type is differentiated, you may accidentally use a CPU-bound context when performing blocking operations. You can create your own <code class="literal">DatabaseOperationsExecutionContext</code> type wrapping an <code class="literal">ExecutionContext</code>, and accept this type when creating your database access module. Another idea is to use tagged types that are provided by Scalaz. Refer to <a class="link" href="ch03.html" title="Chapter 3. Unleashing Scala Performance">Chapter 3</a>, <span class="emphasis"><em>Unleashing Scala Performance</em></span>, for a refresher on tagged types. Consider the following example:</p><pre class="programlisting">object DatabaseAccess { &#13;
+ &#13;
+ sealed trait BlockingExecutionContextTag &#13;
+ &#13;
+ type BlockingExecutionContext = ExecutionContext @@ BlockingExecutionContextTag &#13;
+ &#13;
+ object BlockingExecutionContext { &#13;
+   def fromContext(ec: ExecutionContext): BlockingExecutionContext = &#13;
+     Tag[ExecutionContext, BlockingExecutionContextTag](ec) &#13;
+ &#13;
+  def withSize(size: Int): BlockingExecutionContext =  &#13;
+ fromContext(ExecutionContext.fromExecutor(Executors.newFixedThreadPool(size))) &#13;
+} &#13;
+} &#13;
+ &#13;
+class DatabaseAccess(ec: BlockingExecutionContext) { &#13;
+  // Implementation elided &#13;
+} &#13;
+</pre><p>Using a tagged types for our <code class="literal">ExecutionContext</code> gives us additional safety. It is easy to make a mistake in the <code class="literal">main</code> method while wiring up your application, and inadvertently use the wrong <code class="literal">ExecutionContext</code> when creating your modules.</p></div><div class="section" title="Using the blocking construct"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec36"/>Using the blocking construct</h3></div></div></div><p>The standard library provides a <code class="literal">blocking</code> construct that can be used to signal blocking operations executed inside a <code class="literal">Future</code>. We can modify our previous example to leverage <code class="literal">blocking </code>instead of a dedicated <code class="literal">ExecutionContext</code>:</p><pre class="programlisting">import scala.concurrent.ExecutionContext.Implicits.global &#13;
+def findBuyOrders( &#13;
+ client: ClientId, &#13;
+ ticket: Ticker): Future[List[Order]] = Future { &#13;
+   scala.concurrent.blocking{ &#13;
+     Thread.sleep(100) &#13;
+     Order.staticList.filter(o =&gt; o.clientId == client &amp;&amp; o.ticker == ticker) &#13;
+   } &#13;
+} &#13;
+</pre><p>Note that in the preceding implementation, we use the default <code class="literal">ExecutionContext</code> to execute the <code class="literal">Future</code>. The <code class="literal">blocking</code> construct is used to notify the <code class="literal">ExecutionContext</code> that a computation is blocking. This allows the <code class="literal">ExecutionContext</code> to adapt its execution strategy. For example, the default global <code class="literal">ExecutionContext</code> will temporarily increase the number of threads in the pool when it performs a computation wrapped with <code class="literal">blocking</code>. A dedicated thread is created in the pool to execute the blocking computation, making sure that the rest of the pool remains available for CPU-bound computations.</p><p>You should use <code class="literal">blocking</code> cautiously. The <code class="literal">blocking</code> construct is merely used to notify <code class="literal">ExecutionContext</code> that the wrapped operation is blocking. It is the responsibility of the <code class="literal">ExecutionContext</code> to implement a specific behavior or ignore the notification. The only implementation that actually takes it into account and implements special behavior is the default <code class="literal">ExecutionContext</code> global.</p></div></div><div class="section" title="Translating callbacks with Promise"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec52"/>Translating callbacks with Promise</h2></div></div></div><p>While <code class="literal">Future</code> is the main construct of the <code class="literal">scala.concurrent</code> API, another useful abstraction is <code class="literal">Promise</code>. <code class="literal">Promise</code> is another way to create and complete a <code class="literal">Future</code>. The <code class="literal">Future </code>is a read-only container for a result that will eventually be computed. <code class="literal">Promise</code> is a handle that allows you to explicitly set the value contained in a <code class="literal">Future</code>. A <code class="literal">Promise</code> is always associated with only one <code class="literal">Future</code>, and this <code class="literal">Future</code> is specific to the <code class="literal">Promise</code>. It is possible to complete the <code class="literal">Future</code> of a <code class="literal">Promise</code> with a successful result, or an exception (which will fail the <code class="literal">Future</code>).</p><p>Let's look at a short example to understand how <code class="literal">Promise</code> works:</p><pre class="programlisting">scala&gt; val p = Promise[Int]  // this promise will provide an Int &#13;
+p: scala.concurrent.Promise[Int] = scala.concurrent.impl.Promise$DefaultPromise@d343a81 &#13;
+ &#13;
+scala&gt; p.future.value &#13;
+res3: Option[scala.util.Try[Int]] = None &#13;
+// The future associated to this Promise is not yet completed &#13;
+ &#13;
+scala&gt; p.success(42) &#13;
+res4: p.type = scala.concurrent.impl.Promise$DefaultPromise@d343a81 &#13;
+ &#13;
+scala&gt; p.future.value &#13;
+res5: Option[scala.util.Try[Int]] = Some(Success(42))  &#13;
+</pre><p>A <code class="literal">Promise</code> can only be used once to complete its associated <code class="literal">Future</code>, either with a success or a failure. Attempting to complete an already realized <code class="literal">Promise</code> will throw an exception, unless you use <code class="literal">trySuccess</code>, <code class="literal">tryFailure</code>, or <code class="literal">tryComplete</code>. These three methods will attempt to complete the <code class="literal">Future</code> that is linked to the <code class="literal">Promise</code> and return <code class="literal">true</code> if the <code class="literal">Future</code> was completed or <code class="literal">false</code> if it was already previously completed.</p><p>At this point, you may be wondering in what circumstances you would really take advantage of <code class="literal">Promise</code>. Especially considering the previous example, would it be simpler to return the internal <code class="literal">Future</code> instead of relying on a <code class="literal">Promise</code>? Keep in mind that the preceding snippet is meant to demonstrate a simple workflow that illustrates the <code class="literal">Promise</code> API. However, we understand your question. In practice, we see two common use cases for <code class="literal">Promise</code>.</p><div class="section" title="From callbacks to a Future-based API"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec37"/>From callbacks to a Future-based API</h3></div></div></div><p>The first use case is to turn a callback-based API into a <code class="literal">Future</code>-based API. Imagine having to integrate with a third-party product, such as the proprietary database that MVT obtained recently by purchasing usage licenses. This is a great product that is used to store historical quotes per timestamp and ticker. It comes with a library to be used by a client application. Unfortunately, this library, while fully asynchronous and nonblocking, is callback-oriented, as follows:</p><pre class="programlisting">object DatabaseClient { &#13;
+  def findQuote(instant: Instant, ticker: Ticker,  &#13;
+    f: (Quote) =&gt; Unit): Unit = ??? &#13;
+ &#13;
+  def findAllQuotes(from: Instant, to: Instant, ticker: Ticker,&#13;
+    f: (List[Quote]) =&gt; Unit, h: Exception =&gt; Unit): Unit = ??? &#13;
+} &#13;
+</pre><p>There is no doubt that the client works fine; after all, MVT paid a lot of money for it! However, it will not be easy to integrate it with your own application. Your program relies heavily on <code class="literal">Future</code>. This is where <code class="literal">Promise</code> can help us, as follows:</p><pre class="programlisting">object DatabaseAdapter { &#13;
+ &#13;
+  def findQuote(instant: Instant, ticker: Ticker): Future[Quote] = { &#13;
+    val result = Promise[Quote] &#13;
+ &#13;
+    DatabaseClient.findQuote(instant, ticker, { &#13;
+      q: Quote =&gt; &#13;
+        result.success(q) &#13;
+    }) &#13;
+ &#13;
+    result.future &#13;
+  } &#13;
+ &#13;
+  def findAllQuotes(from: Instant, to: Instant, ticker: Ticker): &#13;
+  Future[List[Quote]] = { &#13;
+    Val result = Promise[List[Quote]] &#13;
+    DatabaseClient.findQuote(from, to, ticker, {&#13;
+      quotes: List[Quote] =&gt; result.success(quotes)&#13;
+    }, {&#13;
+      ex: Exception =&gt; result.failure(ex)&#13;
+    } &#13;
+  } &#13;
+ &#13;
+  result.future &#13;
+} &#13;
+</pre><p>Thanks to the <code class="literal">Promise</code> abstraction, we are able to return a <code class="literal">Future</code>. We simply use <code class="literal">success</code> and <code class="literal">failure</code> in the respective callbacks to call the proprietary client. This use case often arises in production when you have to integrate with a Java library. Even though Java 8 introduced a significant improvement to the Java concurrent package, most Java libraries still rely on callbacks to implement asynchronous behavior. Using <code class="literal">Promise</code>, you can fully leverage the existing Java ecosystem in your program without giving up on Scala support for concurrent programming.</p></div><div class="section" title="Combining Future with Promise"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec38"/>Combining Future with Promise</h3></div></div></div><p>
+<code class="literal">Promise</code> can also be used to combine instances of <code class="literal">Future</code>. For example, let's add a timeout capability to <code class="literal">Future</code>:</p><pre class="programlisting">def run[A](f: =&gt; Future[A], timeout: Duration): Future[A] = { &#13;
+  val res = Promise[A] &#13;
+ &#13;
+  Future { &#13;
+    Thread.sleep(timeout.getMillis) &#13;
+     res.tryFailure(new Exception("Timed out") &#13;
+  }  &#13;
+ &#13;
+  f onComplete { &#13;
+  case r =&gt; res.tryCompleteWith(f) &#13;
+  } &#13;
+ &#13;
+  res.future &#13;
+} &#13;
+</pre><p>Our method takes a by-name <code class="literal">Future</code> (that is, a <code class="literal">Future</code> that has not started its execution yet) as well as the timeout value to apply. In the method, we use a <code class="literal">Promise</code> as a container for the result. We start an internal <code class="literal">Future</code> that will block for the timeout duration before failing the <code class="literal">Promise</code> with an <code class="literal">Exception</code>. We also start the main <code class="literal">Future</code> and register a callback to complete the <code class="literal">Promise</code> with the result of the computation. The first of the two <code class="literal">Futures</code> that terminates will effectively complete the <code class="literal">Promise</code> with its result. Note that in this example, we use <code class="literal">tryFailure</code> and <code class="literal">tryCompleteWith</code>. It is likely that both <code class="literal">Futures</code> will eventually terminate and try to complete the <code class="literal">Promise</code>. We are only interested in the result of the first one that completes, but we also want to avoid throwing an <code class="literal">Exception</code> when attempting to complete an already realized <code class="literal">Promise</code>.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note47"/>Note</h3><p>The preceding example is a naive implementation of a timeout. It is mostly a prototype used to demonstrate how <code class="literal">Promise</code> can be leveraged to enriched <code class="literal">Future</code> and implement complex behavior. A more realistic implementation would probably involve a <code class="literal">ScheduledExecutorService</code>. A <code class="literal">ScheduledExecutorService</code> allows you to schedule the execution of a computation after a certain delay. It allows us to schedule the call to <code class="literal">tryFailure </code>without blocking a thread with a call to <code class="literal">Thread.sleep</code>. We made the choice to keep this example simple and not introduce a new type, but we encourage you to research this implementation of <code class="literal">ScheduledExecutorService</code>.</p></div></div><p>In practice, you may occasionally have to write your own custom combinators for <code class="literal">Future</code>. <code class="literal">Promise</code> is a useful abstraction in your toolbox if you need to do this. However, <code class="literal">Future</code> and its companion object already provide a number of built-in combinators and methods that you should try to leverage as much as possible.</p></div></div></div>
+<div class="section" title="Tasked with more backtest performance improvements"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec34"/>Tasked with more backtest performance improvements</h1></div></div></div><p>Discovering <code class="literal">Future</code> and adopting an asynchronous mindset helped you better utilize your computing resources to test multiple strategies and tickers faster. You improved performance by treating the backtest as a black box. Without changing the implementation of the backtest, there were straightforward performance wins. Identifying logical sequences of transformations as candidates for concurrency is a good strategy to apply when considering how to speed up your software.</p><p>Let's extend this idea to a smaller logical unit of processing within the backtester. A backtest exercises a strategy for a ticker across a time period. After speaking with Dave, you discover that MVT does not maintain positions overnight. At the end of each trading day, MVT trading systems mitigate risk by ensuring that all stock positions are liquidated. This is done to defend against volatile overnight price moves after the market closes, which the company is unable to react to by trading. As positions are not held overnight, each trading day can be simulated independently of the previous trading day. Returning to our asynchronous mindset, this insight implies that trading day simulations can be performed concurrently.</p><p>Before jumping into the implementation using <code class="literal">Future</code>, we will share an alternative abstraction, named <code class="literal">Task</code>, which is provided by the Scalaz library. <code class="literal">Task</code> provides compelling usage reasons for our proposed backtest modifications. We introduce <code class="literal">Task</code> next, provided that you are up to the task!</p><div class="section" title="Introducing Scalaz Task"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec53"/>Introducing Scalaz Task</h2></div></div></div><p>Scalaz <code class="literal">Task</code> provides a different approach to achieve concurrency. Although <code class="literal">Task</code> can be used in a way that mimics <code class="literal">Future</code>, there are important conceptual differences between these two abstractions. <code class="literal">Task</code> allows fine-grained control over asynchronous execution, which provides performance benefits. <code class="literal">Task</code> maintains referential transparency as well, which provides stronger reasoning abilities. Referential transparency is a property of expressions that are side-effect free. To better understand this principle, consider the following simple <code class="literal">sum</code> method:</p><pre class="programlisting">def sum(x: Int, y: Int): Int = x + y &#13;
+</pre><p>Imagine that we are performing two summations:</p><pre class="programlisting">sum(sum(2, 3), 4)  &#13;
+</pre><p>As <code class="literal">sum</code> is side-effect free, we can replace <code class="literal">sum(2, 3)</code> with its result, as follows:</p><pre class="programlisting">sum(5, 4) &#13;
+</pre><p>This expression will always evaluate to 9, which satisfies referential transparency. Now imagine a twist in the implementation of <code class="literal">sum</code>:</p><pre class="programlisting">class SumService(updateDatabase: () =&gt; Unit) { &#13;
+  def sum(x: Int, y: Int): Int = { &#13;
+    updateDatabase() &#13;
+    x + y &#13;
+  } &#13;
+} &#13;
+</pre><p>Now, <code class="literal">sum</code> includes a side-effect of writing to a database that breaks referential transparency. We can no longer perform the replacement of <code class="literal">sum(2, 3)</code> with the value 9 because then the database will not be updated. Referential transparency is a concept at the heart of the functional programming paradigm because it provides strong reasoning guarantees. The Haskell wiki provides additional commentary and examples worth reviewing at <a class="ulink" href="https://wiki.haskell.org/Referential_transparency">https://wiki.haskell.org/Referential_transparency</a>.</p><p>Let's take a look at common <code class="literal">Task</code> API usage to better understand how <code class="literal">Task</code> works.</p><div class="section" title="Creating and executing Task"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec39"/>Creating and executing Task</h3></div></div></div><p>The methods provided by the <code class="literal">Task</code> companion object are the main entry points to the API, and the best ways to create an instance of <code class="literal">Task</code>. The <code class="literal">Task.apply</code> is the first method to inspect. It takes a computation returning an instance of <code class="literal">A</code> (that is, a by-name parameter of the <code class="literal">A</code> type) and an implicit <code class="literal">ExecutorService</code> to run the computation. Contrary to <code class="literal">Future</code>, which uses <code class="literal">ExecutionContext</code> as an abstraction for a thread pool, <code class="literal">Task</code> uses the <code class="literal">ExecutorService</code>, which is defined in the Java standard library:</p><pre class="programlisting">scala&gt; val t = Task { &#13;
+     |   println("Starting task") &#13;
+     |   40 + 2 &#13;
+     | } &#13;
+t: scalaz.concurrent.Task[Int] = scalaz.concurrent.Task@300555a9 &#13;
+</pre><p>The first thing that you may have noticed is that, even though we instantiated a new <code class="literal">Task</code>, nothing is printed on the screen. This is an important difference when comparing <code class="literal">Task</code> and <code class="literal">Future</code>; while <code class="literal">Future</code> is eagerly evaluated, a <code class="literal">Task</code> is not computed until you explicitly ask for it:</p><pre class="programlisting">scala&gt; t.unsafePerformSync &#13;
+Starting task &#13;
+res0: Int = 42 &#13;
+</pre><p>The preceding example calls the <code class="literal">unsafePerformSync</code> instance method to execute the task. We can see the <code class="literal">println</code> as well as the returned result <code class="literal">42</code>. Note that <code class="literal">unsafePerformSync</code> is an unsafe call. If the computation throws an exception, the exception is re-thrown by <code class="literal">unsafePerformSync</code>. To avoid this side-effect, calling <code class="literal">unsafePerformSyncAttempt</code> is preferred. The <code class="literal">unsafePerformSyncAttempt</code> instance catches the exception and has a return type of <code class="literal">Throwable \/ A</code>, which allows you to cleanly handle the failure case. Note that when creating the task <code class="literal">t</code>, we did not provide an <code class="literal">ExecutorService</code>. By default, <code class="literal">apply</code> creates a <code class="literal">Task</code> to be run on <code class="literal">DefaultExecutorService</code>, a fixed thread pool for which the size is based on the count of available processors on the machine using a default parameter. The <code class="literal">DefaultExecutorService</code> is analogous to the global <code class="literal">ExecutionContext</code> that we explored with <code class="literal">Future</code>. It is CPU-bound and sized based on the available cores on the machine. We can also supply a different <code class="literal">ExecutorService</code> at creation time:</p><pre class="programlisting">scala&gt; val es = Executors.newFixedThreadPool(4) &#13;
+es: java.util.concurrent.ExecutorService = java.util.concurrent.ThreadPoolExecutor@4c50cd8c[Running, pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0] &#13;
+ &#13;
+scala&gt; val t = Task { &#13;
+ println("Starting task on thread " + Thread.currentThread.getName) &#13;
+ 40 + 2 &#13;
+}(es) &#13;
+t: scalaz.concurrent.Task[Int] = scalaz.concurrent.Task@497db010 &#13;
+ &#13;
+scala&gt; println("Calling run from " + Thread.currentThread.getName) &#13;
+Calling run from run-main-1 &#13;
+ &#13;
+scala&gt; t.unsafePerformSync &#13;
+Starting task on thread pool-8-thread-2 &#13;
+res2: Int = 42 &#13;
+</pre><p>The output shows that the <code class="literal">Task</code> is executed on the supplied <code class="literal">ExecutorService</code>, not on the main thread.</p><p>Speaking of <code class="literal">Task</code> execution, let's perform a little experiment. We will create an instance of <code class="literal">Task</code> and call <code class="literal">unsafePerformSync</code> twice in a row:</p><pre class="programlisting">scala&gt; val t = Task { &#13;
+     |   println("Starting task") &#13;
+     |   40 + 2 &#13;
+     | } &#13;
+t: scalaz.concurrent.Task[Int] = scalaz.concurrent.Task@300555a9 &#13;
+ &#13;
+scala&gt; t.unsafePerformSync &#13;
+Starting task &#13;
+res0: Int = 42 &#13;
+ &#13;
+scala&gt; t.unsafePerformSync &#13;
+Starting task &#13;
+res1: Int = 42 &#13;
+</pre><p>We observe that <code class="literal">Starting task</code> prints after each call to <code class="literal">unsafePerformSync</code>. This indicates that the full computation is executed each time we call <code class="literal">unsafePerformSync</code>. That is another difference with <code class="literal">Future</code>. While a <code class="literal">Future</code> memorizes its result after the computation, a <code class="literal">Task</code> performs its computation each time we call <code class="literal">unsafePerformSync</code>. In other words, <code class="literal">Task</code> is referentially transparent and, therefore, closer to the functional programming paradigm than <code class="literal">Future</code>.</p></div><div class="section" title="Asynchronous behavior"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec40"/>Asynchronous behavior</h3></div></div></div><p>Like <code class="literal">Future</code>, it is possible (and even recommended) to use <code class="literal">Task</code> in an asynchronous way. An instance of <code class="literal">Task</code> can be executed asynchronously by calling <code class="literal">unsafePerformAsync</code>. This method takes a callback of type<code class="literal">(Throwable \/ A) =&gt; Unit</code> that is called at the end of the computation. Observe the following snippet:</p><pre class="programlisting">def createAndRunTask(): Unit = { &#13;
+ val t = Task { &#13;
+   println("Computing the answer...") &#13;
+   Thread.sleep(2000) &#13;
+   40 + 2 &#13;
+ } &#13;
+ &#13;
+ t.unsafePerformAsync { &#13;
+   case \/-(answer) =&gt; println("The answer is " + answer) &#13;
+   case -\/(ex) =&gt; println("Failed to compute the answer: " + ex) &#13;
+ } &#13;
+ &#13;
+ println("Waiting for the answer") &#13;
+} &#13;
+</pre><p>We create our<code class="literal">Task</code>, and add a <code class="literal">Thread.sleep</code> to simulate an expensive computation. We call <code class="literal">unsafePerformAsync</code> and use a simple callback to print the answer (or an exception, if the computation fails). We call <code class="literal">createAndRunTask</code> and observe the following output:</p><pre class="programlisting">scala&gt; TaskExample.createAndRunTask() &#13;
+Waiting for the answer &#13;
+ &#13;
+scala&gt; Computing the answer... &#13;
+The answer is 42 &#13;
+</pre><p>We can see that our last statement, "Waiting for the answer" was printed first. This is because <code class="literal">unsafePerformAsync</code> returns immediately. We can see the statement from our computation, as well as the answer printed in our callback. This method is a rough equivalent to <code class="literal">onComplete</code>, which is defined on Scala's <code class="literal">Future</code>.</p><p>Another useful method provided by the companion object of <code class="literal">Task</code> is <code class="literal">async</code>. Remember how we previously used <code class="literal">Promise</code> to turn a callback-based API into an API returning an instance of <code class="literal">Future</code>? It is possible to achieve the same goal with <code class="literal">Task</code>; that is, we can turn a callback-based API into a more monadic API returning a <code class="literal">Task</code>, as follows:</p><pre class="programlisting">object CallbackAPI { &#13;
+  def doCoolThings[A](a: =&gt; A, f: (Throwable \/ A) =&gt; Unit): Unit = ??? &#13;
+} &#13;
+ &#13;
+def doCoolThingsToTask[A](a: =&gt; A): Task[A] = &#13;
+ Task.async { f =&gt; &#13;
+   CallbackAPI.doCoolThings[A](a, res =&gt; f(res)) &#13;
+ } &#13;
+</pre><p>Evaluating this method in the REPL yields the following:</p><pre class="programlisting">&gt; val t = doCoolThingsToTask(40+2) &#13;
+&gt; t.map(res =&gt; res / 2).unsafePerformSync &#13;
+res2: Int = 21 &#13;
+</pre><p>Our <code class="literal">doCoolThingsToTask</code> method uses <code class="literal">Task.async</code> to create a <code class="literal">Task</code> instance from a callback-based API that is defined in <code class="literal">CallbackAPI</code>. The <code class="literal">Task.async</code> can even be used to turn a Scala <code class="literal">Future</code> into a Scalaz <code class="literal">Task</code>:</p><pre class="programlisting">def futureToTask[A](future: Future[A])(implicit ec: ExecutionContext): Task[A] = &#13;
+ Task.async { f =&gt; &#13;
+   future.onComplete { &#13;
+     case Success(res) =&gt; f(\/-(res)) &#13;
+     case Failure(ex) =&gt; f(-\/(ex)) &#13;
+   } &#13;
+ } &#13;
+</pre><p>Note that we have to supply an <code class="literal">ExecutionContext</code> to be able to call <code class="literal">onComplete</code> on <code class="literal">Future</code>. This is due to <code class="literal">Future</code> eager evaluation. Almost all methods that are defined on <code class="literal">Future</code> will submit a computation to a thread pool immediately.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note48"/>Note</h3><p>It is also possible to convert a <code class="literal">Task</code> to a <code class="literal">Future</code>:</p><div class="informalexample"><pre class="programlisting">def taskToFuture[A](t: Task[A]): Future[A] = { 
+  val p = Promise[A]() 
+  t.unsafePerformAsync { 
+    case \/-(a) =&gt; p.success(a) 
+    case -\/(ex) =&gt; p.failure(ex) 
+  } 
+  p.future 
+}</pre></div></div></div></div><div class="section" title="The execution model"><div class="titlepage"><div><div><h3 class="title"><a id="ch06lvl3sec41"/>The execution model</h3></div></div></div><p>Understanding the <code class="literal">Task</code> execution model requires understanding the Scalaz <code class="literal">Future</code> execution model because <code class="literal">Task</code> composes a Scalaz <code class="literal">Future</code> and adds error handling. This is visible from the definition of <code class="literal">Task</code>:</p><pre class="programlisting">class Task[+A](val get: Future[Throwable \/ A]) &#13;
+</pre><p>In this definition, <code class="literal">Future</code> is the not the Scala standard library version, but instead this is an alternative version that is provided by Scalaz. The Scalaz <code class="literal">Future</code> decouples defining transformations from execution strategy, providing us with fine-grained control over <code class="literal">Executor</code> submissions. Scalaz <code class="literal">Future</code> accomplishes this by defining itself as a trampolining computation. Trampolining is a technique that describes a computation as a discrete series of chunks that are run using constant space. To dive into the details of how a trampoline works, we recommend reading Runar Bjarnason's paper, <span class="emphasis"><em>Stackless Scala With Free Monads</em></span>, available at <a class="ulink" href="http://blog.higher-order.com/assets/trampolines.pdf">http://blog.higher-order.com/assets/trampolines.pdf</a>.</p><p>
+<code class="literal">Task</code> builds on Scalaz <code class="literal">Future</code> by providing error handling with the Scalaz <code class="literal">\/</code> disjunction. <code class="literal">Task</code> is the description of a computation. Transformations add to the description of the computation that will eventually be executed by a thread pool. To begin evaluation, a <code class="literal">Task</code> must be explicitly started. This behavior is interesting because when a <code class="literal">Task</code> is finally executed, we can limit computation execution to a single thread. This improves thread reuse and reduces context switching.</p><p>
+</p><div class="mediaobject"><img src="graphics/B05368_06_02.jpg" alt="The execution model"/></div><p>
+</p><p>In the preceding diagram, we see various calls to <code class="literal">apply </code>and <code class="literal">map</code>. These calls are merely modifying the definition of the task to be performed. It is only when we call <code class="literal">unsafePerformAsync</code> that the computation is realized in a different thread. Note that all the transforms are applied by the same thread.</p><p>We can exercise <code class="literal">Future</code> and <code class="literal">Task</code> performance in a short microbenchmark comparing their throughput based on the transform (for example, <code class="literal">map</code> and <code class="literal">flatMap</code>), and the count of transformations applied. A snippet of the benchmark can be found, as follows:</p><pre class="programlisting">@Benchmark &#13;
+def mapWithFuture(state: TaskFutureState): Int = { &#13;
+  implicit val ec = state.context &#13;
+  val init = Future(0) &#13;
+  val res = (1 until state.operations).foldLeft(init) &#13;
+    ((f, _) =&gt; f.map(_ + 1)) &#13;
+  Await.result(res, Duration("5 minutes")) &#13;
+} &#13;
+ &#13;
+@Benchmark &#13;
+def mapWithTask(state: TaskFutureState): Int = { &#13;
+  val init = Task(0)(state.es) &#13;
+  val res = (1 until state.operations).foldLeft(init)&#13;
+    ((t, _) =&gt; t.map(_ + 1)) &#13;
+  res.unsafePerformSync &#13;
+} &#13;
+</pre><p>Both scenarios run similar computations. We create an initial instance of <code class="literal">Future</code> or <code class="literal">Task</code> containing 0, and we apply several consecutive <code class="literal">map</code> operations to add 1 to the accumulator. Two other scenarios performed the same computation but with <code class="literal">flatMap</code> instead. The results for <code class="literal">flatMap</code> are displayed in the following table:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Benchmark</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Operation count</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Throughput (ops per second)</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Error as percentage of throughput</strong></span>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">flatMapWithFuture</code>
+</p>
+</td><td>
+<p>5</p>
+</td><td>
+<p>41,602.33</p>
+</td><td>
+<p>± 0.69</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">flatMapWithTask</code>
+</p>
+</td><td>
+<p>5</p>
+</td><td>
+<p>59,478.50</p>
+</td><td>
+<p>± 2.14</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">flatMapWithFuture</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>31,738.80</p>
+</td><td>
+<p>± 0.52</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">flatMapWithTask</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>43,811.15</p>
+</td><td>
+<p>± 0.47</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">flatMapWithFuture</code>
+</p>
+</td><td>
+<p>100</p>
+</td><td>
+<p>4,390.11</p>
+</td><td>
+<p>± 1.91</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">flatMapWithTask</code>
+</p>
+</td><td>
+<p>100</p>
+</td><td>
+<p>13,415.30</p>
+</td><td>
+<p>± 0.60</p>
+</td></tr></tbody></table></div><p>The results for <code class="literal">map</code> operations can be found in the following table:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Benchmark</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Operation count</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Throughput (ops per second)</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Error as percentage of throughput</strong></span>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">mapWithFuture</code>
+</p>
+</td><td>
+<p>5</p>
+</td><td>
+<p>45,710.02</p>
+</td><td>
+<p>± 1.30</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">mapWithTask</code>
+</p>
+</td><td>
+<p>5</p>
+</td><td>
+<p>93,666.73</p>
+</td><td>
+<p>± 0.57</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">mapWithFuture</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>44,860.44</p>
+</td><td>
+<p>± 1.80</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">mapWithTask</code>
+</p>
+</td><td>
+<p>10</p>
+</td><td>
+<p>91,932.14</p>
+</td><td>
+<p>± 0.88</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">mapWithFuture</code>
+</p>
+</td><td>
+<p>100</p>
+</td><td>
+<p>19,974.24</p>
+</td><td>
+<p>± 0.55</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">mapWithTask</code>
+</p>
+</td><td>
+<p>100</p>
+</td><td>
+<p>46,288.17</p>
+</td><td>
+<p>± 0.46</p>
+</td></tr></tbody></table></div><p>This benchmark highlights the performance gain due to the different execution model of <code class="literal">Task</code>. Even for a small number of transforms, the throughput is better with a deferred evaluation.</p></div></div><div class="section" title="Modeling trading day simulations with Task"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec54"/>Modeling trading day simulations with Task</h2></div></div></div><p>Equipped with our understanding of <code class="literal">Task</code>, we now have the knowledge necessary to add concurrency to the execution of a single backtest run. You may recall that we discovered from Dave that MVT closes its positions at the end of each trading day. This insight allows us to model each trading day independently. Let's familiarize ourselves with the current implementation by beginning with the model, as follows:</p><pre class="programlisting">  case class PnL(value: BigDecimal) extends AnyVal &#13;
+  object PnL { &#13;
+    def merge(x: PnL, y: PnL): PnL = PnL(x.value + y.value) &#13;
+    val zero: PnL = PnL(0) &#13;
+  } &#13;
+  case class BacktestPerformanceSummary(pnl: PnL) &#13;
+  case class DecisionDelayMillis(value: Long) extends AnyVal &#13;
+</pre><p>The profit-and-loss is the output of each simulated trading day. <code class="literal">PnL</code> provides a convenient method to add together two <code class="literal">PnL</code> instances, which can be used to sum the simulation <code class="literal">PnL </code>across multiple trading days. Once all the trading days are simulated, a <code class="literal">BacktestPerformanceSummary</code> is created to capture the simulation profit-and-loss. For our work on the backtester, we will use a <code class="literal">Thread.sleep</code> to simulate computationally expensive work in place of an actual decisioning strategy. The length of the sleep is parameterized by <code class="literal">DecisionDelayMillis</code>.</p><p>We show a simplified version of the backtester that shows how <code class="literal">DecisionDelayMillis</code> is used to simulate a trading day, as follows:</p><pre class="programlisting">  def originalBacktest( &#13;
+    testDays: List[MonthDay], &#13;
+    decisionDelay: DecisionDelayMillis): BacktestPerformanceSummary = &#13;
+    { &#13;
+    val pnls = for { &#13;
+      d &lt;- testDays &#13;
+      _ = Thread.sleep(decisionDelay.value) &#13;
+    } yield PnL(10) &#13;
+    BacktestPerformanceSummary(pnls.reduceOption(PnL.merge).getOrElse(&#13;
+      PnL.zero)) &#13;
+  } &#13;
+</pre><p>The original backtest displays how a list of days is simulated in a synchronous fashion. For reproducibility, we substitute a constant profit-and-loss of $10 in place of a dynamic value. This backtest ignores the application of a ticker and a strategy to focus on the core of our dilemma: How can we use <code class="literal">Task</code> to add concurrency to a backtest?</p><p>From our examples, we saw that <code class="literal">Task</code> introduces concurrency through submission of multiple <code class="literal">Task</code>s to an <code class="literal">ExecutorService</code> and by performing the side-effect of running a <code class="literal">Task</code> with <code class="literal">unsafePerformAsync</code> to avoid a blocking wait for the result. As a first step, let's implement a version of the backtest that uses <code class="literal">Task</code> without introducing concurrency:</p><pre class="programlisting">  def backtestWithoutConcurrency( &#13;
+    testDays: List[MonthDay], &#13;
+    decisionDelay: DecisionDelayMillis): Task[BacktestPerformanceSummary] = &#13;
+    { &#13;
+    val ts = for (d &lt;- testDays) yield Task.delay { &#13;
+      Thread.sleep(decisionDelay.value) &#13;
+      PnL(10) &#13;
+    } &#13;
+    Task.gatherUnordered(ts).map(pnls =&gt; BacktestPerformanceSummary( &#13;
+      pnls.reduceOption(PnL.merge).getOrElse(PnL.zero))) &#13;
+  } &#13;
+</pre><p>This implementation changes the return type to <code class="literal">Task[BacktestPerformanceSummary]</code>. Since the <code class="literal">Task</code> is not run, referential transparency is maintained within this method. Each trading day is simulated using <code class="literal">Task.delay</code>. <code class="literal">delay</code> is a lazy variant of <code class="literal">Task.now</code> that defers evaluation of the provided value. Let's look at the following signature to confirm:</p><pre class="programlisting">def delay[A](a: =&gt; A): Task[A] &#13;
+</pre><p>If we had instead used <code class="literal">Task.now</code> in place of <code class="literal">Task.delay</code>, the sleep (that is, the simulation) would have taken effect before running <code class="literal">Task</code>. We also see the use of another new capability, <code class="literal">Task.gatherUnordered</code>. <code class="literal">gatherUnordered</code> is useful when you wish to make the following transformation:</p><pre class="programlisting">List[Task[A]] =&gt; Task[List[A]] &#13;
+</pre><p>Although <code class="literal">List</code> is used here, this relationship exists for any <code class="literal">Seq</code>. <code class="literal">gatherUnordered </code>provides a way to take a collection of <code class="literal">Task</code> and instead operate on a single <code class="literal">Task</code> that wraps a collection of the underlying type. Let's look at the following signature to make our understanding more concrete:</p><pre class="programlisting">def gatherUnordered[A](tasks: Seq[Task[A]], exceptionCancels: Boolean = false): Task[List[A]] &#13;
+</pre><p>This signature closely matches the previous function that we defined with the addition of an optional Boolean parameter. When <code class="literal">exceptionCancels</code> is set to <code class="literal">true</code>, any pending <code class="literal">Task</code> will not be evaluated. <code class="literal">gatherUnordered</code> allows us to merge together the results of each trading day's profit-and-loss and return a single <code class="literal">Task</code> wrapping <code class="literal">BacktestPerformanceSummary</code>. The Scala <code class="literal">Future</code> companion object provides an analogous method, named <code class="literal">sequence</code>, that performs the same operation on a sequence of <code class="literal">Future</code>s.</p><p>This is a functioning implementation of the backtest, but it does not add concurrency to the simulation of historical trading days. For our next iteration, we take advantage of a new part of the <code class="literal">Task</code> API, <code class="literal">Task.fork</code>. Let's see how it is used, and then we will explain how it works:</p><pre class="programlisting">  def backtestWithAllForked( &#13;
+    testDays: List[MonthDay], &#13;
+    decisionDelay: DecisionDelayMillis): Task[BacktestPerformanceSummary] = &#13;
+    { &#13;
+    val ts = for (d &lt;- testDays) yield Task.fork { &#13;
+      Thread.sleep(decisionDelay.value) &#13;
+      Task.now(PnL(10)) &#13;
+    } &#13;
+    Task.gatherUnordered(ts).map(pnls =&gt; BacktestPerformanceSummary( &#13;
+      pnls.reduceOption(PnL.merge).getOrElse(PnL.zero))) &#13;
+  } &#13;
+</pre><p>This implementation gathers trading day <code class="literal">PnL</code> in the same way as before, but instead this uses a combination of <code class="literal">Task.fork</code> and <code class="literal">Task.now</code> to simulate the trading day. Let's look at the signature of <code class="literal">Task.fork</code> to understand how runtime behavior changes:</p><pre class="programlisting">def fork[A](a: =&gt; Task[A])(implicit pool: ExecutorService = Strategy.DefaultExecutorService): Task[A] &#13;
+</pre><p>
+<code class="literal">fork</code> accepts a <code class="literal">Task</code> as a by-name parameter and an implicit <code class="literal">ExecutorService</code> that defaults to the CPU-bound executor. The signature shows that <code class="literal">fork</code> submits the provided <code class="literal">Task</code> to <code class="literal">pool</code> in order to fork the computation into a different thread. <code class="literal">fork</code> is an explicit way to control concurrency with <code class="literal">Task</code>. Conceptually, <code class="literal">fork</code> is analogous to any <code class="literal">Future</code> transformation (for example, <code class="literal">map</code>) that involves submission to an executor. As <code class="literal">fork</code> lazily evaluates its argument, <code class="literal">Task.now</code> can be used to lift the trading day's profit-and-loss into a <code class="literal">Task</code>. With this implementation, the <code class="literal">Task</code> that represents each trading day is submitted to an executor. If we assume 30 trading days are being backtested and the computer used has two cores, then this implementation allows each core to simulate 15 trading days instead of a single core simulating 30 days.</p><p>As we saw in earlier benchmarks, submitting a high volume of small computations to an executor is expensive. As we have explicit control over concurrency with <code class="literal">Task</code> using <code class="literal">fork</code>, we can improve our performance by optimizing the frequency of executor submissions. In our third attempt, we take advantage of knowing the number of trading days to be simulated to control executor submissions. The implementation now looks like the following:</p><pre class="programlisting">  def backtestWithBatchedForking( &#13;
+    testDays: List[MonthDay], &#13;
+    decisionDelay: DecisionDelayMillis): Task[BacktestPerformanceSummary] = &#13;
+    { &#13;
+    val ts = for (d &lt;- testDays) yield Task.delay { &#13;
+      Thread.sleep(decisionDelay.value) &#13;
+      PnL(10) &#13;
+    } &#13;
+    Task.gatherUnordered(ts.sliding(30, 30).toList.map(xs =&gt; &#13;
+      Task.fork(Task.gatherUnordered(xs)))).map(pnls =&gt; &#13;
+      BacktestPerformanceSummary( &#13;
+        pnls.flatten.reduceOption(PnL.merge).getOrElse(PnL.zero))) &#13;
+  } &#13;
+</pre><p>This implementation returns to representing the simulation of each trading day without any concurrency using <code class="literal">Task.delay</code>. In contrast to the previous implementations, the list of trading day simulation <code class="literal">Task</code>s is divided into chunks of 30 using <code class="literal">sliding</code>. Each chunk of 30 <code class="literal">Task</code>s is wrapped with an invocation of <code class="literal">Task.fork</code> to execute concurrently. This approach allows us to balance the benefits of concurrency with the overhead of executor submissions.</p><p>Of these three implementations, which is most performant? The answer is not straightforward because it depends on the number of simulation trading days and the computational cost of simulating a trading day. To better understand the tradeoffs, we write a microbenchmark that tests each of the three backtest implementations. We show the state required to run the benchmark, as follows:</p><pre class="programlisting">  @State(Scope.Benchmark) &#13;
+  class BenchmarkState { &#13;
+    @Param(Array("1", "10")) &#13;
+    var decisionDelayMillis: Long = 0 &#13;
+    @Param(Array("1", "12", "24" )) &#13;
+    var backtestIntervalMonths: Int = 0 &#13;
+ &#13;
+    var decisionDelay: DecisionDelayMillis = DecisionDelayMillis(-1) &#13;
+    var backtestDays: List[MonthDay] = Nil &#13;
+ &#13;
+    @Setup &#13;
+    def setup(): Unit = { &#13;
+      decisionDelay = DecisionDelayMillis(decisionDelayMillis) &#13;
+      backtestDays = daysWithin(trailingMonths(backtestIntervalMonths)) &#13;
+    } &#13;
+  } &#13;
+</pre><p>This benchmark allows us to sweep different backtest interval and decision delay combinations. Using a <code class="literal">daysWithin</code> method, which is omitted from the snippet, a count representing the number of months is converted into the list of simulation trading days. We display the implementation of only one benchmark because the other two are identical, as follows:</p><pre class="programlisting">@Benchmark &#13;
+def withBatchedForking(state: BenchmarkState): BacktestPerformanceSummary = &#13;
+  Backtest.backtestWithBatchedForking(state.backtestDays, &#13;
+  state.decisionDelay) &#13;
+    .unsafePerformSync &#13;
+</pre><p>To accurately time how long it takes to complete the <code class="literal">Task</code> computation, we start the computation with the blocking <code class="literal">unsafePerformSync</code> method. This is a rare example where it is acceptable to make a blocking call without a timeout. In this controlled test, we are confident that all invocations will return. For this test, we sweep the the month count, leaving the decision delay fixed at 1 ms. Running this benchmark on a machine with four cores produces the following results:</p><div class="informaltable"><table border="1"><colgroup><col/><col/><col/><col/><col/></colgroup><tbody><tr><td>
+<p>
+<span class="strong"><strong>Benchmark</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Months</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Decision delay milliseconds</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Throughput (ops per second)</strong></span>
+</p>
+</td><td>
+<p>
+<span class="strong"><strong>Error as percentage of throughput</strong></span>
+</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withoutConcurrency</code>
+</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>25.96</p>
+</td><td>
+<p>± 0.46</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withAllForked</code>
+</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>104.89</p>
+</td><td>
+<p>± 0.36</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withBatchedForking</code>
+</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>27.71</p>
+</td><td>
+<p>± 0.70</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withoutConcurrency</code>
+</p>
+</td><td>
+<p>12</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>1.96</p>
+</td><td>
+<p>± 0.41</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withAllForked</code>
+</p>
+</td><td>
+<p>12</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>7.25</p>
+</td><td>
+<p>± 0.22</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withBatchedForking</code>
+</p>
+</td><td>
+<p>12</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>8.60</p>
+</td><td>
+<p>± 0.49</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withoutConcurrency</code>
+</p>
+</td><td>
+<p>24</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>0.76</p>
+</td><td>
+<p>± 2.09</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">withAllForked</code>
+</p>
+</td><td>
+<p>24</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>1.98</p>
+</td><td>
+<p>± 1.46</p>
+</td></tr><tr><td>
+<p>
+<code class="literal">WithBatchedForking</code>
+</p>
+</td><td>
+<p>24</p>
+</td><td>
+<p>1</p>
+</td><td>
+<p>4.32</p>
+</td><td>
+<p>± 0.88</p>
+</td></tr></tbody></table></div><p>The results make the tradeoff between the overhead and the benefits of batching clearer. Batching is a clear win as the number of months increase with a short 1 ms computational delay. Consider the scenario of backtesting 24 months with a 1 ms decision delay. Assuming 30-day months, there are 720 trading days to simulate. Split into batches of 30, there are 24 invocations of <code class="literal">fork</code> instead of 720. The overhead for splitting the <code class="literal">Task</code> into batches, and gathering each batch's results, is overshadowed by the order of magnitude of fewer executor submissions. Our explicit control over forking yielded a doubling of throughput in this scenario.</p><p>As the number of months decreases, the overhead of creating <code class="literal">Task</code> batches becomes a dominating factor. In a 12-month backtest, there are 360 trading days, yielding 12 batches. Here, batching yields about a 20% throughput improvement over forking all <code class="literal">Task</code>. Cutting the number of trading days in half from the 24-month test reduced the performance advantage by more than half. In the worst-case scenario, when there is one month to simulate, the batching strategy fails to take to advantage of all the cores on the machine. In this scenario, one batch is created, leaving CPU resources underutilized.</p></div><div class="section" title="Wrapping up the backtester"><div class="titlepage"><div><div><h2 class="title"><a id="ch06lvl2sec55"/>Wrapping up the backtester</h2></div></div></div><p>As we have seen, there are a number of variables at play here. Accounting for computational costs, the number of available cores, the expected number of <code class="literal">Task</code> executor submissions, and batching overhead can be challenging. To extend our work, we can investigate a more dynamic batching strategy that takes better advantage of CPU resources with smaller backtest intervals. Using this benchmark, we got a taste for the additional tools that <code class="literal">Task</code> provides, and how explicit control of executor submissions can affect throughput.</p><p>The insights that we gleaned by working on the backtester can be applied to larger-scale software systems as well. We focused on analyzing results with a short 1 ms decision delay. As the cost of executing each <code class="literal">Task</code> increases (for example, 10 ms decision delay), diminishing marginal performance improvements are gained from batching. This is because the cost of executor submissions becomes overshadowed by the cost of the computation. While 1 ms appears to be a small amount of time, there are a potentially surprising number of computations that can be completed in this time frame. Consider that a throughput of 1,000 operations per second translates to 1 operation per millisecond. Reflecting on benchmarks that we have performed in our earlier efforts and through your own work, you can find numerous examples where we worked with operations that have a throughput higher than 1 operation per millisecond. The takeaway from this thought experiment is a large number of use cases fit within the definition of a short computation (that is, 1 ms), which means that there are a significant number of opportunities to optimize concurrency through the judicious use of <code class="literal">fork</code>.</p><div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note49"/>Note</h3><p>The backtester is a prime candidate for batching because the amount of work, namely the number of days to simulate, is known at the start of processing. In a stream processing environment, the amount of work is unknown. For example, consider the order book receiving events on-the-fly. How can you implement batching in a streaming environment?</p></div></div><p>We hope that backtester provided an illustrative example to give you a feeling for <code class="literal">Task</code>. There are additional tools that are provided by <code class="literal">Task</code> that we did not explore. We invite you to read the documentation for <code class="literal">Task</code> in the Scalaz library. In the book entitled, <span class="emphasis"><em>Functional Programming in Scala</em></span>, written by two Scalaz contributors, Rúnar Bjarnason and Paul Chiusano, there is an excellent chapter describing the implementation of a simplified version of Scalaz <code class="literal">Task</code>. This is a great resource to understand the design of the API.</p></div></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch06lvl1sec35"/>Summary</h1></div></div></div><p>In this chapter, we discovered how to harness the power of asynchronous programming with the Scala standard library using <code class="literal">Future</code> and <code class="literal">Promise</code>. We improved MVT backtesting performance by introducing concurrency to improve runtime performance and discovered how <code class="literal">Promise</code> can be used to extend <code class="literal">Future</code>. Along the way, we investigated the shortcomings of <code class="literal">Future</code> along with the techniques to mitigate these shortcomings. We also explored an alternative to <code class="literal">Future</code> with Scalaz <code class="literal">Task</code>, which provides compelling performance benefits while retaining referential transparency. Using what you have learned in this chapter, you can take full advantage of multicore hardware using Scala to scale your software systems and deliver higher throughput. In our final chapter, <a class="link" href="ch07.html" title="Chapter 7. Architecting for Performance">Chapter 7</a>, <span class="emphasis"><em>Architecting for Performance</em></span>, we explore a set of advanced functional programming techniques and concepts to enrich your functional programming toolbox.</p></div></body></html>
