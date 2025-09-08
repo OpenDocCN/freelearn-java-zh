@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# JavaEE8 和 Eclipse 开发指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/1ba964ecb0ccb77760bf120f36de84c7`](https://zh.annas-archive.org/md5/1ba964ecb0ccb77760bf120f36de84c7)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

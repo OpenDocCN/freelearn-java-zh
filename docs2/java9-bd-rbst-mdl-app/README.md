@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Java9 健壮的模块化应用构建指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/f971ca396427dbf27d69e7205d80d1f2`](https://zh.annas-archive.org/md5/f971ca396427dbf27d69e7205d80d1f2)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

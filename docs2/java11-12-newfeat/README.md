@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Java11 和 12 新特性指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/ceccff69d2ebf68b979e5c5563cc96be`](https://zh.annas-archive.org/md5/ceccff69d2ebf68b979e5c5563cc96be)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

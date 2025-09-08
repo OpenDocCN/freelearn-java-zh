@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# JavaEE8 秘籍
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/68a4f8945a727a4e0aca3f4ea0fac1de`](https://zh.annas-archive.org/md5/68a4f8945a727a4e0aca3f4ea0fac1de)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
