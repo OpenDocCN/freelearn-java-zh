@@ -1,0 +1,511 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Migrating Your Code to Java 9</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In the previous chapter, we looked at what it takes to start with a pre-Java 9 code base and have it compile or run with minimal changes in the new Java 9 platform. We also looked at some problems you could face with your legacy code and how to solve them.</p>
+<p class="calibre2">If you are working on a code base that you expect to make many changes or enhancements to, then you'll want to do more than just run it in Java 9. You'll want to take advantage of the modularity features that Java 9 provides. Of course, you shouldn't always blindly rewrite your application to use modules just because you can! The advantages of modularity--strong encapsulation and reliable configuration--are the most useful in applications where there is a large code base with clear boundaries and multiple teams working on it. In this chapter, we'll take a look at how you can use those new modularity features and gradually introduce them to your pre-Java 9 codebase.</p>
+<p class="calibre2">These are the topics we'll be covering in this chapter:</p>
+<ul class="calibre14">
+<li class="calibre15">Migration strategy for codebases</li>
+<li class="calibre15">Automatic modules</li>
+<li class="calibre15">Library migration</li>
+<li class="calibre15">Multi-release JARs</li>
+</ul>
+<p class="calibre2">We'll be working on the shopping bag example that we've looked at in the previous chapter. We've got it compiling and running in the Java 9 platform. We'll now be adding modularity features to the code.</p>
+<p class="calibre2">Now, how do you go about doing something like that? In the case of a small application, like the example code we are looking at, it is trivial to make a complete change across the application--you can split a small codebase into modules based on the roles that different types in your code performs. And then wrap the individual modules in modules with the right module definitions. Easy!</p>
+<p class="calibre2">Unfortunately, most real-world applications are much larger and more complex. Thus, they cannot be modularized with a <strong class="calibre1">big bang</strong> approach. You'll have to gradually chunk away at it, moving portions of the application into modules. How would this work in an application where a portion of the code is modularized while the rest isn't? In addition, most applications, especially enterprise Java applications, use some kind of a framework or library to handle application infrastructure. What does Java 9 migration mean in those cases? Would the libraries need to be rewritten to use modules as well? Could you modularize your application while the libraries are not yet modularized? Before we answer these questions, let's first understand what the migration goal is. What are we trying to achieve?</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Understanding the migration goal</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Let's assume you are done with the steps in the previous chapter and your legacy code now complies or runs in Java 9. You are ready for the next step--to migrate your code to use Java 9 modules! What does that look like?</p>
+<p class="calibre2">Here's a very high-level picture that shows the different elements of a typical pre-Java 9 application running on a Java 9 platform:</p>
+<div class="packt_figure"><img class="image-border87" src="../images/00094.jpeg"/></div>
+<p class="calibre2">You can break a typical application down into three distinct layers. At the very top layer are the <strong class="calibre1">application classes and jars</strong>. Typical applications have a combination of <strong class="calibre1">application classes and jars</strong> along with any internal libraries, such as shared utility components. All of these are application specific. Since the application is yet to be migrated to Java 9, this layer consists of classes and jars in the classpath.</p>
+<p class="calibre2">The second layer denotes any <strong class="calibre1">frameworks</strong> that the application might be using. It's very rare to find Java applications these days that do not use an application framework of some sort. Frameworks such as Spring, Vaadin, JSF, and Hibernate are very commonly used. These are typically bundled into the application as <kbd class="calibre12">.jar</kbd> files, either downloaded manually or through a dependency management utility such as Maven or Gradle. Will the libraries be in the classpath or the module path? It depends on the library, and if the authors have migrated it to Java 9. If the libraries are already migrated, all you need to do is simply add them to the module path! However, for the sake of this chapter, let's assume that the libraries are still not migrated, so that you know how to tackle the more complex scenario.</p>
+<p class="calibre2">The third layer is the underlying <strong class="calibre1">Java Platform</strong> that powers it all. This, as we've seen in this book, is a fully modularized platform as of Java 9.</p>
+<p class="calibre2">Since we are assuming that none of the application code or the libraries are Java 9 modules, they are primarily running in the class path, and the module path is completely empty. This is just the way we left our code at the end of the previous chapter. Here's the <em class="calibre22">before</em> picture:</p>
+<div class="packt_figure"><img class="image-border5" src="../images/00095.jpeg"/></div>
+<p class="calibre2">The goal is to create modules and move everything from the <strong class="calibre1">classpath</strong> into the <strong class="calibre1">module path</strong>. Once we are done, the <strong class="calibre1">classpath</strong> will be empty and everything that the application needs will run from the <strong class="calibre1">module path</strong>. Here's the ideal <em class="calibre22">after</em> picture:</p>
+<div class="packt_figure"><img class="image-border5" src="../images/00096.jpeg"/></div>
+<p class="calibre2">Notice that in the <em class="calibre22">after</em> picture, we aren't even using the <strong class="calibre1">classpath</strong> anymore. All the code and binaries we need are now converted to modules and made available in the <strong class="calibre1">module path</strong>. Thus, in an ideal world, there is no need to even pass the classpath argument! Also, notice that I have intentionally changed the representation of modules to random sizes. This is to highlight that there might not be a one-to-one mapping between the JARs and classes in the classpath to the converted modules. You might break a single JAR in your Java 8 application into multiple modules in Java 9 or merge multiple JARs into a single module.</p>
+<p class="calibre2">Now that we have an idea about what the end goal is, let's look at the migration strategy.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Beginning the migration</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Let's go through the migration process by working on the sample shopping bag application. It's a simple app that contains three classes--one to read user input, one to provide a shopping bag functionality, and one class with a main method to drive execution--iteratively taking in user input, adding it to the shopping bag, and then printing the contents of the bag. The application has a dependency on the commons collections JAR file for the Bag data structure. It also calls the Java logging API to log the start and end times to the console.</p>
+<div class="packt_infobox">The shopping bag application has code that is referred to as a <em class="calibre29">monolith</em>. That is, all the code that forms the app is in one code base. This is really a simplification, and does not represent a real-world application that could span multiple projects and have different build artifacts that are bundled together. We'll keep things simple and run through the migration process with the simplified monolithic code base first and then expand it to a multi-project setup.</div>
+<p class="calibre2">We are starting with the code in the <kbd class="calibre12">01-legacy-app</kbd> folder. The application code is in the <kbd class="calibre12">src</kbd> folder and the commons collections JAR in the <kbd class="calibre12">lib</kbd> folder:</p>
+<div class="packt_figure"><img class="image-border88" src="../images/00097.jpeg"/><br class="title-page-name"/></div>
+<p class="calibre2">The first step to modularizing this application is to create one big module that wraps around the entire application. We've run this application in the classpath in <a target="_blank" href="part0161.html#4PHAI0-ed2405f4162b4f86b565edd6b6d679fb" class="calibre4">Chapter 10</a>, <em class="calibre22">Preparing Your Code for Java 9</em>. The platform helped us there by creating an unnamed module that housed all of our code, which was an automatic process. This time, we'll do this ourselves by creating a module for our application called <kbd class="calibre12">packt.shoppingbag</kbd>.</p>
+<p class="calibre2">First, just like before, let's assign a module source folder where the source of all the modules resides. You can either create a new folder or use the existing <kbd class="calibre12">src</kbd> folder. I'll choose the latter. In the <kbd class="calibre12">src</kbd> folder, create a module room folder, <kbd class="calibre12">packt.shoppingbag</kbd>, and a <kbd class="calibre12">module-info.java</kbd> file within it:</p>
+<pre class="calibre23">    module packt.shoppingbag { 
+    } </pre>
+<p class="calibre2">It's just an empty module descriptor for now. We'll get back to this in a bit.</p>
+<p class="calibre2">Now that we have a module root, you can move the entire source (with the package name folder hierarchy) into the module root folder. The source code in the <kbd class="calibre12">11-migrating-application/02-migrating-to-one-module</kbd> folder represents this state of the code base:</p>
+<div class="packt_figure"><img class="image-border89" src="../images/00098.jpeg"/><br class="title-page-name"/></div>
+<p class="calibre2">What we have now is far from a <em class="calibre22">modular</em> Java application. However, it does technically have one module. So, the way to compile and execute this application needs to be similar to what we've done so far in this book. That is, use the module source path argument for the source location containing the module root and the module path argument to point to the location of the compiled modules.</p>
+<p class="calibre2">Let's try compiling this application. We'll first create a folder called out to contain the compiled classes:</p>
+<pre class="calibre23"><strong class="calibre1">$ mkdir out</strong></pre>
+<p class="calibre2">Here's the javac command we've used all along:</p>
+<pre class="calibre23"><strong class="calibre1">$ javac --module-source-path src -d out $(find . -name '*.java')</strong></pre>
+<p class="calibre2">If you run this, you'll get the following error:</p>
+<pre class="calibre23"><strong class="calibre1">$ javac --module-source-path src -d out $(find . -name '*.java')</strong><br class="title-page-name"/><strong class="calibre1">./src/packt.shoppingbag/module-info.java:3: error: module not found: commons.collections4</strong><br class="title-page-name"/><strong class="calibre1">requires commons.collections4;</strong><br class="title-page-name"/><strong class="calibre1">                              ^</strong><br class="title-page-name"/><strong class="calibre1">1 error</strong></pre>
+<p class="calibre2">The compiler is unable to find the commons collections dependency. Makes sense! The JAR in the <kbd class="calibre12">lib</kbd> folder and we never told the compiler about it. Now, can we add this JAR to the class path and compile again?</p>
+<pre class="calibre23"><strong class="calibre1">$ javac --module-source-path src -cp lib/commons-collections4-4.1.jar -d out $(find . -name '*.java')</strong><br class="title-page-name"/><strong class="calibre1">./src/packt.shoppingbag/module-info.java:3: error: module not found: commons.collections4</strong><br class="title-page-name"/><strong class="calibre1">requires commons.collections4;</strong><br class="title-page-name"/><strong class="calibre1">                              ^</strong><br class="title-page-name"/><strong class="calibre1">1 error</strong></pre>
+<p class="calibre2">Nope, that won't work either. Why is that? Here's a picture of the application we have now:</p>
+<div class="packt_figure"><img class="image-border90" src="../images/00099.jpeg"/></div>
+<p class="calibre2">We've moved the application code into the <strong class="calibre1">module path</strong>, but the library (in our case, a single JAR file) still exists in the <strong class="calibre1">classpath</strong>. And, since it is in the <strong class="calibre1">classpath</strong>, it is a part of the automatically created unnamed module. We've already seen how the unnamed module reads all resolved modules by default. Thus, any code in the unnamed module can access types in the <strong class="calibre1">module path</strong>. This is what we did in <a target="_blank" href="part0161.html#4PHAI0-ed2405f4162b4f86b565edd6b6d679fb" class="calibre4">Chapter 10</a>, <em class="calibre22">Preparing Your Code for Java 9</em>:</p>
+<div class="packt_figure"><img class="image-border91" src="../images/00100.jpeg"/></div>
+<p class="calibre2">However, what we are trying to do here is the other way round. We want a module in the <strong class="calibre1">module path</strong> to access types from the <strong class="calibre1">unnamed module</strong>, and there's the problem. It turns out that no other module can read the <strong class="calibre1">unnamed module</strong>!</p>
+<div class="packt_figure"><img class="image-border92" src="../images/00101.jpeg"/></div>
+<p class="calibre2">This is an intentional restriction. Every module needs to meet the requirements of strong encapsulation and reliable configuration. If a module were to read the class path, we'd basically be tossing reliable configuration out of the window! Since the class path does not have reliable configuration, there's no way the platform can verify if the module has everything it needs. So, preventing explicit Java 9 modules from accessing the classpath is a Good Thing™.</p>
+<p class="calibre2">It does cause a major problem with migration though. Moving code from the class path to the module path is taking it down a one-way street. Once the code is crossed over to the module path, it cannot access anything from the class path. It's not so much an issue for your application code. Like we've seen, you can take your entire code base and put it in a giant named module, like we did with the shopping bag app. And now, none of your code is in the classpath. Great! However, what about libraries? Almost every Java application has third-party libraries and frameworks that are mostly JARs pulled in from the internet and bundled into the classpath. Since we don't control or maintain the library code, we cannot put their code in a module and wrap them with a module descriptor. So, until the authors of your libraries get to migrate their code to Java 9, you are stuck with non-modular libraries. How can your types access them? Do you have to hold off on modularizing your code until the very last library you use has its code migrated to Java 9?</p>
+<p class="calibre2">Thankfully, that's not the case. The platform helps, once again, with the ability to create modules from JARs automatically. These modules are called <strong class="calibre1">automatic modules</strong>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Automatic modules</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In order to avoid the problems with third-party library dependencies, which we just discussed, the Java platform has a mechanism to automatically create modules from JAR files. You don't need to access the library code or even create a module descriptor. All you need is the JAR file. This works great because, for any third-party library, the one thing that you are sure to have is the JAR file!</p>
+<p class="calibre2">Okay, what does it take to convert a JAR file into an automatic module and drop them into your application? The answer is--nothing! All you need to do is drop any JAR file into the module path. The platform automatically converts it into a module. Here are the things that the platform does to every JAR that it encounters in the module path:</p>
+<ul class="calibre14">
+<li class="calibre15">It automatically converts the JAR into a module and gives it a name</li>
+<li class="calibre15">It sets up the module definition--What the module reads and exports</li>
+</ul>
+<p class="calibre2">And since they are now modules with a name (albeit automatically created), your code can depend on and require them just like any other module.</p>
+<p class="calibre2">Let's examine the preceding two options in detail.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Automatic module naming</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Given a JAR file, how does the platform know what to name it? For instance, if I were to drop the JAR file we are currently working with--<kbd class="calibre12">commons-collections4-4.1.jar</kbd>--into the module path, what would be the name of the module that gets created from it?</p>
+<p class="calibre2">Naming of an automatic module is based off of the name of the JAR file, without the <kbd class="calibre12">.jar</kbd> extension. For example, if your JAR is named <kbd class="calibre12">foo.jar</kbd>, the name of the automatic module is <kbd class="calibre12">foo</kbd>! But, wait! What about invalid characters? It's very common to have the <kbd class="calibre12">-</kbd> character in the JAR name, but it's not allowed in module names. In such cases, the <kbd class="calibre12">-</kbd> character is automatically replaced by the <kbd class="calibre12">.</kbd> character. So, if the JAR file's name is <kbd class="calibre12">my-lib.jar</kbd> , the name of the automatic module would be <kbd class="calibre12">my.lib</kbd>.</p>
+<p class="calibre2">While this naming works, it can be a hassle. It's because most JARs (especially ones from Maven or Gradle build systems) commonly have the version number in the name. This means that every time you get a new version of the JAR, the name of the module changes! To prevent that, and to make the library module names consistent, the automatic module name drops the version number from the name.</p>
+<p class="calibre2">In summary, given a JAR file name, the automatic module naming does the following:</p>
+<ul class="calibre14">
+<li class="calibre15">It drops the <kbd class="calibre12">.jar</kbd> file extension</li>
+<li class="calibre15">It replaces <kbd class="calibre12">-</kbd> characters with <kbd class="calibre12">.</kbd></li>
+<li class="calibre15">It removes the version string</li>
+</ul>
+<p class="calibre2">Thus, the JAR, <kbd class="calibre12">commons-collections4-4.1.jar</kbd>, gets the automatic module name-- <kbd class="calibre12">commons.collections4</kbd>.</p>
+<p class="calibre2">Here are a few more examples:</p>
+<table class="msotablegrid">
+<tbody class="calibre6">
+<tr class="calibre7">
+<td class="calibre8">
+<p class="calibre2"><strong class="calibre1">JAR file name</strong></p>
+</td>
+<td class="calibre8">
+<p class="calibre2"><strong class="calibre1">Automatic module name</strong></p>
+</td>
+</tr>
+<tr class="calibre7">
+<td class="calibre8">
+<p class="calibre2"><kbd class="calibre12">commons-lang-1.2.10.jar</kbd></p>
+</td>
+<td class="calibre8">
+<p class="calibre2"><kbd class="calibre12">commons.lang</kbd></p>
+</td>
+</tr>
+<tr class="calibre7">
+<td class="calibre8">
+<p class="calibre2"><kbd class="calibre12">spring-core-4.3.10.RELEASE.jar</kbd></p>
+</td>
+<td class="calibre8">
+<p class="calibre2"><kbd class="calibre12">spring.core</kbd></p>
+</td>
+</tr>
+<tr class="calibre7">
+<td class="calibre8">
+<p class="calibre2"><kbd class="calibre12">guice-4.1.0.jar</kbd></p>
+</td>
+<td class="calibre8">
+<p class="calibre2"><kbd class="calibre12">guice</kbd></p>
+</td>
+</tr>
+</tbody>
+</table>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Automatic module definition</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">What does the automatic module <em class="calibre22">require</em> and <em class="calibre22">export</em>? The answer is--everything! Remember that the platform creates the module descriptor automatically, so it has no idea what the module needs or what it will be used for. To make sure things work, it creates the least restrictive module definition possible.</p>
+<ul class="calibre14">
+<li class="calibre15">It <kbd class="calibre12">requires transitive</kbd> all resolved modules</li>
+<li class="calibre15">It exports all modules</li>
+<li class="calibre15">It reads the unnamed module (that is, all code in the classpath)</li>
+</ul>
+<p class="calibre2">I hope you agree that this is the worst module definition you can possibly create for a module. However, this is required to ensure that the libraries in the Java ecosystem work seamlessly as automatic modules. This is not the ideal end state. We'd like to move to an environment where all the libraries are modularized too, and we work with actual modular JAR files with well-defined <kbd class="calibre12">requires</kbd> and <kbd class="calibre12">exports</kbd> definitions in the module path. Until that happens, automatic modules help get us going with the migration.</p>
+<div class="packt_tip">Note that the automatic modules <span class="packt_screen"><kbd class="calibre28">requires transitive</kbd> </span>all resolved modules. You read that right! When you depend on an automatic module, you read <em class="calibre29">everything</em>, whether you want it or not! Be very cautious about what dependencies you use. Just because you get readability to any module doesn't mean it's okay to use it. Always keep the module definition in mind. Automatic modules are just a stop-gap arrangement. You don't want to take the readability relationship you get for granted. Remember that when the automatic module goes away, the transitive readability goes away with it.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Migrating with automatic modules</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">With this knowledge of automatic modules, let's resume the migration of the shopping bag application. We need to get the commons collection JAR out of the classpath and made into an automatic module. To do that, rather than moving the JAR, we'll just supply the <kbd class="calibre12">--module-path</kbd> argument with the path to the JAR (the <kbd class="calibre12">lib</kbd> folder), thereby making the JAR file in the module path. (Unlike the classpath, you don't have to specify the file name. Just the folder location will do.)</p>
+<p class="calibre2">Here's the compiler command:</p>
+<pre class="calibre23"><strong class="calibre1">$ javac --module-source-path src --module-path lib -d out $(find . -<br class="title-page-name"/>  name '*.java')</strong></pre>
+<p class="calibre2">We will get the following different errors now:</p>
+<pre class="calibre23"><strong class="calibre1">./src/packt.shoppingbag/com/packt/shoppingbag/app/App.java:3: error: package java.util.logging is not visible</strong><br class="title-page-name"/><strong class="calibre1">import java.util.logging.Logger;</strong><br class="title-page-name"/><strong class="calibre1">         ^</strong><br class="title-page-name"/><strong class="calibre1">(package java.util.logging is declared in module java.logging, but module packt.shoppingbag does not read it)</strong><br class="title-page-name"/><strong class="calibre1">./src/packt.shoppingbag/com/packt/shoppingbag/data/ShoppingBag.java:3: error: package org.apache.commons.collections4 is not visible</strong><br class="title-page-name"/><strong class="calibre1">import org.apache.commons.collections4.Bag;</strong><br class="title-page-name"/><strong class="calibre1">               ^</strong><br class="title-page-name"/><strong class="calibre1">(package org.apache.commons.collections4 is declared in module commons.collections4, but module packt.shoppingbag does not read it)</strong><br class="title-page-name"/><strong class="calibre1">./src/packt.shoppingbag/com/packt/shoppingbag/data/ShoppingBag.java:4: error: package org.apache.commons.collections4.bag is not visible</strong><br class="title-page-name"/><strong class="calibre1">import org.apache.commons.collections4.bag.HashBag;</strong><br class="title-page-name"/><strong class="calibre1">                    ^</strong><br class="title-page-name"/><strong class="calibre1">(package org.apache.commons.collections4.bag is declared in module commons.collections4, but module packt.shoppingbag does not read it)</strong><br class="title-page-name"/><strong class="calibre1">3 errors</strong></pre>
+<p class="calibre2">This fix should be a bit more obvious. The compiler is complaining that the <kbd class="calibre12">packt.shoppingbag</kbd> module does not <em class="calibre22">require</em> the modules whose types it uses. It uses the logging API (in module <kbd class="calibre12">java.logging</kbd>) and the Commons Collections API (from the now-created automatic module called <kbd class="calibre12">commons.collections4</kbd>). Let's add them both as dependencies in <kbd class="calibre12">module-info.java</kbd>. Note that we are using the automatic module name to establish read relationships just like any other Java 9 module:</p>
+<pre class="calibre23">    module packt.shoppingbag {<br class="title-page-name"/>      requires java.logging;<br class="title-page-name"/>      requires commons.collections4;<br class="title-page-name"/>    }</pre>
+<div class="packt_infobox">In this sample application, we are using just one JAR file. It is far from a realistic scenario. Most real-world applications have multiple JARs. So, this step would involve converting all the necessary JARs into automatic modules by adding them to the module path and then adding the right <span class="packt_screen"><kbd class="calibre28">requires</kbd> </span>declaration in your module definition files.</div>
+<p class="calibre2">When compiling again, things should work without any errors. To execute, we'll use the same <kbd class="calibre12">java</kbd> command with the <kbd class="calibre12">--module-path</kbd> flag that we've used before, with one minor change. We need to add the <kbd class="calibre12">lib</kbd> folder to the module path, because we, again, want the commons collections JAR to be treated as an automatic module.</p>
+<pre class="calibre23"><strong class="calibre1">$ java --module-path out:lib -m packt.shoppingbag/com.packt.shoppingbag.app.App</strong><br class="title-page-name"/><strong class="calibre1">Aug 02, 2017 2:47:45 PM com.packt.shoppingbag.app.App main</strong><br class="title-page-name"/><strong class="calibre1">INFO: Shopping Bag application: Started</strong><br class="title-page-name"/><strong class="calibre1">Enter item (Type 'end' when done):</strong></pre>
+<p class="calibre2">We use the delimiter (<kbd class="calibre12">:</kbd> for macOS/Linux and <kbd class="calibre12">;</kbd> for Windows) to separate the two module paths--<kbd class="calibre12">out</kbd>, which has the compiled modules, and <kbd class="calibre12">lib</kbd>, which has the JAR. Everything should work as expected.</p>
+<div class="packt_tip">There is one potential problem that could result from automatic modules that you need to watch out for. Remember the split package problem that we discussed in <a target="_blank" href="part0095.html#2QJ5E0-ed2405f4162b4f86b565edd6b6d679fb" class="calibre27">Chapter 6</a>, <em class="calibre29">Module Resolution, Readability, and Accessibility</em>? It is not possible for a single package to exist in two different modules in Java 9. However, it is possible for a package to exist in two different JARs. Now what happens when you take two such JARs that share a package and make them as automatic modules? They don't work, because they result in the split package problem. If you encounter this problem with any library of yours, there is unfortunately not much you can do. You'll either have to move things back to the classpath, or bug the library developers to have them fix their code. Or both!</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Using jdeps to outline module relationships</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">We used <kbd class="calibre12">jdeps</kbd> to identify the usage of internal JDK APIs. The tool can do much more than that! One feature that comes in handy when migrating code to Java 9 is the <kbd class="calibre12">-summary</kbd> option. What this does is go through your compiled modules and identify the relationships between different modules. This makes sure that you get the right <kbd class="calibre12">requires</kbd> relationship specified in your modules, including the automatic modules.</p>
+<p class="calibre2">Run the following <kbd class="calibre12">jdeps</kbd> command in the <kbd class="calibre12">11-migrating-application/02-migrating-to-one-module</kbd> folder:</p>
+<pre class="calibre23"><strong class="calibre1">$ jdeps -cp lib/commons-collections4-4.1.jar -recursive -summary out</strong><br class="title-page-name"/><strong class="calibre1">commons-collections4-4.1.jar -&gt; java.base</strong><br class="title-page-name"/><strong class="calibre1">out -&gt; lib/commons-collections4-4.1.jar</strong><br class="title-page-name"/><strong class="calibre1">out -&gt; java.base</strong><br class="title-page-name"/><strong class="calibre1">out -&gt; java.logging</strong></pre>
+<p class="calibre2">The <kbd class="calibre12">-recursive</kbd> flag instructs <kbd class="calibre12">jdeps</kbd> to recursively navigate subfolders and list the dependencies of modules found in them too.</p>
+<p class="calibre2">Notice that you get a really helpful output listing what module reads what. This is very handy when you have a bunch of JAR dependencies that were compiled in Java 8 or earlier, and you are trying to add them as automatic modules; rather than guessing what modules need to read these automatic modules, you can just run this command and get a good overview.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Refactoring into smaller modules</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Now that you have your codebase in the module source path, the next steps would be to gradually break it down into smaller modules. This effort depends on the size of your codebase and how much of it you want to tackle at a time. You can choose to leave the single module as is and only create modules for any new code that you write. Thus, the legacy code does not get the benefit of modularity concepts, but any new code does. However, it is highly recommended to do the following two steps at this point:</p>
+<ol class="calibre17">
+<li value="1" class="calibre15">Find modular versions or equivalents for your libraries and move the JARs out of the module path.</li>
+<li value="2" class="calibre15">Break down the module into smaller modules.</li>
+</ol>
+<p class="calibre2"><strong class="calibre1">Step 1</strong> removes the broad transitive dependencies that automatic modules give you, so that you can get more fine-grained control over your dependencies. This depends on the libraries you use and if the authors have gotten to migrating them to Java 9. Once a library gets updated to Java 9, the updated version can still be placed in the module path, but this time, since they'll have a proper module descriptor, the platform will not need to convert them to automatic modules. You might have to check if the new name of the Java 9 modules in those libraries are different from the automatic module names you had previously used, and if they are, update your module descriptors to use the new library module name.</p>
+<p class="calibre2"><strong class="calibre1">Step 2</strong> makes sure that the legacy code also gets the benefits of strong encapsulation and reliable configuration. Since unlike step 1, we can control step 2, let's do just that for the shopping bag application.</p>
+<p class="calibre2">Let's say we'd like to split the code into the following three modules:</p>
+<ul class="calibre14">
+<li class="calibre15">User Input module</li>
+<li class="calibre15">Bag module</li>
+<li class="calibre15">App module</li>
+</ul>
+<p class="calibre2">I know this is an overkill for this small application. However, it helps as an example, illustrating the next step in the migration.</p>
+<p class="calibre2">The <kbd class="calibre12">11-migrating-application/03-splitting-modules</kbd> folder contains the state of the application after separating the code into multiple modules. Note the module descriptors in each module narrow down the dependencies, making it clear which part of the code needs those external APIs. The <kbd class="calibre12">java.logging</kbd> is required just by the <kbd class="calibre12">packt.app</kbd> module. The commons collection is required by <kbd class="calibre12">packt.bag</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Handling larger codebases</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">The sample application we modularized is very simple and not a representation of most real-world applications. Here are a couple of characteristics in which most applications differ:</p>
+<ul class="calibre14">
+<li class="calibre15">They have a <em class="calibre22">broader</em> code base that spans multiple projects. These projects may reside in different source locations and may be hooked to a build system. The build of the main application then gathers the right dependencies together to form the final application build.</li>
+<li class="calibre15">They have many more framework dependencies that have more complex needs. Frameworks such as Spring or Hibernate require access to your application code to do reflection. They might scan your classes for annotations and do various things such as dependency injection and object-relational mapping. In that sense, it is not just your application code that needs access to libraries as automatic modules; even such automatic modules would need access to your application code.</li>
+</ul>
+<p class="calibre2">Given such a large Java 8 code base, how do you even begin migrating? Here are some steps that you'd typically follow:</p>
+<p class="calibre2"><strong class="calibre1">Step 1</strong>: Draw module boundaries and create a high-level module map:</p>
+<p class="calibre2">In my opinion, modularizing existing code starts with having at least a rough high-level idea of the modules you need and how you plan to split the code base. We've looked at some strategies and tips to help you draw module boundaries in <a target="_blank" href="part0134.html#3VPBC0-ed2405f4162b4f86b565edd6b6d679fb" class="calibre4">Chapter 9</a>, <em class="calibre22">Module Design Patterns and Strategies</em>. Depending on the complexity of your code, you'll need to either look at the code in entirety or in high-level parts and come up with some module names and interfaces.</p>
+<p class="calibre2">Once you have a rough idea about what your modules will be, you can create a module graph that represents the dependencies between these modules. Don't get too involved in the details. This is just a rough sketch and you may be inclined to make changes to either the modules or their relationships as you get into the weeds and start refactoring.</p>
+<p class="calibre2"><strong class="calibre1">Step 2</strong>: Modularize the <em class="calibre22">main</em> application:</p>
+<p class="calibre2">Among all the code projects that a large application consists of, there's usually one that can be classified as the <em class="calibre22">main</em> project. It is the one that perhaps starts the execution or the project that is built and deployed as the application. That would be a good place to start. You can follow the steps you learned in this chapter to bring that application over to the module path first.</p>
+<p class="calibre2"><strong class="calibre1">Step 3</strong>: Use the module overrides for special library needs:</p>
+<p class="calibre2">If you are using a framework like Spring or Hibernate, you are sure to run into problems when using them as automatic modules. That's because those frameworks typically need access to your code base to reflectively scan your classes for annotations. We know that automatic modules read all resolved modules. So, it technically reads your application modules that could have Spring annotations. However, if your modules do not <em class="calibre22">export</em> the packages, it'll still be unable to access them. You can get around this problem in a couple of ways:</p>
+<ul class="calibre14">
+<li class="calibre15">Add the <kbd class="calibre12">opens</kbd> declaration to the packages that contain such annotations in your module definition so that the libraries have access to reflect on the necessary classes</li>
+<li class="calibre15">Use the <kbd class="calibre12">--add-opens</kbd> command-line arguments to achieve the same result</li>
+</ul>
+<p class="calibre2"><strong class="calibre1">Step 4</strong>: Leverage automatic modules for in-house build artifacts:</p>
+<p class="calibre2">There's no reason why you should not use automatic modules even for your own application JARs. Let's say you are migrating a large Maven application with multiple artifact dependencies on other projects that are built in-house (or code that you own). Those in-house artifacts can be added to the module path and converted into automatic modules too. One thing to watch out for here is the split package problem. Since we are dealing with in-house code, there's a good chance that there are package overlaps between JARs. In such cases, you'll need to refactor your code to make sure there are no overlapping packages in JAR files. You can do this refactoring while using an older version of Java too.</p>
+<p class="calibre2"><strong class="calibre1">Step 5a</strong>: Break down the <em class="calibre22">main</em> project into smaller modules:</p>
+<p class="calibre2">Again, following the process we used in this chapter, start chunking away pieces of the monolithic module into smaller pieces. Establish clearer dependencies among the smaller modules as you go.</p>
+<p class="calibre2"><strong class="calibre1">Step 5b</strong>: Migrate modules from the leaf up:</p>
+<p class="calibre2">In parallel to <strong class="calibre1">Step 5a</strong>, you can also start migrating projects other than the main project too. Since you've built your module tree, the order of migration of modules becomes clear. You can make your migration significantly easier by ordering the modules you choose to migrate from the leaf of the module dependency tree and work your way toward the top. The ideal candidate for migration is a module that does not have any other application module dependency. Dependency on Java modules is okay though!</p>
+<p class="calibre2">For example, let's say this is your target module graph for the code that you plan to achieve after migration. The graph includes just your application modules. Any dependency on platform modules is excluded in this graph:</p>
+<div class="packt_figure"><img class="image-border93" src="../images/00102.jpeg"/></div>
+<p class="calibre2">The first set of modules you should pick for migration are <strong class="calibre1">D</strong> and <strong class="calibre1">E</strong>. Once they are done, migrate <strong class="calibre1">C</strong>, then <strong class="calibre1">A</strong> and <strong class="calibre1">B</strong>.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Migrating libraries</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">We've looked at steps and strategies to follow when migrating applications to the Java modules. How about libraries? Let's say you are the maintainer of an open source library that is used by many people. Or, perhaps, you maintain a library that's used by multiple teams in your organization. How would you migrate such a code base? Wouldn't that require you to follow the same steps we've covered to migrate applications? Well, mostly yes. However, there are certain things you need to do differently with libraries. This section covers those details.</p>
+<p class="calibre2">What's perhaps the biggest difference with libraries is that you no longer work in the <em class="calibre22">context</em> of an application. A library could be used by multiple applications. These applications could be using multiple versions of Java. How could you create a single library JAR that could work for all those cases? Thankfully, there are some features in the platform that make this easier.</p>
+<p class="calibre2">Before we get into those specific problems, let's look at what it takes to migrate library code to use Java 9 modules. Here are some high-level steps you need to follow as a library author:</p>
+<ol class="calibre17">
+<li value="1" class="calibre15"><strong class="calibre1">Eliminate the JDK internal API usage</strong>: This is no different from what we did for applications. We need to make sure the library is a good Java 9 citizen. Calls to JDK internals or deprecated APIs are a no-no. Refactor your code to avoid the calls or use a replacement that our friendly <kbd class="calibre12">jdeps</kbd> tool with the <kbd class="calibre12">--jdk-internals</kbd> option suggests.</li>
+<li value="2" class="calibre15"><strong class="calibre1">Eliminate any split packages</strong>: We've looked at how split packages cause problems with automatic modules. You'll need to make sure your JARs do not contain packages that could potentially exist in other JARs in your organization. If other teams own libraries whose packages conflict with yours, you'll need to work with them to streamline the package names</li>
+<li value="3" class="calibre15"><strong class="calibre1">Identify a name for your core library module</strong>: As with any module, you need to come up with a name for the library. This is not that big of a deal when working with libraries that are used only in your organization. However, it's a much more important step when dealing with open source modules. Like we've covered in <a target="_blank" href="part0033.html#VF2I0-ed2405f4162b4f86b565edd6b6d679fb" class="calibre4">Chapter 2</a>, <em class="calibre22">Creating Your First Java Module</em>, module names can follow reverse domain name convention. You can opt to go with a shorter name for strictly in-house libraries to ease readability and communication, because name conflicts are less likely in such cases.</li>
+</ol>
+<ol start="4" class="calibre17">
+<li value="4" class="calibre15"><strong class="calibre1">Start refactoring and converting your code into modules</strong>: This involves moving your code into module root folders, adding module descriptors, and defining the <kbd class="calibre12">requires</kbd> <span>and </span><span><kbd class="calibre12">exports</kbd> </span><span>definitions for your modules. Be careful about any types that you encapsulate. If there are consumers of your library using those types, they'll not be able to use them anymore, unless they add the </span><span><kbd class="calibre12">--add-exports</kbd> </span><span>overrides.</span></li>
+</ol>
+<p class="calibre24">As with application migration, I highly recommend that you survey your library code and come up with a high-level module diagram that outlines the relationships between modules before you start digging into the code and moving files around. It will save you a lot of time and work!</p>
+<ol start="5" class="calibre17">
+<li value="5" class="calibre15"><strong class="calibre1">Add transitive dependencies or wrap around dependency leakage</strong>: There's a chance that your library code depends on other libraries. They may be other in-house libraries or open source JARs. These libraries may not be migrated to Java 9 yet, and we have the same problem we did for application dependencies. Here, again, you'll need to use automatic modules for the JARs that your library depends on. If using your APIs requires access to those libraries, it's a good idea to add require transitive <span>on those libraries in your module definition. If possible, wrap around those types so that the code consuming your library doesn't have to be aware of this dependency.</span></li>
+</ol>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Reserving library names</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Let's say you are a library developer who is not ready to migrate your code to Java 9 yet. We know that's not a problem. Other Java 9 applications can still consume your library by dropping the JAR into the module path, thus making an automatic module out of it. They use the auto-generated module name from the JAR file name and use that in their module definition files. However, what if you have a really cool name for your module that you plan to use when you eventually get to migrating to Java 9? Does it mean that all the consumers will then have to go to all the module definitions that specify the auto-generated name and update them to the new module name? That can be tedious.</p>
+<p class="calibre2">The Java 9 platform gives library authors an option to <em class="calibre22">reserve</em> a module name for their libraries, even before migrating their libraries to Java 9. So, you, as a library author, can specify what you want your Java 9 module name to be in the <kbd class="calibre12">META-INF/MANIFEST.MF</kbd> file in your JAR. You can do this in your Java 8 compiled JAR. Once you do that and bundle it into your JAR file, when it is dropped into the module path in a Java 9 application, the platform picks that name up as the automatic module name. It essentially overrides the automatic naming of modules from the JAR file name.</p>
+<p class="calibre2">Here's how you specify your preferred automatic module name in your JAR file. Create a file called <kbd class="calibre12">MANIFEST.MF</kbd> file in the <kbd class="calibre12">META_INF</kbd> folder in the root of the JAR file. Add the following line to specify the preferred automatic module name:</p>
+<pre class="calibre23">    Automatic-Module-Name: &lt;my.preferred.module.name&gt;</pre>
+<p class="calibre2">Once you've done this, the JAR is given this name instead of the name from the JAR file name when the platform converts it into an automatic module. And all the consumers have to refer to your JAR in the module path by using this preferred module name. Thus, when you do get to migrating your module to Java 9, you can use the preferred name in the module descriptor and the consumers of your library won't need to change their module descriptors.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Using jdeps to create module descriptors</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Once you start breaking down your library JARs into modules, depending on the size of your library, you may have a lot of work to do. It's not straightforward to identify which modules you'll need to <kbd class="calibre12">require</kbd> and which you'll need to <kbd class="calibre12">export</kbd>. The <kbd class="calibre12">jdeps</kbd> tool has another trick up its sleeve. It can look at your JAR files and automatically come up with module descriptors for you to use.</p>
+<p class="calibre2">The syntax is as follows:</p>
+<pre class="calibre23"><strong class="calibre1">$ jdeps --generate-module-info &lt;output-location&gt; &lt;path-to-jars&gt;</strong></pre>
+<p class="calibre2">Let's try this for the commons-collections JAR file:</p>
+<pre class="calibre23"><strong class="calibre1">$ jdeps --generate-module-info out lib/commons-collections4-4.1.jar</strong></pre>
+<p class="calibre2">The output should look like this:</p>
+<pre class="calibre23"><strong class="calibre1">writing to out/commons.collections4/module-info.java</strong></pre>
+<p class="calibre2">As you can see, <kbd class="calibre12">jdeps</kbd> has generated a module root folder with the same automatic naming algorithm we've seen before. Inside that folder, it has created a <kbd class="calibre12">module-info.java</kbd> file that it has populated with the <kbd class="calibre12">requires</kbd> and <kbd class="calibre12">exports</kbd> declarations that it identified by scanning the classes in the JARs:</p>
+<pre class="calibre23">    module commons.collections4 {<br class="title-page-name"/>      requires transitive java.xml;<br class="title-page-name"/>      exports org.apache.commons.collections4;<br class="title-page-name"/>      ...<br class="title-page-name"/>    }</pre>
+<p class="calibre2">You can run this command and point to multiple JARs, and it'll do this for every single JAR, which also benefits from any relationships between the JARs. The generated <kbd class="calibre12">module-info.java</kbd> files for those related modules will include the relationship too!</p>
+<div class="packt_tip">Remember to use this feature just as a starting point to define your module definitions. The platform cannot obviously guess the perfect module definition for your library just by looking at the code. It's your job as the author of the library to come up with what it requires and what it encapsulates or exports. There is also a technical limitation here. The <span class="packt_screen"><kbd class="calibre28">jdeps</kbd> </span>does static code analysis, so it will not be able to catch any runtime reflective access that libraries may perform. If your library is using reflection, you'll need to manually add the <span class="packt_screen"><kbd class="calibre28">exports</kbd> </span>or <span class="packt_screen"><kbd class="calibre28">opens</kbd> </span>declarations to the right modules yourself.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Building libraries for multiple Java versions</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">When migrating applications, we had to deal with the scenario that the dependent libraries might not all be migrated to Java 9. When dealing with libraries, you'll need to tackle the opposite problem. The applications consuming your library may not all be Java 9. You'll have to support Java 8 (or perhaps even older versions of Java in some cases). How do you, as a library author, create library distributions for all those versions? Before Java 9, you used to have two options:</p>
+<ul class="calibre14">
+<li class="calibre15">You could create separate JARs for each Java version</li>
+<li class="calibre15">In your library code, you could use reflection to do a <em class="calibre22">feature check</em>. For example, you could reflectively access a platform API that was introduced in Java 8. If it works, you are in Java 8. If not, drop down to Java 7, and so on.</li>
+</ul>
+<p class="calibre2">Both these options are tedious. There is a new alternative with Java 9, with a feature called <em class="calibre22">multi-release JARs</em>. The concept is simple. You create a special JAR file called a <em class="calibre22">multi-release JAR</em> that contains classes for all versions of Java you are targeting.</p>
+<p class="calibre2">Here's how it works. Multi-release JARs have a special structure that holds the classes within it:</p>
+<div class="packt_figure"><img class="image-border94" src="../images/00103.jpeg"/></div>
+<p class="calibre2">Here's what you'll find in a multi-release JAR file, corresponding to the numbering in the diagram:</p>
+<ol class="calibre17">
+<li value="1" class="calibre15">There's a root <kbd class="calibre12">META-INF</kbd> folder with a <kbd class="calibre12">MANIFEST.MF</kbd> file that contains the following line:</li>
+</ol>
+<p class="calibre24"><kbd class="calibre12">Multi-Release: true</kbd></p>
+<p class="calibre24">This tells the platform that this is a multi-release JAR and thus needs to be treated differently</p>
+<ol start="2" class="calibre17">
+<li value="2" class="calibre15">The JAR root also contains a default version of the compiled classes, just like any other JAR. Remember, this JAR targets multiple Java versions and it could hold multiple target versions of the same class. The classes at the root folder are the <em class="calibre22">default</em> base versions that could potentially apply to multiple Java versions</li>
+<li value="3" class="calibre15">There's a folder called <kbd class="calibre12">versions</kbd> inside <kbd class="calibre12">META-INF.</kbd> To target multiple runtimes, the JAR packages classes into sub-folders here. There's one folder for each Java version you want to target. Each such folder contains classes that have been specifically compiled for that release version. So, if the JAR is used in that version of the Java platform, the classes in the version folder override the classes in the <kbd class="calibre12">multirelease</kbd> folder and are picked up instead. If the JAR is used in a platform version that does not have classes in the <kbd class="calibre12">META-INF</kbd> folder, or the class needed doesn't exist in the version folder, the runtime falls back to the contents of the <kbd class="calibre12">multirelease</kbd> folder.</li>
+</ol>
+<p class="calibre2">Notice that the default versions of the classes are in the root location in the JAR file. This is why you can use the JAR file with older versions of Java too. To older Java versions, a multi-release JAR file looks just like an ordinary JAR file--the root location is all the platform looks at, and the versions folder is ignored!</p>
+<p class="calibre2">Let's try creating a simple multi-release JAR. The <kbd class="calibre12">11-migrating-application/04-multirelease-jars</kbd> folder contains an extremely simple library. It's called <kbd class="calibre12">mylib</kbd> and it has a class with a method that prints the contents of a list passed to it.</p>
+<p class="calibre2">We'd like to create a multi-release JAR for this library targeting two different versions of Java:</p>
+<ul class="calibre14">
+<li class="calibre15">The base version of the library targets all pre-Java 9 versions. It contains code that performs a <kbd class="calibre12">for</kbd> loop and prints the contents of the list as follows:</li>
+</ul>
+<pre class="calibre23">        public class PrintList { 
+          public void print(List&lt;?&gt; list) { 
+            for (int i = 0; i &lt; list.size(); i++) { 
+              System.out.println(list.get(i)); 
+            } 
+          } 
+        } </pre>
+<ul class="calibre14">
+<li class="calibre15">The Java 9 specific version of this library has two changes--it declares itself as a Java 9 module with <kbd class="calibre12">module-info.java</kbd> and it uses <kbd class="calibre12">forEach</kbd> and a function reference to print the contents of the list, as follows:</li>
+</ul>
+<pre class="calibre23">        public class PrintList { 
+          public void print(List&lt;?&gt; list) { 
+            list.forEach(System.out::println); 
+          } 
+        } </pre>
+<p class="calibre2">The two versions of the library are in two separate folders. Since there will be two separate versions of the same class, it helps to separate them this way.</p>
+<p class="calibre2">Here's the structure of the code:</p>
+<div class="packt_figure"><img class="image-border95" src="../images/00104.jpeg"/></div>
+<p class="calibre2">The first step to making a multi-release JAR is to add the <kbd class="calibre12">MANIFEST.MF</kbd> file that declares it. Add this file at the root of the project with a single line, shown next. Make sure you match the statement exactly without any extra spaces:</p>
+<pre class="calibre23">    Multi-Release: true</pre>
+<p class="calibre2">Now, we'll create the folders that hold the compiled classes. We'll create a folder called <kbd class="calibre12">out</kbd> and have two subfolders--<kbd class="calibre12">base</kbd> for the base classes and <kbd class="calibre12">9</kbd> for the Java 9 version, as shown here:</p>
+<pre class="calibre23"><strong class="calibre1">$ mkdir out</strong><br class="title-page-name"/><strong class="calibre1">$ mkdir out/base</strong><br class="title-page-name"/><strong class="calibre1">$ mkdir out/9</strong></pre>
+<p class="calibre2">Next, we will compile the classes into these two folders by setting the right release versions. The <kbd class="calibre12">--release</kbd> parameter to the <kbd class="calibre12">javac</kbd> command lets you target specific Java versions for your compiled classes:</p>
+<pre class="calibre23"><strong class="calibre1">$ javac --release 7 -d out/base base/src/packt/mylib/PrintList.java</strong></pre>
+<p class="calibre2">The preceding command compiles the <kbd class="calibre12">PrintList.java</kbd> class with target release 7, and places the complied output in the <kbd class="calibre12">out/base</kbd> directory.</p>
+<div class="packt_tip">Note that you don't need to have multiple versions of Java installed on your machine to achieve this. Java 9 has the ability to generate classes targeting different versions of Java by itself! This is analogous to the <span class="packt_screen"><kbd class="calibre28">-target</kbd></span> flag in Java that has been available in earlier versions of the Java platform.</div>
+<p class="calibre2">Next, we'll compile the Java 9 version as follows:</p>
+<pre class="calibre23"><strong class="calibre1">$ javac --release 9 -d out/9 java9/src/packt.mylib/module-info.java java9/src/packt.mylib/packt/mylib/PrintList.java</strong></pre>
+<p class="calibre2">There are two Java files this time--<kbd class="calibre12">PrintList.java</kbd> and <kbd class="calibre12">module-info.java</kbd>. The complied classes go to the <kbd class="calibre12">out/9</kbd> directory.</p>
+<p class="calibre2">Now that we have the compiled classes, it's time to create a multi-release JAR. Let's first create a JAR file with the base version classes. We also supply the <kbd class="calibre12">MANIFEST.MF</kbd> file to be included in the JAR:</p>
+<pre class="calibre23"><strong class="calibre1">$ jar -cf mylib.jar MANIFEST.MF -C out/base .</strong></pre>
+<p class="calibre2">The <kbd class="calibre12">-c</kbd> option tells the <kbd class="calibre12">jar</kbd> tool to create a new JAR, and <kbd class="calibre12">f</kbd> option is used to specify the JAR file name (here, <kbd class="calibre12">mylib.jar</kbd>). The <kbd class="calibre12">-C</kbd> option changes the directory the tool is looking for to <kbd class="calibre12">out.base</kbd> and lets it compile classes there (as specified by "<kbd class="calibre12">.</kbd>").</p>
+<p class="calibre2">This creates the JAR file and adds the base classes to it. Next, let's add the Java 9 classes:</p>
+<pre class="calibre23"><strong class="calibre1">$ jar -uf mylib.jar --release 9 -C out/9 .</strong></pre>
+<p class="calibre2">The <kbd class="calibre12">-u</kbd> options tells the <kbd class="calibre12">jar</kbd> tool to update the JAR rather than create one. We are targeting release 9 this time, and including compiled classes in the <kbd class="calibre12">out/9</kbd> directory.</p>
+<div class="packt_infobox">You don't have to add all the classes in your JAR file for every version. Try to keep version-specific classes to a minimum. If there are common classes in the base version that the version-specific copy can reuse, you just don't include it here. The platform will fall back to the base folder for classes it doesn't find for that specific version.</div>
+<p class="calibre2">Here are the contents of the JAR file that's generated. This is the structure we have already seen:</p>
+<div class="packt_figure"><img class="image-border96" src="../images/00105.jpeg"/></div>
+<div class="packt_infobox">Remember that the multi-release JAR feature was introduced in Java 9. So, you cannot really create version-specific alternatives in your JAR for Java 8 or earlier. Those versions of the platform will not know to read from the <span class="packt_screen"><kbd class="calibre28">META-INF/versions</kbd></span> folder. They'd just use the compiled classes in the JAR root folder. This is, however, a good feature to use if you need to create new Java-9-only classes. Since those classes will end up in the <span class="packt_screen"><kbd class="calibre28">META-INF/versions</kbd> </span>folder, older platforms will ignore them. Once future versions of Java are released, this feature can be used for those versions too. So, you can have a <span class="packt_screen"><kbd class="calibre28">META-INF/versions/10</kbd> </span>folder targeting the Java 10 platform, for example.</div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Summary</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In this chapter, we looked at how to migrate a pre-Java 9 application to use the Java 9 modularity features. You learned how to plan the overall migration strategy, and what the ideal end goal of such a migration is. You also learned about a new feature in the platform that lets you handle dependencies and libraries that are not modular--automatic modules. We looked at how automatic modules are named, how they behave, and how we can use them in our migration process.</p>
+<p class="calibre2">You then learned how to approach migrating libraries. We looked at some factors to consider when migrating the library code, as well as the multi-release JAR feature that lets us create single JARs that target multiple Java platform versions.</p>
+<p class="calibre2">In the next and final chapter, we'll wrap things up by looking at two important aspects that Java developers commonly deal with--build tooling and unit testing. We will understand how they work in the context of a modular Java application.</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>

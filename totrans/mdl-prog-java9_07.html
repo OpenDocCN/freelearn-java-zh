@@ -1,0 +1,510 @@
+<html><head></head><body>
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Introducing Services</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In this chapter, we'll learn about yet another exciting new feature in Java modularity called <strong class="calibre1">services</strong>. Services offer an additional layer of indirection between modules when compared to direct dependencies, and we will see that they add extra flexibility to how we can get modules to work with each other. In this chapter, you will:</p>
+<ul class="calibre14">
+<li class="calibre15">Understand one of the limitations of module dependencies the way we have been doing things so far</li>
+<li class="calibre15">Understand what services are and how they solve this problem</li>
+<li class="calibre15">Learn how to create and expose services</li>
+<li class="calibre15">Learn how to consume services using the <kbd class="calibre12">ServiceLoader</kbd> API</li>
+</ul>
+<p class="calibre2">Before we learn what services are, let's examine and understand the actual problem that they were created to solve. It's the problem of tight coupling between modules with direct dependencies, at least the way we've been hooking them up so far.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">The problem of coupling</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">The phrase <strong class="calibre1">tight coupling</strong> in programming is referred to situations where two entities are so highly dependent on each other that in order to change either of their behavior or relationship, it is required to make actual code changes to one (or often both) of those entities. The term <strong class="calibre1">loose coupling</strong>, on the other hand, refers to the opposite scenario--entities that are not highly dependent. In such cases, entities ideally don't even know about each other's existence, but can still be made to interact with each other.</p>
+<p class="calibre2">With that in mind, what would you say the coupling of two modules in the Java module system could be called? When one module depends on another, are the two modules tightly coupled or loosely coupled? The answer is obviously that they are tightly coupled. Think of the following facts that apply to module relationships:</p>
+<ul class="calibre14">
+<li class="calibre15">Modules need to explicitly state which other modules they depend on. In that sense, each module is <em class="calibre22">aware of</em> the existence of other modules it needs.</li>
+<li class="calibre15">Modules are also coupled to and <em class="calibre22">aware of</em> the APIs exposed by the dependent modules. If module A reads module B and calls an API, it is by using the actual Java type that is available in and exported from module B. Thus, module A knows the internals of module B, at least as much as the types exported by module B and used by module A.</li>
+</ul>
+<p class="calibre2">Because of these two factors, it is obvious that this kind of tight coupling results in a very <em class="calibre22">strict</em> and <em class="calibre22">rigid</em> behavior of the modules at runtime. Consider the address book viewer application. The set of modules compiled is the exact set of modules that is involved in execution at runtime. Once modules are compiled, there's no way you can remove one of those modules, replace it with something else, and execute them. The modules involved have to be <em class="calibre22">exactly</em> the same. Although we get an impression of Java 9 modules being building blocks that can be assembled into multiple combinations, that advantage only applies to development time. What we've seen so far is that once the modules are coded and the dependencies established, the result is pretty much a cohesive, unalterable monolith.</p>
+<p class="calibre2">Now you might wonder, <em class="calibre22">Well, isn't that what we want?</em> The benefits of <em class="calibre22">reliable configuration</em> require a strict check to make sure the exact modules we intend to have are present, don't they? Well, yes, but we could still have runtime flexibility without giving up reliable configuration. An analogous example for that is in the Java language itself. Even though Java is strictly typed, you can achieve powerful runtime flexibility and loose coupling between types by using the concepts of polymorphism. The idea is that classes don't directly depend on each other. Instead, they depend on abstract classes or interfaces. At runtime, instances of those interfaces can be dynamically initialized and used anywhere the interface is used. Could we have something similar to this with modules? If so, how would it work?</p>
+<p class="calibre2">Let me give you an example. We have a sorting utility module called <kbd class="calibre12">packt.sortutil</kbd> that has an API to sort lists. We have configured the module to export an interface and encapsulate an implementation, but in reality, that distinction is currently useless. It has only one implementation, and all that the module can do now is bubble sort. What if we wanted to have multiple sorting modules and we let the consuming module choose which sorting algorithm to use?</p>
+<p class="calibre2">Current:</p>
+<div class="packt_figure"><img class="image-border56" src="../images/00063.jpeg"/></div>
+<p class="calibre2">What we'd like:</p>
+<div class="packt_figure"><img class="image-border57" src="../images/00064.jpeg"/></div>
+<p class="calibre2">We'd like to be able to use multiple modules providing different implementations of sorting in our application. However, thanks to tight coupling, in order for a module to use another module, it has to <em class="calibre22">require</em> it. This means that the consumer <kbd class="calibre12">packt.addressbook</kbd> module has to declare <kbd class="calibre12">requires</kbd> on each and every one of those different implementation modules it might need, even though, at any time, it might possibly be using just one. Wouldn't it be nice if there was a way you could define an interface type somewhere and have the <em class="calibre22">consumer</em> module depend only on that? Then the different <em class="calibre22">provider</em> modules with different sorting algorithms just provide implementations of the interface that you can plug in at runtime without needing explicit dependencies, and with no coupling between the actual consumer and the various implementation modules?</p>
+<p class="calibre2">The following diagram shows what we'd like. Rather than <kbd class="calibre12">packt.addressbook</kbd> requiring all of the modules that provide the implementation logic, it instead requires a single module that somehow acts as an interface, and has some mechanism to get the implementations dynamically:</p>
+<div class="packt_figure"><img class="image-border58" src="../images/00065.gif"/></div>
+<p class="calibre2">By now you must have guessed that anytime I ask the <em class="calibre22">Wouldn't it be nice ...</em> question, it probably means that such a feature already exists! At least in this case, it's true. This is where services come in. The concept of services and the Service API together add a whole new layer of indirection on top of the existing modularity concepts you've learn so far. Let's dive into the details.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Understanding services</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Let's begin our journey of understanding services with a concept that you should be very familiar with as a Java developer--polymorphism. It starts with one interface and (possibly multiple) implementations of that interface. Although interfaces are not strictly <em class="calibre22">necessary</em> for services, they are still a good place to start. Let's say you define a service interface called <kbd class="calibre12">MyServiceInterface</kbd> that looks like this:</p>
+<pre class="calibre23">    package service.api; 
+    public interface MyServiceInterface { 
+      public void runService(); 
+    } </pre>
+<p class="calibre2">Now you can have multiple modules containing classes that implement this interface. Since all those modules need access to this interface, let's throw this interface into a module of its own, called <kbd class="calibre12">service.api</kbd>, and expose the package that the interface <kbd class="calibre12">MyServiceInterface</kbd> is in. Then each implementation module can require the <kbd class="calibre12">service.api</kbd> module and implement <kbd class="calibre12">MyServiceInterface</kbd>.</p>
+<p class="calibre2">Consider there are three implementations of <kbd class="calibre12">MyServiceInterface</kbd> in three corresponding modules. Since they need the interface to implement it in the first place, all three implementation modules <em class="calibre22">read</em> the <kbd class="calibre12">service.api</kbd> module to get access to <kbd class="calibre12">MyServiceInterface</kbd>. Imagine each module does just that, and that each contains a class that implements <kbd class="calibre12">MyServiceInterface</kbd>:</p>
+<div class="packt_figure"><img class="image-border59" src="../images/00066.jpeg"/></div>
+<p class="calibre2">Now, the consumer module needs to call one of these implementations to actually run the service. The goal here is not to have the consumer module directly <em class="calibre22">read</em> the various implementation modules, since that's tight coupling. What we want is for the consumer module to read just the <em class="calibre22">interface</em> module <kbd class="calibre12">service.api</kbd> and deal with the interface type only, but still somehow manage to get access to instances of that interface's implementations. Remember, we <em class="calibre22">do not</em> want the consumer to require the individual implementation modules (the <em class="calibre22">Xs</em> in the following diagram):</p>
+<div class="packt_figure"><img class="image-border60" src="../images/00067.jpeg"/></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">The service registry</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In order to cross this bridge between the consumer and the implementation without direct tight coupling, imagine a layer between them called <em class="calibre22">the service registry</em>. The service registry is a layer provided by the module system to record and register implementations of a given interface as <em class="calibre22">services</em>. Think of it as a kind of phone book or yellow pages, but for services. Any module that implements a service needs to register itself in the service registry. Once that's done, the service registry has all the information about the different service implementations of the interface that are available. The following diagram illustrates this interaction:</p>
+<div class="packt_figure"><img class="image-border61" src="../images/00068.jpeg"/></div>
+<p class="calibre2">Now when the consumer needs an implementation, it uses the services API to talk to the service registry and get instances of the available implementations. The following diagram illustrates this interaction:</p>
+<div class="packt_figure"><img class="image-border62" src="../images/00069.jpeg"/></div>
+<p class="calibre2">What the consumer module gets is an <kbd class="calibre12">Iterable</kbd> of instances of all available implementations. There doesn't have to be multiple instances, of course. There could be just one implementation! Either way, the Service API hands over the available instances to the consumer when accessed.</p>
+<p class="calibre2">As you can see, we have broken the coupling between the <em class="calibre22">provider</em> and the <em class="calibre22">consumer</em>. Every module in this figure reads just one module in common--the module containing the interface. The interface is the only <strong class="calibre1">common</strong> entity that all these different modules share, since that's the means of the interaction between them. Since the other modules are completely unaware of each other, you could pretty much remove one implementation module and drop in another. As long as it does the right things--that is, implements the right interface and registers with the service registry--it is available for the consumer to use.</p>
+<p class="calibre2">Now that you've understood the concept of services at a high level, let's get into the specifics. How do the modules <em class="calibre22">register</em> their implementations? How does the consumer module access the instances from the registry? Let's look at the implementation details.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Creating and using services</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Here are the end-to-end steps to create, register, and implement a service:</p>
+<ol class="calibre17">
+<li value="1" class="calibre15"><strong class="calibre1">Create the Java type that defines the service</strong>: Every service is based off of a single Java type that defines the service API. The type could be an interface, an abstract class, or even a regular Java class. Most of the time, the service type will be an interface. Having an interface is ideal because that way, you can have multiple implementation types for it.</li>
+</ol>
+<p class="calibre24">The service type is the means through which both the providers and consumers talk to each other. This begs the question of which module the service type should be in? Since it is shared by multiple modules, and we don't want the providers and consumers to be tightly coupled, the ideal solution is to create the service types in a separate module. This module exports the service type and is read by both the provider and consumer modules.</p>
+<p class="calibre24">In our example, that would be the module <kbd class="calibre12">service.api</kbd>. It exports the package <kbd class="calibre12">service.api</kbd>, thereby exporting the interface:</p>
+<pre class="calibre23">        module service.api { 
+          exports service.api; 
+        } </pre>
+<p class="calibre24">This module contains the interface <kbd class="calibre12">service.api.MyServiceInterface</kbd>, as previously shown. This fully qualified interface type name itself is the service type. Services in the Java module system don't have special names. They are simply referred to by the name of the Java type that acts as the service.</p>
+<ol start="2" class="calibre17">
+<li value="2" class="calibre15"><strong class="calibre1">Create one or more implementation modules that read the interface module and implement the interface</strong>: For example, if you need to have two modules <kbd class="calibre12">service.implA</kbd> and <kbd class="calibre12">service.implB</kbd> that provide two implementations of <kbd class="calibre12">MyServiceInterface</kbd>, both the modules will <em class="calibre22">require</em> the <kbd class="calibre12">service.api</kbd> module to access the interface. They each have an implementation of the <kbd class="calibre12">MyServiceInterface</kbd> interface. Each implementation of the service interface is referred to as a <em class="calibre22">service provider</em>.</li>
+<li value="3" class="calibre15"><strong class="calibre1">Have the implementation modules register themselves as service providers</strong>: This is the part where the implementation modules tell the service registry that they would like to register their implementation of the interface. This is done in the module descriptor by using a new keyword called  <kbd class="calibre12">provides</kbd> and specifying both the interface and the implementation type information. The syntax is as follows:</li>
+</ol>
+<pre class="calibre23">        provides &lt;interface-type&gt; with &lt;implementation-type&gt;; </pre>
+<p class="calibre24">For example, if the module <kbd class="calibre12">service.implA</kbd> has the implementation class <kbd class="calibre12">packt.service.impla.MyServiceImplA</kbd> that implements <kbd class="calibre12">MyServiceInterface</kbd>, the module definition should read:</p>
+<pre class="calibre23">        module service.implA { 
+          requires service.api;  
+          provides service.api.MyServiceInterface with <br class="title-page-name"/>           packt.service.impla.MyServiceImplA; 
+        } </pre>
+<p class="calibre24">This is sufficient for the module system to know that this module would like to register the <kbd class="calibre12">MyServiceImplA</kbd> class as a service that provides for the interface <kbd class="calibre12">MyServiceInterface</kbd>.</p>
+<p class="calibre24">A few observations here:</p>
+<ul class="calibre14">
+<li class="calibre15">Note the fully qualified name for both the interface and implementation types. This is important in order to avoid name conflicts and make sure the Java platform knows exactly which types you are referring to.</li>
+<li class="calibre15">Note that the interface type referred to in the <kbd class="calibre12">provides</kbd> clause does not belong to the module itself. It's in a completely different module that this module reads from (using the <kbd class="calibre12">requires</kbd> clause)! But that's okay; it works. However, it's important for the implementation class to be in the module that the module descriptor belongs to. This makes sense when you consider the fact that with the <kbd class="calibre12">provides</kbd> line of code, the module is essentially claiming to provide the implementation mentioned. So, it had better have it!</li>
+<li class="calibre15">This is an observation about what's <em class="calibre22">not</em> in the preceding module descriptor. Notice that we haven't added an <kbd class="calibre12">exports</kbd> clause here in order to make the <kbd class="calibre12">MyServiceImplA</kbd> class accessible to other modules. When providing services, you don't have to expose the implementation classes and make them accessible. This is because this class is not accessed with the usual module <em class="calibre22">readability</em> and <em class="calibre22">accessibility</em> relationships that we've been working with so far. The consumer module will get the instance of the implementation through the service APIs and does not read the module directly. That's the point of services after all, to avoid this tight coupling.</li>
+</ul>
+<p class="calibre24">With this step, we have now successfully registered the service providers with the module system. Every implementation that does this is now mapped to the service <em class="calibre22">name</em> which is, for all practical purposes, the fully qualified interface name--<kbd class="calibre12">service.api.MyServiceInterface</kbd>.</p>
+<p class="calibre2">Now let's turn our attention to the consumer module. Getting the consumer module to have access to the service implementation instances is a two-part process:</p>
+<ol start="1" class="calibre17">
+<li value="1" class="calibre15"><strong class="calibre1">Have the consumer module register itself as a consumer of the service</strong>: Just like the service providers <em class="calibre22">register</em> their intent to provide implementations, the service consumers need to <em class="calibre22">register</em> the fact that they'll need to <em class="calibre22">use</em> the service. The module that needs the instances will have to formally declare this need in the module descriptor. This is done using the <kbd class="calibre12">uses</kbd> keyword. The syntax is:</li>
+</ol>
+<pre class="calibre23">        uses &lt;interface-type&gt;; </pre>
+<p class="calibre24">In our example, if we have a module named consumer that needs instances of <kbd class="calibre12">MyServiceInterface</kbd>, the module definition will read:</p>
+<pre class="calibre23">        module consumer { 
+          requires service.api; 
+          uses service.api.MyServiceInterface; 
+        } </pre>
+<p class="calibre24">This is sufficient for the module system to know that this is a module that will use a service implementation instance of the mentioned interface.</p>
+<p class="calibre24">A few observations:</p>
+<ul class="calibre14">
+<li class="calibre15">The consumer module too <kbd class="calibre12">requires</kbd> the module that exposes the interface. It has to, because when the module requests service instances from the service API, what it'll get back are instances that are of the same type as the interface.</li>
+<li class="calibre15">Here, the <kbd class="calibre12">uses</kbd> clause is referring to a type that's not available in the module.</li>
+<li class="calibre15">As you must have guessed, there's no direct dependency on any of the implementation modules. Loose coupling for the win!</li>
+</ul>
+<p class="calibre24">After this step, on the one hand, we have the provider modules register their implementations with the service registry. And on the other hand, we have the consumer module register that it is a consumer of the service. Now, how does the code in the consumer module get access to the instances of the provider implementations? This is the final step, and this involves calling the <kbd class="calibre12">ServiceLoader</kbd> API.</p>
+<ol start="2" class="calibre17">
+<li value="2" class="calibre15"><strong class="calibre1">Call the</strong> <strong class="calibre1">ServiceLoader</strong> <strong class="calibre1">API to access the provider instances in the consumer module's code</strong>: With no direct dependencies, the service implementation types are completely unknown to the consumer. All it has is the interface type. So, there's no way it can instantiate types using <kbd class="calibre12">new</kbd>.</li>
+</ol>
+<p class="calibre24">In order to access all registered implementations of the service, you'll need to call the Java platform API <kbd class="calibre12">ServiceLoader.load()</kbd> method in the consumer module's code. Here's the code to get all registered service provider instances of the interface <kbd class="calibre12">MyServiceInterface</kbd>:</p>
+<pre class="calibre23">        Iterable&lt;MyServiceInterface&gt; sortUtils =<br class="title-page-name"/>         ServiceLoader.load(MyServiceInterface.class);</pre>
+<p class="calibre2">What the API returns is an <kbd class="calibre12">Iterable</kbd> of all available implementations of the service that have been registered in the Service Registry. Thanks to the return type being <kbd class="calibre12">Iterable</kbd>, you can loop through the instances and maybe pick one of them. Or you could even use all! It really depends on the application need and what it's trying to do. What's important to note is that each one of the objects in this <kbd class="calibre12">Iterable</kbd> is an instance of the provider implementation types that were registered in step 3 of creating services mentioned earlier. There could be several other classes that implement the interface, but if they aren't registered using the <kbd class="calibre12">provides</kbd> syntax, they will not be considered in this process.</p>
+<div class="packt_infobox">There's a common pattern in many Enterprise Java frameworks that's used to handle various implementations of services and is accessed through the interface. It's called <em class="calibre29">Dependency Injection</em>. This pattern is available in frameworks such as Spring, as well as Java EE technologies like EJB. This pattern requires the consumer classes to simply <em class="calibre29">declare</em> dependency on services. The framework then performs the job of creating instances and automatically <em class="calibre29">injecting</em> them to the consuming classes.<br class="calibre25"/>
+<br class="calibre25"/>
+What we are doing here is <strong class="calibre26"><em class="calibre29">not</em></strong> that. There's no automatic injection of instances to the consuming code. As you've noticed, you have to write code that uses <kbd class="calibre28">ServiceLoader</kbd><span class="packt_screen"> </span><span class="packt_screen">to</span> <em class="calibre29">look up</em> <span class="packt_screen">provider instances. This is by design, and is an important distinction to make when compared to those other patterns. This is a</span> <em class="calibre29">dependency lookup</em><span class="packt_screen">, not</span> <em class="calibre29">dependency injection</em><span class="packt_screen">.</span></div>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Implementing sorting services</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Now that we have an understanding of how to create and consume services, let's put this to practice in the address book viewer application. We'll create multiple sorting implementation modules and register these implementations as services. We'll then update the <kbd class="calibre12">packt.addressbook</kbd> module to use the <kbd class="calibre12">ServiceLoader</kbd> API to get the sorting instances, and then use one of these instances to sort the contacts list. Let's run through the five steps we've just learned in order to achieve this:</p>
+<ol class="calibre17">
+<li value="1" class="calibre15"><strong class="calibre1">Create the Java type that defines the service</strong>: We'll retain the interface <kbd class="calibre12">SortUtil</kbd> to be the common interface that various implementation types will use. The <kbd class="calibre12">packt.sortutil</kbd> module contains both the interface and implementation types now. We'll remove the implementation and leave just the interface in there. We'll also remove the default static dependency on <kbd class="calibre12">BubbleSortUtilImpl</kbd> and make this a pure and abstract interface:</li>
+</ol>
+<pre class="calibre23">        package packt.util; 
+        import java.util.List; 
+        public interface SortUtil { 
+          public &lt;T extends Comparable&gt; List&lt;T&gt; sortList(List&lt;T&gt; list); 
+        } </pre>
+<p class="calibre24">This will be the only type in the <kbd class="calibre12">packt.sortutil</kbd> module. The module exports the <kbd class="calibre12">packt.util</kbd> package to make the interface available to both the providers and consumers. Here's <kbd class="calibre12">module-info.java</kbd>:</p>
+<pre class="calibre23">        module packt.sortutil { 
+          exports packt.util; 
+        } </pre>
+<ol start="2" class="calibre17">
+<li value="2" class="calibre15"><strong class="calibre1">Create one or more implementation modules that read the interface module and implement the interface</strong>: Let's create a couple of implementation modules--<kbd class="calibre12">packt.sort.bubblesort</kbd>, which provides the BubbleSort implementation, and <kbd class="calibre12">packt.sort.javasort</kbd>, which provides an implementation using the default sorting API of Java collections:</li>
+</ol>
+<div class="packt_figure"><img class="image-border63" src="../images/00070.jpeg"/></div>
+<div class="packt_tip">Make sure you don't put both the implementation classes in the two modules in the same package. For example, both the implementation classes cannot be in the same <span class="packt_screen"><kbd class="calibre28">packt.util.impl</kbd> </span>package, because then you'll run into the problem of split packages, with both modules containing the same package, and the runtime will throw an error. We've covered the split packages problem in <a target="_blank" href="part0095.html#2QJ5E0-ed2405f4162b4f86b565edd6b6d679fb" class="calibre27">Chapter 6</a>, <em class="calibre29">Module Resolution, Accessibility, and Readability</em>.</div>
+<p class="calibre24">Both the modules <kbd class="calibre12">requires</kbd> the module <kbd class="calibre12">packt.sortutil</kbd> in order to access the <kbd class="calibre12">packt.util.SortUtil</kbd> interface. Each has an implementation of the interface.</p>
+<p class="calibre24">Here's <kbd class="calibre12">BubbleSortUtilImpl</kbd>, which is a class we've already seen, so here's the truncated version:</p>
+<pre class="calibre23">        public class BubbleSortUtilImpl implements SortUtil { 
+ 
+          public &lt;T extends Comparable&gt; List&lt;T&gt; sortList(<br class="title-page-name"/>           List&lt;T&gt; list) { 
+             ...  
+             return list; 
+          }''  
+        } </pre>
+<p class="calibre24">Here's <kbd class="calibre12">JavaSortUtilImpl</kbd>, which simply uses the <kbd class="calibre12">Collections.sort</kbd> API:</p>
+<pre class="calibre23">        public class JavaSortUtilImpl implements SortUtil { 
+          public &lt;T extends Comparable&gt; List&lt;T&gt; sortList(<br class="title-page-name"/>           List&lt;T&gt; list) { 
+             Collections.sort(list); 
+             return list; 
+          } 
+        } </pre>
+<ol start="3" class="calibre17">
+<li value="3" class="calibre15"><strong class="calibre1">Have the implementation modules register themselves as service providers</strong>: Let's register both the implementation modules as providers using the <kbd class="calibre12">provides</kbd> keyword. The service type is the interface <kbd class="calibre12">packt.util.SortUtil</kbd> and the implementation types are the two implementation classes in the two modules, respectively.</li>
+</ol>
+<p class="calibre24">Here's the <kbd class="calibre12">module-info.java</kbd> file for the <kbd class="calibre12">packt.sort.bubblesort</kbd> module:</p>
+<pre class="calibre23">        module packt.sort.bubblesort { 
+          requires packt.sortutil; 
+          provides packt.util.SortUtil  
+           with packt.util.impl.bubblesort.BubbleSortUtilImpl; 
+        } </pre>
+<p class="calibre24">And here's the <kbd class="calibre12">module-info.java</kbd> file for the <kbd class="calibre12">packt.sort.javasort</kbd> module:</p>
+<pre class="calibre23">        module packt.sort.javasort { 
+          requires packt.sortutil; 
+          provides packt.util.SortUtil  
+           with packt.util.impl.javasort.JavaSortUtilImpl; 
+        }</pre>
+<ol start="4" class="calibre17">
+<li value="4" class="calibre15"><strong class="calibre1">Have the consumer module register itself as a consumer of the service</strong>: We'll be needing instances of <kbd class="calibre12">SortUtil</kbd> in the <kbd class="calibre12">packt.addressbook</kbd> and <kbd class="calibre12">packt.addressbook.ui</kbd>. I'll showcase the steps in the <kbd class="calibre12">packt.addressbook</kbd> module alone here, because it has relatively fewer things going on. But the steps are the same and need to be applied to both modules.</li>
+</ol>
+<p class="calibre24">Here's the module descriptor of <kbd class="calibre12">packt.addressbook</kbd> with the <kbd class="calibre12">uses</kbd> clause:</p>
+<pre class="calibre23">        module packt.addressbook { 
+          requires java.logging; 
+          requires packt.addressbook.lib; 
+          uses packt.util.SortUtil; 
+        } </pre>
+<ol start="5" class="calibre17">
+<li value="5" class="calibre15"><strong class="calibre1">Call the</strong> <strong class="calibre1">ServiceLoader</strong> <strong class="calibre1">API to access the provider instances in the consumer module's code</strong>: In <kbd class="calibre12">Main.java</kbd>, use the <kbd class="calibre12">ServiceLoader</kbd> API to get all provider instances of <kbd class="calibre12">SortUtil</kbd>:</li>
+</ol>
+<pre class="calibre23">        Iterable&lt;SortUtil&gt; sortUtils =<br class="title-page-name"/>          ServiceLoader.load(SortUtil.class); </pre>
+<p class="calibre24">Now, iterating through, you can access each instance. I'll loop through and sort the list using <em class="calibre22">both</em> of the sorting implementations. This is clearly unnecessary, but it's just for illustration:</p>
+<pre class="calibre23">        for (SortUtil sortUtil : sortUtils) { 
+          System.out.println("Found an instance of SortUtil"); 
+          sortUtil.sortList(contacts); 
+        } </pre>
+<p class="calibre2">And we are done! You've used the service mechanism to create, register, and use sorting service implementations.</p>
+<div class="packt_tip">Make sure you apply the same changes to the <kbd class="calibre28">packt.addressbook.ui</kbd> module as well! If not, the compilation step will fail for that module, for obvious reasons.</div>
+<p class="calibre2">Compiling and running the code now should work without any errors:</p>
+<pre class="calibre23"><strong class="calibre1">$ javac --module-source-path src -d out $(find . -name '*.java') 
+$ java --module-path out -m packt.addressbook/packt.addressbook.Main 
+Apr 09, 2017 12:03:18 AM packt.addressbook.Main main 
+INFO: Address book viewer application: Started 
+Found an instance of SortUtil 
+Found an instance of SortUtil 
+[Charles Babbage, Tim Berners-Lee, Edsger Dijkstra, Ada Lovelace, Alan Turing] 
+Apr 09, 2017 12:03:19 AM packt.addressbook.Main main 
+INFO: Address book viewer application: Completed</strong> </pre>
+<p class="calibre2">As you can see from the output, there have been two instances of <kbd class="calibre12">SortUtil</kbd> returned by <kbd class="calibre12">ServiceLoader</kbd>, corresponding to the two implementations we have registered.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Drawing the module graph</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Let's draw the module graph that represents the interaction between the service provider and consumer modules. We know how to represent <em class="calibre22">readability</em> relationships. How about service consumer and provider dependencies? The following diagram uses arrows to depict both the <strong class="calibre1">uses</strong> and <strong class="calibre1">provides</strong> dependencies, with labels to identify them:</p>
+<div class="packt_figure"><img class="image-border64" src="../images/00071.gif"/></div>
+<p class="calibre2">The lack of dependencies between the consumer and provider modules is the key to loose coupling that is enabled using services.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Advanced services</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">The services concepts covered so far should address a lot of typical use cases, but there are a few additional features and concepts that might come in handy in certain special scenarios. We'll look at a few such concepts in this section.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Supporting singleton and factory providers</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Suppose your service instances cannot be created simply by a constructor. What if you need to reuse instances, maybe to have a singleton provider instance? Or maybe execute some logic whenever a new service instance is created? There is a handy feature of services that lets you create factory methods to get service instances. All you need to do is add a method with the name <kbd class="calibre12">provide()</kbd> in your provider classes. The method needs to be a public static method and it shouldn't take any arguments. Also, the return type should be the same as the type of the service being provided. If the <kbd class="calibre12">ServiceLoader</kbd> sees this method, it calls it, and uses the return of the method as the service instance. If it doesn't find such a method, it calls the public no-args constructor like we've already seen. This allows you to hook into the provider instance creation step, and here you can execute any necessary code, as well as get an opportunity to create the object that the <kbd class="calibre12">ServiceLoader</kbd> will use as the provider instance.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Implementing service priorities</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In the last example, we got two instances of <kbd class="calibre12">SortUtil</kbd>, and we did something ridiculous with them--we sorted the list twice, once per implementation! You wouldn't typically do that. What you'll most likely need to do in applications when you receive more than one service implementation is something a bit trickier. You'll need to choose one!</p>
+<p class="calibre2">Unfortunately there is no way you can give service implementations distinct priorities. So, there's no way you can say something like <kbd class="calibre12">BubbleSortUtilImpl</kbd> is your favorite sort implementation, and that's the implementation to be used if it's available, irrespective of whatever other implementations are found. As per design, it's not the responsibility of the service implementations to specify priority. It's the job of the consumer to decide what to do with the multiple implementations it receives from <kbd class="calibre12">ServiceLoader</kbd>, since the <em class="calibre22">best</em> service implementation for the job is usually dependent on the consuming application itself. What is the best service implementation for one consumer might not be ideal for another.</p>
+<p class="calibre2">Now, how does the consumer choose one provider among all available ones? All it sees is a bunch of instances of the same interface! So, what we do is enhance the interface to contain methods that the consumer can use to query provider instances. The consumer calls these methods to find out more about the provider classes and thus make an informed decision about which provider instances it would like to go with.</p>
+<p class="calibre2">Take the case of the <kbd class="calibre12">SortUtil</kbd> implementations. Let's assume we want to use the sorting algorithm depending on the size of the list. For instance, let's say we wish to choose bubble sort only if the list is very small, but use the <kbd class="calibre12">Collections</kbd> API sorting for larger lists.</p>
+<p class="calibre2">What we could do is add a method to the <kbd class="calibre12">SortUtil</kbd> interface called <kbd class="calibre12">getIdealInputLength()</kbd>. Each implementation then provides an integer length that it can deal with ideally.</p>
+<div class="packt_infobox">Bubble sort is far from the best sorting algorithm you can use. It's an algorithm many programming courses use to teach sorting, but in reality it's horribly inefficient. For the sake of our simple example, let's say we use bubble sort on lists that are four elements or smaller, and use <span class="packt_screen"><kbd class="calibre28">Collections</kbd> </span><span class="packt_screen">sort for the rest. I'll admit this is a contrived example, but it'll let us implement a basic strategy for choosing providers. In reality, you'd almost always want to use the </span><span class="packt_screen"><kbd class="calibre28">Collections</kbd> </span>API for sorting lists.</div>
+<p class="calibre2">Here's <kbd class="calibre12">SortUtil</kbd> with the new method declaration:</p>
+<pre class="calibre23">    public interface SortUtil { 
+      public &lt;T extends Comparable&gt; List&lt;T&gt; sortList(List&lt;T&gt; list); 
+      public int getIdealMaxInputLength(); 
+    } </pre>
+<p class="calibre2">Here's the <kbd class="calibre12">BubbleSortUtilImpl</kbd> implementation of this method that returns <kbd class="calibre12">4</kbd> as the ideal maximum size of the input list:</p>
+<pre class="calibre23">    public class BubbleSortUtilImpl implements SortUtil { 
+      ... 
+      public int getIdealMaxInputLength() { 
+        return 4; 
+      } </pre>
+<p class="calibre2">The <kbd class="calibre12">JavaSortUtilImpl</kbd> is OK with any list size, so for the ideal maximum, we'll just return the maximum integer value:</p>
+<pre class="calibre23">    public class JavaSortUtilImpl implements SortUtil { 
+      ... 
+      public int getIdealMaxInputLength() { 
+        return Integer.MAX_VALUE; 
+      } </pre>
+<p class="calibre2">Now that each provider has a method that can be used to choose one implementation over the other, the consumer can use this to identify which of the implementations it would like to use.</p>
+<p class="calibre2">Here's the section in <kbd class="calibre12">Main.java</kbd> (in both the <kbd class="calibre12">pack.addressbook</kbd> and <kbd class="calibre12">packt.addressbook.ui</kbd> modules) that loops through the providers to pick one:</p>
+<pre class="calibre23">    Iterable&lt;SortUtil&gt; sortUtils =<br class="title-page-name"/>      ServiceLoader.load(SortUtil.class); 
+    for (SortUtil sortUtil : sortUtils) { 
+      logger.info("Found an instance of SortUtil with ideal<br class="title-page-name"/>       max input: " + sortUtil.getIdealMaxInputLength()); 
+      if (contacts.size() &lt; sortUtil.getIdealMaxInputLength()) { 
+        sortUtil.sortList(contacts); 
+        break; 
+      } 
+    } </pre>
+<p class="calibre2">Given the size of the <kbd class="calibre12">contacts</kbd> list we'd like to sort, we'll check each provider to see if the list size is greater than the maximum size the provider would ideally like to handle. We then pick the first provider that passes this check, use that instance to sort the list, and <kbd class="calibre12">break</kbd> off the loop.</p>
+<p class="calibre2">Run the code and observe the output. If the <kbd class="calibre12">BubbleSortUtilImpl</kbd> is the first instance in the iterator, the logic skips it and moves to the <kbd class="calibre12">JavaSortUtilImpl</kbd> and uses it to sort:</p>
+<pre class="calibre23"><strong class="calibre1">$ java --module-path out -m packt.addressbook/packt.addressbook.Main 
+Apr 09, 2017 8:01:20 PM packt.addressbook.Main main 
+INFO: Address book viewer application: Started 
+Apr 09, 2017 8:01:20 PM packt.addressbook.Main main 
+INFO: Found an instance of SortUtil with ideal max input: 4 
+Apr 09, 2017 8:01:20 PM packt.addressbook.Main main 
+INFO: Found an instance of SortUtil with ideal max input: 2147483647 
+[Charles Babbage, Tim Berners-Lee, Edsger Dijkstra, Ada Lovelace, Alan Turing] 
+Apr 09, 2017 8:01:20 PM packt.addressbook.Main main 
+INFO: Address book viewer application: Completed </strong></pre>
+<p class="calibre2">This is a simple example of how provider implementations give <em class="calibre22">clues</em> about the implementation to any consumers. Different consumers could then choose different implementations, depending on their unique needs and business problems.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Service interface provider lookup</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">The lookup logic to get service instances is now in the Main classes in both the <kbd class="calibre12">packt.addressbook</kbd> and <kbd class="calibre12">packt.addressbook.ui</kbd> modules. This is less than ideal. We don't want to repeat the lookup logic in multiple places. One way to solve this is to move the logic to a common place that's accessible by all the consumers of the service. Now, what's the module that's shared by every consumer of the service? It's the module that exports the interface. Wouldn't it be a great idea to move the dependency lookup logic and tuck it away as a default method in the interface? Then none of the consumer modules would need to mess with the <kbd class="calibre12">ServiceLoader</kbd> APIs directly. They would just have to call the right interface method to look up the instances.</p>
+<p class="calibre2">Let's create two new methods on the <kbd class="calibre12">SortUtil</kbd> interface. One to get all service provider instances, and the second to get single instances based on the size of the list (which is a criterion that affects which instance is picked, like we've already seen).</p>
+<p class="calibre2">Here are the two new static methods on <kbd class="calibre12">SortUtil</kbd>:</p>
+<pre class="calibre23">    public static Iterable&lt;SortUtil&gt; getAllProviders() { 
+      return ServiceLoader.load(SortUtil.class); 
+    } 
+ 
+    public static SortUtil getProviderInstance(int listSize) { 
+      Iterable&lt;SortUtil&gt; sortUtils =<br class="title-page-name"/>        ServiceLoader.load(SortUtil.class); 
+      for (SortUtil sortUtil : sortUtils) { 
+        if (listSize &lt; sortUtil.getIdealMaxInputLength()) { 
+          return sortUtil; 
+        } 
+      } 
+      return null; 
+    } </pre>
+<p class="calibre2">Here we are returning <kbd class="calibre12">null</kbd> if no service instances that matched our requirement were found. This could easily be enhanced to provide a default service in case a suitable instance wasn't found.</p>
+<p class="calibre2">Now, <kbd class="calibre12">Main</kbd> doesn't have to talk to <kbd class="calibre12">ServiceLoader</kbd> and loop through instances anymore:</p>
+<pre class="calibre23">    SortUtil sortUtil = SortUtil.getProviderInstance(contacts.size()); 
+    sortUtil.sortList(contacts); </pre>
+<p class="calibre2">I hope you'll agree that the consumption of the service has become much simpler now.</p>
+<p class="calibre2">One other change you'll have to do is to move the  <kbd class="calibre12">uses</kbd> clause from the <kbd class="calibre12">packt.addressbook</kbd> and <kbd class="calibre12">packt.addressbook.ui</kbd> modules to the <kbd class="calibre12">packt.sortutil</kbd> module. That's because the service is consumed and the <kbd class="calibre12">ServiceLoader</kbd> APIs are invoked from the <kbd class="calibre12">packt.sortutil</kbd> module now:</p>
+<pre class="calibre23">    module packt.sortutil { 
+      exports packt.util; 
+      uses packt.util.SortUtil; 
+    } </pre>
+<p class="calibre2">Compiling and running the code should give you the same output as before. But this time, the service lookup logic is now refactored into a common module usable by all consumers.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Selective service instantiation</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In the preceding examples, we have queried the <kbd class="calibre12">ServiceLoader</kbd> APIs to get <em class="calibre22">all</em> provider instances in an <kbd class="calibre12">Iterable</kbd>. We then looped through them and picked one. This is not a problem here because our services are simple and lightweight Java classes. That may not always be ideal. Imagine if services are more complex and need time and resources to instantiate. In such cases, you wouldn't want to instantiate every service provider when you know you won't use all of them.</p>
+<div class="packt_infobox">The Java module system is quite smart about how it manages service instances in an application. First of all, all service instances are <em class="calibre29">lazily loaded</em>. In other words, service provider instances are not automatically instantiated when the application starts up. The runtime creates a service instance only when the type is needed, like when some consumer asks for instances of the service using <kbd class="calibre28">ServiceProvider.load()</kbd>.<br class="calibre25"/>
+<br class="calibre25"/>
+Secondly, any service instances that are created during the lifetime of the application are always cached. The service loader maintains this cache and keeps track of all the service instances that have been created. When the second consumer requests the service, the instance is fetched off of the cache directly. It also intelligently makes sure that the order of the service instances returned always includes the cached instances first.<br class="calibre25"/>
+<br class="calibre25"/>
+Caching is automatic with service instances. If you want to clear the entire service provider cache during application execution, you can do so using the <kbd class="calibre28">ServiceProvider.reload()</kbd> API.</div>
+<p class="calibre2">The <kbd class="calibre12">ServiceLoader</kbd> API has an option of streaming instances of an intermediate type called <kbd class="calibre12">Provider</kbd>, which can then be used to create service provider instances. Rather than getting all the service instances directly, what you get instead is <kbd class="calibre12">Provider</kbd> instances--one instance per service implementation found. You can then instantiate only the service providers you want by using the <kbd class="calibre12">Provider.get()</kbd> method on those instances.</p>
+<p class="calibre2">As an example, consider the <kbd class="calibre12">getProviderInstanceLazy()</kbd> method on <kbd class="calibre12">SortUtil</kbd>. Rather than directly use <kbd class="calibre12">ServiceLoader.load(SortUtil.class)</kbd>, we can instead use <kbd class="calibre12">ServiceLoader.load(SortUtil.class).stream()</kbd>, which returns a <kbd class="calibre12">Stream</kbd> of <kbd class="calibre12">Provider</kbd> instances:</p>
+<pre class="calibre23">    Stream&lt;Provider&lt;SortUtil&gt;&gt; providers =<br class="title-page-name"/>      ServiceLoader.load(SortUtil.class).stream();</pre>
+<p class="calibre2">The <kbd class="calibre12">Provider</kbd> instances can then be inspected for things such as annotations and other type information. Here, we are just sorting them by type name, which is silly, but it works as a minimal example:</p>
+<pre class="calibre23">    Stream&lt;Provider&lt;SortUtil&gt;&gt; providers = <br class="title-page-name"/>      ServiceLoader.load(SortUtil.class).stream() 
+       .sorted(Comparator.comparing(p -&gt; p.type().getName()));</pre>
+<p class="calibre2">At this time, no service instances are created. The actual instantiation of the service provider types happens when the <kbd class="calibre12">Provider.get</kbd> is called:</p>
+<pre class="calibre23">    SortUtil util = providers.map(Provider::get)<br class="title-page-name"/>                             .findAny() 
+                             .orElse(null);</pre>
+<p class="calibre2">In the preceding code, we call <kbd class="calibre12">Provider.get()</kbd> on each provider instance through the map function and pick one. This way, we can defer the creation of instances as well as selectively instantiate provider types by calling <kbd class="calibre12">Provider.get</kbd> only on the ones we need.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Services and the module system goals</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">Since services are a part of the Java module system, how do they align with the two goals of the module system--strong encapsulation and reliable configuration?</p>
+<p class="calibre2">Let's begin with strong encapsulation. Services provide an alternative way of having types in modules interact with one another, which does not involve having to expose types to all consuming modules. The service provider packages do not have to be <kbd class="calibre12">exported</kbd> and thus they are encapsulated even from modules that <em class="calibre22">read</em> the module containing the service! At the same time, they are published as implementations of a service type, and thus can be used by modules that do not even <em class="calibre22">read</em> the service implementation module. So, in a way, the types are still encapsulated, although not in the same way as what we've seen so far.</p>
+<p class="calibre2">How about reliable configuration? Since the service providers and the service consumers <em class="calibre22">declare</em> the fact that they are providing and consuming services respectively, it's easy for the runtime and the <kbd class="calibre12">ServiceProvider</kbd> API to make sure that the right consumers get the right services. However, you can easily compile a bunch of modules without any service implementations available in the module path.</p>
+<p class="calibre2">For example, you can delete the <kbd class="calibre12">packt.sort.bubblesort</kbd> and <kbd class="calibre12">packt.sort.javasort</kbd> modules from your source code and compile the rest of the modules. It works! You can execute the <kbd class="calibre12">Main</kbd> module. It still works, although the <kbd class="calibre12">ServiceProvider</kbd> API does not find any service instances. We are returning <kbd class="calibre12">null</kbd> in our example, but we could easily handle this scenario by providing a default service implementation (assuming there's a default implementation called  <kbd class="calibre12">DefaultSortImpl</kbd>) in case nothing is found:</p>
+<pre class="calibre23">    SortUtil util = providers.map(Provider::get)<br class="title-page-name"/>                             .findAny() 
+                             .orElse(new DefaultSortImpl()); </pre>
+<p class="calibre2">Why is this? When there's a module that clearly declares itself as a service consumer, why do the compiler and runtime not check if at least one service implementation is available? The reason is, it is by design. Service dependencies are <em class="calibre22">meant</em> to be optional. Remember the concept of loose coupling we started the chapter with. We want to be able to plug-and-play service consumers and providers at runtime. This works perfectly well with services.</p>
+<p class="calibre2">The reliable configuration checking of the platform, however, does come into play when there's a service module that does not have some of its dependencies met. For example, let's say we have a service consumer module <strong class="calibre1">C</strong>. You can compile and execute this module without the presence of a service provider. In the following picture, the Java platform won't complain:</p>
+<div class="packt_figure"><img class="image-border65" src="../images/00072.jpeg"/></div>
+<p class="calibre2">However, if you do add a provider module, you'll need to make sure it has all the dependencies met. For instance, let's say you drop in a provider module <strong class="calibre1">P</strong> that provides an implementation for the service that <strong class="calibre1">C</strong> needs. Now this provider module needs to follow all the rules for reliable configuration. If this module reads module <strong class="calibre1">D</strong> and module <strong class="calibre1">D</strong> doesn't exist as an observable module, the platform complains:</p>
+<div class="packt_figure"><img class="image-border66" src="../images/00073.jpeg"/></div>
+<p class="calibre2">It seems strange that while the platform was perfectly fine when there was no provider module available, it complains when a provider module exists, but it doesn't have a dependency met. Why could it not ignore module <strong class="calibre1">P</strong> then? The answer is, again, reliable configuration. The absence of a provider module could be intentional. But if the platform finds a module that it could technically use, but cannot, because of an unmet dependency, that indicates a <em class="calibre22">broken</em> state, and thus, it errors out accordingly. Even allowing loose coupling through services, the platform is essentially trying the best it can to provide reliable configuration for us.</p>
+
+
+            </article>
+
+            
+        </section>
+    
+
+        <section>
+
+                            <header>
+                    </header><h1 class="header-title" id="calibre_pb_0">Summary</h1>
+                
+            
+            <article>
+                
+<p class="calibre2">In this chapter, we've taken a detailed look at the services feature in the Java module system. We've learned the disadvantages of tight coupling of modules, and how loose coupling provides more flexibility. We then dove right into the syntax of creating and using services and then implemented a sorting service with two provider implementations. We then looked at some advanced concepts related to services, such as mechanisms for prioritizing service instances, using the service interface itself to handle service lookup, and deferring service instance creation using the <kbd class="calibre12">Provider</kbd> type in the case of heavy-weight services.</p>
+<p class="calibre2">We then revisited the two goals of modularity--strong encapsulation and dependency injection--and evaluated how the services feature impacts those goals.</p>
+<p class="calibre2">In the next chapter, we'll learn about the new <em class="calibre22">linking</em> phase that now applies to Java development thanks to modularity features. We'll also revisit the problem of the monolithic JDK that we discussed in <span><a target="_blank" href="part0021.html#K0RQ0-ed2405f4162b4f86b565edd6b6d679fb" class="calibre4">Chapter 1</a>, <em class="calibre22">Introducing Java 9 Modularity</em>,</span> How can we make that better? How can we leverage the concepts of modularity to create leaner and meaner runtimes that are smaller and perform better? The answers to these questions and much more can be found in the next chapter!</p>
+
+
+            </article>
+
+            
+        </section>
+    </body></html>
