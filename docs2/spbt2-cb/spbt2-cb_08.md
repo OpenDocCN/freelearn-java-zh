@@ -1,0 +1,235 @@
+# Spring Boot DevTools
+
+在本章中，我们将学习以下主题：
+
++   将 Spring Boot DevTools 添加到项目中
+
++   配置 LiveReload
+
++   配置动态应用程序重启触发器
+
++   使用远程更新
+
+# 简介
+
+在 DevOps、敏捷软件开发实践、微服务的引入以及越来越多的团队进行持续开发和部署的世界中，能够快速看到应用程序的代码更改，而不必经历整个重新编译整个项目、重建和重启应用程序的过程，这一点变得更加重要。
+
+容器化服务如 Docker 的出现，在访问实际应用程序运行环境方面也提出了挑战。它通过抽象和封装运行时环境改变了机器的概念，移除了使用任何端口来获取访问的能力。
+
+Spring Boot DevTools 提供了使用 HTTP 远程调试隧道进行选择性地重新加载类和调试运行在 Docker 容器中的应用程序的能力，以便为开发者提供一个快速反馈循环，以便在运行中的应用程序中看到他们的更改，而无需经历长时间的重构建和重启周期。
+
+# 将 Spring Boot DevTools 添加到项目中
+
+从 Spring Boot 1.3 版本开始，我们能够在项目中利用 DevTools 组件，以实现诸如代码更改时自动重启应用程序、重新加载浏览器窗口以更新 UI 或远程重新加载应用程序等功能。
+
+DevTools 模块适用于 Maven 和 Gradle，并且与 Eclipse 或 IntelliJ IDEA 编辑器配合良好。
+
+在本章中，我们将介绍与 Gradle 和 IntelliJ IDEA 的集成，但有关使用 Spring Boot DevTools 的详细信息，请参阅[`docs.spring.io/spring-boot/docs/current/reference/html/using-boot-devtools.html`](http://docs.spring.io/spring-boot/docs/current/reference/html/using-boot-devtools.html)上的文档。
+
+# 如何操作...
+
+继续我们的`BookPub`项目，我们将通过以下步骤将 DevTools 模块添加到主构建配置中：
+
+1.  将以下内容添加到位于项目根目录的`build.gradle`文件中：
+
+```java
+dependencies { 
+    ... 
+    compile("io.dropwizard.metrics:metrics-graphite:3.1.0") 
+    compile("org.springframework.boot:spring-boot-devtools") 
+    runtime("com.h2database:h2") 
+    ... 
+} 
+```
+
+1.  通过运行`./gradlew clean bootRun`来启动应用程序。
+
+1.  应用程序启动后，你可能会在控制台日志中注意到关于无法注册 Spring Boot admin（除非你有一个正在运行的）的输出警告，如下所示：Failed to register application as Application.... 让我们从项目根目录下的`build/resources/main`目录中的`application.properties`文件进行实时更改，并添加以下内容的属性条目：
+
+```java
+spring.boot.admin.auto-registration=false 
+```
+
+1.  在不进行其他操作的情况下，保存文件后，我们应该看到控制台日志显示应用程序上下文正在重启。
+
+# 它是如何工作的...
+
+如您现在可能已经了解的那样，当我们将 `spring-boot-devtools` 模块作为依赖项添加时，会发生一些自动配置的魔法，以添加许多组件。一些监听器和自动配置扩展了应用程序上下文，以处理代码更改并执行适当的重启和重新加载，包括本地和远程。
+
+在我们的配方中，我们进行了一个快速测试，以确保重启功能正常工作，并且通过在 `application.properties` 文件中更改属性来确保一切已配置。您可能已经注意到，我们不是在 `src/main/resources/application.properties` 中进行更改，而是在位于 `build/resources/main` 目录下的编译版本中进行更改。这样做的原因是因为我们在 Gradle 构建阶段使用的 `info.` 块的属性占位符替换。如果我们只更改原始文件并使用 IntelliJ 编译选项，它将不会执行所需的替换，从而导致重启失败。
+
+当 DevTools 启用时，启动后的应用程序开始监视类路径上的类更改。当任何类或资源更改时，它将作为 DevTools 通过刷新包含项目代码库的类加载器（这不是包含静态依赖项工件类的类加载器）来重新加载应用程序的触发器。
+
+以下链接提供了详细的工作原理解释：
+
+[Spring Boot DevTools 使用参考](http://docs.spring.io/spring-boot/docs/current/reference/html/using-boot-devtools.html#using-boot-devtools-restart)
+
+在可重新加载的类加载器完成刷新后，应用程序上下文会自动重启，从而有效地导致应用程序重启。
+
+# 配置 LiveReload
+
+对于从事前端 Web 应用程序的人来说，可能会同意，一旦后端代码或资源发生更改，能够自动重新加载页面将节省几个点击，并防止忘记重新加载导致浪费调试努力和追逐不存在的错误的情况。幸运的是，DevTools 通过提供 LiveReload 服务器实现来救命，该实现可以与 LiveReload 浏览器扩展一起使用，在后台更改发生时自动重新加载页面。
+
+# 如何操作...
+
+如果将 DevTools 模块添加到构建依赖项中，LiveReload 服务器已自动启动。然而，我们确实需要通过执行以下步骤来安装和启用浏览器扩展：
+
+1.  除非浏览器已经安装了 LiveReload 扩展，否则请访问 [`livereload.com/extensions/`](http://livereload.com/extensions/) 并为您的浏览器选择合适的扩展（Firefox、Safari 和 Chrome 都受支持）。
+
+对于 Internet Explorer 用户，有一个第三方扩展可以在[`github.com/dvdotsenko/livereload_ie_extension/downloads`](https://github.com/dvdotsenko/livereload_ie_extension/downloads)找到。
+
+1.  安装扩展后，通常需要在页面上通过点击工具栏中的按钮来启用它。在 Chrome 浏览器中，它看起来是这样的：![](img/8114390a-7101-4692-b995-d33a1fe19d56.png)
+
+1.  启用扩展后，我们可以继续进行另一个更改，就像在之前的菜谱中做的那样（或任何其他代码或资源更改），或者简单地执行`touch build/resources/main/application.properties`命令。我们应该在后台看到应用程序重新加载，以及浏览器页面在之后重新加载。
+
+# 它是如何工作的...
+
+通过添加 LiveReload 浏览器扩展，并将 LiveReload 服务器嵌入到我们的`BookPub`应用程序中，现在浏览器能够通过 WebSocket 连接到后端服务器以监控更改。当 Spring Boot DevTools 检测到应该触发重新加载的更改时，它将触发重新加载，并向浏览器发送通知以重新加载页面。
+
+如果需要禁用 DevTools 功能中的 LiveReload 部分，可以通过添加`spring.devtools.livereload.enabled=false`属性通过任何支持的配置选项轻松实现，无论是属性文件、环境变量还是系统属性。
+
+# 配置动态应用程序重启触发器
+
+在之前的菜谱中，我们已经探讨了 DevTools 在代码或资源更改后重启应用程序以及与浏览器通信以重新加载页面时的基本功能。本节将介绍我们可以利用的各种配置选项，以向 Spring Boot DevTools 准确指示我们希望由哪些事件触发，以及何时触发。
+
+# 如何操作...
+
+默认情况下，将 DevTools 模块添加到项目中将使其监控所有类或资源，这可能会变成不希望的行为，尤其是在多模块仓库中。当在 IntelliJ 或 Eclipse 等 IDE 中构建和启动项目时，这一点尤为明显。我们需要通过调整配置设置来告诉 DevTools 排除我们项目中的`db-count-starter`子模块从监视列表：
+
+1.  让我们在项目根目录下的`db-count-starter/src/main/resources/META-INF`目录中创建一个名为`spring-devtools.properties`的文件，并包含以下内容：
+
+```java
+restart.exclude.db-count-starter=/db-count-starter/build/(classes|resources)/main 
+```
+
+1.  接下来，我们需要在 IDE 中启动我们的应用程序，通过打开位于项目根目录下的`src/main/java/com/example/bookpub`目录中的`BookPubApplication`类，并在**运行**或**调试**模式下启动`main(String[] args)`方法。
+
+1.  排除`db-count-starter`模块后，我们可以安全地更改一个文件，例如位于项目根目录下的`db-count-starter/build/resources/main/META-INF`目录中的`spring.factories`资源文件，结果却看到应用程序没有被重新启动
+
+1.  如果我们想要完全禁用重启功能，我们可以通过向位于项目根目录下的`src/main/resources`目录中的`application.properties`文件添加以下属性来实现：
+
+```java
+spring.devtools.restart.enabled=false 
+```
+
+1.  在重新启动我们的应用程序后，即使是`build/resources/main/application.properties`文件的更改，也就是从类路径中加载的内容，也不会触发应用程序重启
+
+# 它是如何工作的...
+
+在这个菜谱中，我们查看了一些不同的重新加载触发配置，因此让我们逐个查看它们，以了解在哪里最好使用它们：
+
++   `spring.devtools.restart.enabled`：此属性提供了最简单的控制，完全启用或禁用 DevTools 的重启功能。当值为`false`时，无论类路径上的类或资源发生何种更改，都不会重新启动应用程序。
+
++   `spring.devtools.restart.exclude`：此属性提供了一种停止特定类路径重新加载的能力。此属性接受使用 Ant 路径匹配模式风格的逗号分隔值。默认排除值是`"META-INF/maven/**,META-INF/resources/**,resources/**,static/**,public/**,templates/**,**/*Test.class,**/*Tests.class,git.properties,META-INF/build-info.properties"`。
+
++   `spring.devtools.restart.additional-exclude`：此属性提供了在不复制/粘贴默认值的情况下向默认排除列表添加的便利性，而是简单地添加到它们，同时保留原始默认值。它采用相同的逗号分隔 Ant 路径匹配模式风格输入。
+
++   `spring.devtools.restart.additional-paths`：此属性提供了监视类路径之外资源的能力。例如，这可能是应用程序启动时加载的`config`目录，如果配置条目发生变化，则希望重新启动应用程序。它接受绝对文件路径的逗号分隔列表。
+
++   `spring.devtools.restart.poll-interval`：此属性指定在检查类路径更改之间暂停多长时间，以毫秒为单位。默认值为`1000`毫秒，但如果需要节省一些 CPU 周期，这将有效。
+
++   `spring.devtools.restart.quiet-period`：此属性控制在重启发生之前，在类路径没有任何更改的情况下应经过多少毫秒。这是确保如果发生连续更改，重启不会变得压倒性的必要条件。默认值为`400`毫秒，但如有需要可以更改。
+
++   `spring.devtools.restart.trigger-file`：此属性通过监视`trigger`文件的变化来提供对何时重新启动的显式控制。这在类路径持续变化的情况下很有用，你不想陷入重新启动循环。
+
+所列出的所有先前属性设置通常在开发人员工作的所有应用程序项目中共享，因此 DevTools 提供了在此处定义全局属性的能力，这使得在多个项目中共享开发配置变得方便，无需在所有不同的代码库中复制/粘贴相同的值。
+
+在内部，此功能作为`PropertySource`实现，并将其添加到配置优先级层次结构的顶部。这意味着不仅`spring.devtools`配置家族，任何添加到全局文件的属性都将应用于所有使用 DevTools 的应用程序。
+
+控制重新加载触发器的一种方法是使用`META-INF/spring-devtools.properties`，其中包含`restart.exclude.<name>`和`restart.include.<name>`配置。默认情况下，应用程序的重新启动仅由实际类或资源的变化触发，这些类或资源位于类路径上且未打包到 JAR 文件中。这允许你将大多数类保留在不可重新加载的基本类加载器中，从而大大减少了需要监控变化条目数量。
+
+在开发人员与相互依赖的多个项目一起工作或在一个多模块仓库（如`BookPub`）中工作的场合，可能希望将一些 JAR 文件添加到可重新加载的类加载器中，并监视它们的变化。这通常适用于指向`build/libs`或`target`目录的依赖项，其中它们内部的 JAR 文件是构建任务执行的直接结果，并且通常频繁重建。
+
+另一个用例，我们在本食谱中探讨了，是包含或排除`build/classes`或`target/classes`从监视列表中。如果一个多模块项目在 IDE 中加载，类路径通常包含对子模块构建目录的直接引用，而不是编译的 JAR 工件，根据用例，我们可能选择包含或排除这些内容以触发重新加载。
+
+键的`<name>`部分并不重要，只要它是唯一的即可，因为所有的`META-INF/spring-devtools.properties`文件都将被加载为组合文件，无论它们是否位于 JAR 文件内部还是直接在项目中。建议的方法是使用子模块/工件名称，因为它通常可以确保唯一性。如果有多个模式适用，则可以在名称后附加一个序列号，例如`restart.exclude.db-count-starter-1`和`restart.exclude.db-count-starter-2`。每个键的值应包含一个有效的正则表达式模式，可以针对类路径中的每个条目进行评估，以确定特定的类路径 URL 是否应该进入可重新加载或基本类加载器。
+
+# 使用远程更新
+
+随着 Docker 的日益流行，越来越多的应用程序被构建和部署为 Docker 容器。Docker 的一个伟大特性是将运行时环境与宿主操作系统隔离开来，但这种隔离也使得在真实环境中对应用程序进行持续更改和测试变得困难。每次属性文件或 Java 类的更改，都需要重新构建一切，创建新的 Docker 镜像，重启容器等等。对于每一次更改，这都是一大堆工作。
+
+尽管不幸的是，从 2.0 版本开始，Spring Boot 已经移除了远程调试的能力，但仍然有一个非常有用的功能，可以在你编写代码时，从 IDE 中远程重新加载代码更改，而无需至少重新构建应用程序 JAR 和 Docker 镜像。
+
+**远程重启**功能为更好的持续开发提供了解决方案，使得可以在远程进行动态应用程序重启，就像它是在本地机器上一样。
+
+# 如何实现...
+
+如你所猜，远程重启涉及一个在本地运行的代理，并向远程客户端发送指令。DevTools 提供了一个这样的代理实现——`RemoteSpringApplication`：
+
+1.  为了启用远程重启功能，我们需要在项目根目录下的`src/main/resources`目录中添加一个名为`application.properties`的属性文件，内容如下：
+
+```java
+spring.devtools.remote.secret=our-secret 
+```
+
+1.  下一步是在 IDE 中为`RemoteSpringApplication`类创建一个 Java 应用程序启动配置。
+
+确保程序参数字段包含你试图调试的应用程序的基本 URL 以及端口非常重要。确保工作目录指向主项目，并且模块的类路径指向主项目模块。
+
+下页的图显示了在 IntelliJ IDEA 中此类配置的外观。Eclipse IDE 也会有类似的形式。
+
+![图片](img/7503253b-f437-48e8-a5be-cbd5facb2aea.png)
+
+1.  填写完所有字段后，我们需要通过点击运行来在 IDE 中启动`RemoteSpringApplication`。如果一切配置正确，我们应该在日志中看到类似的输出：
+
+```java
+      .   ____          _                                              __ _ _
+    /\ / ___'_ __ _ _(_)_ __  __ _          ___               _ 
+    ( ( )___ | '_ | '_| | '_ / _` |        | _ ___ _ __  ___| |_ ___ 
+     \/  ___)| |_)| | | | | || (_| []::::::[]   / -_) '  / _   _/ -_) ) ) ) )
+      '  |____| .__|_| |_|_| |___, |        |_|____|_|_|____/_____|/ / / /
+     =========|_|==============|___/===================================/_/_/_/
+     :: Spring Boot Remote ::  (v2.0.0.BUILD-SNAPSHOT)
+
+    2017-12-26 21:33:28.520  INFO o.s.b.devtools.RemoteSpringApplication   : Starting RemoteSpringApplication v2.0.0.BUILD-SNAPSHOT ...
+    2017-12-26 21:33:28.524  INFO o.s.b.devtools.RemoteSpringApplication   : No active profile set, falling back to default profiles: default
+    2017-12-26 21:33:28.781  INFO s.c.a.AnnotationConfigApplicationContext : Refreshing org.springframework.context.annotation.AnnotationConfigApplicationContext@6babf3bf: startup date [Tue Dec 26 21:33:28 CST 2017]; root of context hierarchy
+    2017-12-26 21:33:29.295  WARN o.s.b.d.r.c.RemoteClientConfiguration    : The connection to http://127.0.0.1:8080 is insecure. You should use a URL starting with 'https://'.
+    2017-12-26 21:33:29.368 DEBUG o.s.b.devtools.restart.ChangeableUrls    : Matching URLs for reloading : [file:/.../ch8/build/classes/main/, file:/.../ch8/build/resources/main/]
+    2017-12-26 21:33:29.401  INFO o.s.b.d.a.OptionalLiveReloadServer       : LiveReload server is running on port 35729
+    2017-12-26 21:33:29.443  INFO o.s.b.devtools.RemoteSpringApplication   : Started RemoteSpringApplication in 1.497 seconds (JVM running for 2.248)
+
+```
+
+1.  为了模拟远程操作，我们将在一个单独的命令行中启动应用程序，执行`./gradlew clean bootJar`命令，然后执行`./build/libs/bookpub-0.0.1-SNAPSHOT-exec.jar`。
+
+1.  一旦应用程序启动，查看日志中的最后一行，它应该看起来像以下内容：
+
+```java
+INFO 50926 --- [           main] ication$$EnhancerBySpringCGLIB$$11c0ff63 : Value of my.config.value property is:
+```
+
+1.  `my.config.value`的属性值没有被设置，因为我们没有在我们的`application.properties`文件中定义它，并且我们没有使用任何环境变量或启动系统属性设置来设置它。
+
+1.  让我们假设我们需要进行实时更改，并从项目根目录下的`build/resources/main`目录修改`application.properties`文件，内容如下：
+
+```java
+my.config.value=Remote Change 
+```
+
+1.  现在，我们应该在控制台中看到我们的应用程序已经自动重启，一切完成后，我们应该看到类似以下的内容：
+
+```java
+INFO 50926 --- [  restartedMain] ication$$EnhancerBySpringCGLIB$$11c0ff63 : Value of my.config.value property is: Remote Change 
+```
+
+# 它是如何工作的...
+
+它可能看起来像是巫术魔法，但远程重启功能背后的科学相当简单。在底层，当包含 DevTools 模块时，`/.~~spring-boot!~/restart`的 HTTP 端点处理器会自动添加。这允许`RemoteSpringApplication`进程通过 HTTP 隧道将代码更改有效载荷发送到远程应用，并返回。
+
+为了确保没有恶意的外部调试连接能够连接到我们的远程应用程序，`spring.devtools.remote.secret`属性的值会被发送并验证，以建立请求的真实性。
+
+在食谱的*第 2 步*中，我们使用`http://127.0.0.1:8080`作为程序参数值启动了`RemoteSpringApplication`进程，这是`RemoteSpringApplication`知道如何与我们的远程应用通信的方式。`RemoteSpringApplication`类本身通过监控类路径来扫描本地文件更改。
+
+在食谱的*第 6 步*中，当我们向代码中的配置添加属性时，非常重要的一点是要注意，我们对`application.properties`文件进行了更改，该文件位于`RemoteSpringApplication`类的运行类路径中，而不是在`src/main/resources`下，而是在`build/resources/main`目录下，这是 Gradle 放置所有编译文件的目录——希望这是你的 IDE 用作运行`RemoteSpringApplication`的类路径的相同目录。如果这不是你的 IDE 使用的路径，你应该在 IDE 编译类的相应文件夹中进行更改——对于 IntelliJ IDEA，默认情况下将是`out/production/resources`目录。
+
+如果需要在作为 Docker 容器运行的应用程序中启用 DevTools，我们需要明确配置`build`脚本，通过在主项目的`build.gradle`文件中添加以下内容来实现：
+
+```java
+bootJar { 
+    ... 
+    excludeDevtools = false 
+} 
+```
+
+我们需要这样做的原因是，默认情况下，当 Spring Boot 应用程序被重新打包用于生产部署时，这在构建 Docker 容器镜像时是常见的情况，DevTools 模块在构建时会从类路径中排除。为了防止这种情况发生，我们需要告诉构建系统不要排除该模块，以便利用其功能，即远程重启。
