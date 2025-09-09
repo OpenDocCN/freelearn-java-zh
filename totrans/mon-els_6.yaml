@@ -1,0 +1,1092 @@
+- en: Chapter 6. Troubleshooting Performance and Reliability Issues
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This chapter focuses on troubleshooting common performance and reliability issues
+    for Elasticsearch using case studies with real-world examples.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This chapter will help answer the following questions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: How do I configure my Elasticsearch cluster to optimize performance?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How do I prevent `OutOfMemoryError` exceptions?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How does my data-indexing strategy affect cluster resources?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Why are my queries running slow?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How can I keep query performance strong when indexing a large amount of data?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How can I configure indices to use less disk space?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: System configuration
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Elasticsearch configuration may lead to a number of performance and reliability
+    issues, as mentioned in [Chapter 2](ch02.html "Chapter 2. Installation and the
+    Requirements for Elasticsearch"), *Installation and the Requirements for Elasticsearch*.
+    A quick reminder that the most important configuration changes to make to your
+    cluster are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Ensuring that the Elasticsearch heap size (`ES_HEAP`) is set to 1/2 of available
+    system memory, but does not exceed 31 GB. Set this value in `/etc/defaults/elasticsearch`
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Disabling memory swapping
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Locking the Elasticsearch address space into memory by setting `bootstrap.mlockall:
+    true` in `elasticsearch.yml`'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Refer to [Chapter 2](ch02.html "Chapter 2. Installation and the Requirements
+    for Elasticsearch"), *Installation and the Requirements for Elasticsearch*, for
+    more detailed instructions on how to set these values.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The fielddata cache
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: A poorly configured Elasticsearch fielddata cache is often the reason for `OutOfMemoryError`
+    exceptions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When running a `sort` or `aggregation` (or `facet`) query, Elasticsearch fills
+    the cache with all distinct field values from the query. This allows similar,
+    subsequent queries to execute more quickly. However, Elasticsearch doesn't put
+    an upper bound on the cache size by default; therefore, the data is not automatically
+    evicted. If the cache causes the total JVM memory to fill up beyond the `ES_HEAP`
+    size, the node will throw an `OutOfMemoryError` exception and will require an
+    Elasticsearch restart.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To limit the fielddata cache size, set the `indices.fielddata.cache.size` value:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: This will limit the fielddata cache size to `30%` of the available JVM heap
+    space.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can set this value to a fixed value as well. For example, setting it to
+    `10gb` will limit the cache size to no more than 10 gigabytes. The value that
+    you choose will depend on the cluster and use case, but if you see an `OutOfMemoryError`
+    caused by the fielddata cache overflowing, it's a good idea to set this field.
+    The downside to limiting the fielddata cache is that it may affect query performance
+    if a query needs to repopulate evicted fielddata cache items when the cache fills
+    up.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If you see `OutOfMemoryError` logged to `/var/log/elasticsearch/`, you can
+    check whether the fielddata cache is the problem by checking in Bigdesk or Marvel:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![The fielddata cache](img/B03798_06_01.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The fielddata cache in Bigdesk
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The fielddata cache from the Marvel Kibana dashboard looks like this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![The fielddata cache](img/B03798_06_02.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: The fielddata cache in Marvel
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Do not change the `indices.fielddata.cache.expire` setting. This is a legacy
+    setting to expire old cache values, and it does not provide any increase in performance.
+    Elasticsearch developers stated that it will be deprecated in a future release.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can also reduce the fielddata cache footprint by optimizing queries that
+    use the cache.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For example, in our Twitter data, we have a `timestamp_ms` field, which stores
+    the tweet's timestamp at millisecond precision. Because there are `86,400,000`
+    milliseconds in a day, if we collected `5,000,000` Tweets in 24 hours, it's likely
+    that the majority of these tweets will have a unique timestamp. If we run a query
+    that sorts on this field, it will fill up the fielddata cache with as many as
+    `5,000,000` distinct timestamps. This will quickly fill up the cache.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A more functional approach would be to store the timestamp field at either second
+    or minute precision. Using second precision, the fielddata cache will be reduced
+    from holding `5,000,000` unique timestamps to approximately `86,400` timestamps.
+    Using minute precision will reduce it to only `1,440` unique timestamps.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Even after limiting the fielddata cache size to a fixed amount, you may still
+    face `OutOfMemoryError` exceptions related to the field cache. This may be a result
+    of a single query loading the fielddata cache with more data than it has been
+    allocated.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This may happen if, for example, the fielddata cache is set to 2 GB, but we
+    run a single query that tries to load 2.5 GB of data into the cache. This issue
+    can be fixed by editing the fielddata circuit breaker in `elasticsearch.yml`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The fielddata circuit breaker is set by default to `60%` of the total JVM heap
+    size:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: This way, if a single query's fielddata is more than `60%` of the heap, the
+    circuit breaker will trip and cause the query to throw an exception rather than
+    causing an `OutOfMemoryError`. Using a lower percentage than the default `60%`
+    may help in solving `OutOfMemoryError` exceptions even when the fielddata cache
+    is limited in size.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Analyzing queries
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Analyzing slow queries and improving their performance can be very challenging.
+    This section examines how to look for the root cause of poor query performance,
+    and it offers some different approaches to finding a solution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Slow log
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'If you notice poor query performance, start with the slow log. To enable the
+    slow log, edit `elasticsearch.yml` and add these configuration options to all
+    nodes on the cluster:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: After updating `elasticsearch.yml` on all nodes, restart the cluster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This configuration enables the slow log for three operations:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Query operations**: This is when Elasticsearch is performing the actual search
+    for documents matching the query'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Fetch operations**: This is when Elasticsearch fetches relevant documents
+    from the index after finding documents of interest'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Index operations**: This is when indexing new documents in Elasticsearch'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'We''ve also set a threshold level for each point: `warn`, `info`, `debug`,
+    and `trace`. These levels identify the point at which Elasticsearch will write
+    to the slow log. For example, if a query takes six seconds, based on our preceding
+    configuration, the query will be logged at an `info` level. These levels make
+    it possible to search for queries of a specific threshold.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Here''s an example of searching the slow log for all queries that took longer
+    than eight seconds, which were logged at the `warn` level:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: '![Slow log](img/B03798_06_03.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Elasticsearch slow log for actions that took longer than eight seconds
+  prefs: []
+  type: TYPE_NORMAL
+- en: The next section covers some additional approaches to improve query performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Improving query performance
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This section highlights common reasons behind certain slow queries on Elasticsearch,
+    and offers instruction to improve performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: High-cardinality fields
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As previously mentioned, running aggregation or sorts against high-cardinality
+    fields (for example, dates precise to the millisecond) can fill up the fielddata
+    cache which leads to `OutOfMemoryError` exceptions. However, even without these
+    errors, running aggregations and sorts can be detrimental to performance. When
+    it comes to dates, it's generally a good idea to store and use less precise dates
+    in order to speed up query execution time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Querying smaller indices
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: As Elasticsearch indices grow larger, query performance will suffer. Another
+    way to improve performance is to run queries against small indices. You can do
+    this by storing our data in several smaller indices instead of one large one.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For example, with Twitter data, you can change the ingestion process to create
+    a new index every day to store tweets. This way, we only query a subset of the
+    total indices when running time-bounded queries.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Index templates are helpful in this case because they automatically apply a
+    data mapping to new indices that follow a certain naming convention.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s create a new index template for our daily Twitter indices using the
+    `twitter-YYmmdd` naming convention. Using this template, the `twitter-20160101`
+    index will hold all tweets from January 1, 2016\. Create this template with the
+    following `cur` `l` command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Note the use of the `*` asterisk wildcard in the `twitter-*` template name.
+    This wildcard that matches 0 or more characters, so it will match index names,
+    such as `twitter-20160101`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We can also create an index alias that allows us to query many or all of the
+    indices at once.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following example creates an alias using the `*` wildcard to query all
+    available Twitter data:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: Play around with different index sizes to find the best fit, depending on your
+    data and setup. It's important to test how they affect your performance before
+    committing to a particular index size because changing the indexing strategy later
+    will involve re-indexing all of your data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If you have a five-node cluster and collect 10,000 records per day, it makes
+    sense to create new indices monthly versus daily to keep the number of indices
+    down and to ensure that each individual index isn't too small. However, it's important
+    to test all assumptions before committing to an indexing strategy. Use a tool
+    such as Logstash and Kibana to monitor average query performance using different
+    index sizes before making this decision.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Cold indices
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Sometimes, an Elasticsearch query is slow the first few times it runs, but it
+    speeds up considerably afterwards. The lag occurs because the index is "cold"
+    and the Elasticsearch caches are not populated with relevant data. After running
+    the query a few times, Elasticsearch fills up the fielddata cache and other caches
+    based on the query criteria. Subsequent queries with similar criteria will take
+    advantage of these cached values and run faster as a result.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Elasticsearch "warmers" and "eager fielddata loading" solve the problem of cold
+    indices by ensuring that the first time a user runs a query, required data for
+    this query is already loaded in memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Indices can be cold for a variety of reasons:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: New data is indexed
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Automatic shard balancing and movement
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: An Elasticsearch node restarted
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The cache was manually cleared
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To demonstrate the performance gains of a slow aggregation query, use the following
+    command:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The results of this are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'If we run the query a few more times, we''ll start to see results like the
+    following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This query took `5.8` seconds to finish at first, but after a few runs, it
+    only took `0.529` seconds to complete. The initial slow query can be avoided and
+    the performance can become more predictable after adding common queries to the
+    Elasticsearch warmer. We''ll demonstrate this by clearing the index cache again,
+    then adding our query to the `twitter` index with the Elasticsearch Warmers API:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can verify that the warmer query made it into our index by checking the Kopf
+    **REGISTERED WARMERS** page at `http://elasticsearch-node-01:9200/_plugin/kopf`
+    and navigating to **more** | **warmers**.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This screenshot shows the warmer query on the Kopf warmers page:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Cold indices](img/B03798_06_04.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Viewing query warmers in Kopf
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The warmer will take effect after restarting Elasticsearch. Run the query again
+    to see a performance increase:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: This led to more than a 10x speedup, from `5.8` seconds to `0.41` seconds. We
+    saw a similar increase after manually running the query a few times to populate
+    the fielddata cache with data from the `text` field.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We can also enable eager fielddata loading for particular Elasticsearch fields:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: If there are only a few distinct values for our fielddata cache, set the `loading`
+    value to `eager_global_ordinals` for more memory optimization. After enabling
+    either warming queries or eager fielddata loading, verify that the fielddata (and
+    filter cache, in the case of warming queries) get populated by checking Marvel's
+    node or Index statistics page or Bigdesk's fielddata chart.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: You can read more about warmers and eager field data loading at [https://www.elastic.co/guide/en/elasticsearch/reference/current/indices-warmers.htmlload-fielddata.html](https://www.elastic.co/guide/en/elasticsearch/reference/current/indices-warmers.html)
+    and [https://www.elastic.co/guide/en/elasticsearch/guide/current/preload-fielddata.html](https://www.elastic.co/guide/en/elasticsearch/guide/current/preload-fielddata.html).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The shard query cache
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: The shard query cache saves results for specific queries. Unlike the fielddata
+    cache where any query that needs fielddata will speed up, with cached queries,
+    we have to run the exact same query more than once to have a cache hit. Additionally,
+    the entire query result is stored with the query cache. This is different from
+    the fielddata cache, in which only part of the query result is stored. This means
+    that the query cache will return results extremely quickly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The shard query cache currently only stores hit counts, aggregations, and search
+    suggestions. It does not store actual search results or hits. Moreover, the `search_type=count`
+    query parameter is required when running cached queries. This may be updated in
+    a future Elasticsearch release.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The query cache defaults to `1%` of the JVM heap, but it can be changed in
+    `elasticsearch.yml`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: The cache key is the JSON body of a search request. Even if a query is logically
+    identical to a query already in the cache, if there is a difference in whitespace
+    or key order, the cache will store these as two separate entries.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The shard query cache is disabled by default. To enable it on an existing index,
+    run the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Or when creating a new index, add the same parameter to the `settings` section:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: When using the query cache, you will always receive the same up-to-date query
+    results that you would get when running noncached queries. This is because cache
+    entries are invalidated automatically when new data is loaded into a shard once
+    the shard refreshes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Run the text aggregation query again a few times, this time using the query
+    cache:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After a few runs of this query, performance results like this should appear:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `4ms` response is an improvement from the `418ms` response using just the
+    fielddata cache, and a huge improvement from the original `5.8` seconds against
+    a cold Elasticsearch index.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Read more about the shard query cache at [https://www.elastic.co/guide/en/elasticsearch/reference/current/shard-request-cache.html](https://www.elastic.co/guide/en/elasticsearch/reference/current/shard-request-cache.html).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Script queries
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: Script queries are a powerful way to query an index by running arbitrary code
+    to manipulate or filter each hit the query comes across. However, they are also
+    very costly, and they can hurt performance in large indices.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Whenever possible, it is best to avoid using scripts in Elasticsearch queries
+    that need to return in a timely fashion. If you find yourself using them, try
+    to think of ways to restructure your data to make them no longer necessary.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: If you do use scripts in your application, make sure that you access source
+    document fields with `doc["text"]` instead of `_source.text`; the latter will
+    access the record on disk, while the former accesses it from memory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Testing meticulously
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: It's important to meticulously test each optimization strategy individually
+    to see which is most effective. If you experience a slow query, try to recreate
+    the problem on a smaller scale and test different optimizations until you find
+    one that works. Make sure that you only test one change at a time in configuration
+    or in query parameters. Also, run testing scripts for a long enough time period
+    to account for normal deviation in performance due to garbage collection, cache
+    evictions, and so on.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This approach to testing may feel tedious, but it will ultimately provide greater
+    insight into the cluster, and it will help avoid making unnecessary changes to
+    the system in the long run.
+  prefs: []
+  type: TYPE_NORMAL
+- en: System and data architecting
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This section covers strategies to improve overall system performance, data indexing
+    performance, and to maximize storage space.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Hot-Warm architecture
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: For time-series data, including Twitter and other social media data as well
+    as data from Logstash, Elastic.co recommends setting up what they have dubbed
+    a **Hot-Warm** architecture. This setup puts nodes into three groups.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Master nodes
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Ideally, dedicate three nodes as master nodes that do not store data or fulfill
+    queries. These machines don't need to be very powerful; they just perform cluster
+    management operations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Hot nodes
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Hot nodes hold the most recent data indices. All data writes are directed at
+    these machines, and they are likely the most-frequently queried nodes. Elastic.co
+    recommends equipping hot nodes with solid state drives (SSDs) for better I/O performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Warm nodes
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: In this architecture, data is not being written to warm nodes; instead, they
+    contain historical time-based data. For example, if we create a new Twitter index
+    every day, we can move an index from "Hot" to "Warm" after seven days.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To configure a Hot node, add the following to `elasticsearch.yml`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Likewise, for a Warm node, add the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To ensure that newly-created indices are allocated to the Hot nodes, configure
+    the index on creation with the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'After seven days to move it to the Warm nodes, use the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: Read more about the "Hot-Warm" architecture at [https://www.elastic.co/blog/hot-warm-architecture](https://www.elastic.co/blog/hot-warm-architecture).
+  prefs: []
+  type: TYPE_NORMAL
+- en: Reducing disk size
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: This section covers how to save disk space on your cluster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Compression
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: In Elasticsearch 2.0 and higher, you can increase the compression level for
+    an index to reduce its footprint on disk. Unfortunately, this also makes indexing
+    new data slower.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For use cases such as the preceding Hot-Warm architecture, it makes sense to
+    increase the compression level on Warm nodes because they are less taxed than
+    the Hot nodes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To increase the compression level on an Elasticsearch 2.0+ node, perform the
+    following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Close the index.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Configure the `index.codec` setting to `best_compression`.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Re-open the index.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: Storing the _source and analyzed fields
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'By default, Elasticesarch stores all documents passed to it in the `_source`
+    field and sets all fields to `analyzed`. This means that some basic tokenizers
+    are run on the field. Disabling these options can save some disk space. We may
+    decide to disable the `_source` field if we have documents stored elsewhere in
+    our system. Or, we can disable the `_source` field and set the individual fields
+    that we want to retrieve to `store: true`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For the `analyzed` fields, think carefully about how you will use your data
+    and set a field to `index: not_analyzed` if you don''t need it tokenized. E-mail
+    addresses, IP addresses, social media usernames, or other fields that we don''t
+    want to split up should be set to `not_analyzed`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Create a new index with `_source` disabled, and set some fields to `not_analyzed`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Unfortunately, there are some pretty big downsides to disabling the `_source`
+    field. In addition to not being able to retrieve the full source during a query,
+    the following are only supported if `_source` is enabled:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The Elasticsearch update API
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Elasticsearch highlighting
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Many tools and strategies to re-index data
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If disk space is a major concern, first check whether enabling data compression
+    will meet your storage needs before disabling the `_source` field.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Optimizing data ingestion
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: This section goes over some additional methods to improve data ingestion. In
+    all of these methods, it's important to monitor the data ingestion rate to ensure
+    that changes have the desired impact on performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As mentioned earlier, test one change at a time and run each test for a long
+    enough period to return meaningful results. The best place to monitor ingestion
+    performance is to select the index of interest in the Marvel *Indices* dashboard.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The following screenshot shows the Marvel Indices dashboard for our `twitter`
+    data index:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Optimizing data ingestion](img/B03798_06_05.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Marvel indexing requests
+  prefs: []
+  type: TYPE_NORMAL
+- en: Monitor this page in Marvel as you make changes to data ingest operations. This
+    will allow you to see how changes affect the indexing rate in real time, and you'll
+    be able to refer back to past indexing rate metrics for reference.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Bulk indexing operations
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: For bulk indexing operations, test various ingestion sizes and monitor them
+    in Marvel until you find the optimal size. For example, run tests at `1MB`, `5MB`,
+    `10MB`, `15MB`, and `20MB` until you find the value that works best. If you run
+    daily ingestion jobs, consider running them during off-peak hours so that resulting
+    slowdowns affect fewer users.
+  prefs: []
+  type: TYPE_NORMAL
+- en: After inserting data into Elasticsearch, the index must be refreshed before
+    a user can see the data. By default, the refresh interval is set to once a second.
+    This means that after indexing a document, it will appear in search results within
+    one second.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Refreshing as often as once a second can hurt performance during large indexing
+    operations. Lowering the refresh rate to a value such as `10s` or `30s` is worthwhile
+    if your system doesn't need to display new results immediately after they are
+    indexed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Setting the refresh rate to `-1` will disable refreshing altogether. This can
+    be useful for very large, one-time, or less-frequent periodic indexing operations.
+    Remember to enable index refreshing afterwards.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To disable index refreshing, use the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Turn enable index refreshing on afterwards:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: Warming queries are run every time an index is refreshed. Another option is
+    to keep index refreshing on, disable warming queries during large index operations,
+    and then re-enable warming when the indexing job is complete.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Disable index warmers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Re-enable index warmers:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: Drive configuration
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: We mentioned in the "Hot-Warm" architecture section that SSDs are great for
+    data indexing performance. Even if you don't use the "Hot-Warm" architecture,
+    consider using SSDs for data nodes on your Elasticsearch cluster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If SSDs are not an option, consider using fast hard drives (10,000+ RPM) configured
+    in **RAID 0**. Remember that RAID 0 mirrors for performance, not reliability,
+    but Elasticsearch's data replicas are sufficient for data reliability.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It's best to avoid storing data on network storage. If you run an Elasticsearch
+    cluster on virtual machines, make sure that they use local disks for storage.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Case studies
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: This section offers some real-world problem scenarios and solutions to use Elasticsearch.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Node configuration
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'You have a five-node production cluster, where each node has `32GB` of total
+    memory and `16GB` is allocated to Elasticsearch. Lately, you''ve noticed a problem:
+    every couple of days, `node-05` leaves the cluster without warning. Restarting
+    Elasticsearch on this node solves the problem temporarily, but the node will drop
+    out of the cluster again in a few days. How do we go about looking into this issue?'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The next time this error happens, check the Elasticsearch logs before restarting
+    the node:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You notice in the log file that Elasticsearch is throwing an `OutOfMemoryError`
+    exception, like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You know that running out of fielddata can cause `OutOfMemoryError` exceptions,
+    so after checking the `elasticsearch.yml` file, you find the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The cache setting was commented out. Uncomment this line and restart the Elasticsearch
+    node. This seems to solve the problem at first. However, after two weeks, another
+    `OutOfMemoryError` from `node-05` appears. After restarting the node, log into
+    Bigdesk for insight. Clicking on `node-05`, you see the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Node configuration](img/B03798_06_06.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: JVM memory in Bigdesk
+  prefs: []
+  type: TYPE_NORMAL
+- en: It doesn't look like Elasticsearch is using much of the available memory, but
+    this is probably because the node was just restarted.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Note that the maximum heap memory available for `node-05` is only about `250MB`.
+    This is odd, considering the host has `32GB` of system memory. At this point,
+    you want to ensure that the `ES_HEAP` variable was set properly. Open the following
+    file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You will see the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: It looks like this configuration, like the `indices.fielddata.cache.size`, was
+    also commented out. Uncommenting this line and restarting Elasticsearch brings
+    the node's total available memory to `16GB`, and eliminates the `OutOfMemoryError`
+    exceptions.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As mentioned earlier, node configuration errors are one of the most common reasons
+    for poor Elasticsearch performance or crashes. It's important to validate each
+    configuration change after it is made.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Query optimization
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: You found a problem in one of your company's internal enterprise Elasticsearch
+    web applications. First thing in the morning, the web application takes a long
+    time to load query results. Performance starts to improve only after running a
+    few queries.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To tackle this problem, take a look at the slow log. In one of the nodes, you
+    see a query that takes `4.7` seconds to run as an `INFO` event in the log:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The slow log won't necessarily write entries to all nodes, so check the log
+    on each host.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Use `python -m json.tool` to pretty-print the query:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You will see the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: This `aggs` parameters may mean that this query makes heavy use of the field
+    data cache. Diagnose this query and figure out what is causing the performance
+    issue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First, clear the fielddata cache to ensure consistent results:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now, run the query, as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Results will be as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: After running the query a few more times to ensure that the values it needs
+    are in the fielddata cache, the query runs in around `.6` seconds. This is a pretty
+    good improvement. Verify that the fielddata cache is now populated using Bigdesk
+    or Marvel (refer to images for fielddata cache for Bigdesk and Marvel).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The fielddata cache was probably getting cleared due to new data ingestion or
+    shard relocation overnight. To solve this problem, enable eager fielddata loading
+    on both the `user.screen_name` and `text` fields in the Elasticsearch mapping.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, this query''s performance still isn''t great. Checking the slow log
+    again, we note it still triggers a `TRACE` event:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'To figure out why this query takes over 0.5 seconds to run even after the fielddata
+    cache is populated, break the query down into individual queries—one that runs
+    the `text` aggregation, and another that runs the `screen_name` aggregation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This query takes approximately `.4` seconds to run:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: This query runs in `.08` seconds; this is a vast improvement over the `text`
+    aggregation query.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we've identified the `text` aggregation as the slow part of the query, consider
+    removing that operation and finding another solution which will yield similar
+    results. Although it depends what the aggregation is used for, aggregating on
+    a lower-cardinality field may be a suitable solution. For example, if the `text`
+    aggregation is used to build a word cloud, consider instead using the `entities.hashtags.text`
+    hashtag field to get a similar result.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another option is keeping the `text` aggregation, but running it periodically
+    in the background and caching the results.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, consider using the shard query cache on this query. As no queries are
+    returned (`size=0`), we can enable the `search_type=count` and `query` `_cache=true`
+    parameter to cache the results of the aggregation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Web application performance
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'You are working on a web application that searches Twitter data in an Elasticsearch
+    index. In addition to displaying tweets in the search results page, you want to
+    display:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tweet activity over time
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Top users in the results
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Top hashtags in the results
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Top user mentions
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: We can implement all of these items using Elasticsearch aggregations, but these
+    operations are much more costly than simply running a search for hits.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To speed up page load times, we split this into two AJAX requests: one query
+    for results, and one query for all aggregations. The queries are both AJAX requests,
+    meaning that the page will load immediately. The query results will follow shortly
+    after, and the aggregation results will load last. Because the aggregations query
+    doesn''t return any hits, we can set the parameters `search_type=count` and `query_cache=true`
+    to cache the aggregations for future queries.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: When paging through results, make sure to only query for the hits and not for
+    the aggregation results. Aggregation results will stay the same no matter what
+    page of data is being looked at.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'This chapter addressed some common performance and reliability issues that
+    come up when using Elasticsearch. To reiterate some of the major points in this
+    chapter:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Always double-check your Elasticsearch cluster's configuration for errors
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Set the fielddata cache size, especially if you see `OutOfMemoryError` exceptions
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Use the slow log to find what queries run slow on your cluster
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Avoid aggregations on high-cardinality fields (such as millisecond timestamps)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Be cognizant of your data indexing strategy so that no one index grows too large
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Use index warmers or enable `eager_global_ordinals` to ensure queries that use
+    the fielddata cache are fast the first time we run them
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: If possible, use SSDs on nodes that index data, and avoid storing Elasticsearch
+    indices on network storage
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Most importantly, when diagnosing Elasticsearch issues, be meticulous about
+    testing at each stage. For example, don't try to optimize a query by making changes
+    to `elasticsearch.yml`, modifying the query criteria, and enabling index `warmers`
+    all at once before running the query again. Test one variable at a time to extract
+    precisely where the problem is before deciding how to fix it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The next chapter discusses how to understand and fix node failures after they've
+    already happened.
+  prefs: []
+  type: TYPE_NORMAL

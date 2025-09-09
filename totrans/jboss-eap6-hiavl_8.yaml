@@ -1,0 +1,415 @@
+- en: Chapter 8. Developing Distributed Applications
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the previous chapters, we have all concentrated on building a stateless cluster.
+    That means we don't need to maintain a session for each user request, and a load
+    balancer can freely choose a worker node to serve the user requests.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A stateless cluster is more flexible and can scale well, so it's always the
+    first choice when we are building a cluster. In essence, HTTP is a stateless protocol,
+    so it lacks the ability to maintain a session for user requests. To solve this
+    problem, web servers usually pass a session ID to the users' web browsers to maintain
+    a long conversation.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For example, if we are building an online shopping system, we have to maintain
+    a shopping cart for each user. When a user is checking out his/her cart, the total
+    price of the goods in the shopping cart will be calculated. All this data needs
+    to be stored either on the server side or in the cookies of users' web browsers
+    and the data needs to be held across multiple pages, so the session ID is the
+    key to refer to this data of a user. For JBoss EAP, the session ID is called JSESSIONID.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In a clustering environment, the situation becomes more complex, because there
+    are multiple servers instead of just one, so their statuses need to be replicated.
+    For example, if a worker node `A` is serving one user's request, then the data
+    of the shopping cart may be saved on the worker node `A`. If the load balancer
+    now redirects the user request to the worker node `B`, then the user will find
+    that his/her shopping cart becomes empty. Even if the JSESSIONID is passed to
+    worker `B`, the data related with the JSESSIONID is stored in worker `A`. So the
+    data of the user still gets lost.
+  prefs: []
+  type: TYPE_NORMAL
+- en: There are two ways that are commonly used to solve this problem. The first option
+    is named **sticky sessions** . This is a straightforward way to solve the problem.
+    It means the load balancer will stick a user session to a specific worker node.
+    For example, if one user visits our website and the load balancer chooses worker
+    node `A` to serve the request, then this worker node will be used forever to serve
+    the following requests from this user until he or she quits the web browser or
+    the session ends.
+  prefs: []
+  type: TYPE_NORMAL
+- en: This solution is easy to apply, and it fits many situations in practice. However,
+    it only partly solves the problem, because a worker node may fail, and the load
+    balancer would like to failover the user requests to another worker node. In this
+    situation, all the sessions on the crashed worker node will still get lost.
+  prefs: []
+  type: TYPE_NORMAL
+- en: So here is the second solution to avoid the preceding problem, it is better
+    for the worker nodes to replicate the session data among one another. Thus when
+    one worker crashes, its session can be restored from other workers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will learn how to configure session replications between
+    EAP6 servers, and then we'll see how to configure sticky sessions in httpd.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Web session replication
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'EAP6 provides web session replication out of the box when it''s running in
+    the domain mode (or in the standalone mode with the `*-ha` profile enabled). The
+    session replication is supported by the Infinispan subsystem, and the session
+    container is defined in `domain.xml` (and `standalone-*-ha.xml`):'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: In this section, we'll use a sample project to demonstrate the usage of web
+    session replication. The project is named as `clusterbench`. It has been developed
+    by my colleagues *Radoslav Husar* and *Michal Babacek* at Red Hat.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The project is located at [https://github.com/clusterbench/clusterbench](https://github.com/clusterbench/clusterbench).
+  prefs: []
+  type: TYPE_NORMAL
+- en: This project has some excellent demonstration codes for us to use. So we'll
+    directly deploy it into our EAP6 servers for testing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In the demo project, there is a submodule called `clusterbench-ee6-web`. In
+    this module, we can see how the session is enabled in `web.xml`. It uses a single
+    line of configuration to enable web session replication as shown in the following
+    screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Web session replication](img/2432_08_01.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'With `distributable` enabled in `web.xml`, the web sessions will be replicated
+    across the EAP6 servers. This is a JavaEE standard requirement. As JBoss EAP6
+    conforms to the JavaEE standard, it supports this feature. This web project has
+    also provided us a servlet for testing:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The preceding class `HttpSessionServlet` extends the `CommonHttpSessionServlet`.
+    The `CommonHttpSessionServlet` is defined in `clusterbench-common`. Here is an
+    abstract of the `CommonHttpSessionServlet`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The main purpose of this servlet is to put a counter into the web session,
+    and each time a user sends a request, the counter will increase by 1\. Please
+    note I''ve added a line of code in the preceeding class:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: So we can see the output from the server console later. Now we can deploy this
+    project into our cluster, and then we can access the servlet to use the counter.
+    We can see the server output to determine which node is actually serving this
+    request. Then we shutdown the working node and access the cluster again. We should
+    expect another EAP6 server to serve the request. If the sessions are replicated
+    successfully, we should see the counter is not reset, and it goes on increasing.
+    In conclusion, this is an example that demonstrates the session replication among
+    EAP6 servers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: To do the testing, we could use the cluster we've set in the previous chapters,
+    using either `JK` or `mod_cluster` as the load balancer, and then deploy the project
+    `clusterbench-ee6.ear` into the EAP6 domain.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After the preceding preparations are done and both the load balancer and EAP6
+    servers are running, let''s access the cluster by **cURL** for the first time:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We see that the counter value is set to `0`. The `-cmysession.txt` option tells
+    cURL to store the session cookie in a file named `mysession.txt`. We will check
+    this file later. Now we can check the server side. From the EAP6 server console
+    output, you can see the master is serving the user request:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding console output of the master server, we can see a new session
+    was created for the counter, and the session ID is `5LQpRPxdSCupM5eHYd93S2wR`.
+    In addition, we see the counter is initialized to `0`, which matches the result
+    from the client side.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now let''s go back to client side and check `mysession.txt`. Here are the contents
+    of the file:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can see that the JSESSIONID is stored in cookies. Now let''s use this cookie
+    file to access the cluster again:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The `-b` option will let cURL read an existing cookie file and send the cookies
+    to the server, which means the previous session is continued. Because the counter
+    increments by 1, it means our session is held by JSESSIONID. We can check the
+    output of the EAP6 server again:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'So the counter on the master is not reset, and it keeps increasing in one session.
+    Now let''s shutdown the master server:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then we access the cluster again:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Because the master server is down, this time it''s the slave server serving
+    the request:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: Though the request was redirected to the slave server, the session is held,
+    and the counter increased from 1 to 2\. This verified that the session replication
+    works properly between two servers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: CDI-session-scoped bean replication
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'The usage of a CDI-session-scoped bean is similar to a web session bean. In
+    the demo project, it provides a `CdiServlet` for testing:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This servlet is also a counter, and it uses a session scoped CDI bean named
+    `SessionScopedCdiSerialBean`. Here is the definition of this bean:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The bean is declared as `SessionScoped`, so it will be replicated across the
+    cluster. The `SerialBean` is a POJO that holds the counter. Now we can test it
+    in our cluster. First we need to access the servlet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'And then we need to check which EAP server is serving the user request. In
+    my environment, the master server is serving the request:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'In `mysession.txt`, we can see the JESSIONID is stored:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now I disconnect the master server by shutting it down, and access the cluster
+    with the session cookie again:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Now we can see that the slave server is serving the request:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: As shown in the preceding code snippet, we can see that the session was replicated
+    from master to slave.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Configuring sticky sessions with JK
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'In the previous sections, we have looked at how to configure and use session
+    replication in EAP6\. In this section, let''s move to the load balancer side and
+    see how we can configure a sticky session. With sticky session enabled, the load
+    balancer will use one worker node to serve all the requests from one user. Let''s
+    start from the JK configuration. The sticky session is automatically enabled with
+    JK. We can check this in its management console as shown in the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Configuring sticky sessions with JK](img/2432_08_06.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'From the preceding diagram, we can see the **Sticky Sessions** option is enabled
+    by default. Now we need to consider how a load balancer implements session stickiness:
+    if there are thousands of user requests coming to a cluster, and if sticky session
+    is enabled, then the requests of each user is stuck to a specific worker node.
+    So the load balancer needs some way to record this relationship.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Storing the relationship in the load balancer is not a good idea. The relationships
+    data will increase linearly by the number of users. The situation becomes worse
+    if there are multiple load balancers, and then the stickiness relationship has
+    to be replicated across the load balancers. The load balancer cannot afford to
+    maintain this huge data and its performance will be throttled by querying the
+    stickiness relationship.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To solve this problem, both `JK` and `mod_clusteruse` offer a simpler solution:
+    it will put a server ID called `jvmRoute` in the JSESSIONID. The `jvmRoute` value
+    is UUID, so it can be used to identify each worker node. As the `jvmRoute` becomes
+    part of the session ID, the load balancer will directly extract it from the JSESSIONID
+    and knows which server this session is bound to.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To enable sticky session, we need to edit the configuration of EAP6 to set
+    this server ID. What we should do is open `domain.xml` and add an `instance-id`
+    element in the web subsystem:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: The element `instance-id` is the value of `jvmRoute`. We've used `${jboss.server.name}`
+    to be its value. This is a variable provided by EAP6, its value is the server
+    name set in `host.xml`. So we know the value of `instance-id` for our two EAP6
+    servers are `master-server` and `slave-server`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To reflect the configuration in EAP6, we need to put these two names into `worker.properties`
+    in the httpd side, so that JK will know the name of its workers. Here are the
+    complete contents of `worker.properties`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: We must ensure that the worker name corresponds to the `instance-id` settings
+    in the domain controller, so JK can find the correct servers that the session
+    sticks to.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now we can test our cluster with the `clusterbench` project deployed in the
+    previous sections. We can still use the cURL command to access the cluster:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'From `mysession.txt`, the JSESSIONID is:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We can see the session is divided into two parts separated by a dot now. The
+    first part is still the session ID and the second part is the `jvmRoute` carried
+    in session, and its value is `master-server`. In the server output, you can also
+    notice that the session has been created and the session ID displayed on `stdout`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: With the information in `jvmRoute`, load balancer will stick the following requests
+    from the user to `mast` `er-server`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Configuring sticky sessions with mod_cluster
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: To enable sticky sessions in `mod_cluster`, we need to add some configuration
+    in the `mod_cluster` subsystem of EAP6\. For the standalone mode, we can configure
+    the `*-ha.xml` profiles that contain the `mod_cluster` subsystem; for the domain
+    mode, we can edit `domain.xml` of the domain controller.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The sticky session is enabled by default by the `mod_cluster` subsystem. Meanwhile,
+    `mod_cluster` uses the same scheme like JK to handle session stickiness, so we
+    should also add the `instance-id` configuration in the web subsystem:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'That''s all we need to configure. We don''t need to do any configuration on
+    the httpd side, because `mod_cluster` will discover the worker node dynamically.
+    Now we can start our cluster and check the management console of `mod_cluster`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Configuring sticky sessions with mod_cluster](img/2432_08_11.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'From the previous screenshot, we can see two EAP6 server names become `master-server`
+    and `slave-server`, which means the setting of `instance-id` is enabled. Now we
+    access our cluster:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'And then we check the contents of `mysession.txt`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: We can see the JSESSIONID carries the `jvmRoute` information now. So httpd will
+    send the following requests from the user to the master server.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we discussed two solutions that handle the stateful applications
+    in clusters. One is sticky sessions and the other is session replication. These
+    two solutions are usually used together to provide high availability in a Stateful
+    cluster.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When we are building a cluster, we should always consider building a stateless
+    one at first because a stateless cluster is very easy to scale, and it doesn't
+    have performance bottleneck on session replication.
+  prefs: []
+  type: TYPE_NORMAL

@@ -1,0 +1,651 @@
+- en: Chapter 8. Futures
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The first step towards reactive applications is to break out of synchronous
+    processing. In general, applications waste a lot of time waiting for things to
+    happen. Maybe we are waiting on an expensive computation—say, calculating the
+    1000th Fibonacci number. Perhaps we are waiting for some information to be written
+    to the database. We could also be waiting for a network call to return, bringing
+    us the latest recommendations from our favorite online store.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Regardless of what we're waiting for, we should never block clients of our application.
+    This is crucial to achieve the responsiveness we desire when building reactive
+    systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In an age where processing cores are abundant—my MacBook Pro has eight processor
+    cores—blocking APIs severely underutilizes the resources we have at our disposal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we approach the end of this book, it is appropriate to step back a little
+    and appreciate that not all classes of problems that deal with concurrent, asynchronous
+    computations require the machinery of frameworks such as RxJava or `core.async`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will look at another abstraction that helps us develop
+    concurrent, asynchronous applications: **futures**. We will learn about:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The problems and limitations with Clojure's implementation of futures
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: An alternative to Clojure's futures that provides asynchronous, composable semantics
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to optimize concurrency in the face of blocking IO
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Clojure futures
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The first step toward fixing this issue—that is, to prevent a potentially long-running
+    task from blocking our application—is to create new threads, which do the work
+    and wait for it to complete. This way, we keep the application's main thread free
+    to serve more clients.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Working directly with threads, however, is tedious and error-prone, so Clojure''s
+    core library includes futures, which are extremely simple to use:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Of course, the most interesting computations, such as the expensive one, return
+    results we care about. This is where the first limitation of Clojure futures becomes
+    apparent. If we attempt to retrieve the result of a future—by derefing it—before
+    it has completed, the calling thread will block until the future returns a value.
+    Try running the following slightly modified version of the previous snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: The only difference now is that we immediately try to *deref* the future after
+    we create it. Since the future isn't done, we sit there waiting for 5 seconds
+    until it returns its value. Only then is our program allowed to continue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In general, this poses a problem when building modular systems. Often, a long-running
+    operation like the one described earlier would be initiated within a specific
+    module or function, and handed over to the next logical step for further processing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Clojure futures don't allow us to schedule a function to be executed when the
+    future finishes in order to perform such further processing. This is an important
+    feature in building reactive systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Fetching data in parallel
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: To understand better the issues outlined in the previous section, let's build
+    a more complex example that fetches data about one of my favorite movies, *The
+    Lord of the Rings*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The idea is that given the movie, we wish to retrieve its actors and, for each
+    actor, retrieve the movies they have been a part of. We also would like to find
+    out more information about each actor, such as their spouses.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Additionally, we will match each actor's movie against the list of top five
+    movies in order to highlight them as such. Finally, the result will be printed
+    to the screen.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'From the problem statement, we identify the following two main characteristics
+    we will need to account for:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Some of these tasks need to be performed in parallel
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: They establish dependencies on each other
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'To get started, let''s create a new leiningen project:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Next, open the core namespace file in `src/clj_futures_playground/core.clj`
+    and add the data we will be working with:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The namespace declaration is simple and only requires the `pprint` function,
+    which will help us print our result in an easy-to-read format. With all the data
+    in place, we can create the functions that will simulate remote services responsible
+    for fetching the relevant data:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: Each `service` function sleeps the current thread by a given amount of time
+    to simulate a slow network. The functions `cast-by-movie` and `Top 5` each returns
+    a future, indicating we wish to fetch this data on a different thread. The remaining
+    functions simply return the actual data. They will also be executed in a different
+    thread, however, as we will see shortly.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The next thing we need is a function to aggregate all fetched data, match spouses
+    to actors, and highlight movies in the **Top 5** list. We''ll call it the `aggregate-actor-data`
+    function:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: The preceding function is fairly straightforward. It simply zips spouses and
+    movies together, building a map of keys `:name`, `:spouse`, and `:movies`. It
+    further transforms `movies` to append the **Top 5** suffix to the ones in the
+    `top-5` list.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The last piece of the puzzle is the `-main` function, which allows us to run
+    the program from the command line:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: Then, we set up a number of `let` bindings. The first, `cast`, is the result
+    of calling `cast-by-movie`, which returns a future.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The next binding, `movies`, uses a function we haven''t seen before: `pmap`.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `pmap` function works like `map`, except the function is mapped over the
+    items in the list in parallel. The `pmap` function uses futures under the covers
+    and that is the reason `movies-by-actor` doesn't return a future—it leaves that
+    for `pmap` to handle.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: The `pmap` function is actually meant for CPU-bound operations, but is used
+    here to keep the code simple. In the face of blocking IO, `pmap` wouldn't perform
+    optimally. We will talk more about blocking IO later in this chapter.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We get the list of actors by *derefing* the `cast` binding, which, as we saw
+    in the previous section, blocks the current thread waiting for the asynchronous
+    fetch to finish. Once all results are ready, we simply call the `aggregate-actor-data`
+    function.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Lastly, we call the `shutdown-agents` function, which shuts down the **Thread
+    Pool** backing futures in Clojure. This is necessary for our program to terminate
+    properly, otherwise it would simply hang in the terminal.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'To run the program, type the following in the terminal, under the project''s
+    root directory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: You will have noticed that the program takes a while to print the first message.
+    Additionally, because futures block when they are derefed , the program doesn't
+    start fetching the list of top five movies until it has completely finished fetching
+    the cast of *The Lord of The Rings*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s have a look at why that is so:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: This prevents `top-5`—a completely independent parallel data fetch—from running
+    before we retrieve the movie's cast.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Of course, this is a contrived example, and we could solve this particular annoyance
+    by calling `top-5` before anything else. The problem is that the solution isn't
+    always crystal clear and ideally we should not have to worry about the order of
+    execution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As we will see in the next section, there is a better way.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Imminent – a composable futures library for Clojure
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the past few months, I have been working on an open source library that aims
+    to fix the previous issues with Clojure futures. The result of this work is called
+    *imminent* (see [https://github.com/leonardoborges/imminent](https://github.com/leonardoborges/imminent)).
+  prefs: []
+  type: TYPE_NORMAL
+- en: The fundamental difference is that imminent futures are asynchronous by default
+    and provide a number of combinators that allow us to declaratively write our programs
+    without having to worry about its order of execution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The best way to demonstrate how the library works is to rewrite the previous
+    movies example in it. We will do this in two steps.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'First, we will examine individually the bits of imminent''s API that will be
+    part of our final solution. Then, we''ll put it all together in a working application.
+    Let''s start by creating a new project:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Next, add a dependency on imminent to your `project.clj`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Then, create a new file, `src/imminent_playground/repl.clj`, and add imminent''s
+    core namespace:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: All the following examples should be in this file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating futures
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Creating a future in imminent isn''t much different from creating a future
+    in Clojure. It''s as simple as the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'What looks very different, however, is the return value. A key decision in
+    imminent''s API is to represent the value of a computation as either a `Success`
+    or a `Failure` type. Success, as in the preceding example, wraps the result of
+    the computation. Failure, as you might have guessed, will wrap any exceptions
+    that happened in the future:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, you're not limited to exceptions only. We can use the `failed-future`
+    function to create a future that completes immediately with the given reason,
+    which, in the second example, is simply a keyword.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The next question we might ask is "How do we get the result out of a future?".
+    As with Clojure futures, we can deref it as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE19]'
+  prefs: []
+  type: TYPE_PRE
+- en: The idiom of using a double-deref is common, so imminent provides the convenience
+    shown, `dderef`, which is equivalent to calling `deref` twice.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'However, different from Clojure futures, this is a non-blocking operation,
+    so if the future hasn''t completed yet, the following is what you''ll get:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE20]'
+  prefs: []
+  type: TYPE_PRE
+- en: The initial state of a future is `unresolved`, so unless you are absolutely
+    certain a future has completed, derefing might not be the best way to work with
+    the result of a computation. This is where combinators become useful.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Combinators and event handlers
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: 'Let''s say we would like to double the value in the age future. As we would
+    with lists, we can simply map a function over the future to do just this:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE21]'
+  prefs: []
+  type: TYPE_PRE
+- en: Tip
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: While `i/future` schedules its body for execution on a separate thread, it's
+    worth noting that future combinators such as `map`, `filter`, and so on, do not
+    create a new thread immediately. Instead, they schedule a function to be executed
+    asynchronously in the thread pool once the original future completes.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Another way to do something with the value of a future is to use the `on-success`
+    event handler that gets called with the wrapped value of the future in case it
+    is successful:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE22]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Similarly, an `on-failure` handler exists, which does the same for `Failure`
+    types. While on the subject of failures, imminent futures understand the context
+    in which they are being executed and, if the current future yields a `Failure`,
+    it simply short-circuits the computation:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE23]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding example, we don't get a new error, but rather the original
+    exception contained in `failed-computation`. The function passed to `map` never
+    runs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The decision to wrap the result of a future in a type such as `Success` or
+    `Failure` might seem arbitrary but is actually quite the opposite. Both types
+    implement the protocol `IReturn`—and a couple of other ones—which comes with a
+    set of useful functions, one of which is `map`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE24]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We get a similar behavior here as we did previously: mapping a function over
+    a failure simply short-circuits the whole computation. If you do, however, wish
+    to map over the failure, you can use map''s counterpart map-failure, which behaves
+    similarly to map but is its inverse:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE25]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'This plays well with the last event handlers imminent provides—`on-complete`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE26]'
+  prefs: []
+  type: TYPE_PRE
+- en: On contrary to `on-success` and `on-failure`, `on-complete` calls the provided
+    function with the result type wrapper, so it is a convenient way to handle both
+    cases in a single function.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Coming back to combinators, sometimes we will need to map a function over a
+    future, which itself returns a future:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE27]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `range-future` function returns a successful future that yields a range
+    of *n*. The `const-future` function is analogous to `failed-future`, except it
+    immediately completes the future with a `Success` type.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, we end up with a nested future, which is almost never what you want.
+    That's OK. This is precisely the scenario in which you would use another combinator,
+    `flatmap`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You can think of it as `mapcat` for futures—it flattens the computation for
+    us:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE28]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Another very useful combinator is used to bring together multiple computations
+    to be used in a single function—`sequence`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE29]'
+  prefs: []
+  type: TYPE_PRE
+- en: Essentially, `sequence` creates a new future, which will complete only when
+    all other futures in the vector have completed or any one of them have failed.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This is a nice segue into the last combinator we will look at—`map-future`—which
+    we would use in place of `pmap`, used in the movies example:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE30]'
+  prefs: []
+  type: TYPE_PRE
+- en: In the preceding example, `calculate-double` is a function that returns a future
+    with the value `n` doubled. The `map-future` function then maps `calculate-double`
+    over the list, effectively performing the calculations in parallel. Finally, `map-future`
+    sequences all futures together, returning a single future, which yields the result
+    of all computations.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Because we are performing a number of parallel computations and don't really
+    know when they will finish, we call `await` on the future, which is a way to block
+    the current thread until its result is ready. In general, you would use the combinators
+    and event handlers instead, but for this example, using `await` is acceptable.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Imminent's API provides many more combinators, which help us write asynchronous
+    programs in a declarative way. This section gave us a taste of what is possible
+    with the API and is enough to allow us to write the movies example using imminent
+    futures.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The movies example revisited
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Still within our `imminent-playground` project, open the `src/imminent_playground/core.clj`
+    file and add the appropriate definitions:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE31]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE32]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE33]'
+  prefs: []
+  type: TYPE_PRE
+- en: The main difference is that all of them now return an imminent future. The `aggregate-actor-data`
+    function is also the same as before.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'This brings us to the `-main` function, which was rewritten to use imminent
+    combinators:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE34]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The function starts much like its previous version, and even the first binding,
+    `cast`, looks familiar. Next we have `movies`, which is obtained by fetching an
+    actor''s movies in parallel. This in itself returns a future, so we `flatmap`
+    it over the `cast` future to obtain our final result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE35]'
+  prefs: []
+  type: TYPE_PRE
+- en: '`spouses` works in exactly the same way as `movies`, which brings us to `result`.
+    This is where we would like to bring all asynchronous computations together. Therefore,
+    we use the `sequence` combinator:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE36]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Finally, we decide to block on the `result` future—by using await—so we can
+    print the final result:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE37]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'We run the program in the same way as before, so simply type the following
+    in the command line, under the project''s root directory:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE38]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'The result output was trimmed as it is exactly the same as before, but two
+    things are different and deserve attention:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The first output, **Fetching data...**, is printed to the screen a lot faster
+    than in the example using Clojure futures
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The overall time it took to fetch all that is shorter, clocking in at just over
+    7 seconds
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: This highlights the asynchronous nature of imminent futures and combinators.
+    The only time we had to wait is when we explicitly called `await` at the end of
+    the program.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'More specifically, the performance boost comes from the following section in
+    the code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE39]'
+  prefs: []
+  type: TYPE_PRE
+- en: Because none of the previous bindings block the current thread, we never have
+    to wait to kick off `top-5` in parallel, shaving off roughly 3 seconds from the
+    overall execution time. We didn't have to explicitly think about the order of
+    execution—the combinators simply did the right thing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Finally, one last difference is that we didn''t have to explicitly call `shutdown-agents`
+    as before. The reason for this is that imminent uses a different type of thread
+    pool: a `ForkJoinPool` (see [http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.html](http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.html)).'
+  prefs: []
+  type: TYPE_NORMAL
+- en: This pool has a number of advantages—each with its own trade-off—over the other
+    thread pools, and one characteristic is that we don't need to explicitly shut
+    it down—all threads it creates daemon threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When the JVM shuts down, it hangs waiting for all non-daemon threads to finish.
+    Only then does it exit. That's why using Clojure futures would cause the JVM to
+    hang, if we had not called `shutdown-agents`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'All threads created by the ForkJoinPool are set as daemon threads by default:
+    when the JVM attempts to shut down, and if the only threads running are daemon
+    ones, they are abandoned and the JVM exits gracefully.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Combinators such as `map` and `flatmap`, as well as the functions `sequence`
+    and `map-future`, aren't exclusive to futures. They have many more fundamental
+    principles by which they abide, making them useful in a range of domains. Understanding
+    these principles isn't necessary for following the contents of this book. Should
+    you want to know more about these principles, please refer to the [Appendix](part0070_split_000.html#page
+    "Appendix A. The Algebra of Library Design") , *The Algebra of Library Design*.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Futures and blocking IO
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: The choice of using ForkJoinPool for imminent is deliberate. The ForkJoinPool—added
+    on Java 7—is extremely smart. When created, you give it a desired level of `parallelism`,
+    which defaults to the number of available processors.
+  prefs: []
+  type: TYPE_NORMAL
+- en: ForkJoinPool then attempts to honor the desired parallelism by dynamically shrinking
+    and expanding the pool as required. When a task is submitted to this pool, it
+    doesn't necessarily create a new thread if it doesn't have to. This allows the
+    pool to serve an extremely large number of tasks with a much smaller number of
+    actual threads.
+  prefs: []
+  type: TYPE_NORMAL
+- en: However, it cannot guarantee such optimizations in the face of blocking IO,
+    as it can't know whether the thread is blocking waiting for an external resource.
+    Nevertheless, ForkJoinPool provides a mechanism by which threads can notify the
+    pool when they might block.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Imminent takes advantage of this mechanism by implementing the `ManagedBlocker`
+    (see [http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.ManagedBlocker.html](http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.ManagedBlocker.html))
+    interface—and provides another way to create futures, as demonstrated here:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE40]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `blocking-future` and `blocking-future-call` have the same semantics as
+    their counterparts, `future` and `future-call`, but should be used when the task
+    to be performed is of a blocking nature (that is, not CPU-bound). This allows
+    the ForkJoinPool to better utilize its resources, making it a powerful and flexible
+    solution.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we learned that Clojure futures leave a lot to be desired.
+    More specifically, Clojure futures don't provide a way to express dependencies
+    between results. It doesn't mean, however, that we should dismiss futures altogether.
+  prefs: []
+  type: TYPE_NORMAL
+- en: They are still a useful abstraction and with the right semantics for asynchronous
+    computations and a rich set of combinators—such as the ones provided by imminent—they
+    can be a big ally in building reactive applications that are performant and responsive.
+    Sometimes, this is all we need.
+  prefs: []
+  type: TYPE_NORMAL
+- en: For the times where we need to model data that varies over time, we turn to
+    richer frameworks inspired by **Functional Reactive Programming** (**FRP**) and
+    **Compositional Event Systems** (**CES**) —such as RxJava—or **Communicating Sequential
+    Processes** (**CSP**) —such as `core.async`. As they have a lot more to offer,
+    much of this book has been dedicated to those approaches.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will go back to discussing FRP/CES by way of a case
+    study.
+  prefs: []
+  type: TYPE_NORMAL

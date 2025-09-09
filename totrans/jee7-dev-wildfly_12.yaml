@@ -1,0 +1,637 @@
+- en: Chapter 12. Long-term Tasks' Execution
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: So far, our applications focused on interaction with the user. This may be the
+    most important aspect of your future projects, but there are some scenarios that
+    require a different approach. Maintenance tasks, importing big sets of data or
+    time-consuming computations are usually addressed in a batch mode instead of an
+    interactive manner. Often, these kinds of jobs are not part of the standard operations
+    and should be invoked only when the server load is at its lowest or periodical.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Before Java EE 7, there was no standardized way to implement batch jobs (operations
+    that do not require user interaction). The deal changed with JSR 352 ([https://jcp.org/en/jsr/detail?id=352](https://jcp.org/en/jsr/detail?id=352))
+    and the introduction of the batch framework, which uses an XML language to define
+    jobs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When it comes to processor-intensive tasks, the natural way is to think about
+    parallelization. Modern CPUs have multiple cores, which can be easily utilized
+    by the JVM. The only problem is that in Java EE, using concurrency primitives
+    known from Java SE is discouraged. The programmer may impair the stability and
+    availability of the whole container.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Once more, the new JSR 236 ([https://jcp.org/en/jsr/detail?id=236](https://jcp.org/en/jsr/detail?id=236))
+    provides new ways to overcome this architectural obstacle. The new specification
+    `ManagedExecutorService` is a container-aware version of `ExecutorService` known
+    from Java SE.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In this chapter, we will cover the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: How to create and execute batch jobs
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: What are the differences between different batch job types
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: How to create our custom worker threads inside a Java EE container
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The overview of the batching framework
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'A step is the basic unit of work and our main area of interest. The batching
+    framework defines two types of steps, which are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Chunk steps**: These work on chunks of data in three phases: reading, processing,
+    and writing (for each phase, a separate class is created). The chunks can be configured
+    with a number of elements that should be processed in one transaction.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Task steps**: These execute a specific block of code created by the programmer,
+    without any special constraints. They are used for most non-data processing errands.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Additionally, the batching framework allows listeners to register for the whole
+    job or specific phases of the tasks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Now that we've covered the basic vocabulary, it will be best to jump straight
+    to coding.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Our first batch job
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: WildFly comes with an implementation of JSR 352 called JBeret ([https://github.com/jberet/jsr352](https://github.com/jberet/jsr352)).
+    This means that we can easily extend our ticket application with batch jobs, by
+    simply implementing the required interfaces; no additional dependencies are required.
+    All APIs are already in place in our current samples, so we only need to create
+    some classes and an XML file to specify the job flow.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'As a base for our development in this chapter, it would be best to use the
+    code from [Chapter 5](part0030_split_000.html#page "Chapter 5. Combining Persistence
+    with CDI"), *Combining Persistence with CDI*. The persistence layer will allow
+    us to code a sample import batching job. To keep it simple, let''s start by defining
+    an artificial external service that will provide us with IDs of tickets that should
+    be booked. We can deploy it as part of our application or as a separate WAR file.
+    This sample is based on a REST endpoint, so be sure to configure JAX-RS in your
+    deployment (for details, check out [Chapter 7](part0038_split_000.html#page "Chapter 7. Adding
+    Web Services to Your Applications"), *Adding Web Services to Your Applications*).
+    This is shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: Creating a chunk-based batch step
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Our integration scenario will be pretty straightforward. We need to read all
+    of the reservation IDs from the external system to get the corresponding seats
+    from our database and write the changes back to the database. It would also be
+    great to write a log with the operations made by the import. Let''s start with
+    the item reader:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: Our reader extends the `AbstractItemReader` class so that we don't have to implement
+    all methods of the `javax.batch.api.chunk.ItemReader` interface. The only two
+    methods we are interested in are `open` and `readItem`. The first one initializes
+    the REST client, which will get the data from the server. The implementation is
+    optional because not every reader needs initialization logic. Note that a checkpoint
+    parameter is passed to the method. It can be used to restart the batch job from
+    a specific point. We will, however, leave out this feature.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `readItem` method requests the data from an external service and returns
+    a single item to the batch framework. A null value is an indicator that there
+    is no more data. Additional methods of the `ItemReader` interface are responsible
+    for checkpoint handling and closing of the reader.
+  prefs: []
+  type: TYPE_NORMAL
+- en: When we define the XML specification for the batch job, we must use the names
+    of managed beans to refer to the reader, processor, or writer we want (just like
+    in JSF). Therefore, we need the `@Named` annotation in order to provide a string-based
+    qualifier; by default, it will be a lowercase name of the class on which the annotation
+    is placed. For the `ExternalSystemReader` bean, we will use the `externalSystemReader`
+    name.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'After an item is read, we may process it. Our `SeatProcessor` class goes as
+    the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: Our processor retrieves IDs from the reader and finds the corresponding entry
+    in the database. To find the entity, we reuse our `SeatDao` class known from previous
+    chapters. Because we have CDI working on the batch framework, we can just inject
+    our EJB without caring about transaction handling.
+  prefs: []
+  type: TYPE_NORMAL
+- en: If the seat is found, we check if it's already booked. If yes, we can simply
+    return a null value to omit this item from further processing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'The last step is `SeatWriter`. This is shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: Our `ItemWriter` class starts by defining an `open` method, which gets a file
+    for writing. The name of the newly created logfile is taken from the job properties.
+    Our source of information about the current batch job is the injected `JobContext`
+    class (there is also a `StepContext` object that provides information about a
+    specific step). It gives us the possibility to get the properties defined for
+    a job, its current ID, status, and additional transient data.
+  prefs: []
+  type: TYPE_NORMAL
+- en: The heart of our writer is, of course, the `writeItem` method. It receives a
+    list of items (seats in our case) to be written and its responsibility is to persist
+    them. This method can be invoked multiple times up to the moment when there is
+    no more data to be written. You can configure the number of elements that will
+    be processed in every chunk. What's more, every chunk runs in its own transaction.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, when the last chunk is written, the `close` method writes a summary
+    and closes the file.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'All elements are now in place, so we need to create a batch job specification.
+    The file `externalSystem.xml` should be placed in the `src/main/resources/META-INF/batch-jobs`
+    directory in your project. The contents are as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: The structure is pretty straightforward. First, we define a job ID matching
+    the filename `[1]`. Next, in the properties section, we set a property `logFile`
+    with the `log.txt` value `[2]` we used it in our `SeatWriter` to create an output
+    file `[3]`. Then, we define a step with a data chunk. The `item-count` attribute
+    defines the number of items we process in one transaction. Finally, we reference
+    our reader, processor, and writer in their matching tags `[4]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Now, when our job is defined, it is time to start it. To do this, we need to
+    the use the BatchRuntime''s static method, `getJobOperator`. In order to simplify
+    the solution, we will use a REST endpoint''s GET method as a way to invoke our
+    code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE6]'
+  prefs: []
+  type: TYPE_PRE
+- en: The `JobOperator start` method returns a job ID, which is a representation of
+    the ongoing batch process. We need to provide the name of the file defining the
+    batch job without the XML extension and a set of runtime parameters.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'The properties provided during runtime are not the same as we used earlier!
+    These kinds of properties are not bound to a specific job (in contrast to the
+    ones defined in the XML file), but can be accessed from the job execution. The
+    batching framework calls them parameters. If you need this kind of logic in your
+    application, you should just pass them during a job''s startup and use the job
+    execution ID to access them:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE7]'
+  prefs: []
+  type: TYPE_PRE
+- en: You can point your browser to `http://localhost:8080/ticket-agency-longterm/rest/job`
+    and your batch job should start running! Be sure to set up your seats before running
+    the job (the console is available at `http://localhost:8080/ticket-agency-longterm/faces/views/setup.xhtml`).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'A sample output file in your WildFly''s bin directory would look like the following:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE8]'
+  prefs: []
+  type: TYPE_PRE
+- en: Of course, you could also start the batch job using a Java EE timer after a
+    specific event in your application or even as an effect of an incoming JMS message.
+    You can also use the retrieved job IDs to monitor the already running jobs or
+    terminate them on demand. The batching framework API gives you many possibilities
+    without too many complications in the area of job management.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Creating a job-based batch step
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: Our chunk-based job was great to process big data sets. However, what if we
+    only want to perform a specific task? Besides creating chunks, we can also define
+    steps that will simply call a process method of a specific class. These kinds
+    of classes must implement the `Batchlet` interface (or extend the `AbstractBatchlet`
+    class).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In our sample, let''s try to contact an external API to ask about the current
+    Bitcoin exchange rate (a decentralized, virtual currency). Then, we will store
+    the current prices of our tickets in a simple flat file. Our batchlet would be
+    as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE9]'
+  prefs: []
+  type: TYPE_PRE
+- en: The process method `[1]` is our entry point to the batchlet. We will start by
+    making a `REST` request against an external API `[2]` and use the response to
+    calculate our prices in bitcoins `[3]`. Finally, we will try to write so as to
+    gathered data into a file. As you can see, once more, we use `JobContext` to get
+    the configuration properties from the batching framework (the filename in this
+    case).
+  prefs: []
+  type: TYPE_NORMAL
+- en: You may wonder, what is the point of the return type in the `process` method?
+    It simply indicates the status of the job, if it has been completed successfully
+    or not.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'That''s all we wanted to do and we achieved it in a single batch step: reading,
+    processing, and writing. In the chunk-oriented approach, we will have three separate
+    mechanisms for this. Let''s add our new step to `externalSystem.xml` from `src/main/resources/META-INF/batch-jobs`:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE10]'
+  prefs: []
+  type: TYPE_PRE
+- en: There are three new things to notice in the XML file. First, we added a new
+    property, which we referenced earlier in our batchlet `[1]`. Next, we defined
+    that after our chunk processing step, we would like to invoke another one, `checkBitcoins`
+    `[2]`. Finally, we created a new step in which we referenced our `batchlet` class.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can once again start your job, and after it is completed, a `bitcoins.txt`
+    file should appear in WildFly's `bin` directory.
+  prefs: []
+  type: TYPE_NORMAL
+- en: We've covered the foundation of the batching framework, which allows you to
+    fulfill most of the frequent requirements defined for enterprise applications.
+    However, there is a lot more inside the specification, such as splits, partitions,
+    and workflow-related elements (statuses and decisions) that you can explore if
+    a more sophisticated mechanism is required by the business processes that you're
+    implementing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Our next step is to provide some parallelism inside our Java EE container using
+    the new concurrency utilities.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using concurrency utilities in Java EE
+  prefs:
+  - PREF_H2
+  type: TYPE_NORMAL
+- en: In Java EE 6 (specifically in the EJB container), creation of new threads was
+    discouraged because the application server would not be able to control the stability
+    of the platform nor guarantee any transactional features. This could be a problem
+    for applications that would like to effectively use CPU and execute multiple tasks
+    in parallel. It was possible to overcome this using JCA adapters, but additional
+    effort was required to implement them.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Fortunately, the JSR 236 introduces the `ManagedExecutorService` (along with
+    the `ManagedScheduledExecutorService`), a container-aware version of the `ExecutorService`
+    used in Java SE. The well-known API ported to Java EE was merged in the platform,
+    providing a smooth workflow for concurrent operations in the EJB container. The
+    new managed executor services have the following advantages over the standard
+    ones:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: They rely on the thread pool provided by the container. This means that the
+    server controls have many threads that can be spawned from all deployed applications
+    and you can tweak the configuration in order to ensure the desired quality of
+    service.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The thread configuration is totally separated from the code, so it is possible
+    to change it without changing the application itself.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: It is possible to propagate the caller context to the created thread. For example,
+    it is possible to use the security principal of the user's request that initiated
+    the new thread.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: The application server allows monitoring of the current thread count.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Threads started by the managed executors can create new transactions for business
+    components; they cannot, however, participate in transactions from other components.
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'The main parts of the concurrency utilities are described in the following
+    table:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '| Component | Description |'
+  prefs: []
+  type: TYPE_TB
+- en: '| --- | --- |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `ManagedExecutorService` | This is used to execute submitted tasks in an
+    asynchronous manner. The developer may submit a `Callable` or `Runnable` function
+    and use returned `Future` to check for the result when it is available. The container
+    context will be propagated by the container.This interface extends the standard
+    `ExecutorService` interface. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `ManagedScheduledExecutorService` | This is similar to `ManagedExecutorService`,
+    but it is used to execute tasks at specific times (cyclic, scheduled, or delayed).The
+    interface extends the standard `ScheduleExecutorService`, but it additionally
+    provides the Trigger feature; the possibility to create a dynamic object, which
+    can decide when a specific event should be fired (see `javax.enterprise.concurrent.Trigger`).
+    |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `ContextService` | This is used to capture the context of the container;
+    it can then be used while submitting a job to the executor service. |'
+  prefs: []
+  type: TYPE_TB
+- en: '| `ManagedThreadFactory` | This is used to create threads by the container.
+    The developer can provide its own thread factory in order to fulfil specific use
+    cases (for instance, setting specific properties on the created objects). |'
+  prefs: []
+  type: TYPE_TB
+- en: 'Instances of these components can be obtained using the JNDI lookup or the
+    `@Resource` injection. The Java EE 7 specification requires that every container
+    provides a set of default resources that should be injectable without any additional
+    configuration. So, in WildFly, the easiest way to get your hands on them would
+    be to just type the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE11]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'You can also find any additional executor services and the configuration of
+    the default ones in the `standalone.xml` file (and in other variants of the configuration
+    file). A part of the relevant subsystem is presented as follows:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE12]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, the `standalone.xml` file contains the configuration of the
+    default `ManagedExecutorService`. You can add a new custom configuration with
+    another name and JNDI path; you can also create a separate one for every deployed
+    application.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Note
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: 'Note that the default ManagedExecutorService has two JNDI names: the one in
+    the configuration and the one defined in the Java EE specification (`java:comp/DefaultManagedExecutorService`).
+    You can switch to the default executor service (and other components) using the
+    default-bindings tag in the `standalone.xml` file.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Let''s take a closer look at some of the properties of the executor service:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**core-threads**: This defines how many threads should be alive in the thread
+    pool all the time (even if those threads are idle and the server is handling no
+    user requests).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**max-threads**: This states how many threads the server can start (including
+    the core threads) if necessary, for instance, when under heavy load.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**keepalive-time**: This defines after how many milliseconds a thread can be
+    idle before the server kills it (it only applies if there are more threads running
+    than the core-threads parameter specified). This configuration value defines how
+    long the server will keep around the additional threads when they are not needed
+    anymore.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**hung-task-threshold**: This defines after how many milliseconds the server
+    will mark a thread as hung. If set to `0`, a thread will never be marked as hung
+    (the thread will have no execution time limit).'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: By using these configuration properties and creating additional executor services,
+    the server administrator can gain a fine control over the maximum load that the
+    server can handle at a given time. Be sure to take a closer look at them during
+    an application's performance tuning.
+  prefs: []
+  type: TYPE_NORMAL
+- en: As for development, the default configuration suits us well, so it's time to
+    dive into the code with an example usage of the concurrency utilities!
+  prefs: []
+  type: TYPE_NORMAL
+- en: Introducing threads to enterprise beans
+  prefs:
+  - PREF_H3
+  type: TYPE_NORMAL
+- en: When we were working with the batching framework, we contacted a REST endpoint,
+    which was mocking an external system in our sample. Now, we are going to add some
+    concurrency to it.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'An external system may aggregate booking requests from several sources. If
+    every request takes a substantial amount of time, it could be a good idea to make
+    all the requests simultaneously. Let''s start with creating `Callable`, which
+    will return a list of the seat IDs that should be booked. This is shown in the
+    following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE13]'
+  prefs: []
+  type: TYPE_PRE
+- en: 'Our task implements `[1]` two interfaces: `Callable` and `ManagedTask`. The
+    `ManagedExecutorService` requires an object that fulfils the contract of a `Callable`
+    or `Runnable` interface known from Java SE.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: The `ManagedTask` interface is optional, but it allows us to register a `ManagedTaskListener`
+    along with the task itself and return additional properties from the task. The
+    task listener has a set of life cycle callbacks, which are called during the task's
+    execution. We will use it in order to log additional information about our task.
+    In order to create an instance of the task listener, we used the `Instance<T>`
+    class `[2]`. It is used to create instances of CDI beans on demand. We return
+    `ManagedTaskListener` in a method from the `ManagedTask` interface `[3]`. We don't
+    need any additional properties; therefore, we return an empty object in the second
+    method from the `ManagedTask` interface `[4]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Finally, we implement the `call` method; the thread will be suspended for 5
+    seconds (to simulate long work) and return a list of predefined IDs.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Our task listener is simply a bean with a logger, which will get all the information
+    about the task''s lifecycle. This is shown in the following code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE14]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, most of the implemented methods are getting the executor service,
+    future, and the task itself as parameters. We simply log the current status using
+    an injected logger.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'So, we''ve created one task, which is pretty static. Now, let''s try to create
+    another one, which will contact a database. As before, we''ll need a `Callable`
+    implementation, which returns a list of integers. This is shown in the following
+    code snippet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE15]'
+  prefs: []
+  type: TYPE_PRE
+- en: The main difference between this task and the previous one is that we injected
+    an EJB `[1]`, which will start an underlying transaction. In the `call` method,
+    a database request is issued `[2]`. The returned list of seats is then filtered
+    and transformed into a list of IDs `[3]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Additionally, as mentioned earlier, we will stop the thread for 5 seconds so
+    that we can observe the execution later `[4]`.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'We''ve got our building blocks in place. Now, it is time to combine them into
+    a working example. We can revisit our `PendingSeats` class from the beginning
+    of this chapter, as shown in the following code:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE16]'
+  prefs: []
+  type: TYPE_PRE
+- en: We start by obtaining an instance of `ManagedExecutorService` using the `@Resource`
+    annotation `[1]`. Next, the previously created tasks are injected using the CDI's
+    `Instance<T>` class pattern `[2]`. Thanks to this, the are managed beans and have
+    their dependencies injected. With the dependencies in place, we use the `invokeAll`
+    method `[3]` of `executorService` in order to start all our tasks at once (we
+    could also use multiple calls of the `submit` method). The return values represent
+    a set of future results, which can be used to retrieve the collected data when
+    it is ready.
+  prefs: []
+  type: TYPE_NORMAL
+- en: At this point, our tasks are already running so we can simply make a blocking
+    `get` call on the future results and wait for the data `[4]`. When it is ready,
+    we remove any duplicates, and collect the results in a single list using the `flatMap`
+    operation. As you remember, our previous two tasks were waiting 5 seconds each.
+    Thanks to the fact that they are executed simultaneously, we expect that they
+    will both finish after 5 seconds.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Because our bean is a singleton with a startup annotation, the whole process
+    will be invoked during the deployment of our application. Feel free to try it
+    out now!
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Of course, the database task requires some data in the `seats` table or it
+    will yield empty results (that''s not a big issue for us). If you want the application
+    to automatically seed some data to the database, you can create another singleton
+    bean, for instance:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE17]'
+  prefs: []
+  type: TYPE_PRE
+- en: Be sure to add a `@DependsOn("DatabaseInitializer")` annotation on the `PendingSeats`
+    bean, so that the initializer runs before our database collector.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'If everything goes well, you should see something like this on your console:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE18]'
+  prefs: []
+  type: TYPE_PRE
+- en: As you can see, both tasks started at the same time (1 and 2) in two separate
+    threads (notice the `EE-ManagedExecutorService-default-Thread-1` and `…-Thread-2`
+    entries in the log). The final result is yielded after roughly 5 seconds, and
+    it contains data from both the collectors, and additionally, is collected in the
+    thread that originally submitted the tasks (`ServerService Thread Pool -- 54`).
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'You can also use the Java VisualVM tool to visualize your threads in the application
+    server. The tool is available in your JDK installation in the `bin` directory
+    (the `jvisualvm` executable). After running it, you should see JBoss in the left
+    tree and the **Threads** tab after clicking on the JBoss node. This is shown in
+    the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Introducing threads to enterprise beans](img/00099.jpeg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'If you switch to the **Threads** tab during your application deployment, you
+    will see a graph, as shown in the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Introducing threads to enterprise beans](img/00100.jpeg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'The purple color denotes a sleeping thread and the two highlighted threads
+    with a purple part of the timeline are our tasks during execution. You can use
+    a detailed thread view to additionally examine your worker threads. This is shown
+    in the following screenshot:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![Introducing threads to enterprise beans](img/00101.jpeg)'
+  prefs: []
+  type: TYPE_IMG
+- en: Java VisualVM offers many more features useful for every developer, such as
+    resource monitoring of the virtual machine, profiler, sampler, and others that
+    are implemented as dedicated plugins. Be sure to check them out!
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this section, we implemented a use case that was a lot harder to cover in
+    a proper manner in previous versions of Java EE. We were able to do this with
+    less code, thanks to the high-level API that was made available to the developers.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, you learned how to create batching applications using the new
+    batching framework in two different ways. Next, we tried some of the mechanisms
+    provided by the concurrency utilities. Our exploration went away from the user
+    interaction and concentrated on the internals of the middleware layer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the next chapter, we will fill the last gap in the Java EE developer's toolbox,
+    which is integration testing with Arquillian.
+  prefs: []
+  type: TYPE_NORMAL
