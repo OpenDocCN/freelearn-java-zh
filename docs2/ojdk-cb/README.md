@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# OpenJDK 秘籍
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/eb0bb777667f31c2b6ad4f879b6fa565`](https://zh.annas-archive.org/md5/eb0bb777667f31c2b6ad4f879b6fa565)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

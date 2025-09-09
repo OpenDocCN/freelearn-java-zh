@@ -1,6 +1,6 @@
-# Scala 并发编程实用指南
+# Scala 并发编程学习指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/8c38ba44e94fe602493bc3c947a5e3cf`](https://zh.annas-archive.org/md5/8c38ba44e94fe602493bc3c947a5e3cf)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

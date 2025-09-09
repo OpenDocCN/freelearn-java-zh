@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Maven 秘籍
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/a2dca759f12f96089fa330617e3a9c65`](https://zh.annas-archive.org/md5/a2dca759f12f96089fa330617e3a9c65)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

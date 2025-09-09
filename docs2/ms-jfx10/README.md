@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# 精通 JavaFX10
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/ed6aa077da1688755465ac62dfa875c2`](https://zh.annas-archive.org/md5/ed6aa077da1688755465ac62dfa875c2)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

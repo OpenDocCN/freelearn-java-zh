@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Scala 专业指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/1616bd34ccc553b47b7c00d481c0137c`](https://annas-archive.org/md5/1616bd34ccc553b47b7c00d481c0137c)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

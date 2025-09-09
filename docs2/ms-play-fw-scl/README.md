@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# 精通 Scala Play 框架
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/079c5d0ec77661c34a79029f5b3207aa`](https://zh.annas-archive.org/md5/079c5d0ec77661c34a79029f5b3207aa)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
