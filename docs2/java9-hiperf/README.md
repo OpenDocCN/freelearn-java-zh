@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Java9 高性能指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/9f13d9d94c7022ae23122382814df111`](https://zh.annas-archive.org/md5/9f13d9d94c7022ae23122382814df111)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

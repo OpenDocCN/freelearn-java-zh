@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Clojure 高性能 JVM 编程
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/30898d6f47b23409d6f79c6d6b893e9a`](https://zh.annas-archive.org/md5/30898d6f47b23409d6f79c6d6b893e9a)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

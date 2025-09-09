@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# JavaEE 现代应用架构指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/6c63b1219ff03677be8e0c6a8e668426`](https://zh.annas-archive.org/md5/6c63b1219ff03677be8e0c6a8e668426)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
