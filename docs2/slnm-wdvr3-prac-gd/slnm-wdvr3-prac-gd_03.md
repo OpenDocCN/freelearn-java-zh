@@ -1,4 +1,4 @@
-# 使用 Java 8 功能与 Selenium
+# 第三章：使用 Java 8 功能与 Selenium
 
 随着 Selenium 3.0 转向 Java 8，我们可以使用 Java 8 的一些新功能，如 Stream API 和 Lambda 或匿名函数，以函数式编程风格创建脚本。我们这样做是通过减少代码行数以及利用语言的新功能的好处。在本章中，我们将介绍这些主题：
 

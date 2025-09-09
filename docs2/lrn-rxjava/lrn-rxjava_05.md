@@ -1,4 +1,4 @@
-# 多播、重放和缓存
+# 第五章：多播、重放和缓存
 
 我们在这本书中已经看到了热和冷`Observable`的实际应用，尽管我们的大部分例子都是冷`Observable`（甚至包括使用`Observable.interval()`的例子）。事实上，在`Observable`的热和冷特性中有很多细微之处，我们将在本章中探讨。当你有多个`Observer`时，默认行为是为每个`Observer`创建一个单独的流。这可能是或可能不是期望的，我们需要意识到何时需要通过多播使用`ConnectableObservable`来强制`Observable`变为热。我们在第二章，*Observables and Subscribers*中简要介绍了`ConnectableObservable`，但我们将在一个完整的`Observable`操作符链的更深入背景下探讨它。
 

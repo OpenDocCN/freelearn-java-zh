@@ -1,6 +1,6 @@
 
 
-# 迁移到 Spring Security 6
+# 第十六章：迁移到 Spring Security 6
 
 在本章的最后，我们将回顾与从`Spring Security 5.x`迁移到`Spring Security 6.x`相关的常见迁移问题，这些问题包含大量的非被动重构。
 

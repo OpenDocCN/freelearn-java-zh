@@ -1,4 +1,4 @@
-# 理解 WebDriver 事件
+# 第六章：理解 WebDriver 事件
 
 Selenium WebDriver 提供了一个 API 来跟踪使用 WebDriver 执行测试脚本时发生的各种事件。许多导航事件在 WebDriver 内部事件发生之前和之后被触发（例如在导航到 URL 之前和之后，以及浏览器后退导航之前和之后），这些事件可以被跟踪和捕获。为了抛出一个事件，WebDriver 提供了一个名为`EventFiringWebDriver`的类，为了捕获该事件，它为测试脚本开发者提供了一个名为`WebDriverEventListener`的接口。测试脚本开发者应该为其提供的接口重写方法提供自己的实现。在本章中，我们将探讨以下主题：
 

@@ -1,6 +1,6 @@
 
 
-# 使用 Spring Data 进行身份验证
+# 第五章：使用 Spring Data 进行身份验证
 
 在上一章中，我们介绍了如何利用 Spring Security 的内置**Java 数据库连接**（**JDBC**）支持。在本章中，我们将探讨 Spring Data 项目以及如何利用**Java 持久性 API**（**JPA**）对关系型数据库进行身份验证。我们还将探讨如何使用**MongoDB**对文档数据库进行身份验证。本章的示例代码基于第四章的 Spring Security 设置，*基于 JDBC 的身份验证*（[B21757_04.xhtml#_idTextAnchor106]），并且已经更新以重构对 SQL 的需求，并使用 ORM 进行所有数据库交互。
 

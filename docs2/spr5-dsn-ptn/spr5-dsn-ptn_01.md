@@ -1,4 +1,4 @@
-# 开始使用 Spring Framework 5.0 和设计模式
+# 第一章：开始使用 Spring Framework 5.0 和设计模式
 
 本章将帮助你通过模块更好地理解 Spring Framework，并使用负责 Spring 成功的设计模式。本章将涵盖 Spring Framework 的每一个主要模块。我们将从 Spring Framework 的介绍开始。我们将查看 Spring 5 中引入的新特性和增强功能。我们还将了解 Spring Framework 主要模块中使用的设计模式。
 

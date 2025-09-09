@@ -1,6 +1,6 @@
 
 
-# 数组、集合和数据结构
+# 第五章：数组、集合和数据结构
 
 本章包括涵盖三个主要主题的 24 个问题。我们首先讨论与专门用于并行数据处理的新的 Vector API 相关的一些问题。然后，我们继续讨论包括 Rope、Skip List、K-D Tree、Zipper、Binomial Heap、Fibonacci Heap、Pairing Heap、Huffman 编码等在内的几个数据结构。最后，我们讨论三种最流行的连接算法。
 

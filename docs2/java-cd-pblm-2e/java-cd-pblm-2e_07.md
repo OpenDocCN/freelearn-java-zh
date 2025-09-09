@@ -1,6 +1,6 @@
 
 
-# 外部（函数）内存 API
+# 第七章：外部（函数）内存 API
 
 本章包括涵盖外部内存 API 和外部链接器 API 的 28 个问题。我们将从依赖于 JNI API 和开源 JNA/JNR 库调用外国函数的经典方法开始。接下来，我们将介绍名为 Project Panama 的新方法（在 JDK 21 中的第三次审查和 JDK 22 中的最终发布作为 JEP 454）。我们将分析最相关的 API，如`Arena`、`MemorySegment`、`MemoryLayout`等。最后，我们将关注外部链接器 API 和 Jextract 工具，用于调用具有不同类型签名的国外函数，包括回调函数。
 

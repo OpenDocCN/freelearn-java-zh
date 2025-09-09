@@ -1,4 +1,4 @@
-# Schema Registry
+# 第五章：Schema Registry
 
 在上一章中，我们看到了如何以 JSON 格式生产和消费数据。在本章中，我们将了解如何使用 Apache Avro 序列化相同的消息。
 

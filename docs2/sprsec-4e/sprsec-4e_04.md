@@ -1,6 +1,6 @@
 
 
-# 基于 JDBC 的认证
+# 第四章：基于 JDBC 的认证
 
 在上一章中，我们看到了如何扩展 Spring Security 以利用我们的`CalendarDao`接口和现有的领域模型来认证用户。在本章中，我们将看到如何使用 Spring Security 的内置 JDBC 支持。为了保持简单，本章的示例代码基于我们从*第二章*继承的 Spring Security 设置，*Spring Security 入门*。在本章中，我们将涵盖以下主题：
 

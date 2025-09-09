@@ -1,4 +1,4 @@
-# Kafka Connect
+# 第八章：Kafka Connect
 
 在本章中，我们不是使用 Kafka Java API 进行生产者和消费者，也不是使用 Kafka Streams 或 KSQL（如前几章所述），我们将使用 Spark Structured Streaming 连接 Kafka，这是 Apache Spark 用于处理流数据的解决方案，它使用其 Datasets API。
 

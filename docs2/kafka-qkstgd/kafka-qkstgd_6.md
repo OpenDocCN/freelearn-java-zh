@@ -1,4 +1,4 @@
-# Kafka Streams
+# 第六章：Kafka Streams
 
 在本章中，我们将不再像前几章那样使用 Kafka Java API 来处理生产者和消费者，而是将使用 Kafka Streams，这是 Kafka 用于流处理的模块。
 

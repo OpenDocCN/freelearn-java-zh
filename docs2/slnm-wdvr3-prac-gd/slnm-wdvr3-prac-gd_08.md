@@ -1,4 +1,4 @@
-# 设置 Selenium Grid
+# 第八章：设置 Selenium Grid
 
 现在我们已经了解了 RemoteWebDriver 是什么以及它是如何工作的，我们准备学习 Selenium Grid。在本章中，我们将涵盖以下主题：
 

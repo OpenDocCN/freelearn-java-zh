@@ -1,6 +1,6 @@
 
 
-# 构建 GraalVM 原生图像
+# 第十九章：构建 GraalVM 原生图像
 
 本章节致力于提升关于原生图像和`GraalVM`的技能。在本章中，您将获得构建利用原生功能的 Spring Security 应用程序的指导。
 

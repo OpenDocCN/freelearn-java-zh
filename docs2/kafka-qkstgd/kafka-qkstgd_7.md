@@ -1,4 +1,4 @@
-# KSQL
+# 第七章：KSQL
 
 在前面的章节中，我们编写了 Java 代码来使用 Kafka 操作数据流，我们还为 Kafka 和 Kafka Streams 构建了几个 Java 处理器。在本章中，我们将使用 KSQL 来实现相同的结果。
 

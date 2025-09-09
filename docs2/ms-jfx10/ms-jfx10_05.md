@@ -1,4 +1,4 @@
-# 探索 WebDriver 的高级交互
+# 第五章：探索 WebDriver 的高级交互
 
 在上一章中，我们讨论了 WebDriver 接口及其功能，包括截图、与窗口、框架、警报、cookie 和测试同步。在本章中，我们将介绍一些在 Web 元素上执行动作的高级方法。我们将学习如何使用 Selenium WebDriver 的动作 API 执行动作，包括以下内容：
 

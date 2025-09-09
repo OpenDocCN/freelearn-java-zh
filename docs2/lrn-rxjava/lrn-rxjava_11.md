@@ -1,4 +1,4 @@
-# Android 上的 RxJava
+# 第十一章：Android 上的 RxJava
 
 如果有一个领域被反应式编程所席卷，那无疑是移动应用。正如本书中讨论的那样，ReactiveX 在许多领域都非常有用。但是，移动应用正变得越来越复杂，用户对无响应、缓慢或存在错误的应用的容忍度很低。因此，移动应用迅速成为 ReactiveX 的早期采用者，以解决这些问题。RxJava 在 Android 上站稳脚跟后，RxSwift 迅速在 iOS 上流行起来。还有 RxAndroid 和 RxBinding 库，可以将 RxJava 与 Android 环境轻松集成，我们将在本章中介绍。
 

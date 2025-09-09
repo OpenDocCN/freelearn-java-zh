@@ -1,4 +1,4 @@
-# 使用 RxJava 为 Kotlin 新增功能
+# 第十二章：使用 RxJava 为 Kotlin 新增功能
 
 在我们的最后一章中，我们将把 RxJava 应用于 JVM 上的一个令人兴奋的新领域：Kotlin 语言。
 

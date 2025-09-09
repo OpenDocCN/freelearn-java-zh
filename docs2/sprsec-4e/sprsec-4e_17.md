@@ -1,6 +1,6 @@
 
 
-# 微服务安全性使用 OAuth 2 和 JSON Web Tokens
+# 第十七章：微服务安全性使用 OAuth 2 和 JSON Web Tokens
 
 在本章中，我们将探讨基于微服务的架构，并查看如何使用 **OAuth 2** 和 **JSON Web Tokens** (**JWT**) 在基于 Spring 的应用程序中确保微服务的安全性。
 

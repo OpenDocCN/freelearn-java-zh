@@ -1,4 +1,4 @@
-# 可用的不同 WebDriver
+# 第二章：可用的不同 WebDriver
 
 上一章介绍了 Selenium WebDriver 架构和 WebDriver 接口。我们使用 ChromeDriver 和 Google Chrome 创建了一个简单的测试。在本章中，我们将探讨 Mozilla Firefox、Microsoft Internet Explorer、Microsoft Edge 和 Safari 的 WebDriver 实现。随着 WebDriver 成为 W3C 规范，所有主要浏览器厂商现在都原生支持 WebDriver。在本章中，我们将探讨以下内容：
 

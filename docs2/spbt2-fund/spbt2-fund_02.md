@@ -1,4 +1,4 @@
-# 构建 Spring 应用程序
+# 第二章：构建 Spring 应用程序
 
 在本章中，你将学习如何与 Spring Beans 交互以及如何配置你的 Spring 上下文。这是每个 Spring 应用程序构建的基础。
 
