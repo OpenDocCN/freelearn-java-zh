@@ -1,0 +1,524 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;7.&#xA0;Error Handling"><div class="titlepage"><div><div><h1 class="title"><a id="ch07"/>Chapter 7. Error Handling</h1></div></div></div><p>In any integrated system, there are numerous reasons for errors to happen. Many are unforeseen, not easy to predict, and not easy to simulate. As an integrated framework, Camel provides extensive support for error handling, which is very flexible and able to deal with very different kinds of errors.</p><p>In this chapter, we will cover the following topics:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The kind of errors that we can deal with using Camel</li><li class="listitem" style="list-style-type: disc">The different Camel error handlers available</li><li class="listitem" style="list-style-type: disc">The configuration of the error handlers</li></ul></div><div class="section" title="Types of errors"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec54"/>Types of errors</h1></div></div></div><p>We can distinguish two<a id="id361" class="indexterm"/> main types of errors—recoverable and irrecoverable. Let's have a look at these in detail.</p><div class="section" title="Recoverable errors"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec67"/>Recoverable errors</h2></div></div></div><p>A recoverable error<a id="id362" class="indexterm"/> is a temporary error. It means that this error might be recovered <span class="emphasis"><em>automatically</em></span> after a certain time.</p><p>An example would be a network connection that is temporarily down, resulting in <code class="literal">IOException</code>.</p><p>Basically, the exceptions are represented as recoverable errors in Camel.</p><p>In that case, Camel stores the exceptions (the recoverable errors) in the exchange using the <code class="literal">setException</code> (throwable cause) method:</p><div class="informalexample"><pre class="programlisting">Exchange.setException(new IOException("My exception"));</pre></div><p>As we will see later, an exchange containing an exception will be caught by an error handler, which will react accordingly.</p></div><div class="section" title="Irrecoverable errors"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec68"/>Irrecoverable errors</h2></div></div></div><p>An irrecoverable <a id="id363" class="indexterm"/>error is an error that remains an error no matter how many times you try to perform the same action.</p><p>An example would be trying to access a nonexistent table in a database, or accessing a JMS queue that does not exist.</p><p>An irrecoverable error is represented as a message with its <code class="literal">setFault</code> flag set to <code class="literal">true</code>. The fault message is the normal message body, as follows:</p><div class="informalexample"><pre class="programlisting">Message msg = Exchange.getOut();
+msg.setFault(true);
+msg.setBody("Some Error Message");</pre></div><p>Programmers can set a fault message so Camel can react accordingly and stop routing the message.</p><p>The question could be, in which case do we use an exception in the exchange and in which case do we use the fault flag on the message?</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The first reason for the presence of the fault flag is that the Camel API was designed around JBI, which includes a <code class="literal">Fault</code> message concept.</li><li class="listitem" style="list-style-type: disc">The second reason is that we might want to handle some errors in a different way. For instance, using exceptions in an exchange will use an <code class="literal">ErrorHandler</code>, meaning that for an <code class="literal">InOut</code> exchange the next endpoint of the route won't ever get an <code class="literal">out</code> message.</li></ul></div><p>Using the fault flag allows you to handle this kind of error in a specific way. For instance, with a CXF endpoint, it could make sense to create and return a SOAP fault. However, we will see that all kinds of errors can be handled by the Camel error handlers.</p></div></div></div>
+<div class="section" title="Camel error handlers"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec55"/>Camel error handlers</h1></div></div></div><p>As we saw, Camel<a id="id364" class="indexterm"/> stores the exceptions in the exchange using the <code class="literal">setException(Throwable cause)</code> method.</p><p>Camel provides<a id="id365" class="indexterm"/> ready-to-use error handlers, depending of the mechanism that you have to implement. These error handlers will only react to the exceptions set in the exchange. By default, the error handlers won't react if an irrecoverable error has been set as the fault message. We will see, further in the chapter, that Camel provides an option to handle irrecoverable errors.</p><p>In order to react, the error handler <span class="emphasis"><em>lives</em></span> on the route channels. Actually, an error handler is an interceptor (on the channel), that analyzes the exchange, and verifies that the exception attribute of the exchange is not null.</p><p>If the exception is not null, the error handler <span class="emphasis"><em>reacts</em></span>. This means that the error handler will <span class="emphasis"><em>catch</em></span> any uncaught exception thrown during the routing or processing of messages within Camel.</p><p>Camel provides <a id="id366" class="indexterm"/>different kinds of error handlers, depending on your need.</p><div class="section" title="Non-transacted error handlers"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec69"/>Non-transacted error handlers</h2></div></div></div><p>The non-transacted<a id="id367" class="indexterm"/> error handlers are mentioned in this<a id="id368" class="indexterm"/> section.</p><div class="section" title="DefaultErrorHandler"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec13"/>DefaultErrorHandler</h3></div></div></div><p>The <code class="literal">DefaultErrorHandler</code> is the default error handler. It doesn't support dead letter queues it propagates back to the caller. The exchange ends immediately.</p><p>It's very similar to the dead letter error handler, but the payload is lost (whereas the DLQ keeps the payload for processing).</p><p>This means that it <a id="id369" class="indexterm"/>supports redelivery policies. As we will see later, we can configure the error handler with some options.</p><p>This error handler covers most use cases. It catches exceptions in the processors and propagates them back to the previous channel, where the error handler can catch it. This gives Camel the chance to react accordingly, for instance, to reroute the message to a different route path, try a redelivery, or give up and propagate the exception back to the caller.</p><p>Even if you don't explicitly specify an error handler, Camel will implicitly create a <code class="literal">DefaultErrorHandler</code>, without redelivery, no handle (see error handlers features for details about handle), and no dead letter queue (as it's not supported by the <code class="literal">DefaultErrorHandler</code>).</p><p>To illustrate the <code class="literal">DefaultErrorHandler</code>, we create a simple Camel route that will expose a HTTP service (using Jetty).</p><p>First, we create the following Maven <code class="literal">pom.xml</code>:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;project   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"&gt;
+
+  &lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;
+
+  &lt;groupId&gt;com.packt.camel&lt;/groupId&gt;
+  &lt;artifactId&gt;chapter7a&lt;/artifactId&gt;
+  &lt;version&gt;1.0-SNAPSHOT&lt;/version&gt;
+  &lt;packaging&gt;bundle&lt;/packaging&gt;
+
+  &lt;dependencies&gt;
+      &lt;dependency&gt;
+          &lt;groupId&gt;org.apache.camel&lt;/groupId&gt;
+          &lt;artifactId&gt;camel-core&lt;/artifactId&gt;
+          &lt;version&gt;2.12.4&lt;/version&gt;
+      &lt;/dependency&gt;
+  &lt;/dependencies&gt;
+
+  &lt;build&gt;
+      &lt;plugins&gt;
+          &lt;plugin&gt;
+              &lt;groupId&gt;org.apache.felix&lt;/groupId&gt;
+              &lt;artifactId&gt;maven-bundle-plugin&lt;/artifactId&gt;
+              &lt;version&gt;2.3.7&lt;/version&gt;
+              &lt;extensions&gt;true&lt;/extensions&gt;
+              &lt;configuration&gt;
+                  &lt;instructions&gt;
+                      &lt;Import-Package&gt;*&lt;/Import-Package&gt;
+                  &lt;/instructions&gt;
+              &lt;/configuration&gt;
+          &lt;/plugin&gt;
+      &lt;/plugins&gt;
+  &lt;/build&gt;
+
+&lt;/project&gt;</pre></div><p>The route is pretty<a id="id370" class="indexterm"/> simple. It exposes an HTTP service using the Camel Jetty component and validates the submitted message using a bean.</p><p>We write this route using the Blueprint DSL. We add the following <code class="literal">src/main/resources/OSGI-INF/blueprint/route.xml</code> file:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="checker" class="com.packt.camel.chapter7a.Checker"/&gt;
+
+  &lt;camelContext &gt;
+      &lt;route&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;to uri="bean:checker"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>The <code class="literal">checker bean</code> is pretty simple. It takes the message received on the Jetty endpoint and checks whether it's valid. The message is an HTTP parameter <code class="literal">key=value</code>. If the parameter has the <a id="id371" class="indexterm"/>format message=... it's valid, or else we throw an <code class="literal">IllegalArgumentException</code>.</p><p>Here's the <code class="literal">checker</code> code:</p><div class="informalexample"><pre class="programlisting">package com.packt.camel.chapter7a;
+
+public class Checker {
+
+  public String validate(String body) throws Exception {
+      String[] param = body.split("=");
+      if (param.length != 2) {
+          throw new IllegalArgumentException("Bad parameter");
+      }
+      if (!param[0].equalsIgnoreCase("message")) {
+          throw new IllegalArgumentException("Message parameter expected");
+      }
+      return "Hello " + param[1] + "\n";
+  }
+ 
+}</pre></div><p>We can build our bundle using the following code:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ mvn clean install</strong></span>
+<span class="strong"><strong>[INFO] Scanning for projects...</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] -------------------------------------------------------------</strong></span>
+<span class="strong"><strong>[INFO] Building chapter7a 1.0-SNAPSHOT</strong></span>
+<span class="strong"><strong>[INFO] -------------------------------------------------------------</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-clean-plugin:2.5:clean (default-clean) @ chapter7a</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-resources-plugin:2.6:resources (default-resources) @ chapter7a ---</strong></span>
+<span class="strong"><strong>[WARNING] Using platform encoding (UTF-8 actually) to copy filtered resources, i.e. build is platform dependent!</strong></span>
+<span class="strong"><strong>[INFO] Copying 1 resource</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-compiler-plugin:3.2:compile (default-compile) @ chapter7a ---</strong></span>
+<span class="strong"><strong>[INFO] Changes detected - recompiling the module!</strong></span>
+<span class="strong"><strong>[WARNING] File encoding has not been set, using platform encoding UTF-8, i.e. build is platform dependent!</strong></span>
+<span class="strong"><strong>[INFO] Compiling 1 source file to /home/jbonofre/Workspace/sample/chapter7a/target/classes</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-resources-plugin:2.6:testResources (default- testResources) @ chapter7a ---</strong></span>
+<span class="strong"><strong>[WARNING] Using platform encoding (UTF-8 actually) to copy filtered resources, i.e. build is platform dependent!</strong></span>
+<span class="strong"><strong>[INFO] skip non existing resourceDirectory /home/jbonofre/Workspace/sample/chapter7a/src/test/resources</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-compiler-plugin:3.2:testCompile (default- testCompile) @ chapter7a ---</strong></span>
+<span class="strong"><strong>[INFO] No sources to compile</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-surefire-plugin:2.17:test (default-test) @ chapter7a</strong></span>
+<span class="strong"><strong>[INFO] No tests to run.</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-bundle-plugin:2.3.7:bundle (default-bundle) @ chapter7a ---</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-install-plugin:2.5.1:install (default-install) @ chapter7a ---</strong></span>
+<span class="strong"><strong>[INFO] Installing /home/jbonofre/Workspace/sample/chapter7a/target/chapter7a-1.0- SNAPSHOT.jar to /home/jbonofre/.m2/repository/com/packt/camel/chapter7a/1.0- SNAPSHOT/chapter7a-1.0-SNAPSHOT.jar</strong></span>
+<span class="strong"><strong>[INFO] Installing /home/jbonofre/Workspace/sample/chapter7a/pom.xml to /home/jbonofre/.m2/repository/com/packt/camel/chapter7a/1.0- SNAPSHOT/chapter7a-1.0-SNAPSHOT.pom</strong></span>
+<span class="strong"><strong>[INFO]</strong></span>
+<span class="strong"><strong>[INFO] --- maven-bundle-plugin:2.3.7:install (default-install) @ chapter7a ---</strong></span>
+<span class="strong"><strong>[INFO] Installing com/packt/camel/chapter7a/1.0-SNAPSHOT/chapter7a- 1.0-SNAPSHOT.jar</strong></span>
+<span class="strong"><strong>[INFO] Writing OBR metadata</strong></span>
+<span class="strong"><strong>[INFO] --------------------------------------------------------------</strong></span>
+<span class="strong"><strong>[INFO] BUILD SUCCESS</strong></span>
+<span class="strong"><strong>[INFO] --------------------------------------------------------------</strong></span>
+<span class="strong"><strong>[INFO] Total time: 3.648 s</strong></span>
+<span class="strong"><strong>[INFO] Finished at: 2015-03-04T10:19:55+01:00</strong></span>
+<span class="strong"><strong>[INFO] Final Memory: 34M/1222M</strong></span>
+<span class="strong"><strong>[INFO] --------------------------------------------------------------</strong></span>
+</pre></div><p>We now start our Apache Karaf container and install the <code class="literal">camel-blueprint</code> and <code class="literal">camel-jetty</code> features:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ bin/karaf</strong></span>
+<span class="strong"><strong>karaf@root()&gt; feature:repo-add camel 2.12.4</strong></span>
+<span class="strong"><strong>Adding feature url mvn:org.apache.camel.karaf/apache- camel/2.12.4/xml/features</strong></span>
+<span class="strong"><strong>karaf@root()&gt; feature:install camel-blueprint</strong></span>
+<span class="strong"><strong>karaf@root()&gt; feature:install camel-jetty</strong></span>
+<span class="strong"><strong>Refreshing bundles org.apache.camel.camel-core (60)</strong></span>
+</pre></div><p>We can now install our bundle:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>karaf@root()&gt; bundle:install mvn:com.packt.camel/chapter7a/1.0- SNAPSHOT</strong></span>
+<span class="strong"><strong>Bundle ID: 86</strong></span>
+<span class="strong"><strong>karaf@root()&gt; bundle:start 86</strong></span>
+</pre></div><p>We can submit a <a id="id372" class="indexterm"/>valid message using curl:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl -d "message=chapter7a" http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>Hello chapter7a</strong></span>
+</pre></div><p>Now, we submit an invalid message:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl -d "foo=bar" http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Message parameter expected</strong></span>
+</pre></div><p>In the Karaf <code class="literal">log</code> file (<code class="literal">data/karaf.log</code>), we can see:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>2015-03-04 10:25:44,647 | ERROR | qtp766046018-75  | DefaultErrorHandler | rg.apache.camel.util.CamelLogger  215 | 60 - org.apache.camel.camel-core - 2.12.4 | Failed delivery for (MessageId: ID-latitude-40620-1425461026278-0-6 on ExchangeId: ID- latitude-40620-1425461026278-0-5). Exhausted after delivery attempt: 1 caught: java.lang.IllegalArgumentException: Message parameter expected</strong></span>
+
+<span class="strong"><strong>Message History</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>RouteId            ProcessorId        Processor                      Elapsed (ms)</strong></span>
+<span class="strong"><strong>[route1]           [route1]           [http://0.0.0.0:9999/my/route] [4]</strong></span>
+<span class="strong"><strong>[route1]           [to1]              [bean:checker]                 [3]</strong></span>
+
+<span class="strong"><strong>Exchange</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>Exchange[</strong></span>
+<span class="strong"><strong>      Id                ID-latitude-40620-1425461026278-0-5</strong></span>
+<span class="strong"><strong>      ExchangePattern   InOut</strong></span>
+<span class="strong"><strong>      Headers           {Accept=*/*, breadcrumbId=ID-latitude-40620- 1425461026278-0-6, CamelHttpMethod=POST, CamelHttpPath=, CamelHttpQuery=null, CamelHttpServletRequest=(POST /my/route)@132201555 org.eclipse.jetty.server.Request@7e13c53, CamelHttpServletResponse=HTTP/1.1 200</strong></span>
+<span class="strong"><strong>^M</strong></span>
+<span class="strong"><strong>, CamelHttpUri=/my/route, CamelHttpUrl=http://localhost:9999/my/route, CamelRedelivered=false, CamelRedeliveryCounter=0, CamelServletContextPath=/my/route, Content- Length=7, Content-Type=application/x-www-form-urlencoded, foo=bar, Host=localhost:9999, User-Agent=curl/7.35.0}</strong></span>
+<span class="strong"><strong>      BodyType          </strong></span>
+<span class="strong"><strong>org.apache.camel.converter.stream.InputStreamCache</strong></span>
+<span class="strong"><strong>      Body              </strong></span>
+<span class="strong"><strong>[Body is instance of org.apache.camel.StreamCache]</strong></span>
+<span class="strong"><strong>]</strong></span>
+
+<span class="strong"><strong>Stacktrace</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Message parameter expected at com.packt.camel.chapter7a.Checker.validate(Checker.java:11)[86:com.packt.camel.chapter7a:1.0.0.SNAPSHOT]</strong></span>
+</pre></div><p>So we can see<a id="id373" class="indexterm"/> that the <code class="literal">DefaultErrorHandler</code> reacted for the <code class="literal">IllegalArgumentException</code>. The delivery failed and has been logged. By default (as handled is false), the exception is thrown back to the caller.</p></div><div class="section" title="DeadLetterChannel"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec14"/>DeadLetterChannel</h3></div></div></div><p>The<a id="id374" class="indexterm"/> <code class="literal">DeadLetterChannel</code> error handler implements the Dead Letter Channel EIP. It supports the redelivery policy, and the redelivery sends the message to a dead letter endpoint.</p><p>Even then, the dead letter endpoint, the <code class="literal">DeadLetterChannel</code> behaves like the <code class="literal">DefaultErrorHandler</code>. To illustrate this, we update our previous example to use a <code class="literal">DeadLetterChannel</code> that calls an error route when an exception occurs.</p><p>So the <code class="literal">DeadLetterChannel</code> error handler will catch the exception, try to redeliver, and if it still fails the message will be sent to a dedicated route.</p><p>The <code class="literal">checker</code> bean is exactly the same as before. The route definition (using the Blueprint DSL) is different as we define the <code class="literal">DeadLetterChannel</code> error handler:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="checker" class="com.packt.camel.chapter7b.Checker"/&gt;
+
+  &lt;camelContext &gt;
+      &lt;route errorHandlerRef="myDeadLetterErrorHandler"&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;to uri="bean:checker"/&gt;
+      &lt;/route&gt;
+      &lt;route&gt;
+          &lt;from uri="direct:error"/&gt;
+          &lt;convertBodyTo type="java.lang.String"/&gt;
+          &lt;to uri="log:error"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+  &lt;bean id="myDeadLetterErrorHandler" class="org.apache.camel.builder.DeadLetterChannelBuilder"&gt;
+      &lt;property name="deadLetterUri" value="direct:error"/&gt;
+      &lt;property name="redeliveryPolicy" ref="myRedeliveryPolicyConfig"/&gt;
+  &lt;/bean&gt;
+
+  &lt;bean id="myRedeliveryPolicyConfig" class="org.apache.camel.processor.RedeliveryPolicy"&gt;
+      &lt;property name="maximumRedeliveries" value="3"/&gt;
+      &lt;property name="redeliveryDelay" value="5000"/&gt;
+  &lt;/bean&gt;
+
+&lt;/blueprint&gt;</pre></div><p>We can see that we use the <code class="literal">myDeadLetterErrorHandler</code> in the <code class="literal">main</code> route. The <code class="literal">myDeadLetterErrorHandler</code> is constructed using the <code class="literal">DeadLetterChannelBuilder</code> builder.</p><p>The following<a id="id375" class="indexterm"/> attributes are set:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The <code class="literal">deadLetterUri</code> containing the endpoint is set where we send the message if the delivery fails. Here, we define the endpoint <code class="literal">direct:error</code> to call the corresponding route.</li><li class="listitem" style="list-style-type: disc">The <code class="literal">redeliveryPolicy</code> is set to define the way we try to redeliver the message. The <code class="literal">myRedeliveryPolicy</code> defines the number of attempts (3 in the example), and the delay between each attempt (5 seconds here). It means that after 3 attempts (so, a maximum of 15 seconds), if the message still fails it will be sent to the endpoint defined in the dead letter URI (so <code class="literal">direct:error</code>, in our case).</li></ul></div><p>The <code class="literal">error</code>
+<a id="id376" class="indexterm"/> route just logs the failed message. It means that the <code class="literal">main</code> route won't fail, it will just return the <code class="literal">in</code> message to the caller.</p><p>We build our new bundle using the following code:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ mvn clean install</strong></span>
+<span class="strong"><strong>[INFO] ------------------------------------------------------</strong></span>
+<span class="strong"><strong>[INFO] BUILD SUCCESS</strong></span>
+<span class="strong"><strong>[INFO] -------------------------------------------------------</strong></span>
+</pre></div><p>We start our Apache Karaf:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>bin/karaf</strong></span>
+</pre></div><p>As previously done, we install the <code class="literal">camel-blueprint</code> and <code class="literal">camel-jetty</code> features:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>karaf@root()&gt; feature:repo-add camel 2.12.4</strong></span>
+<span class="strong"><strong>Adding feature url mvn:org.apache.camel.karaf/apache- camel/2.12.4/xml/features</strong></span>
+<span class="strong"><strong>karaf@root()&gt; feature:install camel-blueprint camel-jetty</strong></span>
+<span class="strong"><strong>Refreshing bundles org.apache.camel.camel-core (60)</strong></span>
+<span class="strong"><strong>karaf@root()&gt;</strong></span>
+</pre></div><p>We can deploy our bundle:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>karaf@root()&gt; bundle:install mvn:com.packt.camel/chapter7b/1.0- SNAPSHOT</strong></span>
+<span class="strong"><strong>Bundle ID: 86</strong></span>
+<span class="strong"><strong>karaf@root()&gt; bundle:start 86</strong></span>
+</pre></div><p>First, we send a valid message using curl:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl -d "message=chapter7b" http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>Hello chapter7b</strong></span>
+</pre></div><p>It works as before, nothing has changed.</p><p>Now, we send an invalid message:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl -d "foo=bar" http://localhost:9999/my/route</strong></span>
+</pre></div><p>We can note that curl is waiting for a response; it's normal as we defined a redelivery policy in our dead letter error handler. Finally, we receive the original in message:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>foo=bar</strong></span>
+</pre></div><p>If we take a look in the Karaf <code class="literal">log</code> file, we can see the following code corresponding to the <code class="literal">error</code> route <a id="id377" class="indexterm"/>execution:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>2015-03-04 15:00:29,838 | INFO  | qtp1470784256-76 | error | org.apache.camel.util.CamelLogger  176 | 60 - org.apache.camel.camel- core - 2.12.4 | Exchange[ExchangePattern: InOnly, BodyType: String,</strong></span>
+<span class="strong"><strong> Body: foo=bar]</strong></span>
+</pre></div></div><div class="section" title="LoggingErrorHandler"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec15"/>LoggingErrorHandler</h3></div></div></div><p>The <code class="literal">LoggingErrorHandler</code> logs<a id="id378" class="indexterm"/> the failed message along with the exception.</p><p>Camel will, by default, log the failed message and the exception using the log name <code class="literal">LoggingErrorHandler</code> at <code class="literal">ERROR</code> level. To illustrate the behavior of the <code class="literal">LoggingErrorHandler</code>, we update the previous route <code class="literal">blueprint</code> XML like this:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+  &lt;bean id="checker" class="com.packt.camel.chapter7c.Checker"/&gt;
+  &lt;camelContext &gt;
+      &lt;errorHandler id="myLoggingErrorHandler" type="LoggingErrorHandler" logName="packt" level="ERROR"/&gt;
+      &lt;route id="main" errorHandlerRef="myLoggingErrorHandler"&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;to uri="bean:checker"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>We define a <code class="literal">LoggingErrorHandler</code> in the <code class="literal">main</code> route. This error handler will just intercept and log the exception in the <code class="literal">packt</code> logger, with <code class="literal">ERROR</code> as the log level. The exchange ends, and the exception is sent back to the caller.</p><p>After deploying our bundle in Apache Karaf, and submitting an invalid message, we can see that the client (curl) gets the following exception:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl -d "foo=bar" http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Message parameter expected at com.packt.camel.chapter7c.Checker.validate(Checker.java:11)</strong></span>
+</pre></div><p>The exception is logged in the Karaf <code class="literal">log</code> file:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>2015-03-04 16:43:57,910 | ERROR | qtp1055249608-73 | packt | org.apache.camel.util.CamelLogger  215 | 60 - org.apache.camel.camel- core - 2.12.4 | Failed delivery for (MessageId: ID-latitude-41466- 1425483831913-0-2 on ExchangeId: ID-latitude-41466-1</strong></span>
+<span class="strong"><strong>425483831913-0-1). Exhausted after delivery attempt: 1 caught: java.lang.IllegalArgumentException: Message parameter expected</strong></span>
+
+<span class="strong"><strong>Message History</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>RouteId            ProcessorId        Processor                                                                      Elapsed (ms)</strong></span>
+<span class="strong"><strong>[route1]           [route1]           [http://0.0.0.0:9999/my/route]                                                      [18]</strong></span>
+<span class="strong"><strong>[route1]           [to1]              [bean:checker]                                                                       [15]</strong></span>
+
+<span class="strong"><strong>Exchange</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>Exchange[</strong></span>
+<span class="strong"><strong>      Id                ID-latitude-41466-1425483831913-0-1</strong></span>
+<span class="strong"><strong>      ExchangePattern   InOut</strong></span>
+<span class="strong"><strong>      Headers           {Accept=*/*, breadcrumbId=ID-latitude-41466- 1425483831913-0-2, CamelHttpMethod=POST, CamelHttpPath=, CamelHttpQuery=null, CamelHttpServletRequest=(POST /my/route)@1904375366 org.eclipse.jetty.server.Request@71827646, CamelHttpServletResponse=HTTP/1.1 200</strong></span>
+
+<span class="strong"><strong>, CamelHttpUri=/my/route, CamelHttpUrl=http://localhost:9999/my/route, CamelRedelivered=false, CamelRedeliveryCounter=0, CamelServletContextPath=/my/route, Content- Length=7, Content-Type=application/x-www-form-urlencoded, foo=bar, Host=localhost:9999, User-Agent=curl/7.35.0}</strong></span>
+<span class="strong"><strong>      BodyType          </strong></span>
+<span class="strong"><strong>org.apache.camel.converter.stream.InputStreamCache</strong></span>
+<span class="strong"><strong>      Body              </strong></span>
+<span class="strong"><strong>[Body is instance of org.apache.camel.StreamCache]</strong></span>
+<span class="strong"><strong>]</strong></span>
+
+<span class="strong"><strong>Stacktrace</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Message parameter expected at com.packt.camel.chapter7c.Checker.validate(Checker.java:11)[86:com.packt.camel.chapter7c:1.0.0.SNAPSHOT]</strong></span>
+</pre></div></div><div class="section" title="NoErrorHandler"><div class="titlepage"><div><div><h3 class="title"><a id="ch07lvl3sec16"/>NoErrorHandler</h3></div></div></div><p>The <code class="literal">NoErrorHandler</code> completely<a id="id379" class="indexterm"/> disables error handling; this means that any exception is not intercepted and is just returned to the caller.</p><p>For instance, if we update the Blueprint XML of our sample like this:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="checker" class="com.packt.camel.chapter7d.Checker"/&gt;
+
+  &lt;camelContext &gt;
+      &lt;errorHandler id="myNoErrorHandler" type="NoErrorHandler"/&gt;
+      &lt;route errorHandlerRef="myNoErrorHandler"&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;to uri="bean:checker"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>If we submit an<a id="id380" class="indexterm"/> invalid message, the exchange doesn't end, we don't have anything in the log, and the exception is just returned to the caller.</p></div></div><div class="section" title="TransactedErrorHandler"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec70"/>TransactedErrorHandler</h2></div></div></div><p>The <code class="literal">TransactedErrorHandler</code> is<a id="id381" class="indexterm"/> used when a route is <span class="emphasis"><em>flagged</em></span> with transacted.</p><p>It's basically the same as<a id="id382" class="indexterm"/> the <code class="literal">DefaultErrorHandler</code> (it's actually inherited from the <code class="literal">DefaultErrorHandler</code>). The difference is that the <code class="literal">TransactedErrorHandler</code> will look for a transaction manager.</p><p>It uses the following mechanism to find it:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">If one (and only one) bean in the registry has the <code class="literal">org.apache.camel.spi.TransactedPolicy</code> type, it uses it</li><li class="listitem" style="list-style-type: disc">If a bean in the registry has the <code class="literal">ID PROPAGATION_REQUIRED</code> and the <code class="literal">org.apache.camel.spi.TransactedPolicy</code> type, it uses it</li><li class="listitem" style="list-style-type: disc">If one (and only one) bean in the registry has <code class="literal">org.springframework.transaction.PlatformTransactionManager</code>, it uses it</li></ul></div><p>You can also <span class="emphasis"><em>force</em></span> the transaction manager that you want to use, as the transacted notation accepts a bean ID.</p></div></div>
+<div class="section" title="Error handlers scopes"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec56"/>Error handlers scopes</h1></div></div></div><p>An error handler<a id="id383" class="indexterm"/> can be defined:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">At the Camel Context level (Camel Context scope), which means that all routes in this Camel Context will use this error handler.</li><li class="listitem" style="list-style-type: disc">At the route level (route scope), possibly overwritten the error handler defined using the Camel Context scope.</li></ul></div><p>Thanks to the <a id="id384" class="indexterm"/>scope, it's possible to define a default error handler (Camel Context scope), and, possibly define an error handler specific to one particular route.</p><p>For instance, the following Blueprint XML contains two routes with two different error handlers—one with the Camel Context scope and another with <code class="literal">route</code> scope.</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="checker" class="com.packt.camel.chapter7e.Checker"/&gt;
+
+  &lt;camelContext  errorHandlerRef="deadLetterErrorHandler"&gt;
+      &lt;errorHandler id="noErrorHandler" type="NoErrorHandler"/&gt;
+      &lt;route&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;to uri="bean:checker"/&gt;
+      &lt;/route&gt;
+      &lt;route errorHandlerRef="noErrorHandler"&gt;
+           &lt;from uri="jetty:http://0.0.0.0:8888/my/route"/&gt;
+           &lt;to uri="bean:checker"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+  &lt;bean id="deadLetterErrorHandler" class="org.apache.camel.builder.DeadLetterChannelBuilder"&gt;       &lt;property name="deadLetterUri" value="direct:error"/&gt;
+      &lt;property name="redeliveryPolicy"ref="myRedeliveryPolicyConfig"/&gt;
+  &lt;/bean&gt;
+
+  &lt;bean id="myRedeliveryPolicyConfig" class="org.apache.camel.processor.RedeliveryPolicy"&gt;
+      &lt;property name="maximumRedeliveries" value="3"/&gt;
+      &lt;property name="redeliveryDelay" value="5000"/&gt;
+  &lt;/bean&gt;
+
+&lt;/blueprint&gt;</pre></div></div>
+<div class="section" title="Error handler features"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec57"/>Error handler features</h1></div></div></div><p>Basically, all error handlers<a id="id385" class="indexterm"/> extend the <code class="literal">DefaultErrorHandler</code>. The <code class="literal">DefaultErrorHandler</code> provides a set of interesting features allowing you to <a id="id386" class="indexterm"/>use very fine-grained management of the exceptions.</p><div class="section" title="Redelivery"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec71"/>Redelivery</h2></div></div></div><p>The <code class="literal">DefaultErrorHandler</code> (and so the <code class="literal">DeadLetterErrorHandler</code> and <code class="literal">TransactedErrorHandler</code>) supports a redelivery mechanism that you can configure via a redelivery policy.</p><p>For instance, the<a id="id387" class="indexterm"/> following Blueprint XML creates a Camel route that systematically throws an <code class="literal">IllegalArgumentException</code> (with <code class="literal">Booooommmmm</code> message). As we don't explicitly define an error handler, the route uses the <code class="literal">DefaultErrorHandler</code>. We just configure the redelivery policy of the <code class="literal">DefaultErrorHandler</code>, trying to redeliver the message three times, waiting two seconds between each attempt. If it still fails at the fourth attempt, the exchange ends and the exception is sent to the caller.</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="myException" class="java.lang.IllegalArgumentException"&gt;
+      &lt;argument value="Booooommmmm"/&gt;
+  &lt;/bean&gt;
+
+  &lt;camelContext &gt;
+      &lt;errorHandler id="defaultErrorHandler"&gt;
+           &lt;redeliveryPolicy maximumRedeliveries="3" redeliveryDelay="2000"/&gt;
+      &lt;/errorHandler&gt;
+      &lt;route errorHandlerRef="defaultErrorHandler"&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;throwException ref="myException"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>We start our Apache Karaf container and install the <code class="literal">camel-blueprint</code> and <code class="literal">camel-jetty</code> features:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ bin/karaf</strong></span>
+<span class="strong"><strong>karaf@root&gt; features:chooseurl camel 2.12.4</strong></span>
+<span class="strong"><strong>karaf@root&gt; features:install camel-blueprint camel-jetty</strong></span>
+</pre></div><p>We just drop our <code class="literal">route.xml</code> in the Karaf <code class="literal">deploy</code> folder, and we call the service using curl:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl http://localhost:9999/my/route</strong></span>
+</pre></div><p>After some time, we <a id="id388" class="indexterm"/>can see the exception (<code class="literal">IllegalArgumentException</code> with <code class="literal">Booooommmmm</code> message) returned to the client:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Booooommmmm</strong></span>
+</pre></div><p>In the Karaf <code class="literal">log</code> file, we can see the following code:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>2015-03-05 13:04:32,447 | ERROR | qtp307037456-75  | DefaultErrorHandler | rg.apache.camel.util.CamelLogger  215 | 60 - org.apache.camel.camel-core - 2.12.4 | Failed delivery for (MessageId: ID-latitude-34120-1425557044231-0-2 on ExchangeId: ID- latitude-34120-1425557044231-0-1). Exhausted after delivery attempt: 4 caught: java.lang.IllegalArgumentException: Booooommmmm</strong></span>
+
+<span class="strong"><strong>Message History</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>RouteId            ProcessorId        Processor                       Elapsed (ms)</strong></span>
+<span class="strong"><strong>[route1]           [route1]           [http://0.0.0.0:9999/my/route]   [6010]</strong></span>
+<span class="strong"><strong>[route1]           [throwException1]    [throwException[java.lang.IllegalArgumentException]]                               [6007]</strong></span>
+
+<span class="strong"><strong>Exchange</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>Exchange[</strong></span>
+<span class="strong"><strong>      Id                ID-latitude-34120-1425557044231-0-1</strong></span>
+<span class="strong"><strong>      ExchangePattern   InOut</strong></span>
+<span class="strong"><strong>      Headers           {Accept=*/*, breadcrumbId=ID-latitude-34120- 1425557044231-0-2, CamelHttpMethod=GET, CamelHttpPath=, CamelHttpQuery=null, CamelHttpServletRequest=(GET /my/route)@1911523579 org.eclipse.jetty.server.Request@71ef88fb, CamelHttpServletResponse=HTTP/1.1 200</strong></span>
+
+<span class="strong"><strong>, CamelHttpUri=/my/route, CamelHttpUrl=http://localhost:9999/my/route, CamelRedelivered=true, CamelRedeliveryCounter=3, CamelRedeliveryMaxCounter=3, CamelServletContextPath=/my/route, Content-Type=null, Host=localhost:9999, User-Agent=curl/7.35.0}</strong></span>
+<span class="strong"><strong>      BodyType          null</strong></span>
+<span class="strong"><strong>      Body              [Body is null]</strong></span>
+<span class="strong"><strong>]</strong></span>
+
+<span class="strong"><strong>Stacktrace</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Booooommmmm at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)[:1.7.0_67]</strong></span>
+</pre></div><p>We can see<a id="id389" class="indexterm"/> that the redelivery policy has been used and the exchange fails at the fourth attempt (which is exhausted after delivery attempt number four).</p></div><div class="section" title="Exception policy"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec72"/>Exception policy</h2></div></div></div><p>The <code class="literal">DefaultErrorHandler</code> (and so <code class="literal">DeadLetterChannel</code> and <code class="literal">TransactedErrorHandler</code>) supports the exception policy. The exception policies are used to intercept and handle specific exceptions in particular ways.</p><p>The exception policies<a id="id390" class="indexterm"/> are specified with the <code class="literal">onException</code> syntax. Camel will traverse the exception hierarchy from the bottom up to the root searching for an <code class="literal">onException</code> that matches the actual exception.</p><p>You can use <code class="literal">onException</code> with error handler defined at <code class="literal">CamelContext</code> scope or route scope. For instance, in the following <code class="literal">route.xml</code>, we have two different routes:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The first route throws an <code class="literal">IllegalArgumentException</code> (<code class="literal">Boooommmm</code>)</li><li class="listitem" style="list-style-type: disc">The second route throws an <code class="literal">IllegalStateException</code> (<code class="literal">Kabooommmm</code>)</li></ul></div><p>We want to react differently for the two exceptions:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">For the <code class="literal">IllegalArgumentException</code>, we want to define a specific redelivery policy</li><li class="listitem" style="list-style-type: disc">For the <code class="literal">IllegalStateException</code>, we want to redirect the message to a specific endpoint</li></ul></div><p>For both exceptions, the exchange ends and the exception is sent back to the caller.</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="illegalArgumentException" class="java.lang.IllegalArgumentException"&gt;
+      &lt;argument value="Booooommmmm"/&gt;
+  &lt;/bean&gt;
+  &lt;bean id="illegalStateException" class="java.lang.IllegalStateException"&gt;
+      &lt;argument value="Kaboooommmmm"/&gt;
+  &lt;/bean&gt;
+
+  &lt;camelContext &gt;
+      &lt;onException&gt;
+          &lt;exception&gt;java.lang.IllegalArgumentException&lt;/exception&gt;
+          &lt;redeliveryPolicy maximumRedeliveries="2" redeliveryDelay="1000"/&gt;
+      &lt;/onException&gt;
+      &lt;onException&gt;
+          &lt;exception&gt;java.lang.IllegalStateException&lt;/exception&gt;
+          &lt;to uri="direct:error"/&gt;
+      &lt;/onException&gt;
+      &lt;route&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;throwException ref="illegalArgumentException"/&gt;
+      &lt;/route&gt;
+      &lt;route&gt;
+          &lt;from uri="jetty:http://0.0.0.0:8888/my/route"/&gt;
+          &lt;throwException ref="illegalStateException"/&gt;
+      &lt;/route&gt;
+      &lt;route&gt;
+          &lt;from uri="direct:error"/&gt;
+          &lt;convertBodyTo type="java.lang.String"/&gt;
+          &lt;to uri="log:error"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>We start the Apache<a id="id391" class="indexterm"/> Karaf container and install the <code class="literal">camel-blueprint</code> and <code class="literal">camel-jetty</code> features:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ bin/karaf</strong></span>
+<span class="strong"><strong>karaf@root()&gt; feature:repo-add camel 2.12.4</strong></span>
+<span class="strong"><strong>karaf@root()&gt; feature:install camel-blueprint camel-jetty</strong></span>
+</pre></div><p>We drop the <code class="literal">route.xml</code> in the Karaf <code class="literal">deploy</code> folder.</p><p>Now, if you access the HTTP endpoint corresponding to the first route, the <code class="literal">IllegalArgumentException</code> is thrown:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Booooommmmm</strong></span>
+</pre></div><p>In the Karaf <code class="literal">log</code> file, we can see the following code:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>2015-03-05 17:24:53,621 | ERROR | qtp486271114-76  | DefaultErrorHandler | rg.apache.camel.util.CamelLogger  215 | 60 - org.apache.camel.camel-core - 2.12.4 | Failed delivery for (MessageId: ID-latitude-34088-1425572554935-0-2 on ExchangeId: ID- latitude-34088-1425572554935-0-1). Exhausted after delivery attempt: 3 caught: java.lang.IllegalArgumentException: Booooommmmm</strong></span>
+
+<span class="strong"><strong>Message History</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>RouteId            ProcessorId        Processor                      Elapsed (ms)</strong></span>
+<span class="strong"><strong>[route1]           [route1]           [http://0.0.0.0:9999/my/route]  [2009]</strong></span>
+<span class="strong"><strong>[route1]           [throwException1]          [throwException[java.lang.IllegalArgumentException]    [2005]</strong></span>
+
+<span class="strong"><strong>Exchange</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>Exchange[</strong></span>
+<span class="strong"><strong>      Id                ID-latitude-34088-1425572554935-0-1</strong></span>
+<span class="strong"><strong>      ExchangePattern   InOut</strong></span>
+<span class="strong"><strong>      Headers           {Accept=*/*, breadcrumbId=ID-latitude-34088- 1425572554935-0-2, CamelHttpMethod=GET, CamelHttpPath=, CamelHttpQuery=null, CamelHttpServletRequest=(GET /my/route)@1882419051 org.eclipse.jetty.server.Request@70336f6b, CamelHttpServletResponse=HTTP/1.1 200</strong></span>
+
+<span class="strong"><strong>, CamelHttpUri=/my/route, CamelHttpUrl=http://localhost:9999/my/route, CamelRedelivered=true, CamelRedeliveryCounter=2, CamelRedeliveryMaxCounter=2, CamelServletContextPath=/my/route, Content-Type=null, Host=localhost:9999, User-Agent=curl/7.35.0}</strong></span>
+<span class="strong"><strong>      BodyType          null</strong></span>
+<span class="strong"><strong>      Body              [Body is null]</strong></span>
+<span class="strong"><strong>]</strong></span>
+
+<span class="strong"><strong>Stacktrace</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>java.lang.IllegalArgumentException: Booooommmmm at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)[:1.7.0_67]</strong></span>
+</pre></div><p>If you access the<a id="id392" class="indexterm"/> HTTP endpoint corresponding to the second route, the <code class="literal">IllegalStateException</code> is thrown:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl http://localhost:8888/my/route</strong></span>
+<span class="strong"><strong>java.lang.IllegalStateException: Kaboooommmmm</strong></span>
+</pre></div><p>In the Karaf <a id="id393" class="indexterm"/>
+<code class="literal">log</code> file, we can see the following code:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>2015-03-05 17:25:02,965 | INFO  | qtp1797782377-82 | error | rg.apache.camel.util.CamelLogger  176 | 60 - org.apache.camel.camel-core - 2.12.4 | Exchange[ExchangePattern: InOut, BodyType: null, Body: [Body is null]]</strong></span>
+<span class="strong"><strong>2015-03-05 17:25:02,969 | ERROR | qtp1797782377-82 | DefaultErrorHandler | rg.apache.camel.util.CamelLogger 215 | 60 - org.apache.camel.camel-core - 2.12.4 | Failed delivery for (MessageId: ID-latitude-34088-1425572554935-0-4 on ExchangeId: ID- latitude-34088-1425572554935-0-3). Exhausted after delivery attempt: 1 caught: java.lang.IllegalStateException: Kaboooommmmm. Processed by failure processor: FatalFallbackErrorHandler[Channel[sendTo(Endpoint[direct://error])]]</strong></span>
+
+<span class="strong"><strong>Message History</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>RouteId            ProcessorId        Processor                                                                      Elapsed (ms)</strong></span>
+<span class="strong"><strong>[route2]           [route2]           [http://0.0.0.0:8888/my/route]              [7]</strong></span>
+<span class="strong"><strong>[route2]           [throwException2]    [throwException[java.lang.IllegalStateException]]                       [to1]              [direct:error]                 [4]</strong></span>
+<span class="strong"><strong>[route3]           [convertBodyTo1] [convertBodyTo[java.lang.String]] [0]</strong></span>
+<span class="strong"><strong>[route3]           [to2]              [log:error]                     [2]</strong></span>
+
+<span class="strong"><strong>Exchange</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>Exchange[</strong></span>
+<span class="strong"><strong>      Id                ID-latitude-34088-1425572554935-0-3</strong></span>
+<span class="strong"><strong>      ExchangePattern   InOut</strong></span>
+<span class="strong"><strong>      Headers           {Accept=*/*, breadcrumbId=ID-latitude-34088- 1425572554935-0-4, CamelHttpMethod=GET, CamelHttpPath=, CamelHttpQuery=null, CamelHttpServletRequest=(GET /my/route)@10303</strong></span>
+<span class="strong"><strong>16697 org.eclipse.jetty.server.Request@3d696299, CamelHttpServletResponse=HTTP/1.1 200</strong></span>
+
+<span class="strong"><strong>, CamelHttpUri=/my/route, CamelHttpUrl=http://localhost:8888/my/route, CamelRedelivered=false, CamelRedeliveryCounter=0, CamelServletContextPath=/my/route, Content- Type=null, Host=localhost:8888, User-Agent=curl/7.35.0}</strong></span>
+<span class="strong"><strong>      BodyType          null</strong></span>
+<span class="strong"><strong>      Body              [Body is null]</strong></span>
+<span class="strong"><strong>]</strong></span>
+
+<span class="strong"><strong>Stacktrace</strong></span>
+<span class="strong"><strong>---------------------------------------------------------------------------------------------------------------------------------------</strong></span>
+<span class="strong"><strong>java.lang.IllegalStateException: Kaboooommmmm at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)[:1.7.0_67]</strong></span>
+</pre></div><p>We can see the<a id="id394" class="indexterm"/> <code class="literal">onException</code> used there, redirecting the exchange to the <code class="literal">error</code> route.</p></div><div class="section" title="Handling and ignoring exceptions"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec73"/>Handling and ignoring exceptions</h2></div></div></div><p>When handling an<a id="id395" class="indexterm"/> exception, Camel breaks out of<a id="id396" class="indexterm"/> route execution.</p><p>With a <code class="literal">handled</code> flag the exception is not sent back to the caller, and you can define an <code class="literal">error</code> message.</p><p>For instance, with the following <code class="literal">route.xml</code>:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="illegalArgumentException" class="java.lang.IllegalArgumentException"&gt;
+      &lt;argument value="Booooommmmm"/&gt;
+  &lt;/bean&gt;
+
+  &lt;camelContext &gt;
+      &lt;onException&gt;
+          &lt;exception&gt;java.lang.IllegalArgumentException&lt;/exception&gt;
+          &lt;redeliveryPolicy maximumRedeliveries="2" redeliveryDelay="1000"/&gt;
+          &lt;handled&gt;&lt;constant&gt;true&lt;/constant&gt;&lt;/handled&gt;
+          &lt;transform&gt;&lt;constant&gt;Ouch we got an error&lt;/constant&gt;&lt;/transform&gt;
+      &lt;/onException&gt;
+      &lt;route&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;throwException ref="illegalArgumentException"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>The handled flag on the <code class="literal">onException</code> prevents to send back the exception to the caller. In that case, we define an error message using a constant string.</p><p>We start Apache<a id="id397" class="indexterm"/> Karaf and install the <code class="literal">camel-blueprint</code> and <code class="literal">camel-jetty</code> features:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ bin/karaf</strong></span>
+<span class="strong"><strong>karaf@root&gt; features:chooseurl camel 2.12.4</strong></span>
+<span class="strong"><strong>karaf@root&gt; features:install camel-blueprint camel-jetty</strong></span>
+</pre></div><p>We drop the <code class="literal">route.xml</code> in<a id="id398" class="indexterm"/> the Karaf <code class="literal">deploy</code> folder. If we access the HTTP endpoint, we have:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>Ouch we got an error</strong></span>
+</pre></div><p>On the other hand, it's possible to completely ignore an exception using the <code class="literal">continued</code> flag. For instance, with the following <code class="literal">route.xml</code>:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+
+  &lt;bean id="illegalArgumentException" class="java.lang.IllegalArgumentException"&gt;
+      &lt;argument value="Booooommmmm"/&gt;
+  &lt;/bean&gt;
+
+  &lt;camelContext &gt;
+      &lt;onException&gt;
+          &lt;exception&gt;java.lang.IllegalArgumentException&lt;/exception&gt;
+          &lt;continued&gt;&lt;constant&gt;true&lt;/constant&gt;&lt;/continued&gt;
+      &lt;/onException&gt;
+      &lt;route&gt;
+          &lt;from uri="jetty:http://0.0.0.0:9999/my/route"/&gt;
+          &lt;throwException ref="illegalArgumentException"/&gt;
+      &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>We ignore the <code class="literal">IllegalArgumentException</code> thrown by the route. It means that if we access the HTTP endpoint with curl, we just have a response:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong>$ curl http://localhost:9999/my/route</strong></span>
+<span class="strong"><strong>$</strong></span>
+</pre></div><p>This means that the <code class="literal">IllegalArgumentException</code> has been ignored, thanks to the <code class="literal">continued</code> flag.</p></div><div class="section" title="A failover solution"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec74"/>A failover solution</h2></div></div></div><p>The <code class="literal">DefaultErrorHandler</code> (and so the <code class="literal">DeadLetterChannel</code> and <code class="literal">TransactedErrorHandler</code>) supports routing of the failed exchange to a specific endpoint. Thanks to<a id="id399" class="indexterm"/> this mechanism we can implement a kind of failover solution, or route that could undo previous changes.</p><p>The following <code class="literal">route.xml</code> implements such a failover:</p><div class="informalexample"><pre class="programlisting">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;blueprint &gt;
+   
+  &lt;camelContext &gt;
+  &lt;onException&gt;
+  &lt;exception&gt;java.io.IOException&lt;/exception&gt;
+  &lt;redeliveryPolicy maximumRedeliveries="3"/&gt;
+  &lt;handled&gt;&lt;constant&gt;true&lt;/constant&gt;&lt;/handled&gt;
+  &lt;to uri= "ftp://fallbackftp.packt.com?user=anonymous&amp;amp;password=foobar"/&gt;
+  &lt;/onException&gt;
+    &lt;route&gt;
+  &lt;from uri="file:/tmp/in"/&gt;
+  &lt;to uri="ftp://ftp.packt.com?user=anonymous&amp;amp;password=foobar"/&gt;
+    &lt;/route&gt;
+  &lt;/camelContext&gt;
+
+&lt;/blueprint&gt;</pre></div><p>We try to upload local files to an FTP server. If in the FTP server, an <code class="literal">IOException</code> is thrown, we react to the <code class="literal">IOException</code> (meaning that something is wrong with the FTP server), trying to redeliver three times on the same FTP server. Finally, we redirect to a fallback (another) FTP server.</p></div><div class="section" title="onWhen"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec75"/>onWhen</h2></div></div></div><p>If <code class="literal">onException</code> allows you to<a id="id400" class="indexterm"/> filter the exceptions and react depending on the exception, it's also possible to add another condition to react to one particular exception. It's what you can do with the <code class="literal">onWhen</code> syntax, accepting a predicate. You have an even more fine-grained way to filter exceptions, as follows:</p><div class="informalexample"><pre class="programlisting">&lt;onException&gt;
+  &lt;exception&gt;java.io.IOException&lt;/exception&gt;
+  &lt;onWhen&gt;&lt;simple&gt;${header.foo} == bar&lt;/simple&gt;&lt;/onWhen&gt;
+  &lt;to uri="direct:my"/&gt;
+&lt;/onException&gt;</pre></div></div><div class="section" title="onRedeliver"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec76"/>onRedeliver</h2></div></div></div><p>The <code class="literal">onRedeliver</code> syntax allows you to execute some code before the message is redelivered. For instance, you <a id="id401" class="indexterm"/>can call a processor for redelivery, as follows:</p><div class="informalexample"><pre class="programlisting">&lt;onException onRedeliveryRef="myRedeliveryProcessor"&gt;
+  &lt;exception&gt;java.io.IOException&lt;/exception&gt;
+&lt;/onException&gt;</pre></div></div><div class="section" title="retryWhile"><div class="titlepage"><div><div><h2 class="title"><a id="ch07lvl2sec77"/>retryWhile</h2></div></div></div><p>Instead of defining a static<a id="id402" class="indexterm"/> number of redeliveries, you can use the <code class="literal">retryWhile</code> syntax. It allows you, at runtime, to determine whether or not to continue redelivery or to give up.</p><p>It allows you to have fine-grained redelivery control.</p></div></div>
+<div class="section" title="Try, Catch, and Finally"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec58"/>Try, Catch, and Finally</h1></div></div></div><p>Until now, we have used<a id="id403" class="indexterm"/> error handlers (most of the time the <code class="literal">DefaultErrorHandler</code>), which applies to all channels in the routes. You might want to <span class="emphasis"><em>square</em></span> the exception handling to some part of a route.</p><p>It's similar to<a id="id404" class="indexterm"/> the <code class="literal">try/catch/finally</code> Java statements.</p><div class="informalexample"><pre class="programlisting">&lt;route&gt;
+    &lt;from uri="direct:start"/&gt;
+    &lt;doTry&gt;
+        &lt;process ref="processor"/&gt;
+        &lt;to uri="direct:result"/&gt;
+        &lt;doCatch&gt;
+            &lt;!-- catch multiple exceptions --&gt;
+            &lt;exception&gt;java.io.IOException&lt;/exception&gt;
+            &lt;exception&gt;java.lang.IllegalStateException&lt;/exception&gt;
+            &lt;to uri="direct:catch"/&gt;
+        &lt;/doCatch&gt;
+        &lt;doFinally&gt;
+            &lt;to uri="direct:finally"/&gt;
+        &lt;/doFinally&gt;
+    &lt;/doTry&gt;
+&lt;/route&gt;</pre></div><p>Camel error handling is disabled. When using <code class="literal">doTry</code> .. <code class="literal">doCatch</code> .. <code class="literal">doFinally</code>, the regular Camel error handler does not apply. This means any <code class="literal">onException</code> or the likes does not trigger. The<a id="id405" class="indexterm"/> reason is that <code class="literal">doTry</code> .. <code class="literal">doCatch</code> .. <code class="literal">doFinally</code> is in fact its own error handler and it aims to mimic and work like <code class="literal">try/catch/finally</code> works in Java.</p></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch07lvl1sec59"/>Summary</h1></div></div></div><p>Generally speaking, error handling is hard. That's why Camel provides a large panel of features around error handling. Even if you can use the <code class="literal">doTry/doCatch/doFinally</code> syntax, most of the time it's better to separate the routing logic from the error handling itself.</p><p>When possible, good practice is to try to recover. It's always a good idea to use strategies for recovery. It's strongly recommended to build unit tests to simulate errors. It's what we will see in the next chapter—testing with Camel.</p></div></body></html>
