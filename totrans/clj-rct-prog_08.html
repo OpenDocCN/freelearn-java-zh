@@ -1,0 +1,283 @@
+<html><head></head><body>
+<div id="page" style="height:0pt"/><div class="book" title="Chapter&#xA0;8.&#xA0;Futures"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch08" class="calibre1"/>Chapter 8. Futures</h1></div></div></div><p class="calibre7">The first step towards reactive applications is to break out of synchronous processing. In general, applications waste a lot of time waiting for things to happen. Maybe we are waiting on an expensive computation—say, calculating the 1000th Fibonacci number. Perhaps we are waiting for some information to be written to the database. We could also be waiting for a network call to return, bringing us the latest recommendations from our favorite online store.</p><p class="calibre7">Regardless of what we're waiting for, we should never block clients of our application. This is crucial to achieve the responsiveness we desire when building reactive systems.</p><p class="calibre7">In an age where processing cores are abundant—my MacBook Pro has eight processor cores—blocking APIs severely underutilizes the resources we have at our disposal.</p><p class="calibre7">As we approach the end of this book, it is appropriate to step back a little and appreciate that not all classes of problems that deal with concurrent, asynchronous computations require the machinery of frameworks such as RxJava or <code class="email">core.async</code>.</p><p class="calibre7">In this chapter, we will look at another abstraction that helps us develop concurrent, asynchronous applications: <span class="strong"><strong class="calibre2">futures</strong></span>. We will learn about:</p><div class="book"><ul class="itemizedlist"><li class="listitem">The problems and limitations with Clojure's implementation of futures</li><li class="listitem">An alternative to Clojure's futures that provides asynchronous, composable semantics</li><li class="listitem">How to optimize concurrency in the face of blocking IO</li></ul></div></div>
+
+<div class="book" title="Chapter&#xA0;8.&#xA0;Futures">
+<div class="book" title="Clojure futures"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_1"><a id="ch08lvl1sec48" class="calibre1"/>Clojure futures</h1></div></div></div><p class="calibre7">The first <a id="id360" class="calibre1"/>step toward fixing this issue—that is, to prevent a potentially<a id="id361" class="calibre1"/> long-running task from blocking our application—is to create new threads, which do the work and wait for it to complete. This way, we keep the application's main thread free to serve more clients.</p><p class="calibre7">Working directly with threads, however, is tedious and error-prone, so Clojure's core library includes futures, which are extremely simple to use:</p><div class="informalexample"><pre class="programlisting">(def f (clojure.core/future
+         (println "doing some expensive work...")
+         (Thread/sleep 5000)
+         (println "done")
+         10))
+(println "You'll see me before the future finishes")
+;; doing some expensive work...
+;; You'll see me before the future finishes
+;; done</pre></div><p class="calibre7">In the preceding snippet, we invoke the <code class="email">clojure.core/future</code> macro with a body simulating an<a id="id362" class="calibre1"/> expensive computation. In this example, it simply sleeps for 5 seconds <a id="id363" class="calibre1"/>before returning the value 10. As the output demonstrates, this does not block the main thread, which is free to serve more clients, pick work items from a queue, or what have you.</p><p class="calibre7">Of course, the most interesting computations, such as the expensive one, return results we care about. This is where the first limitation of Clojure futures becomes apparent. If we attempt to retrieve the result of a future—by derefing it—before it has completed, the calling thread will block until the future returns a value. Try running the following slightly modified version of the previous snippet:</p><div class="informalexample"><pre class="programlisting">(def f (clojure.core/future
+         (println "doing some expensive work...")
+         (Thread/sleep 5000)
+         (println "done")
+         10))
+(println "You'll see me before the future finishes")
+@f
+(println "I could be doing something else. Instead I had to wait")
+
+
+;; doing some expensive work...
+;; You'll see me before the future finishes
+<span class="strong"><strong class="calibre2">;; 5 SECONDS LATER</strong></span>
+;; done
+;; I could be doing something else. Instead, I had to wait</pre></div><p class="calibre7">The only difference now is that we immediately try to <span class="strong"><em class="calibre8">deref</em></span> the future after we create it. Since the future isn't done, we sit there waiting for 5 seconds until it returns its value. Only then is our program allowed to continue.</p><p class="calibre7">In general, this poses a problem when building modular systems. Often, a long-running operation like the one described earlier would be initiated within a specific module or function, and handed over to the next logical step for further processing.</p><p class="calibre7">Clojure futures <a id="id364" class="calibre1"/>don't allow us to schedule a function to be executed when the<a id="id365" class="calibre1"/> future finishes in order to perform such further processing. This is an important feature in building reactive systems.</p></div></div>
+<div class="book" title="Fetching data in parallel"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch08lvl1sec49" class="calibre1"/>Fetching data in parallel</h1></div></div></div><p class="calibre7">To understand<a id="id366" class="calibre1"/> better the issues outlined in the previous section, let's build a more complex example that fetches data about one of my favorite movies, <span class="strong"><em class="calibre8">The Lord of the Rings</em></span>.</p><p class="calibre7">The idea is that given the movie, we wish to retrieve its actors and, for each actor, retrieve the movies they have been a part of. We also would like to find out more information about each actor, such as their spouses.</p><p class="calibre7">Additionally, we will match each actor's movie against the list of top five movies in order to highlight them as such. Finally, the result will be printed to the screen.</p><p class="calibre7">From the problem statement, we identify the following two main characteristics we will need to account for:</p><div class="book"><ul class="itemizedlist"><li class="listitem">Some of these tasks need to be performed in parallel</li><li class="listitem">They establish dependencies on each other</li></ul></div><p class="calibre7">To get started, let's create a new leiningen project:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein new clj-futures-playground</strong></span>
+</pre></div><p class="calibre7">Next, open the core namespace file in <code class="email">src/clj_futures_playground/core.clj</code> and add the data we will be working with:</p><div class="informalexample"><pre class="programlisting">(ns clj-futures-playground.core
+  (:require [clojure.pprint :refer [pprint]]))
+
+(def movie
+  {:name "Lord of The Rings: The Fellowship of The Ring"
+   :cast ["Cate Blanchett"
+          "Elijah Wood"
+          "Liv Tyler"
+          "Orlando Bloom"]})
+
+(def actor-movies
+  [{:name "Cate Blanchett"
+    :movies ["Lord of The Rings: The Fellowship of The Ring"
+             "Lord of The Rings: The Return of The King"
+             "The Curious Case of Benjamin Button"]}
+
+   {:name "Elijah Wood"
+    :movies ["Eternal Sunshine of the Spotless Mind"
+             "Green Street Hooligans"
+             "The Hobbit: An Unexpected Journey"]}
+
+   {:name "Liv Tyler"
+    :movies ["Lord of The Rings: The Fellowship of The Ring"
+             "Lord of The Rings: The Return of The King"
+             "Armageddon"]}
+
+   {:name "Orlando Bloom"
+    :movies ["Lord of The Rings: The Fellowship of The Ring"
+             "Lord of The Rings: The Return of The King"
+             "Pirates of the Caribbean: The Curse of the Black Pearl"]}])
+
+(def actor-spouse
+  [{:name "Cate Blanchett"    :spouse "Andrew Upton"}
+   {:name "Elijah Wood"       :spouse "Unknown"}
+   {:name "Liv Tyler"         :spouse "Royston Langdon"}
+   {:name "Orlando Bloom"     :spouse "Miranda Kerr"}])
+(def top-5-movies
+  ["Lord of The Rings: The Fellowship of The Ring"
+   "The Matrix"
+   "The Matrix Reloaded"
+   "Pirates of the Caribbean: The Curse of the Black Pearl"
+   "Terminator"])</pre></div><p class="calibre7">The<a id="id367" class="calibre1"/> namespace declaration is simple and only requires the <code class="email">pprint</code> function, which will help us print our result in an easy-to-read format. With all the data in place, we can create the functions that will simulate remote services responsible for fetching the relevant data:</p><div class="informalexample"><pre class="programlisting">(defn cast-by-movie [name]
+  (future (do (Thread/sleep 5000)
+              (:cast  movie))))
+
+(defn movies-by-actor [name]
+  (do (Thread/sleep 2000)
+      (-&gt;&gt; actor-movies
+           (filter #(= name (:name %)))
+           first)))
+
+(defn spouse-of [name]
+  (do (Thread/sleep 2000)
+      (-&gt;&gt; actor-spouse
+           (filter #(= name (:name %)))
+           first)))
+
+(defn top-5 []
+  (future (do (Thread/sleep 5000)
+              top-5-movies)))</pre></div><p class="calibre7">Each <code class="email">service</code> function sleeps the current thread by a given amount of time to simulate a slow network. The functions <code class="email">cast-by-movie</code> and <code class="email">Top 5</code> each returns a future, indicating we <a id="id368" class="calibre1"/>wish to fetch this data on a different thread. The remaining functions simply return the actual data. They will also be executed in a different thread, however, as we will see shortly.</p><p class="calibre7">The next thing we need is a function to aggregate all fetched data, match spouses to actors, and highlight movies in the <span class="strong"><strong class="calibre2">Top 5</strong></span> list. We'll call it the <code class="email">aggregate-actor-data</code> function:</p><div class="informalexample"><pre class="programlisting">(defn aggregate-actor-data [spouses movies top-5]
+  (map (fn [{:keys [name spouse]} {:keys [movies]}]
+         {:name   name
+          :spouse spouse
+          :movies (map (fn [m]
+                         (if (some #{m} top-5)
+                           (str m " - (top 5)")
+                           m))
+                       movies)})
+       spouses
+       movies))</pre></div><p class="calibre7">The preceding function is fairly straightforward. It simply zips spouses and movies together, building a map of keys <code class="email">:name</code>, <code class="email">:spouse</code>, and <code class="email">:movies</code>. It further transforms <code class="email">movies</code> to append the <span class="strong"><strong class="calibre2">Top 5</strong></span> suffix to the ones in the <code class="email">top-5</code> list.</p><p class="calibre7">The last piece of the puzzle is the <code class="email">-main</code> function, which allows us to run the program from the command line:</p><div class="informalexample"><pre class="programlisting">(defn -main [&amp; args]
+  (time (let [cast    (cast-by-movie "Lord of The Rings: The Fellowship of The Ring")
+              movies  (pmap movies-by-actor @cast)
+              spouses (pmap spouse-of @cast)
+              top-5   (top-5)]
+          (prn "Fetching data...")
+          (pprint (aggregate-actor-data spouses movies @top-5))
+          (shutdown-agents))))</pre></div><p class="calibre7">There are a number of things worth highlighting in the preceding snippet.</p><p class="calibre7">First, we wrap the whole body in a call to <code class="email">time</code>, a simple benchmarking function that comes with Clojure. This is just so we know how long the program took to fetch all data—this information will become relevant later.</p><p class="calibre7">Then, we<a id="id369" class="calibre1"/> set up a number of <code class="email">let</code> bindings. The first, <code class="email">cast</code>, is the result of calling <code class="email">cast-by-movie</code>, which returns a future.</p><p class="calibre7">The next binding, <code class="email">movies</code>, uses a function we haven't seen before: <code class="email">pmap</code>.</p><p class="calibre7">The <code class="email">pmap</code> function works like <code class="email">map</code>, except the function is mapped over the items in the list in parallel. The <code class="email">pmap</code> function uses futures under the covers and that is the reason <code class="email">movies-by-actor</code> doesn't return a future—it leaves that for <code class="email">pmap</code> to handle.</p><div class="informalexample" title="Note"><h3 class="title2"><a id="tip31" class="calibre1"/>Tip</h3><p class="calibre7">The <code class="email">pmap</code> function is actually meant for CPU-bound operations, but is used here to keep the code simple.  In the face of blocking IO, <code class="email">pmap</code> wouldn't perform optimally. We will talk more about blocking IO later in this chapter.</p></div><p class="calibre7">We get the list of actors by <span class="strong"><em class="calibre8">derefing</em></span> the <code class="email">cast</code> binding, which, as we saw in the previous section, blocks the current thread waiting for the asynchronous fetch to finish. Once all results are ready, we simply call the <code class="email">aggregate-actor-data</code> function.</p><p class="calibre7">Lastly, we <a id="id370" class="calibre1"/>call the <code class="email">shutdown-agents</code> function, which shuts down the <span class="strong"><strong class="calibre2">Thread Pool</strong></span> backing futures in Clojure. This is necessary for our program to terminate properly, otherwise it would simply hang in the terminal.</p><p class="calibre7">To run the program, type the following in the terminal, under the project's root directory:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein run -m clj-futures-playground.core</strong></span>
+
+<span class="strong"><strong class="calibre2">"Fetching data..."</strong></span>
+<span class="strong"><strong class="calibre2">({:name "Cate Blanchett",</strong></span>
+<span class="strong"><strong class="calibre2">  :spouse "Andrew Upton",</strong></span>
+<span class="strong"><strong class="calibre2">  :movies</strong></span>
+<span class="strong"><strong class="calibre2">  ("Lord of The Rings: The Fellowship of The Ring - (top 5)"</strong></span>
+<span class="strong"><strong class="calibre2">   "Lord of The Rings: The Return of The King"</strong></span>
+<span class="strong"><strong class="calibre2">   "The Curious Case of Benjamin Button")}</strong></span>
+<span class="strong"><strong class="calibre2"> {:name "Elijah Wood",</strong></span>
+<span class="strong"><strong class="calibre2">  :spouse "Unknown",</strong></span>
+<span class="strong"><strong class="calibre2">  :movies</strong></span>
+<span class="strong"><strong class="calibre2">  ("Eternal Sunshine of the Spotless Mind"</strong></span>
+<span class="strong"><strong class="calibre2">   "Green Street Hooligans"</strong></span>
+<span class="strong"><strong class="calibre2">   "The Hobbit: An Unexpected Journey")}</strong></span>
+<span class="strong"><strong class="calibre2"> {:name "Liv Tyler",</strong></span>
+<span class="strong"><strong class="calibre2">  :spouse "Royston Langdon",</strong></span>
+<span class="strong"><strong class="calibre2">  :movies</strong></span>
+<span class="strong"><strong class="calibre2">  ("Lord of The Rings: The Fellowship of The Ring - (top 5)"</strong></span>
+<span class="strong"><strong class="calibre2">   "Lord of The Rings: The Return of The King"</strong></span>
+<span class="strong"><strong class="calibre2">   "Armageddon")}</strong></span>
+<span class="strong"><strong class="calibre2"> {:name "Orlando Bloom",</strong></span>
+<span class="strong"><strong class="calibre2">  :spouse "Miranda Kerr",</strong></span>
+<span class="strong"><strong class="calibre2">  :movies</strong></span>
+<span class="strong"><strong class="calibre2">  ("Lord of The Rings: The Fellowship of The Ring - (top 5)"</strong></span>
+<span class="strong"><strong class="calibre2">   "Lord of The Rings: The Return of The King"</strong></span>
+<span class="strong"><strong class="calibre2">   "Pirates of the Caribbean: The Curse of the Black Pearl - (top 5)")})</strong></span>
+<span class="strong"><strong class="calibre2">"Elapsed time: 10120.267 msecs"</strong></span>
+</pre></div><p class="calibre7">You will <a id="id371" class="calibre1"/>have noticed that the program takes a while to print the first message. Additionally, because futures block when they are derefed , the program doesn't start fetching the list of top five movies until it has completely finished fetching the cast of <span class="strong"><em class="calibre8">The Lord of The Rings</em></span>.</p><p class="calibre7">Let's have a look at why that is so:</p><div class="informalexample"><pre class="programlisting">  (time (let [cast    (cast-by-movie "Lord of The Rings: The Fellowship of The Ring")
+              ;; the following line blocks
+              movies  (pmap movies-by-actor <span class="strong"><strong class="calibre2">@cast</strong></span>)
+              spouses (pmap spouse-of @cast)
+              top-5   (top-5)]</pre></div><p class="calibre7">The highlighted section in the preceding snippet shows where the program blocks waiting for <code class="email">cast-by-movie</code> to finish. As stated previously, Clojure futures don't give us a way to run some piece of code when the future finishes—like a callback—forcing us to block too soon.</p><p class="calibre7">This prevents <code class="email">top-5</code>—a completely independent parallel data fetch—from running before we retrieve the movie's cast.</p><p class="calibre7">Of course, this is a contrived example, and we could solve this particular annoyance by calling <code class="email">top-5</code> before anything else. The problem is that the solution isn't always crystal clear and ideally we should not have to worry about the order of execution.</p><p class="calibre7">As we will see in the next section, there is a better way.</p></div>
+
+<div id="page" style="height:0pt"/><div class="book" title="Imminent &#x2013; a composable futures library for Clojure"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch08lvl1sec50" class="calibre1"/>Imminent – a composable futures library for Clojure</h1></div></div></div><p class="calibre7">In the past few months, I have been working on an open source library that aims to fix the <a id="id372" class="calibre1"/>previous issues with Clojure futures. The result of this work is <a id="id373" class="calibre1"/>called <span class="strong"><em class="calibre8">imminent</em></span> (see <a class="calibre1" href="https://github.com/leonardoborges/imminent">https://github.com/leonardoborges/imminent</a>).</p><p class="calibre7">The fundamental difference is that imminent futures are asynchronous by default and provide a number of combinators that allow us to declaratively write our programs without having to worry about its order of execution.</p><p class="calibre7">The best way to demonstrate how the library works is to rewrite the previous movies example in it. We will do this in two steps.</p><p class="calibre7">First, we will examine individually the bits of imminent's API that will be part of our final solution. Then, we'll put it all together in a working application. Let's start by creating a new project:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein new imminent-playground</strong></span>
+</pre></div><p class="calibre7">Next, add a dependency on imminent to your <code class="email">project.clj</code>:</p><div class="informalexample"><pre class="programlisting">:dependencies [[org.clojure/clojure "1.6.0"]
+               [com.leonardoborges/imminent "0.1.0"]]</pre></div><p class="calibre7">Then, create a new file, <code class="email">src/imminent_playground/repl.clj</code>, and add imminent's core namespace:</p><div class="informalexample"><pre class="programlisting">(ns imminent-playground.repl
+  (:require [imminent.core :as Ii]))
+
+(def  repl-out *out*)
+(defn prn-to-repl [&amp; args]
+  (binding [*out* repl-out]
+    (apply prn args)))</pre></div><p class="calibre7">The preceding snippet also creates a helper function that is useful when we're dealing with multiple threads in the REPL—this will be explained in detail later, but for now just take this as being a reliable way to print to the REPL across multiple threads.</p><p class="calibre7">Feel free to type this in the REPL as we go along. Otherwise, you can require the namespace file from a running REPL like so:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">(require 'imminent-playground.repl)</strong></span>
+</pre></div><p class="calibre7">All the following examples should be in this file.</p></div>
+
+<div class="book" title="Imminent &#x2013; a composable futures library for Clojure">
+<div class="book" title="Creating futures"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_1"><a id="ch08lvl2sec60" class="calibre1"/>Creating futures</h2></div></div></div><p class="calibre7">Creating a <a id="id374" class="calibre1"/>future in imminent isn't much different from <a id="id375" class="calibre1"/>creating a future in Clojure. It's as simple as the following:</p><div class="informalexample"><pre class="programlisting">(def age (i/future 31))
+
+;; #&lt;Future@2ea0ca7d: #&lt;Success@3e4dec75: 31&gt;&gt;</pre></div><p class="calibre7">What looks very different, however, is the return value. A key decision in imminent's API is to represent the value of a computation as either a <code class="email">Success</code> or a <code class="email">Failure</code> type. Success, as in the preceding example, wraps the result of the computation. Failure, as you might have guessed, will wrap any exceptions that happened in the future:</p><div class="informalexample"><pre class="programlisting">(def failed-computation   (i/future (throw (Exception. "Error"))))
+;; #&lt;Future@63cd0d58: #&lt;Failure@2b273f98: #&lt;Exception java.lang.Exception: Error&gt;&gt;&gt;
+
+(def failed-computation-1 (i/failed-future :invalid-data))
+;; #&lt;Future@a03588f: #&lt;Failure@61ab196b: :invalid-data&gt;&gt;</pre></div><p class="calibre7">As you can see, you're not limited to exceptions only. We can use the <code class="email">failed-future</code> function to create a future that completes immediately with the given reason, which, in the second example, is simply a keyword.</p><p class="calibre7">The next question we might ask is "How do we get the result out of a future?". As with Clojure futures, we can deref it as follows:</p><div class="informalexample"><pre class="programlisting">@age           ;; #&lt;Success@3e4dec75: 31&gt;
+(deref @age)   ;; 31
+(i/dderef age) ;; 31</pre></div><p class="calibre7">The idiom of using a double-deref is common, so imminent provides the convenience shown, <code class="email">dderef</code>, which is equivalent to calling <code class="email">deref</code> twice.</p><p class="calibre7">However, different from Clojure futures, this is a non-blocking operation, so if the future hasn't completed yet, the following is what you'll get:</p><div class="informalexample"><pre class="programlisting">@(i/future (do (Thread/sleep 500)
+               "hello"))
+;; :imminent.future/unresolved</pre></div><p class="calibre7">The initial state of a future is <code class="email">unresolved</code>, so unless you are absolutely certain a future has completed, derefing might not be the best way to work with the result of a computation. This is where combinators become useful.</p></div></div>
+
+<div class="book" title="Imminent &#x2013; a composable futures library for Clojure">
+<div class="book" title="Combinators and event handlers"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_2"><a id="ch08lvl2sec61" class="calibre1"/>Combinators and event handlers</h2></div></div></div><p class="calibre7">Let's say we <a id="id376" class="calibre1"/>would like to double the value in the age future. As <a id="id377" class="calibre1"/>we would with lists, we can simply map a<a id="id378" class="calibre1"/> function over the future to do just this:</p><div class="informalexample"><pre class="programlisting">(def double-age (i/map age #(* % 2)))
+;; #&lt;Future@659684cb: #&lt;Success@7ce85f87: 62&gt;&gt;</pre></div><div class="informalexample" title="Note"><h3 class="title2"><a id="tip32" class="calibre1"/>Tip</h3><p class="calibre7">While <code class="email">i/future</code> schedules its body for execution on a separate thread, it's worth noting that future combinators such as <code class="email">map</code>, <code class="email">filter</code>, and so on, do not create a new thread immediately. Instead, they schedule a function to be executed asynchronously in the thread pool once the original future completes.</p></div><p class="calibre7">Another <a id="id379" class="calibre1"/>way to do something with the value of a future is to use the <code class="email">on-success</code> event handler that gets called with the wrapped value of the future in case it is successful:</p><div class="informalexample"><pre class="programlisting">(i/on-success age #(prn-to-repl (str "Age is: " %)))
+;; "Age is: 31"</pre></div><p class="calibre7">Similarly, an <code class="email">on-failure</code> handler exists, which does the same for <code class="email">Failure</code> types. While on the subject of failures, imminent futures understand the context in which they are being executed and, if the current future yields a <code class="email">Failure</code>, it simply short-circuits the computation:</p><div class="informalexample"><pre class="programlisting">(-&gt; failed-computation
+    (i/map #(* % 2)))
+;; #&lt;Future@7f74297a: #&lt;Failure@2b273f98: #&lt;Exception java.lang.Exception: Error&gt;&gt;&gt;</pre></div><p class="calibre7">In the preceding example, we don't get a new error, but rather the original exception contained in <code class="email">failed-computation</code>. The function passed to <code class="email">map</code> never runs.</p><p class="calibre7">The decision to wrap the result of a future in a type such as <code class="email">Success</code> or <code class="email">Failure</code> might seem arbitrary but is actually quite the opposite. Both types implement the protocol <code class="email">IReturn</code>—and a couple of other ones—which comes with a set of useful functions, one of which is <code class="email">map</code>:</p><div class="informalexample"><pre class="programlisting">(i/map (i/success "hello")
+       #(str % " world"))
+;; #&lt;Success@714eea92: "hello world"&gt;
+
+(i/map (i/failure "error")
+       #(str % " world"))
+;; #&lt;Failure@6d685b65: "error"&gt;</pre></div><p class="calibre7">We get a similar behavior here as we did previously: mapping a function over a failure simply short-circuits the whole computation. If you do, however, wish to map over the failure, you<a id="id380" class="calibre1"/> can use map's counterpart map-failure, which<a id="id381" class="calibre1"/> behaves similarly to map but is its inverse:</p><div class="informalexample"><pre class="programlisting">(i/map-failure (i/success "hello")
+               #(str % " world"))
+;; #&lt;Success@779af3f4: "hello"&gt;
+
+(i/map-failure (i/failure "Error")
+               #(str "We failed: " %))
+;; #&lt;Failure@52a02597: "We failed: Error"&gt;</pre></div><p class="calibre7">This plays <a id="id382" class="calibre1"/>well with the last event handlers imminent provides—<code class="email">on-complete</code>:</p><div class="informalexample"><pre class="programlisting">(i/on-complete age
+               (fn [result]
+                 (i/map result #(prn-to-repl "success: " %))
+                 (i/map-failure result #(prn-to-repl "error: " %))))
+
+;; "success: " 31</pre></div><p class="calibre7">On <a id="id383" class="calibre1"/>contrary to <code class="email">on-success</code> and <code class="email">on-failure</code>, <code class="email">on-complete</code> calls the provided function with the result type wrapper, so it is a convenient way to handle both cases in a single function.</p><p class="calibre7">Coming back to combinators, sometimes we will need to map a function over a future, which itself returns a future:</p><div class="informalexample"><pre class="programlisting">(defn range-future [n]
+  (i/const-future (range n)))
+
+(def age-range (i/map age range-future))
+
+;; #&lt;Future@3d24069e: #&lt;Success@82e8e6e: #&lt;Future@2888dbf4: #&lt;Success@312084f6: (0 1 2...)&gt;&gt;&gt;&gt;</pre></div><p class="calibre7">The <code class="email">range-future</code> function returns a successful future that yields a range of <span class="strong"><em class="calibre8">n</em></span>. The <code class="email">const-future</code> function is analogous to <code class="email">failed-future</code>, except it immediately completes the future with a <code class="email">Success</code> type.</p><p class="calibre7">However, we end up with a nested future, which is almost never what you want. That's OK. This is precisely the scenario in which you would use another combinator, <code class="email">flatmap</code>.</p><p class="calibre7">You can think of it as <code class="email">mapcat</code> for futures—it flattens the computation for us:</p><div class="informalexample"><pre class="programlisting">(def age-range (i/flatmap age range-future))
+
+;; #&lt;Future@601c1dfc: #&lt;Success@55f4bcaf: (0 1 2 ...)&gt;&gt;</pre></div><p class="calibre7">Another <a id="id384" class="calibre1"/>very useful <a id="id385" class="calibre1"/>combinator is used to bring together <a id="id386" class="calibre1"/>multiple computations to be used in a single <a id="id387" class="calibre1"/>function—<code class="email">sequence</code>:</p><div class="informalexample"><pre class="programlisting">(def name (i/future (do (Thread/sleep 500)
+                        "Leo")))
+(def genres (i/future (do (Thread/sleep 500)
+                          ["Heavy Metal" "Black Metal" "Death Metal" "Rock 'n Roll"])))
+
+(-&gt;  (i/sequence [name age genres])
+     (i/on-success
+      (fn [[name age genres]]
+        (prn-to-repl (format "%s is %s years old and enjoys %s"
+                             name
+                             age
+                             (clojure.string/join "," genres))))))
+
+;; "Leo is 31 years old and enjoys Heavy Metal,Black Metal,Death Metal,Rock 'n Roll"</pre></div><p class="calibre7">Essentially, <code class="email">sequence</code> creates a new future, which will complete only when all other futures in the vector have completed or any one of them have failed.</p><p class="calibre7">This is a nice segue into the last combinator we will look at—<code class="email">map-future</code>—which we would use in place of <code class="email">pmap</code>, used in the movies example:</p><div class="informalexample"><pre class="programlisting">(defn calculate-double [n]
+  (i/const-future (* n 2)))
+
+(-&gt; (i/map-future calculate-double [1 2 3 4])
+    i/await
+    i/dderef)
+
+;; [2 4 6 8]</pre></div><p class="calibre7">In the preceding example, <code class="email">calculate-double</code> is a function that returns a future with the value <code class="email">n</code> doubled. The <code class="email">map-future</code> function then maps <code class="email">calculate-double</code> over the list, effectively performing the calculations in parallel. Finally, <code class="email">map-future</code> sequences all futures together, returning a single future, which yields the result of all computations.</p><p class="calibre7">Because we are performing a number of parallel computations and don't really know when they will finish, we call <code class="email">await</code> on the future, which is a way to block the current thread until its result is ready. In general, you would use the combinators and event handlers<a id="id388" class="calibre1"/> instead, but for this example, using <code class="email">await</code> is acceptable.</p><p class="calibre7">Imminent's <a id="id389" class="calibre1"/>API provides many more combinators, which <a id="id390" class="calibre1"/>help us write asynchronous programs in a declarative <a id="id391" class="calibre1"/>way. This section gave us a taste of what is possible with the API and is enough to allow us to write the movies example using imminent futures.</p></div></div>
+<div class="book" title="The movies example revisited"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch08lvl1sec51" class="calibre1"/>The movies example revisited</h1></div></div></div><p class="calibre7">Still within<a id="id392" class="calibre1"/> our <code class="email">imminent-playground</code> project, open the <code class="email">src/imminent_playground/core.clj</code> file and add the appropriate definitions:</p><div class="informalexample"><pre class="programlisting">(ns imminent-playground.core
+  (:require [clojure.pprint :refer [pprint]]
+            [imminent.core :as i]))
+
+(def movie ...)
+
+(def actor-movies ...)
+
+(def actor-spouse ...)
+
+(def top-5-movies ...)</pre></div><p class="calibre7">We will be using the same data as in the previous program, represented in the preceding snippet by the use of ellipses. Simply copy the relevant declarations over.</p><p class="calibre7">The service functions will need small tweaks in this new version:</p><div class="informalexample"><pre class="programlisting">(defn cast-by-movie [name]
+  (i/future (do (Thread/sleep 5000)
+                (:cast  movie))))
+
+(defn movies-by-actor [name]
+  (i/future (do (Thread/sleep 2000)
+                (-&gt;&gt; actor-movies
+                     (filter #(= name (:name %)))
+                     first))))
+
+(defn spouse-of [name]
+  (i/future (do (Thread/sleep 2000)
+                (-&gt;&gt; actor-spouse
+                     (filter #(= name (:name %)))
+                     first))))
+
+(defn top-5 []
+  (i/future (do (Thread/sleep 5000)
+                top-5-movies)))
+
+(defn aggregate-actor-data [spouses movies top-5]
+    ...)</pre></div><p class="calibre7">The main <a id="id393" class="calibre1"/>difference is that all of them now return an imminent future. The <code class="email">aggregate-actor-data</code> function is also the same as before.</p><p class="calibre7">This brings us to the <code class="email">-main</code> function, which was rewritten to use imminent combinators:</p><div class="informalexample"><pre class="programlisting">(defn -main [&amp; args]
+  (time (let [cast    (cast-by-movie "Lord of The Rings: The Fellowship of The Ring")
+              movies  (i/flatmap cast #(i/map-future movies-by-actor %))
+              spouses (i/flatmap cast #(i/map-future spouse-of %))
+              result  (i/sequence [spouses movies (top-5)])]
+          (prn "Fetching data...")
+          (pprint (apply aggregate-actor-data
+                      (i/dderef (i/await result)))))))</pre></div><p class="calibre7">The function starts much like its previous version, and even the first binding, <code class="email">cast</code>, looks familiar. Next we have <code class="email">movies</code>, which is obtained by fetching an actor's movies in parallel. This in itself returns a future, so we <code class="email">flatmap</code> it over the <code class="email">cast</code> future to obtain our final result:</p><div class="informalexample"><pre class="programlisting">movies  (i/flatmap cast #(i/map-future movies-by-actor %))</pre></div><p class="calibre7">
+<code class="email">spouses</code> works in exactly the same way as <code class="email">movies</code>, which brings us to <code class="email">result</code>. This is where we would like to bring all asynchronous computations together. Therefore, we use the <code class="email">sequence</code> combinator:</p><div class="informalexample"><pre class="programlisting">result  (i/sequence [spouses movies (top-5)])</pre></div><p class="calibre7">Finally, we decide to block on the <code class="email">result</code> future—by using await—so we can print the final result:</p><div class="informalexample"><pre class="programlisting">(pprint (apply aggregate-actor-data
+                      (i/dderef (i/await result)))</pre></div><p class="calibre7">We run the program in the same way as before, so simply type the following in the command line, under the project's root directory:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein run -m imminent-playground.core</strong></span>
+<span class="strong"><strong class="calibre2">"Fetching data..."</strong></span>
+<span class="strong"><strong class="calibre2">({:name "Cate Blanchett",</strong></span>
+<span class="strong"><strong class="calibre2">  :spouse "Andrew Upton",</strong></span>
+<span class="strong"><strong class="calibre2">  :movies</strong></span>
+<span class="strong"><strong class="calibre2">  ("Lord of The Rings: The Fellowship of The Ring - (top 5)"</strong></span>
+<span class="strong"><strong class="calibre2">   "Lord of The Rings: The Return of The King"</strong></span>
+<span class="strong"><strong class="calibre2">   "The Curious Case of Benjamin Button")}</strong></span>
+<span class="strong"><strong class="calibre2">...</strong></span>
+<span class="strong"><strong class="calibre2">"Elapsed time: 7088.398 msecs"</strong></span>
+</pre></div><p class="calibre7">The result <a id="id394" class="calibre1"/>output was trimmed as it is exactly the same as before, but two things are different and deserve attention:</p><div class="book"><ul class="itemizedlist"><li class="listitem">The first output, <span class="strong"><strong class="calibre2">Fetching data...</strong></span>, is printed to the screen a lot faster than in the example using Clojure futures</li><li class="listitem">The overall time it took to fetch all that is shorter, clocking in at just over 7 seconds</li></ul></div><p class="calibre7">This highlights the asynchronous nature of imminent futures and combinators. The only time we had to wait is when we explicitly called <code class="email">await </code>at the end of the program.</p><p class="calibre7">More specifically, the performance boost comes from the following section in the code:</p><div class="informalexample"><pre class="programlisting">(let [...
+      result  (i/sequence [spouses movies (top-5)])]
+   ...)</pre></div><p class="calibre7">Because none of the previous bindings block the current thread, we never have to wait to kick off <code class="email">top-5</code> in parallel, shaving off roughly 3 seconds from the overall execution time. We didn't have to explicitly think about the order of execution—the combinators simply did the right thing.</p><p class="calibre7">Finally, one last difference is that we didn't have to explicitly call <code class="email">shutdown-agents</code> as before. The<a id="id395" class="calibre1"/> reason for this is that imminent uses a different type of thread pool: a <code class="email">ForkJoinPool</code> (see <a class="calibre1" href="http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.html">http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.html</a>).</p><p class="calibre7">This pool has a number of advantages—each with its own trade-off—over the other thread pools, and one characteristic is that we don't need to explicitly shut it down—all threads it creates daemon threads.</p><p class="calibre7">When the JVM shuts down, it hangs waiting for all non-daemon threads to finish. Only then does it exit. That's why using Clojure futures would cause the JVM to hang, if we had not called <code class="email">shutdown-agents</code>.</p><p class="calibre7">All threads <a id="id396" class="calibre1"/>created by the ForkJoinPool are set as daemon threads by default: when the JVM attempts to shut down, and if the only threads running are daemon ones, they are abandoned and the JVM exits gracefully.</p><p class="calibre7">Combinators such as <code class="email">map</code> and <code class="email">flatmap</code>, as well as the functions <code class="email">sequence</code> and <code class="email">map-future</code>, aren't exclusive to futures. They have many more fundamental principles by which they abide, making them useful in a range of domains. Understanding these principles isn't necessary for following the contents of this book. Should you want to know more about these principles, please refer to the <a class="calibre1" title="Appendix A. The Algebra of Library Design" href="part0070_split_000.html#page">Appendix </a>, <span class="strong"><em class="calibre8">The Algebra of Library Design</em></span>.</p></div>
+<div class="book" title="Futures and blocking IO"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch08lvl1sec52" class="calibre1"/>Futures and blocking IO</h1></div></div></div><p class="calibre7">The choice of using ForkJoinPool for imminent is deliberate. The ForkJoinPool—added on Java 7—is extremely smart. When created, you give it a desired level of <code class="email">parallelism</code>, which defaults to the number of available processors.</p><p class="calibre7">ForkJoinPool<a id="id397" class="calibre1"/> then attempts to honor the desired parallelism by dynamically <a id="id398" class="calibre1"/>shrinking and expanding the pool as required. When a task is <a id="id399" class="calibre1"/>submitted to this pool, it doesn't necessarily create a new thread if it doesn't have to. This allows the pool to serve an extremely large number of tasks with a much smaller number of actual threads.</p><p class="calibre7">However, it cannot guarantee such optimizations in the face of blocking IO, as it can't know whether the thread is blocking waiting for an external resource. Nevertheless, ForkJoinPool provides a mechanism by which threads can notify the pool when they might block.</p><p class="calibre7">Imminent takes <a id="id400" class="calibre1"/>advantage of this mechanism by implementing the <code class="email">ManagedBlocker </code>(see <a class="calibre1" href="http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.ManagedBlocker.html">http://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ForkJoinPool.ManagedBlocker.html</a>) interface—and provides another way to create futures,  as demonstrated here:</p><div class="informalexample"><pre class="programlisting">  (-&gt; (immi/blocking-future 
+       (Thread/sleep 100)
+       10)
+      (immi/await))
+  ;; #&lt;Future@4c8ac77a: #&lt;Success@45525276: 10&gt;&gt;
+
+  (-&gt; (immi/blocking-future-call
+       (fn []
+         (Thread/sleep 100)
+         10))
+      (immi/await))
+  ;; #&lt;Future@37162438: #&lt;Success@5a13697f: 10&gt;&gt;</pre></div><p class="calibre7">The <code class="email">blocking-future</code> and <code class="email">blocking-future-call</code> have the same semantics as their counterparts, <code class="email">future</code> and <code class="email">future-call</code>, but should be used when the task to be performed<a id="id401" class="calibre1"/> is of a blocking nature (that is, not CPU-bound). This allows<a id="id402" class="calibre1"/> the ForkJoinPool to better utilize its resources, making it a<a id="id403" class="calibre1"/> powerful and flexible solution.</p></div>
+<div class="book" title="Summary"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch08lvl1sec53" class="calibre1"/>Summary</h1></div></div></div><p class="calibre7">In this chapter, we learned that Clojure futures leave a lot to be desired. More specifically, Clojure futures don't provide a way to express dependencies between results. It doesn't mean, however, that we should dismiss futures altogether.</p><p class="calibre7">They are still a useful abstraction and with the right semantics for asynchronous computations and a rich set of combinators—such as the ones provided by imminent—they can be a big ally in building reactive applications that are performant and responsive. Sometimes, this is all we need.</p><p class="calibre7">For the times where we need to model data that varies over time, we turn to richer frameworks inspired by <span class="strong"><strong class="calibre2">Functional Reactive Programming</strong></span> (<span class="strong"><strong class="calibre2">FRP</strong></span>) and <span class="strong"><strong class="calibre2">Compositional Event Systems</strong></span> (<span class="strong"><strong class="calibre2">CES</strong></span>) —such as RxJava—or <span class="strong"><strong class="calibre2">Communicating Sequential Processes</strong></span> (<span class="strong"><strong class="calibre2">CSP</strong></span>) —such as <code class="email">core.async</code>. As they have a lot more to offer, much of this book has been dedicated to those approaches.</p><p class="calibre7">In the next chapter, we will go back to discussing FRP/CES by way of a case study.</p></div></body></html>

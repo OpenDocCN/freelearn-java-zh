@@ -1,0 +1,314 @@
+<html><head></head><body>
+<div id="page" style="height:0pt"/><div class="book" title="Chapter&#xA0;5.&#xA0;Creating Your Own CES Framework with core.async"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch05" class="calibre1"/>Chapter 5. Creating Your Own CES Framework with core.async</h1></div></div></div><p class="calibre7">In the previous chapter, it was alluded to that <code class="email">core.async</code> operates at a lower level of abstraction when compared to other frameworks such as RxClojure or RxJava.</p><p class="calibre7">This is because most of the time we have to think carefully about the channels we are creating as well as what types and sizes of buffers to use, whether we need pub/sub functionality, and so on.</p><p class="calibre7">Not all applications require such level of control, however. Now that we are familiar with the motivations and main abstractions of <code class="email">core.async</code> we can embark into writing a minimal CES framework using <code class="email">core.async</code> as the underlying foundation.</p><p class="calibre7">By doing so, we avoid having to think about thread pool management as the framework takes care of that for us.</p><p class="calibre7">In this chapter, we will cover the following topics:</p><div class="book"><ul class="itemizedlist"><li class="listitem">Building a CES framework using <code class="email">core.async</code> as its underlying concurrency strategy</li><li class="listitem">Building an application that uses our CES framework</li><li class="listitem">Understanding the trade-offs of the different approaches presented so far</li></ul></div></div>
+
+<div class="book" title="Chapter&#xA0;5.&#xA0;Creating Your Own CES Framework with core.async">
+<div class="book" title="A minimal CES framework"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_1"><a id="ch05lvl1sec33" class="calibre1"/>A minimal CES framework</h1></div></div></div><p class="calibre7">Before we get start on the <a id="id222" class="calibre1"/>details, we should define at a high level what <span class="strong"><em class="calibre8">minimal</em></span> means.</p><p class="calibre7">Let's start with the two main abstractions our framework will provide: behaviors and event streams.</p><p class="calibre7">If you can recall from <a class="calibre1" title="Chapter 1. What is Reactive Programming?" href="part0015_split_000.html#page">Chapter 1</a>, <span class="strong"><em class="calibre8">What is Reactive Programming?</em></span>, behaviors represent continuous, time-varying values such as time or a mouse position behavior. Event streams, on the other hand, represent discrete occurrences at a point in time <span class="strong"><em class="calibre8">T</em></span>, such as key press.</p><p class="calibre7">Next, we should think about <a id="id223" class="calibre1"/>what kinds of operations we would like to support. Behaviors are fairly simple so at the very minimum we need to:</p><div class="book"><ul class="itemizedlist"><li class="listitem">Create new behaviors</li><li class="listitem">Retrieve the current value of a behavior</li><li class="listitem">Convert a behavior into an event stream</li></ul></div><p class="calibre7">Event streams have more interesting logic in play and we should at least support these operations:</p><div class="book"><ul class="itemizedlist"><li class="listitem">Push/deliver a value down the stream</li><li class="listitem">Create a stream from a given interval</li><li class="listitem">Transform the stream with the <code class="email">map</code> and <code class="email">filter</code> operations</li><li class="listitem">Combine streams with <code class="email">flatmap</code></li><li class="listitem">Subscribe to a stream</li></ul></div><p class="calibre7">This is a small subset but big enough to demonstrate the overall architecture of a CES framework. Once we're done, we'll use it to build a simple example.</p></div></div>
+
+<div class="book" title="Chapter&#xA0;5.&#xA0;Creating Your Own CES Framework with core.async">
+<div class="book" title="A minimal CES framework">
+<div class="book" title="Clojure or ClojureScript?"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_2"><a id="ch05lvl2sec37" class="calibre1"/>Clojure or ClojureScript?</h2></div></div></div><p class="calibre7">Here we'll shift gears and add another requirement to our little library: it should work both in Clojure and ClojureScript. At first, this might sound like a tough requirement. However, remember that <code class="email">core.async</code>—the foundation of our framework—works both on the JVM and <a id="id224" class="calibre1"/>in JavaScript. This means we have a lot less work to do to make it happen.</p><p class="calibre7">It does mean, however, that we need to be capable of producing two artifacts from our library: a <code class="email">jar</code> file and a JavaScript file. Luckily, there are leiningen plugins, which help us do that and we will be using a couple of them:</p><div class="book"><ul class="itemizedlist"><li class="listitem"><code class="email">lein-cljsbuild</code> (see <a class="calibre1" href="https://github.com/emezeske/lein-cljsbuild">https://github.com/emezeske/lein-cljsbuild</a>): Leiningen plugin <a id="id225" class="calibre1"/>to make building ClojureScript<a id="id226" class="calibre1"/> easy</li><li class="listitem"><code class="email">cljx</code> (see <a class="calibre1" href="https://github.com/lynaghk/cljx">https://github.com/lynaghk/cljx</a>): A <a id="id227" class="calibre1"/>preprocessor used to write portable Clojure codebases, that is, write a single file and<a id="id228" class="calibre1"/> output both <code class="email">.clj</code> and <code class="email">.cljs</code> files</li></ul></div><p class="calibre7">You don't need to understand these libraries in great detail. We are only using their basic functionality and will be explaining the bits and pieces as we encounter them.</p><p class="calibre7">Let's get started by creating a new leiningen project. We'll call our framework respondent—one of the many synonyms for the word reactive:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">$ lein new respondent</strong></span>
+</pre></div><p class="calibre7">We need to make a few changes to the <code class="email">project.clj</code> file to include the dependencies and configurations <a id="id229" class="calibre1"/>we'll be using. First, make sure the project dependencies look like the following:</p><div class="informalexample"><pre class="programlisting">:dependencies [[org.clojure/clojure "1.5.1"]
+               [org.clojure/core.async "0.1.303.0-886421-alpha"]
+               [org.clojure/clojurescript "0.0-2202"]]</pre></div><p class="calibre7">There should be no surprises here. Still in the project file, add the necessary plugins:</p><div class="informalexample"><pre class="programlisting">:plugins [[com.keminglabs/cljx "0.3.2"]
+          [lein-cljsbuild "1.0.3"]]</pre></div><p class="calibre7">These are the plugins that we've mentioned previously. By themselves they don't do much, however, and need to be configured.</p><p class="calibre7">For <code class="email">cljx</code>, add the following to the project file:</p><div class="informalexample"><pre class="programlisting">:cljx {:builds [{:source-paths ["src/cljx"]
+                 :output-path "target/classes"
+                 :rules :clj}
+
+                {:source-paths ["src/cljx"]
+                 :output-path "target/classes"
+                 :rules :cljs}]}
+  :hooks [cljx.hooks]</pre></div><p class="calibre7">The previous snippet deserves some explanation. <code class="email">cljx</code> allows us to write code that is portable between Clojure and ClojureScript by placing annotations its preprocessor can understand. We will see later what these annotations look like, but this chunk of configuration tells <code class="email">cljx</code> where to find the annotated files and where to output them once they're processed.</p><p class="calibre7">For example, based on the preceding rules, if we have a file called <code class="email">src/cljx/core.cljx</code> and we run the preprocessor we will end up with the <code class="email">target/classes/core.clj</code> and <code class="email">target/classes/core.cljs</code> output files. The hooks, on the other hand, are simply a convenient way to automatically run <code class="email">cljx</code> whenever we start a REPL session.</p><p class="calibre7">The next part of the configuration is for <code class="email">cljsbuild</code>:</p><div class="informalexample"><pre class="programlisting">:cljsbuild
+{:builds [{:source-paths ["target/classes"]
+           :compiler {:output-to "target/main.js"}}]}</pre></div><p class="calibre7">
+<code class="email">cljsbuild</code> provides leiningen tasks to compile Clojuresript source code into JavaScript. We know from our preceding <code class="email">cljx</code> configuration that the <code class="email">source.cljs</code> files will be under <code class="email">target/classes</code>, so here we're simply telling <code class="email">cljsbuild</code> to compile all ClojureScript files in that directory and spit the contents to <code class="email">target/main.js</code>. This is the last piece needed for the project file.</p><p class="calibre7">Go ahead <a id="id230" class="calibre1"/>and delete these files created by the leiningen template as we won't be using them:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">$ rm src/respondent/core.clj</strong></span>
+<span class="strong"><strong class="calibre2">$ rm test/respondent/core_test.clj</strong></span>
+</pre></div><p class="calibre7">Then, create a new <code class="email">core.cljx</code> file under <code class="email">src/cljx/respondent/</code> and add the following namespace declaration:</p><div class="informalexample"><pre class="programlisting">(ns respondent.core
+  (:refer-clojure :exclude [filter map deliver])
+
+  #+clj
+  (:import [clojure.lang IDeref])
+
+  #+clj
+  (:require [clojure.core.async :as async
+             :refer [go go-loop chan &lt;! &gt;! timeout
+                     map&gt; filter&gt; close! mult tap untap]])
+  #+cljs
+  (:require [cljs.core.async :as async
+             :refer [chan &lt;! &gt;! timeout map&gt; filter&gt;
+                     close! mult tap untap]])
+
+  #+cljs
+  (:require-macros [respondent.core :refer [behavior]]
+                   [cljs.core.async.macros :refer [go go-loop]]))</pre></div><p class="calibre7">Here, we start seeing <code class="email">cljx</code> annotations. <code class="email">cljx</code> is simply a text preprocessor, so when it is processing a file using <code class="email">clj</code> rules—as seen in the configuration—it will keep the <code class="email">s-</code>expressions preceded by the annotation <code class="email">#+clj</code> in the output file, while removing the ones prefixed by <code class="email">#+cljs</code>. The reverse process happens when using <code class="email">cljs</code> rules.</p><p class="calibre7">This is necessary because macros need to be compiled on the JVM, so they have to be included separately using the <code class="email">:require-macros</code> namespace option when using ClojureScript. Don't worry about the <code class="email">core.async</code> functions we haven't encountered before; they will be explained as we use them to build our framework.</p><p class="calibre7">Also, note how we are excluding functions from the Clojure standard API as we wish to use the same names and don't want any undesired naming collisions.</p><p class="calibre7">This <a id="id231" class="calibre1"/>section set us up with a new project and the plugins and configurations needed for our framework. We're ready to start implementing it.</p></div></div></div>
+
+<div class="book" title="Chapter&#xA0;5.&#xA0;Creating Your Own CES Framework with core.async">
+<div class="book" title="A minimal CES framework">
+<div class="book" title="Designing the public API"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_3"><a id="ch05lvl2sec38" class="calibre1"/>Designing the public API</h2></div></div></div><p class="calibre7">One of the requirements for behaviors we agreed on is the ability to turn a given behavior into an<a id="id232" class="calibre1"/> event stream. A common way of doing this is by sampling a behavior at a specific interval. If we take the <span class="strong"><em class="calibre8">mouse position</em></span> behavior as an example, by sampling it every <span class="strong"><em class="calibre8">x</em></span> seconds we get an event stream, which will emit the current mouse position at discrete points in time.</p><p class="calibre7">This leads to the following protocol:</p><div class="informalexample"><pre class="programlisting">(defprotocol IBehavior
+  (sample [b interval]
+    "Turns this Behavior into an EventStream from the sampled values at the given interval"))</pre></div><p class="calibre7">It has a single function, <code class="email">sample</code>, which we described in the preceding code. There are more things we need to do with a behavior, but for now this will suffice.</p><p class="calibre7">Our next main abstraction is <code class="email">EventStream</code>, which—based on the requirements seen previously—leads to the following protocol:</p><div class="informalexample"><pre class="programlisting">(defprotocol IEventStream
+  (map        [s f]
+    "Returns a new stream containing the result of applying f
+    to the values in s")
+  (filter     [s pred]
+    "Returns a new stream containing the items from s
+    for which pred returns true")
+  (flatmap    [s f]
+    "Takes a function f from values in s to a new EventStream.
+    Returns an EventStream containing values from all underlying streams combined.")
+  (deliver    [s value]
+    "Delivers a value to the stream s")
+  (completed? [s]
+    "Returns true if this stream has stopped emitting values. False otherwise."))</pre></div><p class="calibre7">This gives us a few basic functions to transform and query an event stream. It does leave out the ability to subscribe to a stream. Don't worry, I didn't forget it!</p><p class="calibre7">Although, it is common to subscribe to an event stream, the protocol itself doesn't mandate it and this is because the operation fits best in its own protocol:</p><div class="informalexample"><pre class="programlisting">(defprotocol IObservable
+  (subscribe [obs f] "Register a callback to be invoked when the underlying source changes.
+   Returns a token the subscriber can use to cancel the subscription."))</pre></div><p class="calibre7">As far as <a id="id233" class="calibre1"/>subscriptions go, it is useful to have a way of unsubscribing from a stream. This can be implemented in a couple of ways, but <code class="email">docstring</code> of the preceding function hints at a specific one: a token that can be used to unsubscribe from a stream. This leads to our last protocol:</p><div class="informalexample"><pre class="programlisting">(defprotocol IToken
+  (dispose [tk]
+    "Called when the subscriber isn't interested in receiving more items"))</pre></div></div></div></div>
+
+<div class="book" title="Chapter&#xA0;5.&#xA0;Creating Your Own CES Framework with core.async">
+<div class="book" title="A minimal CES framework">
+<div class="book" title="Implementing tokens"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_4"><a id="ch05lvl2sec39" class="calibre1"/>Implementing tokens</h2></div></div></div><p class="calibre7">The token type<a id="id234" class="calibre1"/> is the simplest in the whole framework as it has got a single function with a straightforward implementation:</p><div class="informalexample"><pre class="programlisting">(deftype Token [ch]
+  IToken
+  (dispose [_]
+    (close! ch)))</pre></div><p class="calibre7">It simply closes whatever channel it is given, stopping events from flowing through subscriptions.</p></div></div></div>
+
+<div class="book" title="Chapter&#xA0;5.&#xA0;Creating Your Own CES Framework with core.async">
+<div class="book" title="A minimal CES framework">
+<div class="book" title="Implementing event streams"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_5"><a id="ch05lvl2sec40" class="calibre1"/>Implementing event streams</h2></div></div></div><p class="calibre7">The<a id="id235" class="calibre1"/> event stream implementation, on the other hand, is the most complex in our framework. We'll tackle it gradually, implementing and experimenting as we go.</p><p class="calibre7">First, let's look at our main constructor function, <code class="email">event-stream</code>:</p><div class="informalexample"><pre class="programlisting">(defn event-stream
+  "Creates and returns a new event stream. You can optionally provide an existing
+  core.async channel as the source for the new stream"
+  ([]
+     (event-stream (chan)))
+  ([ch]
+     (let [multiple  (mult ch)
+           completed (atom false)]
+       (EventStream. ch multiple completed))))</pre></div><p class="calibre7">The <code class="email">docstring</code> should be sufficient to understand the public API. What might not be clear, however, is what all the constructor arguments mean. From left to right, the arguments<a id="id236" class="calibre1"/> to <code class="email">EventStream</code> are:</p><div class="book"><ul class="itemizedlist"><li class="listitem"><code class="email">ch</code>: This is the <code class="email">core.async</code> channel backing this stream.</li><li class="listitem"><code class="email">multiple</code>: This is a way to broadcast information from one channel to many other channels. It's a <code class="email">core.async</code> concept we will be explaining shortly.</li><li class="listitem"><code class="email">completed</code>: A Boolean flag indicating whether this event stream has completed and will not emit any new values.</li></ul></div><p class="calibre7">From the implementation, you can see that the multiple is created from the channel backing the stream. <code class="email">multiple</code> works kind of like a broadcast. Consider the following example:</p><div class="informalexample"><pre class="programlisting">  (def in (chan))
+  (def multiple (mult in))
+
+  (def out-1 (chan))
+  (tap multiple out-1)
+
+  (def out-2 (chan))
+  (tap multiple out-2)
+  (go (&gt;! in "Single put!"))
+
+  (go (prn "Got from out-1 " (&lt;! out-1)))
+  (go (prn "Got from out-2 " (&lt;! out-2)))</pre></div><p class="calibre7">In the previous snippet, we create an input channel, <code class="email">in</code>, and <code class="email">mult</code> of it called <code class="email">multiple</code>. Then, we create two output channels, <code class="email">out-1</code> and <code class="email">out-2</code>, which are both followed by a call to <code class="email">tap</code>. This essentially means that whatever values are written to <code class="email">in</code> will be taken by <code class="email">multiple</code> and written to any channels tapped into it as the following output shows:</p><div class="informalexample"><pre class="programlisting">"Got from out-1 " "Single put!"
+"Got from out-2 " "Single put!"</pre></div><p class="calibre7">This will make understanding the <code class="email">EventStream</code> implementation easier.</p><p class="calibre7">Next, let's have a look at what a minimal implementation of the <code class="email">EventStream</code> looks like the following—make sure the implementation goes before the constructor function described earlier:</p><div class="informalexample"><pre class="programlisting">(declare event-stream)
+
+(deftype EventStream [channel multiple completed]
+  IEventStream
+  (map [_ f]
+    (let [out (map&gt; f (chan))]
+      (tap multiple out)
+      (event-stream out)))
+
+  (deliver [_ value]
+    (if (= value ::complete)
+      (do (reset! completed true)
+          (go (&gt;! channel value)
+              (close! channel)))
+      (go (&gt;! channel value))))
+
+
+  IObservable
+  (subscribe [this f]
+    (let [out (chan)]
+      (tap multiple out)
+      (go-loop []
+        (let [value (&lt;! out)]
+          (when (and value (not= value ::complete))
+            (f value)
+            (recur))))
+      (Token. out))))</pre></div><p class="calibre7">For <a id="id237" class="calibre1"/>now, we have chosen to implement only the <code class="email">map</code> and <code class="email">deliver</code> functions from the <code class="email">IEventStream</code> protocol. This allows us to deliver values to the stream as well as transform those values.</p><p class="calibre7">However, this would not be very useful if we could not retrieve the values delivered. This is why we also implement the <code class="email">subscribe</code> function from the <code class="email">IObservable</code> protocol.</p><p class="calibre7">In a nutshell, <code class="email">map</code> needs to take a value from the input stream, apply a function to it, and send it to the newly created stream. We do this by creating an output channel that taps on current <code class="email">multiple</code>. We then use this channel to back the new event stream.</p><p class="calibre7">The <code class="email">deliver</code> function simply puts the value into the backing channel. If the value is the namespaced keyword <code class="email">::complete</code>, we update the <code class="email">completed</code> atom and close the backing channel. This ensures the stream will not emit any other values.</p><p class="calibre7">Finally, we have the <code class="email">subscribe</code> function. The way subscribers are notified is by using an output channel tapped to backing <code class="email">multiple</code>. We loop indefinitely calling the subscribing function whenever a new value is emitted.</p><p class="calibre7">We finish by returning a token, which will close the output channel once disposed, causing the <code class="email">go-loop</code> to stop.</p><p class="calibre7">Let's make sure that all this makes sense by experimenting with a couple of examples in the REPL:</p><div class="informalexample"><pre class="programlisting">  (def es1 (event-stream))
+  (subscribe es1 #(prn "first event stream emitted: " %))
+  (deliver es1 10)
+  ;; "first event stream emitted: " 10
+
+
+  (def es2 (map es1 #(* 2 %)))
+  (subscribe es2 #(prn "second event stream emitted: " %))
+
+  (deliver es1 20)
+  ;; "first event stream emitted: " 20
+  ;; "second event stream emitted: " 40</pre></div><p class="calibre7">Excellent! We have a minimal, working implementation of our <code class="email">IEventStream</code> protocol!</p><p class="calibre7">The <a id="id238" class="calibre1"/>next function we'll implement is <code class="email">filter</code> and it is very similar to <code class="email">map</code>:</p><div class="informalexample"><pre class="programlisting">  (filter [_ pred]
+    (let [out (filter&gt; pred (chan))]
+      (tap multiple out)
+      (event-stream out)))</pre></div><p class="calibre7">The only difference is that we use the <code class="email">filter&gt;</code> function and <code class="email">pred</code> should be a Boolean function:</p><div class="informalexample"><pre class="programlisting">  (def es1 (event-stream))
+  (def es2 (filter es1 even?))
+  (subscribe es1 #(prn "first event stream emitted: " %))
+  (subscribe es2 #(prn "second event stream emitted: " %))
+
+  (deliver es1 2)
+  (deliver es1 3)
+  (deliver es1 4)
+
+  ;; "first event stream emitted: " 2
+  ;; "second event stream emitted: " 2
+  ;; "first event stream emitted: " 3
+  ;; "first event stream emitted: " 4
+  ;; "second event stream emitted: " 4</pre></div><p class="calibre7">As we witness, <code class="email">es2</code> only emits a new value if and only if that value is an even number.</p><div class="informalexample" title="Note"><h3 class="title2"><a id="tip19" class="calibre1"/>Tip</h3><p class="calibre7">If you are following along, typing the examples step by step, you will need to restart your REPL whenever we add new functions to any <code class="email">deftype</code> definition. This is because <code class="email">deftype</code> generates and compiles a Java class when evaluated. As such, simply reloading the namespace won't be enough.</p><p class="calibre7">Alternatively, you can use a tool such as <code class="email">tools.namespace</code> (see <a class="calibre1" href="https://github.com/clojure/tools.namespace">https://github.com/clojure/tools.namespace</a>) that addresses some <a id="id239" class="calibre1"/>of <a id="id240" class="calibre1"/>these REPL reloading limitations.</p></div><p class="calibre7">Moving<a id="id241" class="calibre1"/> down our list, we now have <code class="email">flatmap</code>:</p><div class="informalexample"><pre class="programlisting">(flatmap [_ f]
+    (let [es (event-stream)
+          out (chan)]
+      (tap multiple out)
+      (go-loop []
+        (when-let [a (&lt;! out)]
+          (let [mb (f a)]
+            (subscribe mb (fn [b]
+                            (deliver es b)))
+            (recur))))
+      es))</pre></div><p class="calibre7">We've encountered this operator before when surveying Reactive Extensions. This is what our docstring says about it:</p><p class="calibre7"><span class="strong"><em class="calibre8">Takes a function f from values in s to a new EventStream.</em></span></p><p class="calibre7"><span class="strong"><em class="calibre8">Returns an EventStream containing values from all underlying streams combined.</em></span></p><p class="calibre7">This means <code class="email">flatmap</code> needs to combine all the possible event streams into a single output event stream. As before, we tap a new channel to the <code class="email">multiple</code> stream, but then we loop over the output channel, applying <code class="email">f</code> to each output value.</p><p class="calibre7">However, as we saw, <code class="email">f</code> itself returns a new event stream, so we simply subscribe to it. Whenever the function registered in the subscription gets called, we deliver that value to the output event stream, effectively combining all streams into a single one.</p><p class="calibre7">Consider the following example:</p><div class="informalexample"><pre class="programlisting">  (defn range-es [n]
+    (let [es (event-stream (chan n))]
+      (doseq [n (range n)]
+        (deliver es n))
+      es))
+
+  (def es1 (event-stream))
+  (def es2 (flatmap es1 range-es))
+  (subscribe es1 #(prn "first event stream emitted: " %))
+  (subscribe es2 #(prn "second event stream emitted: " %))
+
+  (deliver es1 2)
+  ;; "first event stream emitted: " 2
+  ;; "second event stream emitted: " 0
+  ;; "second event stream emitted: " 1
+
+  (deliver es1 3)
+  ;; "first event stream emitted: " 3
+  ;; "second event stream emitted: " 0
+  ;; "second event stream emitted: " 1
+  ;; "second event stream emitted: " 2</pre></div><p class="calibre7">We have a function, <code class="email">range-es</code>, that receives a number <code class="email">n</code> and returns an event stream that emits numbers from <code class="email">0</code> to <code class="email">n</code>. As before, we have a starting stream, <code class="email">es1</code>, and a transformed stream <a id="id242" class="calibre1"/>created with <code class="email">flatmap</code>, <code class="email">es2</code>.</p><p class="calibre7">We can see from the preceding output that the stream created by <code class="email">range-es</code> gets flattened into <code class="email">es2</code> allowing us to receive all values by simply subscribing to it once.</p><p class="calibre7">This leaves us with single function from <code class="email">IEventStream</code> left to implement:</p><div class="informalexample"><pre class="programlisting">  (completed? [_] @completed)</pre></div><p class="calibre7">
+<code class="email">completed?</code> simply returns the current value of the <code class="email">completed</code> atom. We are now ready to implement behaviors.</p></div></div></div>
+
+<div class="book" title="Chapter&#xA0;5.&#xA0;Creating Your Own CES Framework with core.async">
+<div class="book" title="A minimal CES framework">
+<div class="book" title="Implementing behaviors"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_6"><a id="ch05lvl2sec41" class="calibre1"/>Implementing behaviors</h2></div></div></div><p class="calibre7">If you recall, the <code class="email">IBehavior</code> protocol has a single function called <code class="email">sample</code> whose docstring states: <span class="strong"><em class="calibre8">Turns this Behavior into an EventStream from the sampled values at the given interval</em></span>.</p><p class="calibre7">In order <a id="id243" class="calibre1"/>to implement <code class="email">sample</code>, we will first create a useful helper function that we will call <code class="email">from-interval</code>:</p><div class="informalexample"><pre class="programlisting">(defn from-interval
+  "Creates and returns a new event stream which emits values at the given
+interval.
+  If no other arguments are given, the values start at 0 and increment by
+one at each delivery.
+
+  If given seed and succ it emits seed and applies succ to seed to get
+the next value. It then applies succ to the previous result and so on."
+  ([msecs]
+     (from-interval msecs 0 inc))
+  ([msecs seed succ]
+     (let [es (event-stream)]
+       (go-loop [timeout-ch (timeout msecs)
+                 value seed]
+         (when-not (completed? es)
+           (&lt;! timeout-ch)
+           (deliver es value)
+           (recur (timeout msecs) (succ value))))
+       es)))</pre></div><p class="calibre7">The <code class="email">docstring</code> function should be clear enough at this stage, but we would like to ensure <a id="id244" class="calibre1"/>we understand its behavior correctly by trying it at the REPL:</p><div class="informalexample"><pre class="programlisting">  (def es1 (from-interval 500))
+  (def es1-token (subscribe es1 #(prn "Got: " %)))
+  ;; "Got: " 0
+  ;; "Got: " 1
+  ;; "Got: " 2
+  ;; "Got: " 3
+  ;; ...
+  (dispose es1-token)</pre></div><p class="calibre7">As expected, <code class="email">es1</code> emits integers starting at zero at 500-millisecond intervals. By default, it would emit numbers indefinitely; therefore, we keep a reference to the token returned by calling <code class="email">subscribe</code>.</p><p class="calibre7">This way we can dispose it whenever we're done, causing <code class="email">es-1</code> to complete and stop emitting items.</p><p class="calibre7">Next, we can finally implement the <code class="email">Behavior</code> type:</p><div class="informalexample"><pre class="programlisting">(deftype Behavior [f]
+  IBehavior
+  (sample [_ interval]
+    (from-interval interval (f) (fn [&amp; args] (f))))
+  IDeref
+  (#+clj deref #+cljs -deref [_]
+    (f)))
+
+(defmacro behavior [&amp; body]
+  `(Behavior. #(do ~@body)))</pre></div><p class="calibre7">A behavior is created by passing it a function. You can think of this function as a generator responsible for generating the next value in this event stream.</p><p class="calibre7">This<a id="id245" class="calibre1"/> generator function will be called whenever we (1) <code class="email">deref</code> the <code class="email">Behavior</code> or (2) at the interval given to <code class="email">sample</code>.</p><p class="calibre7">The <code class="email">behavior</code> macro is there for convenience and allows us to create a new <code class="email">Behavior</code> without wrapping the body in a function ourselves:</p><div class="informalexample"><pre class="programlisting">  (def time-behavior (behavior (System/nanoTime)))
+
+  @time-behavior
+  ;; 201003153977194
+
+  @time-behavior
+  ;; 201005133457949</pre></div><p class="calibre7">In the preceding example, we defined <code class="email">time-behavior</code> that always contains the current system time. We can then turn this behavior into a stream of discrete events by using the <code class="email">sample</code> function:</p><div class="informalexample"><pre class="programlisting">  (def time-stream (sample time-behavior 1500))
+  (def token       (subscribe time-stream #(prn "Time is " %)))
+  ;; "Time is " 201668521217402
+  ;; "Time is " 201670030219351
+  ;; ...
+  
+  (dispose token)</pre></div><div class="informalexample" title="Note"><h3 class="title2"><a id="tip20" class="calibre1"/>Tip</h3><p class="calibre7">Always remember to keep a reference to the subscription token when dealing with infinite streams such as the ones created by <code class="email">sample</code> and <code class="email">from-interval</code>, or else you might incur undesired memory leaks.</p></div><p class="calibre7">Congratulations! We have a working, minimal CES framework using <code class="email">core.async</code>!</p><p class="calibre7">We didn't prove it works with ClojureScript, however, which was one of the main requirements early on. That's okay. We will be tackling that soon by developing a simple ClojureScript application, which makes use of our new framework.</p><p class="calibre7">In order to do this, we need to deploy the framework to our local Maven repository. From the project root, type the following <code class="email">lein</code> command:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">$ lein install</strong></span>
+<span class="strong"><strong class="calibre2">Rewriting src/cljx to target/classes (clj) with features #{clj} and 0 transformations.</strong></span>
+<span class="strong"><strong class="calibre2">Rewriting src/cljx to target/classes (cljs) with features #{cljs} and 1 transformations.</strong></span>
+<span class="strong"><strong class="calibre2">Created respondent/target/respondent-0.1.0-SNAPSHOT.jar</strong></span>
+<span class="strong"><strong class="calibre2">Wrote respondent/pom.xml</strong></span>
+</pre></div></div></div></div>
+
+<div id="page" style="height:0pt"/><div class="book" title="Exercises"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch05lvl1sec34" class="calibre1"/>Exercises</h1></div></div></div><p class="calibre7">The following sections have a few exercises for you.</p></div>
+
+<div class="book" title="Exercises">
+<div class="book" title="Exercise 5.1"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_1"><a id="ch05lvl2sec42" class="calibre1"/>Exercise 5.1</h2></div></div></div><p class="calibre7">Extend our current <code class="email">EventStream</code> implementation to include a function called <code class="email">take</code>. It works much like Clojure's core <code class="email">take</code> function for sequences: it will take <code class="email">n</code> items from the underlying event stream after which it will stop emitting items.</p><p class="calibre7">A sample interaction, which takes the first five items emitted from the original event stream, is shown here:</p><div class="informalexample"><pre class="programlisting">(def es1 (from-interval 500))
+(def take-es (take es1 5))
+
+(subscribe take-es #(prn "Take values: " %))
+
+;; "Take values: " 0
+;; "Take values: " 1
+;; "Take values: " 2
+;; "Take values: " 3
+;; "Take values: " 4</pre></div><div class="informalexample" title="Note"><h3 class="title2"><a id="tip21" class="calibre1"/>Tip</h3><p class="calibre7">Keeping some state might be useful here. Atoms can help. Additionally, try to think of a way to dispose of any unwanted subscriptions required by the solution.</p></div></div></div>
+
+<div class="book" title="Exercises">
+<div class="book" title="Exercise 5.2"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_2"><a id="ch05lvl2sec43" class="calibre1"/>Exercise 5.2</h2></div></div></div><p class="calibre7">In this exercise, we will add a function called <code class="email">zip</code> that zips together items emitted from two different event streams into a vector.</p><p class="calibre7">A sample interaction with the <code class="email">zip</code> function is as follows:</p><div class="informalexample"><pre class="programlisting">(def es1 (from-interval 500))
+(def es2 (map (from-interval 500) #(* % 2)))
+(def zipped (zip es1 es2))
+
+(def token (subscribe zipped #(prn "Zipped values: " %)))
+
+;; "Zipped values: " [0 0]
+;; "Zipped values: " [1 2]
+;; "Zipped values: " [2 4]
+;; "Zipped values: " [3 6]
+;; "Zipped values: " [4 8]
+
+(dispose token)</pre></div><div class="informalexample" title="Note"><h3 class="title2"><a id="tip22" class="calibre1"/>Tip</h3><p class="calibre7">For this exercise, we need a way to know when we have enough items to emit from both event streams. Managing this internal state can be tricky at first. Clojure's <code class="email">ref</code> types and, in particular, <code class="email">dosync</code>, can be of use.</p></div></div></div>
+<div class="book" title="A respondent application"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch05lvl1sec35" class="calibre1"/>A respondent application</h1></div></div></div><p class="calibre7">This chapter would not be complete if we didn't go through the whole development life cycle of deploying and using the new framework in a new application. This is the purpose of this <a id="id246" class="calibre1"/>section.</p><p class="calibre7">The application we will build is extremely simple. All it does is track the position of the mouse using the reactive primitives we built into respondent.</p><p class="calibre7">To that end, we will be using the excellent lein template <code class="email">cljs-start</code> (see <a class="calibre1" href="https://github.com/magomimmo/cljs-start">https://github.com/magomimmo/cljs-start</a>), created by Mimmo Cosenza to help developers<a id="id247" class="calibre1"/> get started with ClojureScript.</p><p class="calibre7">Let's get <a id="id248" class="calibre1"/>started:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein new cljs-start respondent-app</strong></span>
+</pre></div><p class="calibre7">Next, let's modify the project file to include the following dependencies:</p><div class="informalexample"><pre class="programlisting">[clojure-reactive-programming/respondent "0.1.0-SNAPSHOT"]
+[prismatic/dommy "0.1.2"]</pre></div><p class="calibre7">The first dependency is self-explanatory. It's simply our own framework. <code class="email">dommy</code> is a DOM manipulation library for ClojureScript. We'll briefly use it when building our web page.</p><p class="calibre7">Next, edit the <code class="email">dev-resources/public/index.html</code> file to match the following:</p><div class="informalexample"><pre class="programlisting">&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8"&gt;
+
+    &lt;title&gt;Example: tracking mouse position&lt;/title&gt;
+    &lt;!--[if lt IE 9]&gt;
+    &lt;script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"&gt;&lt;/script&gt;
+    &lt;![endif]--&gt;
+&lt;/head&gt;
+
+&lt;body&gt;
+    &lt;div id="test"&gt;
+        &lt;h1&gt;Mouse (x,y) coordinates:&lt;/h1&gt;
+    &lt;/div&gt;
+    &lt;div id="mouse-xy"&gt;
+      (0,0)
+    &lt;/div&gt;
+    &lt;script src="js/respondent_app.js"&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</pre></div><p class="calibre7">In the<a id="id249" class="calibre1"/> preceding snippet, we<a id="id250" class="calibre1"/> created a new <code class="email">div</code> element, which will contain the mouse position. It defaults to <code class="email">(0,0)</code>.</p><p class="calibre7">The last piece of the puzzle is modifying <code class="email">src/cljs/respondent_app/core.cljs</code> to match the following:</p><div class="informalexample"><pre class="programlisting"> (ns respondent-app.core
+  (:require [respondent.core :as r]
+            [dommy.core :as dommy])
+  (:use-macros
+   [dommy.macros :only [sel1]]))
+
+
+(def mouse-pos-stream (r/event-stream))
+(set! (.-onmousemove js/document)
+      (fn [e]
+        (r/deliver mouse-pos-stream [(.-pageX e) (.-pageY e)])))
+
+(r/subscribe mouse-pos-stream
+             (fn [[x y]]
+               (dommy/set-text! (sel1 :#mouse-xy)
+                                (str "(" x "," y ")"))))</pre></div><p class="calibre7">This is our main application logic. It creates an event stream to which we deliver the current mouse position from the <code class="email">onmousemove</code> event of the browser window.</p><p class="calibre7">Later, we simply subscribe to it and use <code class="email">dommy</code> to select and set the text of the <code class="email">div</code> element we added previously.</p><p class="calibre7">We are now ready to use the app! Let's start by compiling ClojureScript:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">$ lein compile</strong></span>
+</pre></div><p class="calibre7">This should take a few seconds. If all is well, the next thing to do is to start a REPL session <a id="id251" class="calibre1"/>and start up the <a id="id252" class="calibre1"/>server:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">$ lein repl</strong></span>
+<span class="strong"><strong class="calibre2">user=&gt; (run)</strong></span>
+</pre></div><p class="calibre7">Now, point your browser to <code class="email">http://localhost:3000/</code> and drag the mouse around to see its current position.</p><p class="calibre7">Congratulations on successfully developing, deploying, and using your own CES framework!</p></div>
+<div class="book" title="CES versus core.async"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch05lvl1sec36" class="calibre1"/>CES versus core.async</h1></div></div></div><p class="calibre7">At this stage, you might be wondering when you should choose one approach over the other. After all, as demonstrated at the beginning of this chapter, we could use <code class="email">core.async</code> to do everything we have done using <code class="email">respondent</code>.</p><p class="calibre7">It all comes <a id="id253" class="calibre1"/>down to using the right level of abstraction for the task<a id="id254" class="calibre1"/> at hand.</p><p class="calibre7">
+<code class="email">core.async</code> gives us many low level primitives that are extremely useful when working with processes, which need to talk to each other. The <code class="email">core.async</code> channels work as concurrent blocking queues and are an excellent synchronization mechanism in these scenarios.</p><p class="calibre7">However, it makes other solutions harder to implement: for instance, channels are single-take by default, so if we have multiple consumers interested in the values put inside a channel, we have to implement the distribution ourselves using tools such as <code class="email">mult</code> and <code class="email">tap</code>.</p><p class="calibre7">CES frameworks, on the other hand, operate at a higher level of abstraction and work with multiple subscribers by default.</p><p class="calibre7">Additionally, <code class="email">core.async</code> relies on side effects, as can be seen by the use of functions such as <code class="email">&gt;!</code> inside <code class="email">go</code> blocks. Frameworks such as RxClojure promote stream transformations by the use of pure functions.</p><p class="calibre7">This is not to say there aren't side effects in CES frameworks. There most definitely are. However, as a consumer of the library, this is mostly hidden from our eyes, allowing us to think of most of our code as simple sequence transformations.</p><p class="calibre7">In conclusion, different application domains will benefit more or less from either approach—sometimes they can benefit from both. We should think hard about our application <a id="id255" class="calibre1"/>domain and analyze the types of solutions and idioms <a id="id256" class="calibre1"/>developers are most likely to design. This will point us in the direction of better abstraction for whatever application we are developing at a given time.</p></div>
+<div class="book" title="Summary"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch05lvl1sec37" class="calibre1"/>Summary</h1></div></div></div><p class="calibre7">In this chapter, we developed our very own CES framework. By developing our own framework, we have solidified our understanding of both CES and how to effectively use <code class="email">core.async</code>.</p><p class="calibre7">The idea that <code class="email">core.async</code> could be used as the foundation of a CES framework isn't mine, however. James Reeves (see <a class="calibre1" href="https://github.com/weavejester">https://github.com/weavejester</a>)—creator of the routing library <span class="strong"><strong class="calibre2">Compojure</strong></span> (see <a class="calibre1" href="https://github.com/weavejester/compojure">https://github.com/weavejester/compojure</a>) and many other useful Clojure libraries—also saw the same potential and set off to write <span class="strong"><strong class="calibre2">Reagi</strong></span> (see <a class="calibre1" href="https://github.com/weavejester/reagi">https://github.com/weavejester/reagi</a>), a CES library built on top of <code class="email">core.async</code>, similar in spirit to the one we developed in this chapter.</p><p class="calibre7">He has put a lot more effort into it, making it a more robust option for a pure Clojure framework. We'll be looking at it in the next chapter.</p></div></body></html>

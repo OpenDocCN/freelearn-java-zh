@@ -1,0 +1,185 @@
+<html><head></head><body>
+<div id="page" style="height:0pt"/><div class="book" title="Chapter&#xA0;3.&#xA0;Asynchronous Programming and Networking"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch03" class="calibre1"/>Chapter 3. Asynchronous Programming and Networking</h1></div></div></div><p class="calibre7">Several business applications need to react to external stimuli—such as network traffic—asynchronously. An example of such software might be a desktop application that allows us to track a company's share prices in the stock market.</p><p class="calibre7">We will build this application first using a more traditional approach. In doing so, we will:</p><div class="book"><ul class="itemizedlist"><li class="listitem">Be able to identify and understand the drawbacks of the first design</li><li class="listitem">Learn how to use RxClojure to deal with stateful computations such as rolling averages</li><li class="listitem">Rewrite the example in a declarative fashion using observable sequences, thus reducing the complexity found in our first approach</li></ul></div></div>
+
+<div class="book" title="Chapter&#xA0;3.&#xA0;Asynchronous Programming and Networking">
+<div class="book" title="Building a stock market monitoring application"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_1"><a id="ch03lvl1sec21" class="calibre1"/>Building a stock market monitoring application</h1></div></div></div><p class="calibre7">Our stock <a id="id144" class="calibre1"/>market program will consist of three main components:</p><div class="book"><ul class="itemizedlist"><li class="listitem">A function simulating an external service from which we can query the current price—this would likely be a network call in a real setting</li><li class="listitem">A scheduler that polls the preceding function at a predefined interval</li><li class="listitem">A display function responsible for updating the screen</li></ul></div><p class="calibre7">We'll start by creating a new leiningen project, where the source code for our application will live. Type the following on the command line and then switch into the newly created directory:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein new stock-market-monitor</strong></span>
+<span class="strong"><strong class="calibre2">cd stock-market-monitor</strong></span>
+</pre></div><p class="calibre7">As we'll be building a GUI for this application, go ahead and add a dependency on Seesaw to the dependencies section of your <code class="email">project.clj</code>:</p><div class="informalexample"><pre class="programlisting">[seesaw "1.4.4"]</pre></div><p class="calibre7">Next, create a <code class="email">src/stock_market_monitor/core.clj</code> file in your favorite editor. Let's create and<a id="id145" class="calibre1"/> configure our application's UI components:</p><div class="informalexample"><pre class="programlisting">(ns stock-market-monitor.core
+  (:require [seesaw.core :refer :all])
+  (:import (java.util.concurrent ScheduledThreadPoolExecutor
+                                 TimeUnit)))
+
+(native!)
+
+(def main-frame (frame :title "Stock price monitor"
+                       :width 200 :height 100
+                       :on-close :exit))
+
+(def price-label       (label "Price: -"))
+
+(config! main-frame :content price-label)</pre></div><p class="calibre7">As you can see, the UI is fairly simple. It consists of a single label that will display a company's share price. We also imported two Java classes, <code class="email">ScheduledThreadPoolExecutor</code> and <code class="email">TimeUnit</code>, which we will use shortly.</p><p class="calibre7">The next thing we need is our polling machinery so that we can invoke the pricing service on a given schedule. We'll implement this via a thread pool so as not to block the main thread:</p><div class="informalexample" title="Note"><h3 class="title2"><a id="tip11" class="calibre1"/>Tip</h3><p class="calibre7">User interface SDKs such as swing have the concept of a main—or UI—thread. This is the thread used by the SDK to render the UI components to the screen. As such, if we have blocking—or even simply slow running— operations execute in this thread, the user experience will be severely affected, hence the use of a thread pool to offload expensive function calls.</p></div><div class="informalexample"><pre class="programlisting">(def pool (atom nil))
+
+(defn init-scheduler [num-threads]
+  (reset! pool  (ScheduledThreadPoolExecutor. num-threads)))
+(defn run-every [pool millis f]
+  (.scheduleWithFixedDelay pool
+                           f
+                           0 millis TimeUnit/MILLISECONDS))
+
+(defn shutdown [pool]
+  (println "Shutting down scheduler...")
+  (.shutdown pool))</pre></div><p class="calibre7">The <code class="email">init-scheduler</code> function creates <code class="email">ScheduledThreadPoolExecutor</code> with the given number of threads. That's the<a id="id146" class="calibre1"/> thread pool in which our periodic function will run. The <code class="email">run-every</code> function schedules a function <code class="email">f</code> in the given <code class="email">pool</code> to run at the interval specified by <code class="email">millis</code>. Finally, <code class="email">shutdown</code> is a function that will be called on program termination and shutdown the thread pool gracefully.</p><p class="calibre7">The rest of the program puts all these parts together:</p><div class="informalexample"><pre class="programlisting">(defn share-price [company-code]
+  (Thread/sleep 200)
+  (rand-int 1000))
+
+
+(defn -main [&amp; args]
+  (show! main-frame)
+  (.addShutdownHook (Runtime/getRuntime)
+                    (Thread. #(shutdown @pool)))
+  (init-scheduler 1)
+  (run-every @pool 500
+             #(-&gt;&gt; (str "Price: " (share-price "XYZ"))
+                   (text! price-label)
+                   invoke-now)))</pre></div><p class="calibre7">The <code class="email">share-price</code> function sleeps for 200 milliseconds to simulate network latency and returns a random integer between 0 and 1,000 representing the stock's price.</p><p class="calibre7">The first line of our <code class="email">-main</code> function adds a shutdown hook to the runtime. This allows our program to intercept termination—such as pressing <span class="strong"><em class="calibre8">Ctrl</em></span> + <span class="strong"><em class="calibre8">C</em></span> in a terminal window—and gives us the opportunity to shutdown the thread pool.</p><div class="informalexample" title="Note"><h3 class="title2"><a id="tip12" class="calibre1"/>Tip</h3><p class="calibre7">The <code class="email">ScheduledThreadPoolExecutor</code> pool<a id="id147" class="calibre1"/> creates non-daemon threads by default. A program cannot terminate if there are any non-daemon threads alive in addition to the program's main thread. This is why the shutdown hook is necessary.</p></div><p class="calibre7">Next, we initialize the scheduler with a single thread and schedule a function to be executed every 500 milliseconds. This function asks the <code class="email">share-price</code> function for XYZ's current price and updates the label.</p><div class="informalexample" title="Note"><h3 class="title2"><a id="tip13" class="calibre1"/>Tip</h3><p class="calibre7">Desktop applications require all rendering to be done in the UI thread. However, our periodic function runs on a separate thread and needs to update the price label. This is why we use <code class="email">invoke-now</code>, which is a Seesaw function that schedules its body to be executed in the UI thread as soon as possible.</p></div><p class="calibre7">Let's run the program by typing the following command in the project's root directory:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein trampoline run -m stock-market-monitor.core</strong></span>
+</pre></div><div class="informalexample" title="Note"><h3 class="title2"><a id="tip14" class="calibre1"/>Tip</h3><p class="calibre7">Trampolining tells leiningen not to nest our program's JVM within its own, thus freeing us to handle uses of <span class="strong"><em class="calibre8">Ctrl</em></span> + <span class="strong"><em class="calibre8">C</em></span> ourselves through shutdown hooks.</p></div><p class="calibre7">A window like<a id="id148" class="calibre1"/> the one shown in the following screenshot will be displayed, with the values on it being updated as per the schedule implemented earlier:</p><div class="mediaobject"><img src="../images/00010.jpeg" alt="Building a stock market monitoring application" class="calibre10"/></div><p class="calibre11"> </p><p class="calibre7">This is a fine solution. The code is relatively straightforward and satisfies our original requirements. However, if we look at the big picture, there is a fair bit of noise in our program. Most of its lines of code are dealing with creating and managing a thread pool, which, while necessary, isn't central to the problem we're solving—it's an implementation detail.</p><p class="calibre7">We'll keep things as they are for the moment and add a new requirement: rolling averages.</p></div></div>
+<div class="book" title="Rolling averages"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch03lvl1sec22" class="calibre1"/>Rolling averages</h1></div></div></div><p class="calibre7">Now that we can <a id="id149" class="calibre1"/>see the up-to-date stock price for a given company, it makes sense to display a rolling average of the past, say, five stock prices. In a real scenario, this would provide an objective view of a company's share trend in the stock market.</p><p class="calibre7">Let's extend our program to accommodate this new requirement.</p><p class="calibre7">First, we'll need to modify our namespace definition:</p><div class="informalexample"><pre class="programlisting">(ns stock-market-monitor.core
+  (:require [seesaw.core :refer :all])
+  (:import (java.util.concurrent ScheduledThreadPoolExecutor
+                                 TimeUnit)
+           (clojure.lang PersistentQueue)))</pre></div><p class="calibre7">The only change is a new import clause, for Clojure's <code class="email">PersistentQueue</code> class. We will be using that later.</p><p class="calibre7">We'll also need a new label to display the current running average:</p><div class="informalexample"><pre class="programlisting">(def running-avg-label (label "Running average: -"))
+(config! main-frame :content
+         (border-panel
+          :north  price-label
+          :center running-avg-label
+          :border 5))</pre></div><p class="calibre7">Next, we need a function to calculate rolling averages. A rolling—or moving—average is a calculation in statistics, where you take the average of a subset of items in a dataset. This subset has a fixed size and it shifts forward as data comes in. This will become clear with an example.</p><p class="calibre7">Suppose you have a list with numbers from 1 to 10, inclusive. If we use <code class="email">3</code> as the subset size, the rolling averages are as follows:</p><div class="informalexample"><pre class="programlisting">[<span class="strong"><strong class="calibre2">1 2 3</strong></span> 4 5 6 7 8 9 10] =&gt; 2.0
+[1 <span class="strong"><strong class="calibre2">2 3 4</strong></span> 5 6 7 8 9 10] =&gt; 3.0
+[1 <span class="strong"><strong class="calibre2">2 3 4 5</strong></span> 6 7 8 9 10] =&gt; 4.0</pre></div><p class="calibre7">The highlighted parts in the preceding code show the current <span class="strong"><em class="calibre8">window</em></span> being used to calculate the subset average.</p><p class="calibre7">Now that we know what rolling averages are, we can move on to implement it in our program:</p><div class="informalexample"><pre class="programlisting">(defn roll-buffer [buffer num buffer-size]
+  (let [buffer (conj buffer num)]
+    (if (&gt; (count buffer) buffer-size)
+      (pop buffer)
+      buffer)))
+
+(defn avg [numbers]
+  (float (/ (reduce + numbers)
+            (count numbers))))
+
+(defn make-running-avg [buffer-size]
+  (let [buffer (atom clojure.lang.PersistentQueue/EMPTY)]
+    (fn [n]
+      (swap! buffer roll-buffer n buffer-size)
+      (avg @buffer))))
+
+(def running-avg (running-avg 5))</pre></div><p class="calibre7">The <code class="email">roll-buffer</code> function is a<a id="id150" class="calibre1"/> utility function that takes a queue, a number, and a buffer size as arguments. It adds that number to the queue, popping the oldest element if the queue goes over the buffer limit, thus causing its contents to <span class="strong"><em class="calibre8">roll</em></span> over.</p><p class="calibre7">Next, we have a function for calculating the average of a collection of numbers. We cast the result to float if there's an uneven division.</p><p class="calibre7">Finally, the higher-order <code class="email">make-running-avg</code> function returns a stateful, single argument function that closes over an empty persistent queue. This queue is used to keep track of the current subset of data.</p><p class="calibre7">We then create an instance of this function by calling it with a buffer size of 5 and save it to the <code class="email">running-avg</code> var. Each time we call this new function with a number, it will add it to the queue using the <code class="email">roll-buffer</code> function and then finally return the average of the items in the queue.</p><p class="calibre7">The code we have written to manage the thread pool will be reused as is so all that is left to do is update our periodic function:</p><div class="informalexample"><pre class="programlisting">(defn worker []
+  (let [price (share-price "XYZ")]
+    (-&gt;&gt; (str "Price: " price) (text! price-label))
+    (-&gt;&gt; (str "Running average: " (running-avg price))
+         (text! running-avg-label))))
+
+(defn -main [&amp; args]
+  (show! main-frame)
+  (.addShutdownHook (Runtime/getRuntime)
+                    (Thread. #(shutdown @pool)))
+  (init-scheduler 1)
+  (run-every @pool 500
+             #(invoke-now (worker))))</pre></div><p class="calibre7">Since our function isn't a one-liner anymore, we abstract it away in its own function called <code class="email">worker</code>. As before, it updates the price label, but we have also extended it to use the <code class="email">running-avg</code> function created earlier.</p><p class="calibre7">We're ready to run the program once more:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">lein trampoline run -m stock-market-monitor.core</strong></span>
+</pre></div><p class="calibre7">You should see a window like the one shown in the following screenshot:</p><div class="mediaobject"><img src="../images/00011.jpeg" alt="Rolling averages" class="calibre10"/></div><p class="calibre11"> </p><p class="calibre7">You should see<a id="id151" class="calibre1"/> that in addition to displaying the current share price for XYZ, the program also keeps track and refreshes the running average of the stream of prices.</p></div>
+<div class="book" title="Identifying problems with our current approach"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch03lvl1sec23" class="calibre1"/>Identifying problems with our current approach</h1></div></div></div><p class="calibre7">Aside from<a id="id152" class="calibre1"/> the lines of code responsible for building the user interface, our program is roughly 48 lines long.</p><p class="calibre7">The core of the program resides in the <code class="email">share-price</code> and <code class="email">avg</code> functions, which are responsible for querying the price service and calculating the average of a list of <span class="strong"><em class="calibre8">n</em></span> numbers, respectively. They represent only six lines of code. There is a lot of <span class="strong"><em class="calibre8">incidental complexity</em></span> in this small program.</p><p class="calibre7">Incidental complexity<a id="id153" class="calibre1"/> is complexity caused by code that is not essential to the problem at hand. In this example, we have two sources of such complexity—we are disregarding UI specific code for this discussion: the thread pool and the rolling buffer function. They add a great deal of cognitive load to someone reading and maintaining the code.</p><p class="calibre7">The thread pool is external to our problem. It is only concerned with the semantics of how to run tasks asynchronously. The rolling buffer function specifies a detailed implementation of a queue and how to use it to represent the concept.</p><p class="calibre7">Ideally, we should be able to abstract over these details and focus on the core of our problem; <span class="strong"><strong class="calibre2">Compositional Event Systems</strong></span> (<span class="strong"><strong class="calibre2">CES</strong></span>) allows us to do just that.</p></div>
+
+<div id="page" style="height:0pt"/><div class="book" title="Removing incidental complexity with RxClojure"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch03lvl1sec24" class="calibre1"/>Removing incidental complexity with RxClojure</h1></div></div></div><p class="calibre7">In <a class="calibre1" title="Chapter 2. A Look at Reactive Extensions" href="part0021_split_000.html#page">Chapter 2</a>, <span class="strong"><em class="calibre8">A Look at Reactive Extensions</em></span>, we learned about the basic building blocks of RxClojure, an<a id="id154" class="calibre1"/> open-source CES framework. In this section, we'll use this knowledge <a id="id155" class="calibre1"/>in order to remove the incidental complexity from our program. This will give us a clear, declarative way to display both prices and rolling averages.</p><p class="calibre7">The UI code we've written so far remains unchanged, but we need to make sure RxClojure is declared in the dependencies section of our <code class="email">project.clj</code> file:</p><div class="informalexample"><pre class="programlisting">[io.reactivex/rxclojure "1.0.0"]</pre></div><p class="calibre7">Then, ensure we require the following library:</p><div class="informalexample"><pre class="programlisting">(ns stock-market-monitor.core
+  (:require [rx.lang.clojure.core :as rx]
+            [seesaw.core :refer :all])
+  (:import (java.util.concurrent TimeUnit)
+           (rx Observable)))</pre></div><p class="calibre7">The way we approach the problem this time is also different. Let's take a look at the first requirement: it requires we display the current price of a company's share in the stock market.</p><p class="calibre7">Every time we query the price service, we get a—possibly different—price for the company in question. As we saw in <a class="calibre1" title="Chapter 2. A Look at Reactive Extensions" href="part0021_split_000.html#page">Chapter 2</a>, <span class="strong"><em class="calibre8">A Look at Reactive Extensions</em></span>, modeling this as an observable sequence is easy, so we'll start with that. We'll create a function that gives us back a stock price observable for the given company:</p><div class="informalexample"><pre class="programlisting">(defn make-price-obs [company-code]
+  (rx/return (share-price company-code)))</pre></div><p class="calibre7">This is an observable that yields a single value and terminates. It's equivalent to the following marble diagram:</p><div class="mediaobject"><img src="../images/00012.jpeg" alt="Removing incidental complexity with RxClojure" class="calibre10"/></div><p class="calibre11"> </p><p class="calibre7">Part of the first<a id="id156" class="calibre1"/> requirement is that we query the service on a predefined time interval—every 500 milliseconds in this case. This hints at an observable we have encountered before, aptly<a id="id157" class="calibre1"/> named <span class="strong"><em class="calibre8">interval</em></span>. In order to get the polling behavior we want, we need to combine the interval and the price observables.</p><p class="calibre7">As you probably recall, <code class="email">flatmap</code> is the tool for the job here:</p><div class="informalexample"><pre class="programlisting">(rx/flatmap (fn [_] (make-price-obs "XYZ"))
+                    (Observable/interval 500 
+                                         TimeUnit/MILLISECONDS))</pre></div><p class="calibre7">The preceding snippet creates an observable that will yield the latest stock price for XYZ every 500 milliseconds indefinitely. It corresponds to the following diagram:</p><div class="mediaobject"><img src="../images/00013.jpeg" alt="Removing incidental complexity with RxClojure" class="calibre10"/></div><p class="calibre11"> </p><p class="calibre7">In fact, we <a id="id158" class="calibre1"/>can simply<a id="id159" class="calibre1"/> subscribe to this new observable and test it out. Modify your main function to the following snippet and run the program:</p><div class="informalexample"><pre class="programlisting">(defn -main [&amp; args]
+  (show! main-frame)
+  (let [price-obs (rx/flatmap (fn [_] (make-price-obs "XYZ"))
+                              (Observable/interval 500 TimeUnit/MILLISECONDS))]
+    (rx/subscribe price-obs
+                  (fn [price]
+                    (text! price-label (str "Price: " price))))))</pre></div><p class="calibre7">This is very cool! We replicated the behavior of our first program with only a few lines of code. The best part is that we did not have to worry about thread pools or scheduling actions. By thinking about the problem in terms of observable sequences, as well as combining existing and new observables, we were able to declaratively express what we want the program to do.</p><p class="calibre7">This already provides great benefits in maintainability and readability. However, we are still missing <a id="id160" class="calibre1"/>the other<a id="id161" class="calibre1"/> half of our program: rolling averages.</p></div>
+
+<div class="book" title="Removing incidental complexity with RxClojure">
+<div class="book" title="Observable rolling averages"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_1"><a id="ch03lvl2sec30" class="calibre1"/>Observable rolling averages</h2></div></div></div><p class="calibre7">It might not<a id="id162" class="calibre1"/> be immediately obvious how we can model rolling averages as observables. What we need to keep in mind is that pretty much anything we can think of as a sequence of values, we can probably model as an observable sequence.</p><p class="calibre7">Rolling averages are no different. Let's forget for a moment that the prices are coming from a network call wrapped in an observable. Let's imagine we have all values we care about in a Clojure vector:</p><div class="informalexample"><pre class="programlisting">(def values (range 10))</pre></div><p class="calibre7">What we need is a way to process these values in partitions—or buffers—of size 5 in such a way that only a single value is dropped at each interaction. In Clojure, we can use the <code class="email">partition</code> function for this purpose:</p><div class="informalexample"><pre class="programlisting">(doseq [buffer (partition 5 1 values)]
+  (prn buffer))
+
+<span class="strong"><strong class="calibre2">(0 1 2 3 4)</strong></span>
+<span class="strong"><strong class="calibre2">(1 2 3 4 5)</strong></span>
+<span class="strong"><strong class="calibre2">(2 3 4 5 6)</strong></span>
+<span class="strong"><strong class="calibre2">(3 4 5 6 7)</strong></span>
+<span class="strong"><strong class="calibre2">(4 5 6 7 8)</strong></span>
+<span class="strong"><strong class="calibre2">...</strong></span>
+</pre></div><p class="calibre7">The second argument to the <code class="email">partition</code> function is called a <span class="strong"><em class="calibre8">step</em></span> and it is the offset of how many items should be skipped before starting a new partition. Here, we set it to 1 in order to create the sliding window effect we need.</p><p class="calibre7">The big question then is: can we somehow leverage <code class="email">partition</code> when working with observable sequences?</p><p class="calibre7">It turns out that RxJava has a transformer called <code class="email">buffer</code> just for this purpose. The previous example can be rewritten as follows:</p><div class="informalexample"><pre class="programlisting">(-&gt; (rx/seq-&gt;o (vec (range 10)))
+    (.buffer 5 1)
+    (rx/subscribe
+     (fn [price]
+       (prn (str "Value: " price)))))</pre></div><div class="informalexample" title="Note"><h3 class="title2"><a id="tip15" class="calibre1"/>Tip</h3><p class="calibre7">As mentioned previously, not all RxJava's API is exposed through RxClojure, so here we need to use interop to access the <code class="email">buffer</code> method from the observable sequence.</p></div><p class="calibre7">As before, the<a id="id163" class="calibre1"/> second argument to <code class="email">buffer</code> is the offset, but it's called <code class="email">skip</code> in the RxJava documentation. If you run this at the REPL you'll see the following output:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre2">"Value: [0, 1, 2, 3, 4]"</strong></span>
+<span class="strong"><strong class="calibre2">"Value: [1, 2, 3, 4, 5]"</strong></span>
+<span class="strong"><strong class="calibre2">"Value: [2, 3, 4, 5, 6]"</strong></span>
+<span class="strong"><strong class="calibre2">"Value: [3, 4, 5, 6, 7]"</strong></span>
+<span class="strong"><strong class="calibre2">"Value: [4, 5, 6, 7, 8]"</strong></span>
+<span class="strong"><strong class="calibre2">...</strong></span>
+</pre></div><p class="calibre7">This is exactly what we want. The only difference is that the buffer method waits until it has enough elements—five in this case—before proceeding.</p><p class="calibre7">Now, we can go back to our program and incorporate this idea with our main function. Here is what it looks like:</p><div class="informalexample"><pre class="programlisting">(defn -main [&amp; args]
+  (show! main-frame)
+  (let [price-obs (-&gt; (rx/flatmap make-price-obs
+                                  (Observable/interval 500 TimeUnit/MILLISECONDS))
+                      (.publish))
+        sliding-buffer-obs (.buffer price-obs 5 1)]
+    (rx/subscribe price-obs
+                  (fn [price]
+                    (text! price-label (str "Price: " price))))
+    (rx/subscribe sliding-buffer-obs
+                  (fn [buffer]
+                    (text! running-avg-label (str "Running average: " (avg buffer)))))
+    (.connect price-obs)))</pre></div><p class="calibre7">The preceding snippet works by creating two observables. The first one, <code class="email">price-obs</code>, we had created before. The new sliding buffer observable is created using the <code class="email">buffer</code> transformer on <code class="email">price-obs</code>.</p><p class="calibre7">We can, then, independently subscribe to each one in order to update the price and rolling average labels. Running the program will display the same screen we've seen previously:</p><div class="mediaobject"><img src="../images/00011.jpeg" alt="Observable rolling averages" class="calibre10"/></div><p class="calibre11"> </p><p class="calibre7">You might have noticed two method calls we hadn't seen before: <code class="email">publish</code> and <code class="email">connect</code>.</p><p class="calibre7">The <code class="email">publish</code> method returns a connectable observable. This means that the observable won't start emitting values until its <code class="email">connect</code> method has been called. We do this <a id="id164" class="calibre1"/>here because we want to make sure that all the subscribers receive all the values emitted by the original observable.</p><p class="calibre7">In conclusion, without much additional code, we implemented all requirements in a concise, declarative manner that is easy to maintain and follow. We have also made the previous roll-buffer function completely unnecessary.</p><p class="calibre7">The full source code for the CES version of the program is given here for reference:</p><div class="informalexample"><pre class="programlisting">(ns stock-market-monitor.05frp-price-monitor-rolling-avg
+  (:require [rx.lang.clojure.core :as rx]
+            [seesaw.core :refer :all])
+  (:import (java.util.concurrent TimeUnit)
+           (rx Observable)))
+
+(native!)
+
+(def main-frame (frame :title "Stock price monitor"
+                       :width 200 :height 100
+                       :on-close :exit))
+
+(def price-label       (label "Price: -"))
+(def running-avg-label (label "Running average: -"))
+
+(config! main-frame :content
+         (border-panel
+          :north  price-label
+          :center running-avg-label
+          :border 5))
+
+(defn share-price [company-code]
+  (Thread/sleep 200)
+  (rand-int 1000))
+
+(defn avg [numbers]
+  (float (/ (reduce + numbers)
+            (count numbers))))
+
+(defn make-price-obs [_]
+  (rx/return (share-price "XYZ")))
+
+(defn -main [&amp; args]
+  (show! main-frame)
+  (let [price-obs (-&gt; (rx/flatmap make-price-obs
+                                  (Observable/interval 500 TimeUnit/MILLISECONDS))
+                      (.publish))
+        sliding-buffer-obs (.buffer price-obs 5 1)]
+    (rx/subscribe price-obs
+                  (fn [price]
+                    (text! price-label (str "Price: " price))))
+    (rx/subscribe sliding-buffer-obs
+                  (fn [buffer]
+                    (text! running-avg-label (str "Running average: " (avg buffer)))))
+    (.connect price-obs)))</pre></div><p class="calibre7">Note how<a id="id165" class="calibre1"/> in this version of the program, we didn't have to use a shutdown hook. This is because RxClojure creates daemon threads, which are automatically terminated once the application exits.</p></div></div>
+<div class="book" title="Summary"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch03lvl1sec25" class="calibre1"/>Summary</h1></div></div></div><p class="calibre7">In this chapter, we simulated a real-world application with our stock market program. We've written it in a somewhat traditional way using thread pools and a custom queue implementation. We then refactored it to a CES style using RxClojure's observable sequences.</p><p class="calibre7">The resulting program is shorter, simpler, and easier to read once you get familiar with the core concepts of RxClojure and RxJava.</p><p class="calibre7">In the next Chapter we will be introduced to core.async in preparation for implementing our own basic CES framework.</p></div></body></html>
