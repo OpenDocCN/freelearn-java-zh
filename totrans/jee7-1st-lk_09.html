@@ -1,0 +1,202 @@
+<html><head></head><body><div class="chapter" title="Chapter&#xA0;9.&#xA0;Security"><div class="titlepage"><div><div><h1 class="title"><a id="ch09"/>Chapter 9. Security</h1></div></div></div><p>We will finish up our project by securing it with Java EE solutions. But first, we will analyze the improvements in the concerned APIs. The development of this chapter will be focused on JASPIC 1.1.</p><div class="section" title="JASPIC 1.1"><div class="titlepage"><div><div><h1 class="title"><a id="ch09lvl1sec38"/>JASPIC 1.1</h1></div></div></div><p>The <span class="strong"><strong>Java Authentication SPI for Containers</strong></span> (<span class="strong"><strong>JASPIC</strong></span>) Specification was developed under JSR 196. This section just gives you an overview of <a id="id556" class="indexterm"/>improvements in the API. For more information, the complete document specification can be downloaded from <a class="ulink" href="http://jcp.org/aboutJava/communityprocess/final/jsr349/index.html">http://jcp.org/aboutJava/communityprocess/final/jsr349/index.html</a>.</p><div class="section" title="Secure access to forms"><div class="titlepage"><div><div><h2 class="title"><a id="ch09lvl2sec61"/>Secure access to forms</h2></div></div></div><p>Also called JASPI, the JASPIC Specification defines a set of standard interfaces for the development of modules for authentication, which allow secure access to web resources (Servlets, JSP, and so on), among others. Generally speaking, the JASPIC Specification was designed for message-level security; this means that JASPIC modules are called to be integrated into message processing containers and thus, offer a transparent secured mechanism for protocols such as SOAP and HttpServlet.</p><div class="section" title="Implementing an authentication module"><div class="titlepage"><div><div><h3 class="title"><a id="ch09lvl3sec64"/>Implementing an authentication module</h3></div></div></div><p>In the case where you don't <a id="id557" class="indexterm"/>want to use a predefined authentication module, the JASPIC Specification allows you to develop your own modules. This requires the <a id="id558" class="indexterm"/>implementation of the <code class="literal">javax.security.auth.message.module.ServerAuthModule</code> interface. For reasons that we will explain later, you may need to implement the following interfaces:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">javax.security.auth.message.config.ServerAuthConfig</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">javax.security.auth.message.config.ServerAuthContext</code></li><li class="listitem" style="list-style-type: disc"><code class="literal">javax.security.auth.message.config.AuthConfigProvider</code></li></ul></div><div class="section" title="Implementing the ServerAuthModule interface"><div class="titlepage"><div><div><h4 class="title"><a id="ch09lvl4sec30"/>Implementing the ServerAuthModule interface</h4></div></div></div><p>The <code class="literal">ServerAuthModule</code> interface <a id="id559" class="indexterm"/>contains five methods that must be implemented by the authentication module. These methods are the following:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc"><code class="literal">initialize()</code>: This method is <a id="id560" class="indexterm"/>used to initialize the module and retrieve objects necessary for the validation of access to resources.</li><li class="listitem" style="list-style-type: disc"><code class="literal">getSupportedMessageTypes()</code>: <a id="id561" class="indexterm"/>This method returns an array of objects designating message types supported by the module. For example, for a module that will be compatible with a Servlet Container profile, the returned array will contain the <code class="literal">HttpServletRequest.class</code> and <code class="literal">HttpServletResponse.class</code> objects.</li><li class="listitem" style="list-style-type: disc"><code class="literal">validateRequest()</code>: This <a id="id562" class="indexterm"/>method is called by the container whenever an <code class="literal">HttpServletRequest</code> is received for processing of the incoming message. For this purpose, it receives from the container <code class="literal">HttpServletRequest</code> and <code class="literal">HttpServletResponse</code> objects in the <code class="literal">MessageInfo</code> parameter. At the end of request processing, this method must return a status that determines the sequence of operations in the container.</li><li class="listitem" style="list-style-type: disc"><code class="literal">secureResponse()</code>: This <a id="id563" class="indexterm"/>method is called by the container at the time of returning a response to a client. Very often, it should return the status <code class="literal">SEND_SUCCESS</code>.</li><li class="listitem" style="list-style-type: disc"><code class="literal">cleanSubject()</code>: This <a id="id564" class="indexterm"/>method is used to remove one or several principles of a subject argument.</li></ul></div><p>The following code provides an example <a id="id565" class="indexterm"/>implementation of the <code class="literal">ServerAuthModule</code> interface methods:</p><div class="informalexample"><pre class="programlisting">public class ServerAuthModuleImpl implements ServerAuthModule {
+
+    private MessagePolicy requestPolicy;
+    private CallbackHandler handler;
+    public void initialize(MessagePolicy requestPolicy, MessagePolicy responsePolicy, CallbackHandler handler, Map options) throws AuthException {
+        this.requestPolicy = requestPolicy;
+        this.handler = handler;
+    }
+
+    public Class[] getSupportedMessageTypes() {
+        return new Class[]{HttpServletRequest.class, HttpServletResponse.class};
+    }
+
+    public AuthStatus validateRequest(MessageInfo messageInfo, Subject clientSubject, Subject serviceSubject) throws AuthException {
+        try {
+
+            String username = validation(messageInfo, clientSubject);
+            if (username == null &amp;&amp; requestPolicy.isMandatory()) {
+
+                HttpServletRequest request = (HttpServletRequest) messageInfo.getRequestMessage();
+               
+                HttpServletResponse response = (HttpServletResponse) messageInfo.getResponseMessage();
+
+                String header = "Basic" + " realm=\"" + request.getServerName() + "\"";
+                response.setHeader("WWW-Authenticate", header);
+
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                return AuthStatus.SEND_CONTINUE;
+            }
+
+            handler.handle(new Callback[]{
+                new CallerPrincipalCallback(clientSubject, username)});
+            if (username != null) {
+                messageInfo.getMap().put("javax.servlet.http.authType", "ServerAuthModuleImpl");
+            }
+
+            return AuthStatus.SUCCESS;
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new AuthException(e.getMessage());
+        }
+    }
+
+    public String validation(MessageInfo mInfo, Subject cSubject) throws Exception {
+        HttpServletRequest request = (HttpServletRequest) mInfo.getRequestMessage();
+
+        String headerAutho = request.getHeader("authorization");
+
+        if (headerAutho != null &amp;&amp; headerAutho.startsWith("Basic")) {
+
+            headerAutho = headerAutho.substring(6).trim();
+
+            String decodedAutho = new String(Base64.decode(headerAutho.getBytes()));
+
+            int colon = decodedAutho.indexOf(':');
+            if (colon &lt;= 0 || colon == decodedAutho.length() - 1) {
+                return null;
+            }
+
+            String username = decodedAutho.substring(0, colon);
+            String password = decodedAutho.substring(colon + 1);
+
+            //Container password validation, you can put your
+            //own validation process instead of delegating it to the container
+            PasswordValidationCallback pwdValidCallback =
+                    new PasswordValidationCallback(cSubject, username, password.toCharArray());
+
+            handler.handle(new Callback[]{pwdValidCallback});
+            //Removes the stored password
+            pwdValidCallback.clearPassword();
+            password = null;
+
+            if (pwdValidCallback.getResult()) {//if the user is authenticated
+                return username;
+            }
+        }
+        return null;
+    }
+
+    public AuthStatus secureResponse(MessageInfo messageInfo, Subject serviceSubject) throws AuthException {
+        return AuthStatus.SEND_SUCCESS;
+    }
+
+    public void cleanSubject(MessageInfo messageInfo, Subject subject) throws AuthException {
+    }
+}</pre></div></div><div class="section" title="Installing and configuring the authentication module"><div class="titlepage"><div><div><h4 class="title"><a id="ch09lvl4sec31"/>Installing and configuring the authentication module</h4></div></div></div><p>Install the authentication module <a id="id566" class="indexterm"/>by copying the JAR file of the module in the <code class="literal">install_glassfish\ glassfish\domains\domain1\lib</code> directory of your GlassFish Server.</p><p>Once the module is <a id="id567" class="indexterm"/>installed, you can configure it in the GlassFish administration console as follows:</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Log on to the GlassFish administration console.</li><li class="listitem">Expand the <span class="strong"><strong>server-config</strong></span> menu.</li><li class="listitem">In the menu that appears, expand the <span class="strong"><strong>Security</strong></span> menu.</li><li class="listitem">In the submenu, expand the <span class="strong"><strong>Message security</strong></span> menu.</li><li class="listitem">Click on the <span class="strong"><strong>HttpServlet</strong></span> menu.</li><li class="listitem">On the form that appears, click on the <span class="strong"><strong>Providers</strong></span> tab to add a new provider.</li><li class="listitem">Click on the <span class="strong"><strong>New</strong></span> button and fill out the appropriate form. Before recording your entry, your form should look like the following screenshot:<div class="mediaobject"><img src="graphics/9235OT_09_01.jpg" alt="Installing and configuring the authentication module"/></div></li></ol></div></div><div class="section" title="Binding the authentication module to a web application"><div class="titlepage"><div><div><h4 class="title"><a id="ch09lvl4sec32"/>Binding the authentication module to a web application</h4></div></div></div><p>To bind an <a id="id568" class="indexterm"/>authentication module to an application, you have two options in GlassFish:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The first option (which is <a id="id569" class="indexterm"/>by far the simplest) is to configure the <code class="literal">httpservlet-security-provider</code> attribute of the element <code class="literal">glassfish-web-app</code> in the <code class="literal">glassfish-web.xml</code> file of <a id="id570" class="indexterm"/>the application. The purpose of this configuration is to make you use the <code class="literal">AuthConfigProvider</code> implementation provided by GlassFish to instantiate your security module. The following code shows the contents of the <code class="literal">glassfish-web.xml</code> file <a id="id571" class="indexterm"/>of our application. As you can see, we passed the ID of our provider to the <code class="literal">httpservlet-security-provider</code> attribute. Thus, whenever it is necessary to analyze the security of a request, the GlassFish server through its <code class="literal">AuthConfigProvider</code> implementation <a id="id572" class="indexterm"/>will instantiate our security module in order to make it operational.<div class="informalexample"><pre class="programlisting">&lt;glassfish-web-app error-url=""  httpservlet-security-provider="AuthModule1"&gt;
+  &lt;class-loader delegate="true"/&gt;  
+&lt;/glassfish-web-app&gt;</pre></div></li><li class="listitem" style="list-style-type: disc">The second method is to implement your own implementation of the <code class="literal">AuthConfigProvider</code> interface. <a id="id573" class="indexterm"/>Therefore, in this case, you need to implement <code class="literal">javax.security.auth.message.config.ServerAuthConfig</code>, <code class="literal">javax.security.auth.message.config.ServerAuthContext</code>, and <code class="literal">javax.security.auth.message.config.AuthConfigProvider</code> interfaces. For those who are thrilled about the adventure, you will find all the necessary information in this blog: <a class="ulink" href="http://arjan-tijms.blogspot.com/2012/11/implementing-container-authentication.html">http://arjan-tijms.blogspot.com/2012/11/implementing-container-authentication.html</a>.</li></ul></div></div><div class="section" title="Creating a realm"><div class="titlepage"><div><div><h4 class="title"><a id="ch09lvl4sec33"/>Creating a realm</h4></div></div></div><p>We will tell the GlassFish server where <a id="id574" class="indexterm"/>all the associated users and groups that <a id="id575" class="indexterm"/>can access the secure sections of our application are stored. In other words, we will configure the realm of our application.</p><p>For your information, GlassFish provides the ability to define several types of realms. They are listed as follows:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The <code class="literal">file</code> realm, <a id="id576" class="indexterm"/>for <a id="id577" class="indexterm"/>storing user information in files. This is the default realm.</li><li class="listitem" style="list-style-type: disc">The <code class="literal">ldap</code> realm, <a id="id578" class="indexterm"/>for <a id="id579" class="indexterm"/>storage in an LDAP directory server.</li><li class="listitem" style="list-style-type: disc">The <code class="literal">jdbc</code> realm, <a id="id580" class="indexterm"/>for <a id="id581" class="indexterm"/>storing in a database.</li><li class="listitem" style="list-style-type: disc">The <code class="literal">solaris</code> realm, <a id="id582" class="indexterm"/>for <a id="id583" class="indexterm"/>authentication management based on Solaris username and password.</li><li class="listitem" style="list-style-type: disc">The <code class="literal">certificate</code> <a id="id584" class="indexterm"/>realm, <a id="id585" class="indexterm"/>for authentication management using certificates.</li><li class="listitem" style="list-style-type: disc">And if none of these realms satisfy your need, don't worry; GlassFish offers the possibility of creating your own realm.</li></ul></div><p>In our case, we opt for the <code class="literal">jdbc</code> realm; we need a database structure to store the necessary information (the user name, its password, and the group to which it belongs). The following screenshot shows the structure of tables in which our information is stored:</p><div class="mediaobject"><img src="graphics/9235OT_09_02.jpg" alt="Creating a realm"/></div><p>The <code class="literal">realm_users</code> table will <a id="id586" class="indexterm"/>store all user IDs and passwords, the <code class="literal">realm_groups</code> table will store all the group IDs of our application with their description, while the<code class="literal"> users_groups</code> <a id="id587" class="indexterm"/>table will tell us what groups a user belongs to. Thus, a user can belong to several groups.</p><p>Once you have defined the structure of the <a id="id588" class="indexterm"/>database that will host different users, you must configure GlassFish so that it can connect to your database (MySQL 5, in our case) and access authentication information. To do this, you have to start by copying the Java connector of your database (<code class="literal">mysql-connector-java-5.1.23-bin.jar</code>, in our case) into the directory: <code class="literal">glassfish_install_dir\glassfish\domains\domain1\lib</code>. Then, you have to connect to the GlassFish administration console and gain access to the realms creation form by navigating to <span class="strong"><strong>Configurations</strong></span> | <span class="strong"><strong>server-config</strong></span> | <span class="strong"><strong>Security</strong></span> | <span class="strong"><strong>Realms</strong></span>. By clicking on the <span class="strong"><strong>Realms</strong></span> menu, the following <a id="id589" class="indexterm"/>form will be displayed; you then need to click on the <span class="strong"><strong>New</strong></span> button and the realms creation form will appear:</p><div class="mediaobject"><img src="graphics/9235OT_09_03.jpg" alt="Creating a realm"/></div><p>The following table shows the fields that you need to fill for a <code class="literal">JDBCRealm</code>:</p><div class="informaltable"><table border="1"><colgroup><col style="text-align: left"/><col style="text-align: left"/><col style="text-align: left"/></colgroup><thead><tr><th style="text-align: left" valign="bottom">
+<p><span class="strong"><strong>Field</strong></span></p>
+</th><th style="text-align: left" valign="bottom">
+<p><span class="strong"><strong>Example value</strong></span></p>
+</th><th style="text-align: left" valign="bottom">
+<p><span class="strong"><strong>Description</strong></span></p>
+</th></tr></thead><tbody><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Name</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">MyJDBCRealm</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The name of the realm that will be used to configure security in application</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Class Name</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">com.sun.enterprise.security.auth.realm.jdbc.JDBCRealm</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The class that implements the realm to configure, in our case, <code class="literal">JDBCRealm</code></p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>JAAS Context</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">jdbcRealm</code></p>
+</td><td style="text-align: left" valign="top">
+<p>JAAS (Java Authentication and Authorization Service) context ID</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>JNDI </strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">jdbcRealmDataSource</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The JNDI name of the JDBC Resources to connect to the database containing the realm</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>User Table</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">realm_users</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The name of the table containing the list of system users with their passwords</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>User Name Column</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">USERID</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The name of the column containing the ID of the user in the table <code class="literal">realm_users</code></p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Password Column</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">PASSWORD</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The name of the column containing the passwords of users</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Group Table</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">users_groups</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The <a id="id590" class="indexterm"/>name of the table that associates groups and users</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Group Table User Name Column</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">USERID</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The name of the column in the association table containing the ID of the user</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Group Name Column</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">GROUPID</code></p>
+</td><td style="text-align: left" valign="top">
+<p>The name of the column in the association table containing the identifier of the group</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Password Encryption Algorithm</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">SHA-256</code></p>
+</td><td style="text-align: left" valign="top">
+<p>To set the password encryption algorithm</p>
+</td></tr><tr><td style="text-align: left" valign="top">
+<p><span class="strong"><strong>Digest Algorithm</strong></span></p>
+</td><td style="text-align: left" valign="top">
+<p><code class="literal">SHA-256</code> (even if it is the default value)</p>
+</td><td style="text-align: left" valign="top"> </td></tr></tbody></table></div><p>After filling the form, you can save your realm. With this configuration, we can now use the password validation mechanisms provided by the container to validate incoming connections. This is what we have done in the <a id="id591" class="indexterm"/>validation method using the following statement:</p><div class="informalexample"><pre class="programlisting">PasswordValidationCallback pwdValidCallback = new PasswordValidationCallback(cSubject, username, password.toCharArray());</pre></div><p>Apart from using the container validation mechanism, you can access your database and make this validation yourself.</p></div><div class="section" title="Security configuration"><div class="titlepage"><div><div><h4 class="title"><a id="ch09lvl4sec34"/>Security configuration</h4></div></div></div><p>To configure the <a id="id592" class="indexterm"/>security of an application, you will need to <a id="id593" class="indexterm"/>do the following:</p><div class="orderedlist"><ol class="orderedlist arabic"><li class="listitem">Determine the different roles of the application and declare them in <code class="literal">web.xml</code>. In our application, we only need an administrator role to perform batch processing and some administrative tasks. The following code demonstrates how to create a role named <code class="literal">admin</code> for this purpose:<div class="informalexample"><pre class="programlisting">&lt;security-role&gt;
+   &lt;role-name&gt;admin&lt;/role-name&gt;
+&lt;/security-role&gt;</pre></div></li><li class="listitem">Map URL patterns to appropriate roles in the <code class="literal">web.xml</code> file. This will define the forms that each role can access. Before performing this configuration, you must group the forms depending on the access constraints you want to define. In the case of our application, we have grouped the forms into two folders: a folder for preregistration forms in the registration folder and another folder for administration forms in the administration folder. Thus, to ensure that only users of the admin role will have access to the administration forms, we will associate the URL pattern <code class="literal">/faces/administration/*</code> to the <code class="literal">admin</code> role. The following code <a id="id594" class="indexterm"/>demonstrates how to define a constraint that associates the URL pattern <code class="literal">/faces/administration/*</code> to the <code class="literal">admin</code> role (the word <code class="literal">faces</code> of the previous pattern represents the pattern defined in the <code class="literal">&lt;servlet-mapping&gt;</code> element of the <code class="literal">web.xml</code> file).<div class="informalexample"><pre class="programlisting">&lt;security-constraint&gt;
+        &lt;display-name&gt;Constraint1&lt;/display-name&gt;
+        &lt;web-resource-collection&gt;
+            &lt;web-resource-name&gt;Administration&lt;/web-resource-name&gt;
+            &lt;url-pattern&gt;/faces/administration/*&lt;/url-pattern&gt;
+        &lt;/web-resource-collection&gt;
+        &lt;auth-constraint&gt;
+            &lt;role-name&gt;admin&lt;/role-name&gt;
+        &lt;/auth-constraint&gt;
+&lt;/security-constraint&gt;</pre></div></li><li class="listitem">Associate each role with a user group in the <code class="literal">glassfish-web.xml</code> file. In the realm, each user is associated with a user group. However, the URL patterns are associated with roles. So, you need to tell the server which group a role belongs to. In GlassFish, this is possible through the <code class="literal">&lt;security-role-mapping&gt;</code> element. The following code shows the complete contents of the <code class="literal">glassfish-web.xml</code> file with the role-group combination:<div class="informalexample"><pre class="programlisting">&lt;glassfish-web-app error-url="" httpservlet-security-provider="AuthModule1"&gt;
+  &lt;security-role-mapping&gt;
+    &lt;role-name&gt;admin&lt;/role-name&gt;
+    &lt;group-name&gt;administrator&lt;/group-name&gt;
+  &lt;/security-role-mapping&gt;
+  &lt;class-loader delegate="true"/&gt;
+&lt;/glassfish-web-app&gt;</pre></div></li><li class="listitem">Declare the realm and authentication types to be used by our application in <code class="literal">web.xml</code>. The following code demonstrates how to declare the MyJDBCRealm we created in the preceding step. The authentication type we have chosen is <code class="literal">DIGEST</code>. It transmits the password in an encrypted form.<div class="informalexample"><pre class="programlisting">&lt;login-config&gt;
+    &lt;auth-method&gt;DIGEST&lt;/auth-method&gt;
+    &lt;realm-name&gt;MyJDBCRealm&lt;/realm-name&gt;
+&lt;/login-config&gt;</pre></div></li></ol></div><p>Once you complete these configurations, <a id="id595" class="indexterm"/>candidates can access the registration forms without any problem. But, if they try to connect to an admin form, a window similar to the following window will be displayed:</p><div class="mediaobject"><img src="graphics/9235OT_09_04.jpg" alt="Security configuration"/></div><p>Before finishing up this project, you should <a id="id596" class="indexterm"/>know that it is possible to customize the login screen and even integrate it into your application. The tutorial at URL: <a class="ulink" href="http://blog.eisele.net/2013/01/jdbc-realm-glassfish312-primefaces342.html">http://blog.eisele.net/2013/01/jdbc-realm-glassfish312-primefaces342.html</a> can help you.</p></div></div></div></div></div>
+<div class="section" title="The latest improvements in action"><div class="titlepage"><div><div><h1 class="title"><a id="ch09lvl1sec39"/>The latest improvements in action</h1></div></div></div><p>The Maintenance Release B of JASPIC Specification has made some significant changes, some of which help to standardize the use of the specification regardless of the server; others help to enrich the user experience. Among the changes, we present only some relatively important changes and advise you to browse the specification document and blog found at: <a class="ulink" href="http://arjan-tijms.blogspot.com/2013_04_01_archive.html">http://arjan-tijms.blogspot.com/2013_04_01_archive.html</a>, which will provide you with more information.</p><div class="section" title="Integrating the authenticate, login, and logout methods called"><div class="titlepage"><div><div><h2 class="title"><a id="ch09lvl2sec62"/>Integrating the authenticate, login, and logout methods called</h2></div></div></div><p>Since Version 3.0 of the Servlet, the authenticate, login, and logout methods have been added to the <code class="literal">HttpServletRequest</code> interface for managing the login and logout programmatically. However, the behavior of JASPIC modules after calling one of these three methods was not clearly established. It was left under the care of the server vendors to provide their own method of login and logout. The direct consequence is the non portability of applications between Java EE-compliant servers.</p><p>In the recent changes, Version 1.1 of JASPIC has clearly defined the expected behavior of JASPIC modules after calling one of these three methods. We now know that:</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem" style="list-style-type: disc">The container implementation of the <a id="id597" class="indexterm"/><code class="literal">login</code> method must throw a <code class="literal">ServletException</code> when there is an incompatibility between the <code class="literal">login</code> method and the configured authentication mechanism.<div class="note" title="Note" style=""><div class="inner"><h3 class="title"><a id="note04"/>Note</h3><p>Here, the behavior of the module after calling the <code class="literal">login</code> method is not clearly defined.</p></div></div></li><li class="listitem" style="list-style-type: disc">A call to the <code class="literal">authenticate</code> <a id="id598" class="indexterm"/>method must call the <code class="literal">validateRequest</code> method. This is true if the <code class="literal">authenticate</code> method is not called in the context of a call it made to <code class="literal">validateRequest</code>.</li><li class="listitem" style="list-style-type: disc">A call to the <code class="literal">logout</code> <a id="id599" class="indexterm"/>method must call the <code class="literal">cleanSubject</code> method. This is true if the <code class="literal">logout</code> method is not called in the context of a call it made to the <code class="literal">cleanSubject</code> <a id="id600" class="indexterm"/>method.</li></ul></div></div><div class="section" title="Standardizing access to the application context identifier"><div class="titlepage"><div><div><h2 class="title"><a id="ch09lvl2sec63"/>Standardizing access to the application context identifier</h2></div></div></div><p>The application context <a id="id601" class="indexterm"/>identifier is an ID used to identify or select <a id="id602" class="indexterm"/>
+<code class="literal">AuthConfigProvider</code> and <code class="literal">ServerAuthConfig</code> objects for a <a id="id603" class="indexterm"/>given application (it is contained in the <code class="literal">appContext</code> parameter). Prior to JASPIC 1.1, there was no standard way to get it. As usual, each server vendor proposed a method that was vendor-specific. Now it is possible in standard with the following code:</p><div class="informalexample"><pre class="programlisting">ServletContext context = ...
+ //...
+String appContextID = context.getVirtualServerName() + " " + context.getContextPath();</pre></div></div><div class="section" title="Support for forward and include mechanisms"><div class="titlepage"><div><div><h2 class="title"><a id="ch09lvl2sec64"/>Support for forward and include mechanisms</h2></div></div></div><p>The JASPIC 1.1 Specification has <a id="id604" class="indexterm"/>insisted on the fact that authentication modules must be able to forward and include  during the processing of the <code class="literal">validateRequest</code> <a id="id605" class="indexterm"/>method. Concretely, this is possible by using <code class="literal">request</code> and <code class="literal">response</code> within the <a id="id606" class="indexterm"/>
+<code class="literal">MessageInfo</code> parameter type. The following code gives an overview of a redirection to an error page based on the results of a condition:</p><div class="informalexample"><pre class="programlisting">public AuthStatus validateRequest(MessageInfo messageInfo, Subject clientSubject, Subject serviceSubject) throws AuthException {
+  
+    HttpServletRequest request = (HttpServletRequest) messageInfo.getRequestMessage();
+    HttpServletResponse response = (HttpServletResponse) messageInfo.getResponseMessage();
+ 
+    try{
+      if(...)
+        request.getServletContext().getRequestDispatcher("specificErrorPage")
+               .forward(request, response);
+    }catch(Exception ex){}
+       
+    return SEND_CONTINUE;
+}</pre></div></div></div>
+<div class="section" title="Summary"><div class="titlepage"><div><div><h1 class="title"><a id="ch09lvl1sec40"/>Summary</h1></div></div></div><p>Having reached the end of this chapter, which is the last chapter of the book, we are now able to deploy a Java EE public solution with at least some level of security. Indeed, through this chapter, readers become aware of a specification allowing them to restrict access to the forms. However, it is important to note that we have just dealt with one small aspect of security, given the objectives of this book. We ask you to complete your knowledge about security with additional reading. This is because the domain is made up of several aspects such as the transmission of data across the network, method execution, construction, and execution of SQL queries.</p></div></body></html>
