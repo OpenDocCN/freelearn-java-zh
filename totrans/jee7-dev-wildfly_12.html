@@ -1,0 +1,447 @@
+<html><head></head><body>
+<div id="page" style="height:0pt"/><div class="book" title="Chapter&#xA0;12.&#xA0;Long-term Tasks' Execution"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch12" class="calibre1"/>Chapter 12. Long-term Tasks' Execution</h1></div></div></div><p class="calibre8">So far, our applications focused on interaction with the user. This may be the most important aspect of your future projects, but there are some scenarios that require a different approach. Maintenance tasks, importing big sets of data or time-consuming computations are usually addressed in a batch mode instead of an interactive manner. Often, these kinds of jobs are not part of the standard operations and should be invoked only when the server load is at its lowest or periodical.</p><p class="calibre8">Before Java EE 7, there was no standardized way to implement batch jobs (operations that do not require user interaction). The<a id="id1232" class="calibre1"/> deal changed with JSR 352 (<a class="calibre1" href="https://jcp.org/en/jsr/detail?id=352">https://jcp.org/en/jsr/detail?id=352</a>) and the introduction of the batch framework, which uses an XML language to define jobs.</p><p class="calibre8">When it comes to processor-intensive tasks, the natural way is to think about parallelization. Modern CPUs have multiple cores, which can be easily utilized by the JVM. The only problem is that in Java EE, using concurrency primitives known from Java SE is discouraged. The programmer may impair the stability and availability of the whole container.</p><p class="calibre8">Once more, the<a id="id1233" class="calibre1"/> new JSR 236 (<a class="calibre1" href="https://jcp.org/en/jsr/detail?id=236">https://jcp.org/en/jsr/detail?id=236</a>) provides new ways to overcome this architectural obstacle. The new specification <code class="email">ManagedExecutorService</code> is a container-aware version of <code class="email">ExecutorService</code> known from Java SE.</p><p class="calibre8">In this chapter, we will cover the following topics:</p><div class="book"><ul class="itemizedlist"><li class="listitem">How to create and execute batch jobs</li><li class="listitem">What are the differences between different batch job types</li><li class="listitem">How to create our custom worker threads inside a Java EE container</li></ul></div></div>
+
+<div class="book" title="Chapter&#xA0;12.&#xA0;Long-term Tasks' Execution">
+<div class="book" title="The overview of the batching framework"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_1"><a id="ch12lvl1sec57" class="calibre1"/>The overview of the batching framework</h1></div></div></div><p class="calibre8">The<a id="id1234" class="calibre1"/> batching framework defines the concept of a batch <span class="strong"><strong class="calibre9">job</strong></span>, which is a feature of the application that can be executed without user interaction. A single job consists of one or more steps, which can be executed sequentially or in parallel. Additionally, a sequence of <span class="strong"><strong class="calibre9">steps</strong></span> can be grouped into a <span class="strong"><strong class="calibre9">flow</strong></span>. The start of a parallel execution is called a <span class="strong"><strong class="calibre9">switch</strong></span>. And finally, if we want to control the sequence of steps using conditional statements, we should use <span class="strong"><strong class="calibre9">decisions</strong></span>. These following five nouns <a id="id1235" class="calibre1"/>are the basic building blocks of a batch application. To compose such an application, we will use a specification language written in an XML file, as shown in the following code snippet:</p><div class="informalexample"><pre class="programlisting">&lt;job id="jobName"&gt;
+    &lt;step&gt; … &lt;/step&gt;
+    &lt;step&gt; … &lt;/step&gt;
+    &lt;decision&gt; … &lt;/decision&gt;
+    &lt;flow&gt; … &lt;/flow&gt;
+    &lt;split&gt; … &lt;/split&gt;
+&lt;/job&gt;</pre></div><p class="calibre8">A step is the basic unit of work and our main area of interest. The batching framework defines two types of steps, which are as follows:</p><div class="book"><ul class="itemizedlist"><li class="listitem"><span class="strong"><strong class="calibre9">Chunk steps</strong></span>: These work <a id="id1236" class="calibre1"/>on chunks <a id="id1237" class="calibre1"/>of data in three phases: reading, processing, and writing (for each phase, a separate class is created). The chunks can be configured with a number of elements that should be processed in one transaction.</li><li class="listitem"><span class="strong"><strong class="calibre9">Task steps</strong></span>: These execute <a id="id1238" class="calibre1"/>a specific block of <a id="id1239" class="calibre1"/>code created by the programmer, without any special constraints. They are used for most non-data processing errands.</li></ul></div><p class="calibre8">Additionally, the batching framework allows listeners to register for the whole job or specific phases of the tasks.</p><p class="calibre8">Now that we've covered the basic vocabulary, it will be best to jump straight to coding.</p></div></div>
+
+<div class="book" title="Chapter&#xA0;12.&#xA0;Long-term Tasks' Execution">
+<div class="book" title="The overview of the batching framework">
+<div class="book" title="Our first batch job"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_2"><a id="ch12lvl2sec80" class="calibre1"/>Our first batch job</h2></div></div></div><p class="calibre8">WildFly <a id="id1240" class="calibre1"/>comes with an implementation of JSR 352 <a id="id1241" class="calibre1"/>called JBeret (<a class="calibre1" href="https://github.com/jberet/jsr352">https://github.com/jberet/jsr352</a>). This means that we can easily extend our ticket <a id="id1242" class="calibre1"/>application with batch jobs, by simply implementing the required interfaces; no additional dependencies are required. All APIs are already in place in our current samples, so we only need to create some classes and an XML file to specify the job flow.</p><p class="calibre8">As a base for our development in this chapter, it would be best to use the code from <a class="calibre1" title="Chapter 5. Combining Persistence with CDI" href="part0030_split_000.html#page">Chapter 5</a>, <span class="strong"><em class="calibre10">Combining Persistence with CDI</em></span>. The persistence layer will allow us to code a sample import batching job. To keep it simple, let's start by defining an artificial external service that will provide us with IDs of tickets that should be booked. We can deploy it as part of our application or as a separate WAR file. This sample is based on a REST endpoint, so be sure to configure JAX-RS in your deployment (for details, check out <a class="calibre1" title="Chapter 7. Adding Web Services to Your Applications" href="part0038_split_000.html#page">Chapter 7</a>, <span class="strong"><em class="calibre10">Adding Web Services to Your Applications</em></span>). This is shown in the following <a id="id1243" class="calibre1"/>code snippet:</p><div class="informalexample"><pre class="programlisting">@Singleton
+@Startup
+@ConcurrencyManagement(ConcurrencyManagementType.BEAN)
+@Path("/external")
+<span class="strong"><strong class="calibre9">@Produces(MediaType.TEXT_PLAIN)</strong></span>
+public class PendingSeats {
+
+    private final Queue&lt;Integer&gt; seats = 
+                               new ConcurrentLinkedQueue&lt;&gt;();
+
+    @PostConstruct
+    private void setUp() {
+        for (int i = 5; i &lt; 10; i++) {
+            seats.add(i);
+        }
+    }
+
+<span class="strong"><strong class="calibre9">    @GET</strong></span>
+    public Integer getNextSeat() {
+<span class="strong"><strong class="calibre9">        return seats.poll();</strong></span>
+    }
+}</pre></div><p class="calibre8">As you<a id="id1244" class="calibre1"/> can see in the preceding code snippet, our sample is initialized with IDs from <code class="email">5</code> to <code class="email">9</code>, and on every GET request, it will provide the ID as the output. When all IDs are emitted, a null value will be returned. This endpoint will serve as a model of a reservation system. For simplicity, it produces plaintext values instead of JSON. Of course, a flat file or any other source of data could also be used for integration.</p><div class="book" title="Creating a chunk-based batch step"><div class="book"><div class="book"><div class="book"><h3 class="title2"><a id="ch12lvl3sec83" class="calibre1"/>Creating a chunk-based batch step</h3></div></div></div><p class="calibre8">Our<a id="id1245" class="calibre1"/> integration scenario will be pretty <a id="id1246" class="calibre1"/>straightforward. We need to read all of the reservation IDs from the external system to get the corresponding seats from our database and write the changes back to the database. It would also be great to write a log with the operations made by the import. Let's start with the item reader:</p><div class="informalexample"><pre class="programlisting">package com.packtpub.wflydevelopment.chapter12.batching;
+
+import java.io.Serializable;
+import javax.batch.api.chunk.AbstractItemReader;
+import javax.inject.Named;
+import javax.ws.rs.client.Client;
+import javax.ws.rs.client.ClientBuilder;
+import javax.ws.rs.client.WebTarget;
+
+<span class="strong"><strong class="calibre9">@Named</strong></span>
+public class ExternalSystemReader extends <span class="strong"><strong class="calibre9">AbstractItemReader</strong></span> {
+
+    private WebTarget target;
+
+    @Override
+    public void open(Serializable checkpoint) throws Exception {
+        final Client restclient = ClientBuilder.newClient();
+        this.target = restclient.target("http://localhost:8080/ticket-agency-longterm/rest/external");
+    }
+
+    @Override
+    public Object readItem() throws Exception {
+        return target.request().get(String.class);
+    }
+}</pre></div><p class="calibre8">Our<a id="id1247" class="calibre1"/> reader extends the <code class="email">AbstractItemReader</code> class so that we don't have to implement all methods of the <code class="email">javax.batch.api.chunk.ItemReader</code> interface. The only two methods we are interested<a id="id1248" class="calibre1"/> in are <code class="email">open</code> and <code class="email">readItem</code>. The first one initializes the REST client, which will get the data from the server. The implementation is optional because not every reader needs initialization logic. Note that a checkpoint parameter is passed to the method. It can be used to restart the batch job from a specific point. We will, however, leave out this feature.</p><p class="calibre8">The <code class="email">readItem</code> method<a id="id1249" class="calibre1"/> requests the data from an external service and returns a single item to the batch framework. A null value is an indicator that there is no more data. Additional methods of the <code class="email">ItemReader</code> interface are responsible for checkpoint handling and closing of the reader.</p><p class="calibre8">When we define the XML specification for the batch job, we must use the names of managed beans to refer to the reader, processor, or writer we want (just like in JSF). Therefore, we need the <code class="email">@Named</code> annotation in order to provide a string-based qualifier; by default, it will be a lowercase name of the class on which the annotation is placed. For the <code class="email">ExternalSystemReader</code> bean, we will use the <code class="email">externalSystemReader</code> name.</p><p class="calibre8">After an item is read, we may process it. Our <code class="email">SeatProcessor</code> class goes as the following code snippet:</p><div class="informalexample"><pre class="programlisting">package com.packtpub.wflydevelopment.chapter12.batching;
+
+import javax.batch.api.chunk.ItemProcessor;
+import javax.inject.Inject;
+import javax.inject.Named;
+import com.packtpub.wflydevelopment.chapter12.control.SeatDao;
+import com.packtpub.wflydevelopment.chapter12.entity.Seat;
+
+@Named
+public class SeatProcessor implements <span class="strong"><strong class="calibre9">ItemProcessor</strong></span> {
+
+<span class="strong"><strong class="calibre9">    @Inject</strong></span>
+<span class="strong"><strong class="calibre9">    private SeatDao dao;</strong></span>
+
+    @Override
+    public Object processItem(Object id) throws Exception {
+        Seat seat = dao.find(Long.parseLong((String) id));
+        if (seat != null) {
+            if (seat.getBooked() == true) {
+                return null;
+            }
+            seat.setBooked(true);
+        }
+        return seat;
+    }
+}</pre></div><p class="calibre8">Our<a id="id1250" class="calibre1"/> processor retrieves IDs from the reader <a id="id1251" class="calibre1"/>and finds the corresponding entry in the database. To find the entity, we reuse our <code class="email">SeatDao</code> class known from previous chapters. Because we have CDI working on the batch framework, we can just inject our EJB without caring about transaction handling.</p><p class="calibre8">If the seat is found, we check if it's already booked. If yes, we can simply return a null value to omit this item from further processing.</p><p class="calibre8">The last step is <code class="email">SeatWriter</code>. This is shown in the following code snippet:</p><div class="informalexample"><pre class="programlisting">package com.packtpub.wflydevelopment.chapter12.batching;
+
+import javax.batch.api.chunk.AbstractItemWriter;
+import javax.batch.runtime.context.JobContext;
+import javax.inject.Inject;
+import javax.inject.Named;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+
+@Named
+public class SeatWriter extends <span class="strong"><strong class="calibre9">AbstractItemWriter</strong></span> {
+
+    public static final String FILENAME_PARAM = "logFile";
+
+<span class="strong"><strong class="calibre9">    @Inject</strong></span>
+<span class="strong"><strong class="calibre9">    private JobContext jobContext;</strong></span>
+
+    @PersistenceContext
+    private EntityManager em;
+
+    private BufferedWriter writer;
+
+    @Override
+    public void open(Serializable ckpt) throws Exception {
+        Properties jobProperties = jobContext.getProperties();
+        String fileName = jobProperties.getProperty(FILENAME_PARAM);
+
+        writer = new BufferedWriter(new FileWriter(fileName));
+        writer.write("Importing...");
+        writer.newLine();
+    }
+
+    @Override
+<span class="strong"><strong class="calibre9">    public void writeItems(List&lt;Object&gt; items) throws Exception {</strong></span>
+        writer.write("Chunk size: " + items.size());
+        writer.newLine();
+
+        for (Object obj : items) {
+            em.persist(obj);
+            writer.write("Persisted: " + obj);
+            writer.newLine();
+        }
+    }
+
+    @Override
+    public void close() throws Exception {
+        writer.write("Import finished");
+        writer.newLine();
+        writer.close();
+    }
+}</pre></div><p class="calibre8">Our <code class="email">ItemWriter</code> class<a id="id1252" class="calibre1"/> starts by defining an <code class="email">open</code> method, which gets a file for writing. The name of the newly created logfile is taken from the job properties. Our source of information about the current batch job is the injected <code class="email">JobContext</code> class (there is also a <code class="email">StepContext</code> object that provides information about a specific step). It gives us the possibility to get the properties defined for a job, its current ID, status, and additional transient data.</p><p class="calibre8">The heart of our writer is, of course, the <code class="email">writeItem</code> method. It receives a list of items (seats in our case) to be written and its responsibility is to persist them. This method can be invoked multiple times up to the moment when there is no more data to be written. You<a id="id1253" class="calibre1"/> can configure the number of elements <a id="id1254" class="calibre1"/>that will be processed in every chunk. What's more, every chunk runs in its own transaction.</p><p class="calibre8">Finally, when the last chunk is written, the <code class="email">close</code> method writes a summary and closes the file.</p><p class="calibre8">All elements are now in place, so we need to create a batch job specification. The file <code class="email">externalSystem.xml</code> should be placed in the <code class="email">src/main/resources/META-INF/batch-jobs</code> directory in your project. The contents are as follows:</p><div class="informalexample"><pre class="programlisting">&lt;job id="<span class="strong"><strong class="calibre9">externalSystem</strong></span>" 
+    version="1.0"&gt;<span class="strong"><strong class="calibre9"> [1]</strong></span>
+    &lt;properties&gt;
+        &lt;property name="<span class="strong"><strong class="calibre9">logFile</strong></span>" value="log.txt" /&gt; <span class="strong"><strong class="calibre9">[2]</strong></span>
+    &lt;/properties&gt;
+    &lt;step id="processData"&gt;
+        &lt;chunk <span class="strong"><strong class="calibre9">item-count="2"</strong></span>&gt; <span class="strong"><strong class="calibre9">[3]</strong></span>
+            &lt;reader ref="<span class="strong"><strong class="calibre9">externalSystemReader</strong></span>" /&gt; <span class="strong"><strong class="calibre9">[4]</strong></span>
+            &lt;processor ref="<span class="strong"><strong class="calibre9">seatProcessor</strong></span>" /&gt;
+            &lt;writer ref="<span class="strong"><strong class="calibre9">seatWriter</strong></span>" /&gt;
+        &lt;/chunk&gt;
+    &lt;/step&gt;
+&lt;/job&gt;</pre></div><p class="calibre8">The structure is pretty straightforward. First, we define a job ID matching the filename <code class="email">[1]</code>. Next, in the properties section, we set a property <code class="email">logFile</code> with the <code class="email">log.txt</code> value <code class="email">[2]</code> we used it in our <code class="email">SeatWriter</code> to create an output file <code class="email">[3]</code>. Then, we define a step with a data chunk. The <code class="email">item-count</code> attribute<a id="id1255" class="calibre1"/> defines the number of items we process in one transaction. Finally, we reference our reader, processor, and writer in their matching tags <code class="email">[4]</code>.</p><p class="calibre8">Now, when our job is defined, it is time to start it. To do this, we need to the use the BatchRuntime's static method, <code class="email">getJobOperator</code>. In order to simplify the solution, we will use a REST endpoint's GET method as a way to invoke our code:</p><div class="informalexample"><pre class="programlisting">package com.packtpub.wflydevelopment.chapter12.batching;
+
+import java.util.Properties;
+import javax.batch.runtime.BatchRuntime;
+import javax.ejb.Stateless;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+
+@Stateless
+@Path("/job")
+public class JobStarter {
+
+    @GET
+    public String start() {
+<span class="strong"><strong class="calibre9">        long jobId = BatchRuntime.getJobOperator()</strong></span>
+<span class="strong"><strong class="calibre9">        .start("externalSystem", new Properties());</strong></span>
+        return Long.toString(jobId);
+    }
+}</pre></div><p class="calibre8">The <code class="email">JobOperator start</code> method returns a job ID, which is a representation of the ongoing <a id="id1256" class="calibre1"/>batch process. We need to provide<a id="id1257" class="calibre1"/> the name of the file defining the batch job <a id="id1258" class="calibre1"/>without the XML extension and a set of runtime parameters.</p><div class="informalexample" title="Note"><h3 class="title2"><a id="note72" class="calibre1"/>Note</h3><p class="calibre8">The properties provided during runtime are not the same as we used earlier! These kinds of properties are not bound to a specific job (in contrast to the ones defined in the XML file), but can be accessed from the job execution. The batching framework calls them parameters. If you need this kind of logic in your application, you should just pass them during a job's startup and use the job execution ID to access them:</p><div class="informalexample"><pre class="programlisting">JobOperator operator = BatchRuntime.getJobOperator();
+Properties properties = new Properties();
+properties.put("propertyName", "propertyValue");
+
+long jobId = operator.start("externalSystem", properties);
+
+JobExecution execution = <span class="strong"><strong class="calibre9">operator.getJobExecution(jobId);</strong></span>
+Properties jobParameters = execution.getJobParameters();</pre></div></div><p class="calibre8">You can point your browser to <code class="email">http://localhost:8080/ticket-agency-longterm/rest/job</code> and your batch job should start running! Be sure to set up your seats before running the job (the console is available at <code class="email">http://localhost:8080/ticket-agency-longterm/faces/views/setup.xhtml</code>).</p><p class="calibre8">A sample output file in your WildFly's bin directory would look like the following:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre9">Importing...</strong></span>
+<span class="strong"><strong class="calibre9">Chunk size: 2</strong></span>
+<span class="strong"><strong class="calibre9">Persisted: Seat [id=5, booked=true, seatType=com.packtpub.wflydevelopment.chapter12.entity.SeatType@a55bb6e]</strong></span>
+<span class="strong"><strong class="calibre9">Persisted: Seat [id=6, booked=true, seatType=com.packtpub.wflydevelopment.chapter12.entity.SeatType@a55bb6e]</strong></span>
+<span class="strong"><strong class="calibre9">Chunk size: 2</strong></span>
+<span class="strong"><strong class="calibre9">Persisted: Seat [id=7, booked=true, seatType=com.packtpub.wflydevelopment.chapter12.entity.SeatType@440a007]</strong></span>
+<span class="strong"><strong class="calibre9">Persisted: Seat [id=8, booked=true, seatType=com.packtpub.wflydevelopment.chapter12.entity.SeatType@440a007]</strong></span>
+<span class="strong"><strong class="calibre9">Chunk size: 1</strong></span>
+<span class="strong"><strong class="calibre9">Persisted: Seat [id=9, booked=true, seatType=com.packtpub.wflydevelopment.chapter12.entity.SeatType@307124b7]</strong></span>
+<span class="strong"><strong class="calibre9">Import finished</strong></span>
+</pre></div><p class="calibre8">Of course, you<a id="id1259" class="calibre1"/> could also start the<a id="id1260" class="calibre1"/> batch job using a Java EE timer after a specific event in your application or even as an effect of an incoming JMS message. You can also use the retrieved job IDs to monitor the already running jobs or terminate them on demand. The batching framework API gives you many possibilities without too many complications in the area of job management.</p></div><div class="book" title="Creating a job-based batch step"><div class="book"><div class="book"><div class="book"><h3 class="title2"><a id="ch12lvl3sec84" class="calibre1"/>Creating a job-based batch step</h3></div></div></div><p class="calibre8">Our <a id="id1261" class="calibre1"/>chunk-based job was great to process<a id="id1262" class="calibre1"/> big data sets. However, what if we only want to perform a specific task? Besides creating chunks, we can also define steps that will simply call a process method of a specific class. These kinds of classes must implement the <code class="email">Batchlet</code> interface (or extend the <code class="email">AbstractBatchlet</code> class).</p><p class="calibre8">In our sample, let's try to contact an external API to ask about the current Bitcoin exchange rate (a decentralized, virtual currency). Then, we will store the current prices of our tickets in a simple flat file. Our batchlet would be as follows:</p><div class="informalexample"><pre class="programlisting">@Named
+public class BitcoinTask extends AbstractBatchlet { 
+
+    private static final String EXTERNAL_API = "https://api.bitcoinaverage.com/exchanges/USD";
+    public static final String FILENAME_PARAM = "bitcoinFile";
+
+    @Inject
+    private SeatTypeDao seatTypeDao;
+
+    @Inject
+    private JobContext jobContext;
+
+    @Override
+    <span class="strong"><strong class="calibre9">public String process()</strong></span> throws Exception { // <span class="strong"><strong class="calibre9">[1]</strong></span>
+        WebTarget api = ClientBuilder.newClient().target(EXTERNAL_API);
+        Response response = api.request().get();
+<span class="strong"><strong class="calibre9">        JsonObject entity = response.readEntity(JsonObject.class); // [2]</strong></span>
+
+        double averageValue = entity.getJsonObject("btce").getJsonObject("rates").getJsonNumber("bid").doubleValue(); 
+
+        Map&lt;SeatType, Double&gt; pricesInBitcoins = calculeteBitcoinPrices(averageValue, seatTypeDao.findAll()); // <span class="strong"><strong class="calibre9">[3]</strong></span>
+
+<span class="strong"><strong class="calibre9">        writeToFile(pricesInBitcoins); // [4]</strong></span>
+
+        return "OK";
+    }
+
+    private Map&lt;SeatType, Double&gt; calculeteBitcoinPrices(double averageValue, List&lt;SeatType&gt; findAll) {
+        return findAll.stream().collect(
+                Collectors.toMap(seatType -&gt; seatType, seatType -&gt; seatType.getPrice() / averageValue));
+    }
+
+    private void writeToFile(Map&lt;SeatType, Double&gt; pricesInBitcoins) throws Exception {
+<span class="strong"><strong class="calibre9">        Properties jobProperties = jobContext.getProperties(); // [5]</strong></span>
+        String fileName = jobProperties.getProperty(FILENAME_PARAM);
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName))) {
+            writer.write(pricesInBitcoins.toString());
+            writer.newLine();
+        }
+    }
+}</pre></div><p class="calibre8">The process method <code class="email">[1]</code> is our entry point to the batchlet. We will start by making a <code class="email">REST</code> request against an external API <code class="email">[2]</code> and <a id="id1263" class="calibre1"/>use the response to calculate our prices in bitcoins <code class="email">[3]</code>. Finally, we will try to write so as to gathered data into a file. As you can see, once more, we use <code class="email">JobContext</code> to get the configuration properties from the batching framework (the filename in this case).</p><p class="calibre8">You may wonder, what is the point of the return type in the <code class="email">process</code> method? It simply indicates the status of the job, if it has been completed successfully or not.</p><p class="calibre8">That's all<a id="id1264" class="calibre1"/> we wanted to do and we achieved it in a single batch step: reading, processing, and writing. In the chunk-oriented approach, we will have three separate mechanisms for this. Let's add our new step to <code class="email">externalSystem.xml</code> from <code class="email">src/main/resources/META-INF/batch-jobs</code>:</p><div class="informalexample"><pre class="programlisting">&lt;job id="externalSystem" 
+    version="1.0"&gt;
+    &lt;properties&gt;
+        &lt;property name="logFile" value="log.txt" /&gt;
+        <span class="strong"><strong class="calibre9">&lt;property name="bitcoinFile" value="bitcoins.txt" /&gt; [1]</strong></span>
+    &lt;/properties&gt;
+    &lt;step id="processData" <span class="strong"><strong class="calibre9">next="checkBitcoins"</strong></span>&gt; <span class="strong"><strong class="calibre9">[2]</strong></span>
+        &lt;chunk item-count="2"&gt;
+            &lt;reader ref="externalSystemReader" /&gt;
+            &lt;processor ref="seatProcessor" /&gt;
+            &lt;writer ref="seatWriter" /&gt;
+        &lt;/chunk&gt;
+    &lt;/step&gt;
+    <span class="strong"><strong class="calibre9">&lt;step id="checkBitcoins"&gt; [3]</strong></span>
+        <span class="strong"><strong class="calibre9">&lt;batchlet ref="bitcoinTask" /&gt;</strong></span>
+    <span class="strong"><strong class="calibre9">&lt;/step&gt;</strong></span>
+&lt;/job&gt;</pre></div><p class="calibre8">There are three new things to notice in the XML file. First, we added a new property, which we referenced earlier in our batchlet <code class="email">[1]</code>. Next, we defined that after our chunk processing step, we would like to invoke another one, <code class="email">checkBitcoins</code> <code class="email">[2]</code>. Finally, we created a new step in which we referenced our <code class="email">batchlet</code> class.</p><p class="calibre8">You <a id="id1265" class="calibre1"/>can once again start your job, and after it is completed, a <code class="email">bitcoins.txt</code> file should appear in WildFly's <code class="email">bin</code> directory.</p><p class="calibre8">We've<a id="id1266" class="calibre1"/> covered the foundation of the batching framework, which allows you to fulfill most of the frequent requirements defined for enterprise applications. However, there is a lot more inside the specification, such as splits, partitions, and workflow-related elements (statuses and decisions) that you can explore if a more sophisticated mechanism is required by the business processes that you're implementing.</p><p class="calibre8">Our next step is to provide some parallelism inside our Java EE container using the new concurrency utilities.</p></div></div></div></div>
+
+<div class="book" title="Chapter&#xA0;12.&#xA0;Long-term Tasks' Execution">
+<div class="book" title="The overview of the batching framework">
+<div class="book" title="Using concurrency utilities in Java EE"><div class="book"><div class="book"><div class="book"><h2 class="title1" id="calibre_pb_3"><a id="ch12lvl2sec81" class="calibre1"/>Using concurrency utilities in Java EE</h2></div></div></div><p class="calibre8">In <a id="id1267" class="calibre1"/>Java EE 6 (specifically in the EJB container), creation of new threads was discouraged because the application<a id="id1268" class="calibre1"/> server would not be able to control<a id="id1269" class="calibre1"/> the stability of the platform nor guarantee any transactional features. This could be a problem for applications that would like to effectively use CPU and execute multiple tasks in parallel. It was possible to overcome this using JCA adapters, but additional effort was required to implement them.</p><p class="calibre8">Fortunately, the JSR 236 introduces the <code class="email">ManagedExecutorService</code> (along with the <code class="email">ManagedScheduledExecutorService</code>), a container-aware version of the <code class="email">ExecutorService</code> used in Java SE. The well-known API ported to Java EE was merged in the platform, providing a smooth workflow for concurrent operations in the EJB container. The<a id="id1270" class="calibre1"/> new managed executor services have the following advantages over the standard ones:</p><div class="book"><ul class="itemizedlist"><li class="listitem">They rely on the thread pool provided by the container. This means that the server controls have many threads that can be spawned from all deployed applications and you can tweak the configuration in order to ensure the desired quality of service.</li><li class="listitem">The thread configuration is totally separated from the code, so it is possible to change it without changing the application itself.</li><li class="listitem">It is possible to propagate the caller context to the created thread. For example, it is possible to use the security principal of the user's request that initiated the new thread.</li><li class="listitem">The application server allows monitoring of the current thread count.</li><li class="listitem">Threads started by the managed executors can create new transactions for business components; they<a id="id1271" class="calibre1"/> cannot, however, participate in transactions from other components.</li></ul></div><p class="calibre8">The main parts of the concurrency utilities are described in the following table:</p><div class="informalexample"><table border="1" class="calibre17"><colgroup class="calibre18"><col class="calibre19"/><col class="calibre19"/></colgroup><thead class="calibre20"><tr class="calibre21"><th valign="bottom" class="calibre22">
+<p class="calibre23">Component</p>
+</th><th valign="bottom" class="calibre22">
+<p class="calibre23">Description</p>
+</th></tr></thead><tbody class="calibre24"><tr class="calibre21"><td valign="top" class="calibre25">
+<p class="calibre23"><code class="literal">ManagedExecutorService</code></p>
+</td><td valign="top" class="calibre25">
+<p class="calibre23">This is <a id="id1272" class="indexterm"/>used to execute submitted tasks in an asynchronous manner. The developer may submit a <code class="literal">Callable</code> or <code class="literal">Runnable</code> function and use returned <code class="literal">Future</code> to check for the result when it is available. The container context will be propagated by the container.</p>
+<p class="calibre23">This interface extends the standard <code class="literal">ExecutorService</code> interface.</p>
+</td></tr><tr class="calibre21"><td valign="top" class="calibre25">
+<p class="calibre23"><code class="literal">ManagedScheduledExecutorService</code></p>
+</td><td valign="top" class="calibre25">
+<p class="calibre23">This<a id="id1273" class="indexterm"/> is similar to <code class="literal">ManagedExecutorService</code>, but it is used to execute tasks at specific times (cyclic, scheduled, or delayed).</p>
+<p class="calibre23">The interface extends the standard <code class="literal">ScheduleExecutorService</code>, but it additionally provides the Trigger feature; the possibility to create a dynamic object, which can decide when a specific event should be fired (see <code class="literal">javax.enterprise.concurrent.Trigger</code>).</p>
+</td></tr><tr class="calibre21"><td valign="top" class="calibre25">
+<p class="calibre23"><code class="literal">ContextService</code></p>
+</td><td valign="top" class="calibre25">
+<p class="calibre23">This is <a id="id1274" class="indexterm"/>used to capture the context of the container; it can then be used while submitting a job to the executor service.</p>
+</td></tr><tr class="calibre21"><td valign="top" class="calibre25">
+<p class="calibre23"><code class="literal">ManagedThreadFactory</code></p>
+</td><td valign="top" class="calibre25">
+<p class="calibre23">This is<a id="id1275" class="indexterm"/> used to create threads by the container. The developer can provide its own thread factory in order to fulfil specific use cases (for instance, setting specific properties on the created objects).</p>
+</td></tr></tbody></table></div><p class="calibre8">Instances <a id="id1276" class="calibre1"/>of these components<a id="id1277" class="calibre1"/> can be obtained using the JNDI <a id="id1278" class="calibre1"/>lookup or the <code class="email">@Resource</code> injection. The Java EE 7 specification requires that every container provides a set of default resources that should be injectable without any additional configuration. So, in WildFly, the easiest way to get your hands on them would be to just type the following code:</p><div class="informalexample"><pre class="programlisting">@Resource
+private ManagedExecutorService executorService;
+
+@Resource
+private ManagedScheduledExecutorService scheduledExecutorService;
+
+@Resource
+private ContextService contextService;</pre></div><p class="calibre8">The aforementioned code snippet is shorthand for a lookup of the default instances, which are as follows:</p><div class="informalexample"><pre class="programlisting">@Resource(lookup="java:comp/DefaultManagedExecutorService")
+private ManagedExecutorService executorService;</pre></div><p class="calibre8">You can also find any additional executor services and the configuration of the default ones in the <code class="email">standalone.xml</code> file (and in other variants of the configuration file). A part of the relevant subsystem is presented as follows:</p><div class="informalexample"><pre class="programlisting">&lt;subsystem &gt;
+    &lt;spec-descriptor-property-replacement&gt;false&lt;/spec-descriptor-property-replacement&gt;
+    &lt;concurrent&gt;
+        (…)
+        &lt;managed-executor-services&gt;
+            &lt;managed-executor-service name="default" jndi-name="java:jboss/ee/concurrency/executor/default" context-service="default" <span class="strong"><strong class="calibre9">hung-task-threshold="60000" core-threads="5" max-threads="25" keepalive-time="5000"</strong></span>/&gt;
+        &lt;/managed-executor-services&gt;
+        (…)
+    &lt;/concurrent&gt;
+&lt;/subsystem&gt;</pre></div><p class="calibre8">As <a id="id1279" class="calibre1"/>you can see, the <code class="email">standalone.xml</code> file<a id="id1280" class="calibre1"/> contains the configuration <a id="id1281" class="calibre1"/>of the default <code class="email">ManagedExecutorService</code>. You can add a new custom configuration with another name and JNDI path; you can also create a separate one for every deployed application.</p><div class="informalexample" title="Note"><h3 class="title2"><a id="note73" class="calibre1"/>Note</h3><p class="calibre8">Note that the default ManagedExecutorService has two JNDI names: the one in the configuration and the one defined in the Java EE specification (<code class="email">java:comp/DefaultManagedExecutorService</code>). You can switch to the default executor service (and other components) using the default-bindings tag in the <code class="email">standalone.xml</code> file.</p></div><p class="calibre8">Let's take a closer look at some of the properties of the executor service:</p><div class="book"><ul class="itemizedlist"><li class="listitem"><span class="strong"><strong class="calibre9">core-threads</strong></span>: This<a id="id1282" class="calibre1"/> defines how <a id="id1283" class="calibre1"/>many threads should be alive in the thread pool all the time (even if those threads are idle and the server is handling no user requests).</li><li class="listitem"><span class="strong"><strong class="calibre9">max-threads</strong></span>: This<a id="id1284" class="calibre1"/> states how<a id="id1285" class="calibre1"/> many threads the server can start (including the core threads) if necessary, for instance, when under heavy load.</li><li class="listitem"><span class="strong"><strong class="calibre9">keepalive-time</strong></span>: This defines <a id="id1286" class="calibre1"/>after <a id="id1287" class="calibre1"/>how many milliseconds a thread can be idle before the server kills it (it only applies if there are more threads running than the core-threads parameter specified). This configuration value defines how long the server will keep around the additional threads when they are not needed anymore.</li><li class="listitem"><span class="strong"><strong class="calibre9">hung-task-threshold</strong></span>: This defines<a id="id1288" class="calibre1"/> after <a id="id1289" class="calibre1"/>how many milliseconds the server will mark a thread as hung. If set to <code class="email">0</code>, a thread will never be marked as hung (the thread will have no execution time limit).</li></ul></div><p class="calibre8">By using these configuration properties and creating additional executor services, the server administrator can gain a fine control over the maximum load that the server can handle at a given time. Be sure to take a closer look at them during an application's performance tuning.</p><p class="calibre8">As for<a id="id1290" class="calibre1"/> development, the default configuration<a id="id1291" class="calibre1"/> suits us well, so it's time to dive into the code with an example usage of the concurrency utilities!</p><div class="book" title="Introducing threads to enterprise beans"><div class="book"><div class="book"><div class="book"><h3 class="title2"><a id="ch12lvl3sec85" class="calibre1"/>Introducing threads to enterprise beans</h3></div></div></div><p class="calibre8">When <a id="id1292" class="calibre1"/>we were working with the batching <a id="id1293" class="calibre1"/>framework, we contacted a REST<a id="id1294" class="calibre1"/> endpoint, which was mocking an external system in our sample. Now, we are going to add some concurrency to it.</p><p class="calibre8">An external system may aggregate booking requests from several sources. If every request takes a substantial amount of time, it could be a good idea to make all the requests simultaneously. Let's start with creating <code class="email">Callable</code>, which will return a list of the seat IDs that should be booked. This is shown in the following code snippet:</p><div class="informalexample"><pre class="programlisting">package com.packtpub.wflydevelopment.chapter12.external;
+
+import java.util.concurrent.Callable;
+import javax.enterprise.concurrent.ManagedTask;
+import javax.enterprise.concurrent.ManagedTaskListener;
+import javax.enterprise.inject.Instance;
+
+public class GenerateSeatRequestFromArtificial implements <span class="strong"><strong class="calibre9">Callable&lt;List&lt;Integer&gt;&gt;, ManagedTask [1] </strong></span>{
+
+    @Inject
+    private Logger logger;
+
+<span class="strong"><strong class="calibre9">    @Inject</strong></span>
+<span class="strong"><strong class="calibre9">    private Instance&lt;TaskListener&gt; taskListener; [2]</strong></span>
+
+    @Override
+    public ManagedTaskListener getManagedTaskListener() {
+        <span class="strong"><strong class="calibre9">return taskListener.get(); [3]</strong></span>
+    }
+
+    @Override 
+    public Map&lt;String, String&gt; getExecutionProperties() {
+<span class="strong"><strong class="calibre9">        return new HashMap&lt;&gt;(); [4]</strong></span>
+    }
+
+    @Override
+    public List&lt;Integer&gt; call() throws Exception {
+        logger.info("Sleeping...");
+<span class="strong"><strong class="calibre9">        Thread.sleep(5000); [5]</strong></span>
+        logger.info("Finished sleeping!");
+        
+        return Arrays.asList(4, 5, 6);
+    }
+}</pre></div><p class="calibre8">Our<a id="id1295" class="calibre1"/> task implements <code class="email">[1]</code> two interfaces: <code class="email">Callable</code> and <code class="email">ManagedTask</code>. The <code class="email">ManagedExecutorService</code> requires an object<a id="id1296" class="calibre1"/> that fulfils the contract of a <code class="email">Callable</code> or <code class="email">Runnable</code> interface known from Java SE.</p><p class="calibre8">The <code class="email">ManagedTask</code> interface is optional, but it allows us to register a <code class="email">ManagedTaskListener</code> along with the task itself and return additional properties from the task. The <a id="id1297" class="calibre1"/>task listener has a set of life cycle <a id="id1298" class="calibre1"/>callbacks, which are called during the task's execution. We will use it in order to log additional information about our task. In order to create an instance of the task listener, we used the <code class="email">Instance&lt;T&gt;</code> class <code class="email">[2]</code>. It is used to create instances of CDI beans on demand. We return <code class="email">ManagedTaskListener</code> in a method from the <code class="email">ManagedTask</code> interface <code class="email">[3]</code>. We don't need any additional properties; therefore, we return an empty object in the second method from the <code class="email">ManagedTask</code> interface <code class="email">[4]</code>.</p><p class="calibre8">Finally, we implement the <code class="email">call</code> method; the thread will be suspended for 5 seconds (to simulate long work) and return a list of predefined IDs.</p><p class="calibre8">Our task listener is simply a bean with a logger, which will get all the information about the task's lifecycle. This is shown in the following code snippet:</p><div class="informalexample"><pre class="programlisting">public class TaskListener implements ManagedTaskListener {
+
+    @Inject
+    private Logger logger;
+
+    @Override
+    public void taskSubmitted(Future&lt;?&gt; future, ManagedExecutorService executor, Object task) {
+        logger.info("Submitted " + task);
+    }
+
+    @Override
+    public void taskAborted(Future&lt;?&gt; future, ManagedExecutorService executor, Object task, Throwable exception) {
+        logger.log(Level.WARNING, "Aborted", exception);
+    }
+
+    @Override
+    public void taskDone(Future&lt;?&gt; future, ManagedExecutorService executor, Object task, Throwable exception) {
+        logger.info("Finished task " + task);
+    }
+
+    @Override
+    public void taskStarting(Future&lt;?&gt; future, ManagedExecutorService executor, Object task) {
+        logger.info("Starting " + task);
+    }
+}</pre></div><p class="calibre8">As you<a id="id1299" class="calibre1"/> can see, most of the implemented <a id="id1300" class="calibre1"/>methods are getting the executor <a id="id1301" class="calibre1"/>service, future, and the task itself as parameters. We simply log the current status using an injected logger.</p><p class="calibre8">So, we've created one task, which is pretty static. Now, let's try to create another one, which will contact a database. As before, we'll need a <code class="email">Callable</code> implementation, which returns a list of integers. This is shown in the following code snippet:</p><div class="informalexample"><pre class="programlisting">public class GenerateSeatRequestsFromDatabase implements Callable&lt;List&lt;Integer&gt;&gt; {
+
+    private static final int SEATS_TO_RETURN = 3;
+
+    @Inject
+<span class="strong"><strong class="calibre9">    private SeatDao dao; // [1]</strong></span>
+
+    @Inject
+    private Logger logger;
+
+    @Override
+    public List&lt;Integer&gt; call() throws Exception {
+        logger.info("Sleeping...");
+<span class="strong"><strong class="calibre9">        Thread.sleep(5000); // [4]</strong></span>
+        logger.info("Finished sleeping!");
+        
+<span class="strong"><strong class="calibre9">        List&lt;Seat&gt; databaseSeats = dao.findAll(); // [2]</strong></span>
+
+<span class="strong"><strong class="calibre9">         List&lt;Integer&gt; freeSeats = databaseSeats.stream()</strong></span>
+<span class="strong"><strong class="calibre9">         .filter(seat -&gt; !seat.getBooked())</strong></span>
+<span class="strong"><strong class="calibre9">         .limit(SEATS_TO_RETURN)</strong></span>
+<span class="strong"><strong class="calibre9">         .map(seat -&gt; seat.getId().intValue())</strong></span>
+<span class="strong"><strong class="calibre9">         .collect(Collectors.toList()); // [3]</strong></span>
+
+        if (freeSeats.isEmpty()) {
+            logger.info("No seats to book");
+        } else {
+            logger.info("Requesting booking for " + freeSeats);
+        }
+        return freeSeats;
+    }
+}</pre></div><p class="calibre8">The <a id="id1302" class="calibre1"/>main difference between this<a id="id1303" class="calibre1"/> task and the previous one is that we injected<a id="id1304" class="calibre1"/> an EJB <code class="email">[1]</code>, which will start an underlying transaction. In the <code class="email">call</code> method, a database request is issued <code class="email">[2]</code>. The returned list of seats is then filtered and transformed into a list of IDs <code class="email">[3]</code>.</p><p class="calibre8">Additionally, as mentioned earlier, we will stop the thread for 5 seconds so that we can observe the execution later <code class="email">[4]</code>.</p><p class="calibre8">We've got our building blocks in place. Now, it is time to combine them into a working example. We can revisit our <code class="email">PendingSeats</code> class from the beginning of this chapter, as shown in the following code:</p><div class="informalexample"><pre class="programlisting">package com.packtpub.wflydevelopment.chapter12.external;
+
+@Singleton
+@Startup
+public class PendingSeats {
+
+    private final Queue&lt;Long&gt; seats = 
+                                new ConcurrentLinkedQueue&lt; &gt;();
+
+<span class="strong"><strong class="calibre9">    @Resource</strong></span>
+<span class="strong"><strong class="calibre9">    private ManagedExecutorService executorService; // [1]</strong></span>
+
+<span class="strong"><strong class="calibre9">    @Inject  // [2]</strong></span>
+<span class="strong"><strong class="calibre9">    private Instance&lt;GenerateSeatRequestsFromDatabase&gt; databaseCollector; </strong></span>
+
+<span class="strong"><strong class="calibre9">    @Inject</strong></span>
+<span class="strong"><strong class="calibre9">    private Instance&lt;GenerateSeatRequestFromArtificial&gt; artificalCollector;</strong></span>
+
+    @Inject
+    private Logger logger;
+
+    @PostConstruct
+    private void setUp() {
+        try {
+<span class="strong"><strong class="calibre9">            List&lt;Future&lt;List&lt;Integer&gt;&gt;&gt; futures = executorService.invokeAll(Arrays.asList(</strong></span>
+<span class="strong"><strong class="calibre9">         databaseCollector.get(), artificalCollector.get()</strong></span>
+<span class="strong"><strong class="calibre9">)); // [3]</strong></span>
+
+<span class="strong"><strong class="calibre9">            List&lt;Integer&gt; requestedIds = futures.stream().flatMap(future -&gt; get(future).stream()).distinct()</strong></span>
+<span class="strong"><strong class="calibre9">                    .collect(Collectors.toList()); // [4]</strong></span>
+
+            logger.info(requestedIds.toString());
+        } catch (InterruptedException e) {
+            logger.log(Level.SEVERE, e.getMessage(), e);
+        }
+
+    }
+
+    private List&lt;Integer&gt; get(Future&lt;List&lt;Integer&gt;&gt; future) {
+        try {
+            return future.get();
+        } catch (InterruptedException | ExecutionException e) {
+            logger.log(Level.SEVERE, e.getMessage(), e);
+            return new ArrayList&lt;&gt;();
+        }
+    }
+}</pre></div><p class="calibre8">We <a id="id1305" class="calibre1"/>start by obtaining an instance of <code class="email">ManagedExecutorService</code> using the <code class="email">@Resource</code> annotation <code class="email">[1]</code>. Next, the previously<a id="id1306" class="calibre1"/> created tasks are injected using <a id="id1307" class="calibre1"/>the CDI's <code class="email">Instance&lt;T&gt;</code> class pattern <code class="email">[2]</code>. Thanks to this, the are managed beans and have their dependencies injected. With the dependencies in place, we use the <code class="email">invokeAll</code> method <code class="email">[3]</code> of <code class="email">executorService</code> in order to start all our tasks at once (we could also use multiple calls of the <code class="email">submit</code> method). The return values represent a set of future results, which can be used to retrieve the collected data when it is ready.</p><p class="calibre8">At this point, our tasks are already running so we can simply make a blocking <code class="email">get</code> call on the future results and wait for the data <code class="email">[4]</code>. When it is ready, we remove any duplicates, and collect the results in a single list using the <code class="email">flatMap</code> operation. As you remember, our previous two tasks were waiting 5 seconds each. Thanks to the fact that they are executed simultaneously, we expect that they will both finish after 5 seconds.</p><p class="calibre8">Because our bean is a singleton with a startup annotation, the whole process will be invoked during the deployment of our application. Feel free to try it out now!</p><p class="calibre8">Of course, the database task requires some data in the <code class="email">seats</code> table or it will yield empty results (that's not a big issue for us). If you want the application to automatically seed some data to the database, you can create another singleton bean, for instance:</p><div class="informalexample"><pre class="programlisting">@Startup
+public class DatabaseInitializer {
+
+    @PersistenceContext
+    private EntityManager em;
+
+    @PostConstruct
+    public void setup() {
+        SeatType seatType = new SeatType();
+        seatType.setPosition(SeatPosition.BALCONY);
+        seatType.setDescription("Test Data");
+        seatType.setQuantity(10);
+        seatType.setPrice(10);
+        em.persist(seatType);
+
+        Seat seat = new Seat();
+        seat.setSeatType(seatType);
+        em.persist(seat);
+
+    }
+}</pre></div><p class="calibre8">Be <a id="id1308" class="calibre1"/>sure<a id="id1309" class="calibre1"/> to<a id="id1310" class="calibre1"/> add a <code class="email">@DependsOn("DatabaseInitializer")</code> annotation on the <code class="email">PendingSeats</code> bean, so that the initializer runs before our database collector.</p><p class="calibre8">If everything goes well, you should see something like this on your console:</p><div class="informalexample"><pre class="programlisting">
+<span class="strong"><strong class="calibre9">23:42:48,455 INFO  [TaskListener] (ServerService Thread Pool -- 54) Submitted GenerateSeatRequestFromArtificial@4256cb0c</strong></span>
+<span class="strong"><strong class="calibre9">23:42:48,456 INFO  [GenerateSeatRequestsFromDatabase] (EE-ManagedExecutorService-default-Thread-1) Sleeping... (1)</strong></span>
+<span class="strong"><strong class="calibre9">23:42:48,456 INFO  [TaskListener] (EE-ManagedExecutorService-default-Thread-2) Starting GenerateSeatRequestFromArtificial@4256cb0c</strong></span>
+<span class="strong"><strong class="calibre9">23:42:48,456 INFO  [GenerateSeatRequestFromArtificial] (EE-ManagedExecutorService-default-Thread-2) Sleeping... (2)</strong></span>
+<span class="strong"><strong class="calibre9">23:42:53,457 INFO  [GenerateSeatRequestsFromDatabase] (EE-ManagedExecutorService-default-Thread-1) Finished sleeping!</strong></span>
+<span class="strong"><strong class="calibre9">23:42:53,461 INFO  [GenerateSeatRequestFromArtificial] (EE-ManagedExecutorService-default-Thread-2) Finished sleeping!</strong></span>
+<span class="strong"><strong class="calibre9">23:42:53,461 INFO  [TaskListener] (EE-ManagedExecutorService-default-Thread-2) Finished task GenerateSeatRequestFromArtificial@4256cb0c</strong></span>
+<span class="strong"><strong class="calibre9">23:42:53,617 INFO  [GenerateSeatRequestsFromDatabase] (EE-ManagedExecutorService-default-Thread-1) Requesting booking for [1]</strong></span>
+<span class="strong"><strong class="calibre9">23:42:53,621 INFO  [PendingSeats] (ServerService Thread Pool -- 54) [1, 4, 5, 6] (3)</strong></span>
+</pre></div><p class="calibre8">As you can see, both tasks started at the same time (1 and 2) in two separate threads (notice the <code class="email">EE-ManagedExecutorService-default-Thread-1</code> and<code class="email"> …-Thread-2</code> entries in the log). The final result is yielded after roughly 5 seconds, and it contains data from both the collectors, and additionally, is collected in the thread that originally submitted the tasks (<code class="email">ServerService Thread Pool -- 54</code>).</p><p class="calibre8">You can also use the Java VisualVM tool to visualize your threads in the application server. The tool is available in your JDK installation in the <code class="email">bin</code> directory (the <code class="email">jvisualvm</code> executable). After running it, you should see JBoss in the left tree and the <span class="strong"><strong class="calibre9">Threads</strong></span> tab after clicking on the JBoss node. This is shown in the following screenshot:</p><div class="mediaobject"><img src="../images/00099.jpeg" alt="Introducing threads to enterprise beans" class="calibre11"/></div><p class="calibre12"> </p><p class="calibre8">If you switch to the <span class="strong"><strong class="calibre9">Threads</strong></span> tab during your application deployment, you will see a graph, as shown in the following screenshot:</p><div class="mediaobject"><img src="../images/00100.jpeg" alt="Introducing threads to enterprise beans" class="calibre11"/></div><p class="calibre12"> </p><p class="calibre8">The <a id="id1311" class="calibre1"/>purple <a id="id1312" class="calibre1"/>color denotes a sleeping<a id="id1313" class="calibre1"/> thread and the two highlighted threads with a purple part of the timeline are our tasks during execution. You can use a detailed thread view to additionally examine your worker threads. This is shown in the following screenshot:</p><div class="mediaobject"><img src="../images/00101.jpeg" alt="Introducing threads to enterprise beans" class="calibre11"/></div><p class="calibre12"> </p><p class="calibre8">Java <a id="id1314" class="calibre1"/>VisualVM offers many more<a id="id1315" class="calibre1"/> features useful for every developer, such as <a id="id1316" class="calibre1"/>resource monitoring of the virtual machine, profiler, sampler, and others that are implemented as dedicated plugins. Be sure to check them out!</p><p class="calibre8">In this section, we implemented a use case that was a lot harder to cover in a proper manner in previous versions of Java EE. We were able to do this with less code, thanks to the high-level API that was made available to the developers.</p></div></div></div></div>
+<div class="book" title="Summary"><div class="book"><div class="book"><div class="book"><h1 class="title" id="calibre_pb_0"><a id="ch12lvl1sec58" class="calibre1"/>Summary</h1></div></div></div><p class="calibre8">In this chapter, you learned how to create batching applications using the new batching framework in two different ways. Next, we tried some of the mechanisms provided by the concurrency utilities. Our exploration went away from the user interaction and concentrated on the internals of the middleware layer.</p><p class="calibre8">In the next chapter, we will fill the last gap in the Java EE developer's toolbox, which is integration testing with Arquillian.</p></div></body></html>
