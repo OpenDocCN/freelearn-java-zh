@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# SpringBatch 精要
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/0fe2dd5fae2f276a4e88e006109c4f2b`](https://zh.annas-archive.org/md5/0fe2dd5fae2f276a4e88e006109c4f2b)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

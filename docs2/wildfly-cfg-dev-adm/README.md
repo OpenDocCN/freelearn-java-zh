@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Wildfly 配置、部署和管理指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/c3f9cb4c55103099ae159521114a9172`](https://zh.annas-archive.org/md5/c3f9cb4c55103099ae159521114a9172)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
