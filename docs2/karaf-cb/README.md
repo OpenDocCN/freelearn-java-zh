@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Karaf 秘籍
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/99d5ffa588c36025c2f9244e55e5c5c2`](https://zh.annas-archive.org/md5/99d5ffa588c36025c2f9244e55e5c5c2)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

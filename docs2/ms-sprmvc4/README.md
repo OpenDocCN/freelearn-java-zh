@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# 精通 SpringMVC4
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/cc25428c0d0afda326c59aa81d555968`](https://zh.annas-archive.org/md5/cc25428c0d0afda326c59aa81d555968)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
