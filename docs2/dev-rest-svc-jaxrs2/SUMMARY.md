@@ -1,0 +1,7 @@
++   [JAX-RS2 REST 服务开发指南](README.md)
++   [前言](dev-rest-svc-jaxrs2_0.md)
++   [第一章：使用 JAX-RS 构建 RESTful Web 服务](dev-rest-svc-jaxrs2_1.md)
++   [第二章：WebSocket 和服务器发送事件](dev-rest-svc-jaxrs2_2.md)
++   [第三章。详细理解 WebSocket 和服务器发送事件](dev-rest-svc-jaxrs2_3.md)
++   [第四章：JSON 和异步处理](dev-rest-svc-jaxrs2_4.md)
++   [第五章：通过示例学习 RESTful Web 服务](dev-rest-svc-jaxrs2_5.md)
