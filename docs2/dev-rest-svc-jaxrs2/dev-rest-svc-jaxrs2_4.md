@@ -1,4 +1,4 @@
-# 第四章 JSON 和异步处理
+# 第四章：JSON 和异步处理
 
 本章涵盖了全新的 JSR，JSR 353：Java API for JSON Processing [`jcp.org/en/jsr/detail?id=353`](http://jcp.org/en/jsr/detail?id=353)，以及与 Java EE 中不同服务和组件相关的 API 更新，这些更新为系统不同组件之间的异步交互提供了更好的支持。以下列表显示了本章涵盖的主题列表：
 

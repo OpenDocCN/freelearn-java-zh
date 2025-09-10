@@ -1,4 +1,4 @@
-# 第六章 Maven Assemblies
+# 第六章：Maven Assemblies
 
 Maven 通过插件和生命周期提供了一种可扩展的架构。插件和关联的生命周期支持诸如 `.jar`、`.war`、`.ear` 等多种存档类型。JAR 插件根据 JAR 规范创建一个具有 `.jar` 扩展名和相关元数据的工件。实际上，JAR 文件是一个包含可选 `META-INF` 目录的 ZIP 文件。你可以从 [`docs.oracle.com/javase/7/docs/technotes/guides/jar/jar.html`](http://docs.oracle.com/javase/7/docs/technotes/guides/jar/jar.html) 找到更多关于 JAR 规范的详细信息。
 

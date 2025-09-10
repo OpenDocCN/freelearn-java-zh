@@ -1,4 +1,4 @@
-# 第四章 Marvel 仪表板
+# 第四章：Marvel 仪表板
 
 前两章介绍了 Elasticsearch-head 和 Bigdesk，这两个开源监控工具。本章将介绍 Marvel，这是一个用于监控 Elasticsearch 的非免费工具。
 

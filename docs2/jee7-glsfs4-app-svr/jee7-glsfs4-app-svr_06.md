@@ -1,4 +1,4 @@
-# 第六章 JSON-P 处理
+# 第六章：JSON-P 处理
 
 **JSON**，或称**JavaScript Object Notation**，是一种人类可读的数据交换格式。正如其名所示，JSON 源自 JavaScript。Java EE 7 引入了 JSON-P，即 Java API for JSON Processing 作为**Java Specification Request**（JSR）353。
 

@@ -1,4 +1,4 @@
-# 第二章 JavaServer Faces
+# 第二章：JavaServer Faces
 
 在本章中，我们将介绍 Java EE 平台的标准组件框架 **JavaServer Faces**（**JSF**）。Java EE 7 包含了 JSF 2.2，这是 JSF 的最新版本。JSF 非常依赖于约定优于配置。如果我们遵循 JSF 约定，那么我们就不需要编写很多配置。在大多数情况下，我们甚至不需要编写任何配置。这一事实，加上 `web.xml` 自 Java EE 6 以来一直是可选的，意味着在许多情况下，我们可以编写完整的 Web 应用程序，而无需编写任何一行 XML 配置。
 

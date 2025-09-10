@@ -1,4 +1,4 @@
-# 第十章 测试 Apache Karaf 与 Pax Exam
+# 第十章：测试 Apache Karaf 与 Pax Exam
 
 在本章中，我们将介绍以下食谱：
 

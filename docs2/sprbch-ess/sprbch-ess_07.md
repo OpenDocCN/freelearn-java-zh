@@ -1,4 +1,4 @@
-# 第七章 检查 Spring Batch 作业
+# 第七章：检查 Spring Batch 作业
 
 在上一章中，我们学习了企业集成、各种企业应用程序集成以及 Spring Integration 项目，该项目通过消息驱动方法将 Spring Batch 应用程序与企业集成。我们还学习了使用 Spring Integration 和 RESTful 作业处理技术启动批量作业。Spring Batch 作业执行涉及大量数据，这些数据会随时间变化。有时这些变化的数据可能会损坏，导致作业执行失败。密切关注此类失败非常重要，并且应将失败原因以建设性的方式保存，以便未来的跟踪和修复。
 

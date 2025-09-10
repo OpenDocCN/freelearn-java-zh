@@ -1,4 +1,4 @@
-# 第四章 企业 JavaBeans
+# 第四章：企业 JavaBeans
 
 企业 JavaBeans 是封装应用程序业务逻辑的服务端组件。企业 JavaBeans 通过自动管理事务管理和安全性来简化应用程序开发。企业 JavaBeans 有两种类型：执行业务逻辑的会话 Bean，以及充当消息监听器的消息驱动 Bean。
 

@@ -1,4 +1,4 @@
-# 第三章 Elasticsearch-head 和 Bigdesk
+# 第三章：Elasticsearch-head 和 Bigdesk
 
 本章讨论了 Elasticsearch 监控插件 Elasticsearch-head 和 Bigdesk，以及 Elasticsearch cat API。这些实用工具用于评估集群状态和诊断问题：
 
