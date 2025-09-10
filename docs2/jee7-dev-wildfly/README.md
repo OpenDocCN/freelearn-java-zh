@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# JavaEE7 Wildfly 开发指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/f2f919c79334200026928d55bbf0589b`](https://zh.annas-archive.org/md5/f2f919c79334200026928d55bbf0589b)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

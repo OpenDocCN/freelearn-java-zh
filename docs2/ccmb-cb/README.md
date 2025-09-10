@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Cucumber 秘籍
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/c96140eae61f828625970f3249eb62b9`](https://zh.annas-archive.org/md5/c96140eae61f828625970f3249eb62b9)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# JBoss EAP6 高可用指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/d6bb48b9e141c33ca552b41e5089b7de`](https://zh.annas-archive.org/md5/d6bb48b9e141c33ca552b41e5089b7de)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

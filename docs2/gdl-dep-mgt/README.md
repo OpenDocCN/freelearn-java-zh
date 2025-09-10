@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# Gradle 依赖管理指南
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/d8aa8278b91e9c8ca99c7430135267e9`](https://zh.annas-archive.org/md5/d8aa8278b91e9c8ca99c7430135267e9)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 

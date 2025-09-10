@@ -1,6 +1,6 @@
-# Go 编程蓝图
+# JavaEE7 初识
 
-> 原文：[`zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66`](https://zh.annas-archive.org/md5/AC9839247134C458206EE3BE6D404A66)
+> 原文：[`zh.annas-archive.org/md5/2770519401626d3e2df91d3cd7012b18`](https://annas-archive.org/md5/2770519401626d3e2df91d3cd7012b18)
 > 
 > 译者：[飞龙](https://github.com/wizardforcel)
 > 
