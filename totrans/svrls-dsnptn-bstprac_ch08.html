@@ -1,0 +1,501 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:m="http://www.w3.org/1998/Math/MathML" xmlns:pls="http://www.w3.org/2005/01/pronunciation-lexicon" xmlns:ssml="http://www.w3.org/2001/10/synthesis">
+<head>
+  <meta charset="UTF-8"/>
+  <title>The MapReduce Pattern</title>
+  <link type="text/css" rel="stylesheet" media="all" href="style.css"/>
+  <link type="text/css" rel="stylesheet" media="all" href="core.css"/>
+</head>
+<body>
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">The MapReduce Pattern</h1>
+                </header>
+            
+            <article>
+                
+<p><span>MapReduce is a common data processing pattern made famous by Google and now implemented in various systems and frameworks, most notably Apache Hadoop. Nowadays, this pattern is familiar and easy to understand at its core, but running large-scale systems such as Hadoop comes with its own set of challenges and cost of ownership. In this chapter, we'll show how this pattern can be implemented on your own using serverless technologies.</span></p>
+<p>Implementing big data applications in a serverless environment may seem counter-intuitive due to the computing limitations of FaaS. Certain types of problems&#160;fit very well into a serverless ecosystem, especially considering we practically have unlimited file storage with distributed filesystems such as AWS S3. Additionally, MapReduce's magic is not so much in the application of an algorithm, but in the distribution of computing power such that computation is performed in parallel.</p>
+<p>In this chapter, we will discuss the application and development of a MapReduce pattern in a serverless environment. I'll cover the use cases for such a design and when it may or may not be a good fit. I'll also show how simple this pattern is within a serverless platform and what you should take into consideration before embarking on building your system.</p>
+<p>At the end of this chapter, you can expect to understand the following topics:</p>
+<ul>
+<li><span>What problem MapReduce solves and when it may be appropriate to implement in a serverless environment</span></li>
+<li><span>Design and scaling considerations when applying this pattern on your own</span></li>
+<li><span>How to implement your own MapReduce serverless system to count occurrences of from-to combinations from a corpus of email messages</span></li>
+<li><span>How to use the Fanout pattern as a sub-component of the MapReduce pattern</span></li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Introduction to MapReduce</h1>
+                </header>
+            
+            <article>
+                
+<p>MapReduce as a pattern and programming model has been around for many years, arising from parallel computing research and industry implementations. Most famously, MapReduce hit the mainstream with Google's 2004 paper entitled <em>MapReduce—Simplified Data Processing on Large Clusters</em> (<a href="https://research.google.com/archive/mapreduce.html">https://research.google.com/archive/mapreduce.html</a>). Much of the benefit of Google's initial MapReduce implementation was:</p>
+<ul>
+<li>Automatic parallelization and distribution</li>
+<li>Fault-tolerance</li>
+<li>I/O scheduling</li>
+<li>Status and monitoring</li>
+</ul>
+<p>If you take a step back and look at that list, it should look familiar. FaaS systems such as AWS Lambda give us most of these benefits. While status and monitoring aren't inherently baked into FaaS platforms, there are ways to ensure our functions are executing&#160;successfully. On that same topic,&#160;MapReduce systems were initially, and still are, very often, managed at the OS level, meaning operators are in charge of taking care of crashed or otherwise unhealthy nodes.</p>
+<div class="packt_infobox">The preceding list of benefits is listed in the following slide from a presentation-like form of the research paper: <a href="https://research.google.com/archive/mapreduce-osdi04-slides/index-auto-0002.html">https://research.google.com/archive/mapreduce-osdi04-slides/index-auto-0002.html</a></div>
+<p>Not too long after Google's 2004 MapReduce paper, the Apache Hadoop project was born. Hadoop's goal was an open source implementation of the MapReduce pattern for big data processing. Since then, Hadoop has arguably become the most popular MapReduce framework today. Additionally, the term <em>Hadoop</em>&#160;has evolved to include many other frameworks for big data processing and refers more to the ecosystem of tools rather than the single framework.</p>
+<p>As powerful and popular as Hadoop is, it's a complicated beast in practice. In order to run a Hadoop cluster of any significance, one needs to run and master Zookeeper and <strong>HDFS</strong> (<strong>Hadoop Distributed File System</strong>), in addition to the Hadoop master and worker nodes themselves. For those unfamiliar with these tools and all of the DevOps ownership that comes with them, running a Hadoop cluster is not only daunting but impractical.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">MapReduce example</h1>
+                </header>
+            
+            <article>
+                
+<p>If you've never worked with a MapReduce framework or system, the overall concepts are not incredibly complex. In fact, we can implement a single-process and single-threaded MapReduce system in a few lines of code.</p>
+<p>Overall, MapReduce is designed to extract a specific bit of information from a body of data and distill it down into some final result. That may sound very vague and arbitrary, and it is. The beauty of MapReduce is that one can apply it to so many different problems. A few examples should better demonstrate what MapReduce is and how you can use it.</p>
+<p>A <em>Hello World</em>&#160;MapReduce program counts the number of occurrences of a particular word in a body of text. The following code block does this with a few lines of Python code:</p>
+<pre style="padding-left: 30px">lorem = """<br/>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Etiam ac pulvinar mi. Proin nec mollis<br/>tellus. In neque risus, rhoncus nec tellus eu, laoreet faucibus eros. Ut malesuada dui vel ipsum<br/>...<br/>venenatis ullamcorper ex sed eleifend. Nam nec pharetra elit.<br/>"""<br/><br/>words = (w.strip() for w in lorem.split())<br/><br/>def mapper(word):<br/>    return (word, 1)<br/><br/>def reducer(mapper_results):<br/>    results = {}<br/>    for (word, count) in mapper_results:<br/>        if word in results:<br/>            results[word] += count<br/>        else:<br/>            results[word] = count<br/>    return results<br/><br/>mapper_results = map(mapper, words)<br/>reducer_results = reducer(mapper_results)<br/>print(reducer_results)</pre>
+<p>First, this code performs a mapping phase that emits a two element tuple for every occurrence of a work. For example, a given word would emit <kbd>&#160;('amet', 1)</kbd> for the word&#160;<kbd>amet</kbd>. The result from this mapping phase is a list of <kbd>(word, 1)</kbd> pairs, where the <kbd>1</kbd> simply means we've encountered the word.</p>
+<p>The job of the reducer is to aggregate the mapper's output into some final format. In our case, we'd like a final tally of the number of occurrences for each word. Reading through the preceding&#160;<kbd>reducer</kbd> function, it should be obvious how I'm doing that. A snippet from the final output is shown in the following code block. You can see that <kbd>amet</kbd> only shows up once in the <kbd>Lorem</kbd>, <kbd>ipsum</kbd> text blog, but <kbd>sit</kbd> shows up nine times:</p>
+<pre style="padding-left: 30px">{<br/>  'Lorem': 1, <br/>  'ipsum': 4, <br/>  'dolor': 3,<br/>  'sit': 9, <br/>  'amet,': 1,<br/>   ...<br/>}</pre>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Role of the mapper</h1>
+                </header>
+            
+            <article>
+                
+<p>The primary purpose of the <kbd>mapper</kbd> is to emit data that the reducer will later aggregate into a final. In this trivial example, each occurrence of a word results in a <kbd>(word, 1)</kbd> pair since we're giving a single appearance of a word a score of <kbd>1</kbd>. We very well could have emitted the word by itself (that is, <kbd>'amet'</kbd>) and put the score of <kbd>1</kbd> in the reducer; however, this would have made the code less general. If we wanted to give a heavier weighting to certain words, we'd merely change our mapper to output a different number based on the word and would leave our <kbd>reducer</kbd> code as-is.</p>
+<p>The following code block shows how we would give the word <kbd>amet</kbd> a score of &#160;<kbd>10</kbd> while all other words count as <kbd>1</kbd>. Of course, this is no longer counting word occurrences but instead scoring words:</p>
+<pre style="padding-left: 30px">def mapper(word):<br/>    if word == 'amet':<br/>        return (word, 10)<br/>    else:<br/>        return (word, 1)</pre>
+<p>If we were computing something completely different, you should see now that we'd need to update the mapper function. Some examples of additional calculations we could make based on this Lorem ipsum text could be:</p>
+<ul>
+<li>Number of uppercase letters in a word</li>
+<li>Number of vowels in a word</li>
+<li>The average length of a word</li>
+</ul>
+<p>Some of these would require changes to the reducer step, which we'll cover in the following section.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Role of the reducer</h1>
+                </header>
+            
+            <article>
+                
+<p>While the mapper's job is to extract and emit some form of data to be aggregated, the reducer's job is to perform that aggregation. In this example, the reducer receives the full list of <kbd>(word, 1)</kbd> pairs and just adds up the counts (<kbd>1</kbd>, in this case) for each word. If we were to perform a different aggregation, the <kbd>reducer</kbd> function would need to change.</p>
+<p>Rather than counting the number of occurrences, let's calculate the average length of a word. In this case, both our <kbd>mapper</kbd> and our <kbd>reducer</kbd> will need updating with the more significant changes happening within the <kbd>reducer</kbd>. The following code block changes our example to calculate the average word length for a body of text broken up into words:</p>
+<pre style="padding-left: 30px">def mapper(word):<br/>    return len(word)<br/><br/>def reducer(mapper_results):<br/>    results = list(mapper_results)<br/>    total_words = len(results)<br/>    total_len = sum(results)<br/>    return total_len / total_words</pre>
+<p>As in the prior example, the mapper is quite dumb and only returns the word length. Since this example doesn't rely on anything specific to the words, there is no need to return the word itself. The reducer code becomes even more straightforward. The input to the <kbd>reducer</kbd> is now a list of numbers. To calculate the average, it's a simple task of returning the total divided by the number of elements.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">MapReduce architecture</h1>
+                </header>
+            
+            <article>
+                
+<p>The real magic behind MapReduce implementations such as Hadoop is the distribution and parallelization of computation. Our trivial example would work well running on your laptop even when the input data was several megabytes. However, imagine a case where you would like to perform some analysis like this on data that is hundreds of gigabytes, terabytes, or even in the petabyte range.</p>
+<p>Real MapReduce systems use two essential tricks to do this work efficiently. One is working in parallel as I've already mentioned. This means, for example, that multiple instances that do the computation<span>&#160;comprise a Hadoop system or cluster</span>. The other trick is co-locating data with the worker node that does the work. Data co-location reduces network traffic and speeds up overall processing.</p>
+<p>Mappers begin their work on a subset of the input data. You can imagine that when working on petabytes of data, there could be hundreds or thousands of nodes involved. Once the mappers have completed their job, they send their data to the reducers for final processing. The following diagram shows the details of this architecture from a conceptual standpoint:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/47a8dfe6-67d6-4fd4-822c-695345c7deef.png" style="width:42.75em;height:35.25em;"/></div>
+<div class="packt_figref CDPAlignCenter CDPAlign">Image adapted from <em>MapReduce:</em><br/>
+<em>Simplified Data Processing on Large Clusters</em>, <span>Jeff Dean, Sanjay Ghemawat</span><br/>
+<span>Google, Inc.&#160;</span><a href="https://research.google.com/archive/mapreduce-osdi04-slides/index-auto-0008.html">https://research.google.com/archive/mapreduce-osdi04-slides/index-auto-0008.html</a></div>
+<p><span>A key phase in Hadoop is the <em>shuffle</em>&#160;phase, labeled&#160;<span class="packt_screen">partitioning function</span>&#160;in the previous diagram. The arrows coming out of the Map Tasks show that a subset of mapper data will be sent to various reducers. In Hadoop, all output for specific keys is sent to the same reducer node. For example, in our case of the word count, the key <kbd>('amet', 1)</kbd> would be sent to the same reducer machine/node regardless of which mapper emitted that key. The reason behind this is to reduce network latency and reduce complexity for the reducers. By guaranteeing that a reducer has all of the data needed to perform its final reduce task, reducers&#160;are both faster and simpler to implement. Without this guarantee, the framework would need to designate a master reducer and crawl horizontally to final all the necessary data. Not only is that complex, but it's also slow because of all of the network latency.</span></p>
+<p><span>There are many details that we cannot cover in a system as complex as Hadoop. If you have unanswered questions at this point, I'd encourage you to do some more investigation on your own. Hopefully, this discussion has been enough to set the stage for our serverless implementation of MapReduce in the next section.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">MapReduce serverless architecture</h1>
+                </header>
+            
+            <article>
+                
+<p>MapReduce on a serverless platform is very different than in a system such as Hadoop. Most of the differences occur on the operational and system architecture side of things. Another huge difference is the limited processing power and memory we have with our FaaS. Because FaaS providers put in hard limits for both temporary storage space and memory, there are some problems that you cannot realistically solve with a serverless MapReduce implementation.</p>
+<p>The good news is that the foundational ideas in the MapReduce design still hold true. If you look back up at the start of the initial list of benefits provided by MapReduce, we naturally get many of these for free, albeit with a few caveats. MapReduce truly shines, due in large part to the&#160;<span>parallelization of computation. We have that with serverless functions. Similarly, much work goes into ensuring Hadoop nodes are healthy and able to perform work. Again, we get that for free with serverless functions.</span></p>
+<p>A significant feature we do <em>not</em> get is the co-location of our data and the processing of that data. Our distributed filesystem in this example will be AWS S3. The only way to get data to our serverless functions is to either send that data via API or have our&#160;functions fetch the data across the network. Hadoop storage and computing co-location mean that each mapper node processes the data that it has stored locally, using the HDFS. This drastically cuts down on the amount of data being transferred over the network and is an implementation detail that makes the entire system possible.</p>
+<div class="packt_tip">Before you start your implementation of this pattern, ask yourself whether you can segment your data to a point where processing it with a Lambda function is possible.&#160;<span>If your input data is 100 GB, it's feasible that you may have 100 functions handling 1 GB each, even with paying the penalty of network bandwidth. However, it won't be practical to expect a reducer to produce a 100 GB output file since it would need to hold that in memory to calculate the final result.</span></div>
+<p>Either way, we need to consider the size of the data we're processing, both concerning reads and writes. Fortunately, it's easy to scale out Lambda functions, so executing 10s or 100s of Lambda functions are of little difference.</p>
+<p>I've drawn the overall architecture of our system in the following block diagram. We'll walk through each of the five steps in detail. For this diagram, the actual problem at hand is less important than the real architecture:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/cc0d6620-3097-4c26-8755-6c6946dfc3d1.png" style="width:42.25em;height:32.08em;"/></div>
+<p>Our implementation can be broken down into five significant steps:</p>
+<ol>
+<li>We trigger a <kbd>driver</kbd> function that lists the content of a particular bucket on S3. For each file in S3, the driver triggers an SNS event that ultimately triggers a <kbd>mapper</kbd> function. Each <kbd>mapper</kbd> function receives a different payload that corresponds to a file in S3.</li>
+<li>Mappers read data from S3 and perform a first level aggregation.</li>
+<li>The mappers write the intermediate <em>keys</em>&#160;result to S3.</li>
+<li>The data writes to S3 trigger reducers. Every time a reducer is triggered, it checks whether all of the intermediate <em>keys</em>&#160;data is ready. If not, the reducer does nothing.</li>
+<li>Once all of the <em>keys</em>&#160;data is ready, a reducer will run a final aggregation across all intermediate <em>keys</em> files and write the final results to S3.</li>
+</ol>
+<p>Many things are going on here, each of which we will discuss in detail.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Processing Enron emails with serverless MapReduce</h1>
+                </header>
+            
+            <article>
+                
+<p>I've based our example application on <span>the Enron email corpus, which is publicly available on Kaggle.&#160;</span>This data is made up of some 500,000 emails from the Enron corporation. In total, this dataset is approximately 1.5 GB. What we will be doing is counting the number of From-To emails. That is, for each person who <em>sent</em> an email, we will generate a count of the number of times they sent <em>to</em> a particular person.</p>
+<div class="packt_infobox"><span>Anyone may download and work with this dataset:&#160;<a href="https://www.kaggle.com/wcukierski/enron-email-dataset">https://www.kaggle.com/wcukierski/enron-email-dataset.</a>&#160;The original data from Kaggle comes as a single file in CSV format. To make this data work with this example MapReduce program, I broke the single ~1.4 GB file into roughly 100 MB chunks. During this example, it's important to remember that we are starting from 14 separate files on S3.</span></div>
+<p>The data format in our dataset is a CSV with two columns, the first being the email message location (on the mail server, presumably) and the second being the full email message. Since we're only concerned with the <kbd>From</kbd> and <kbd>To</kbd> fields, we'll just concern ourselves with the email message.</p>
+<div class="packt_infobox">The code for this chapter may be found at:&#160;<a href="https://github.com/brianz/serverless-design-patterns/tree/master/ch8">https://github.com/brianz/serverless-design-patterns/tree/master/ch8</a></div>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Driver function</h1>
+                </header>
+            
+            <article>
+                
+<p><span>To initiate the entire process, s</span>ome event needs to be triggered. Here, we'll do this manually. The <kbd>driver</kbd> function is responsible for setting up the whole job and invoking the mappers in parallel. We'll accomplish this using some straightforward techniques.</p>
+<div class="packt_infobox"><span>By their nature, MapReduce jobs are batch-oriented, meaning they start up, do their work, write the results somewhere, and finally shut down. As such, doing this on some schedule (whether it be hourly, nightly, or weekly) makes sense. If we were doing this for real where the input data was changing, it would be trivial to set up this <kbd>driver</kbd> function to run on a schedule.</span></div>
+<p>As usual, the entry point for all our functions is the <kbd>handler.py</kbd> file, which I have not&#160;shown. The <kbd>driver</kbd> function will invoke the <kbd>crawl</kbd> function located in <kbd>mapreduce/driver.py</kbd>. The crawl function contains all of the logic, so we'll focus on this. I've shown the full listing of <span><kbd>mapreduce/driver.py</kbd>&#160;in the following code block:</span></p>
+<pre style="padding-left: 30px">import time<br/>import uuid<br/><br/>from .aws import (<br/>        list_s3_bucket,<br/>        publish_to_sns,<br/>)<br/><br/><br/>def crawl(bucket_name, prefix=''):<br/>    """Entrypoint for a map-reduce job.<br/><br/>    The function is responsible for crawling a particular S3 bucket and <br/>    publishing map jobs<br/>    asyncrhonously using SNS where the mapping is 1-to-1, file-to-sns.<br/><br/>    It's presumed that lambda mapper functions are hooked up to the SNS <br/>    topic. These Lambda<br/>    mappers will each work on a particular file.<br/><br/>    """<br/>    print('Starting at: %s: %s' % (time.time(), time.asctime(), ))<br/><br/>    # Unique identifer for the entire map-reduce run<br/>    run_id = str(uuid.uuid4())<br/>    mapper_data = [<br/>            {<br/>                'bucket': bucket,<br/>                'job_id': str(uuid.uuid4()),<br/>                'key': key,<br/>                'run_id': run_id,<br/>            } for (bucket, key) in list_s3_bucket(bucket_name, prefix)<br/>    ]<br/><br/>    # Let's add in the total number of jobs which will be kicked off.<br/>    num_mappers = len(mapper_data)<br/><br/>    for i, mapper_dict in enumerate(mapper_data):<br/>        mapper_dict['total_jobs'] = num_mappers<br/>        mapper_dict['job_id'] = i<br/>        publish_to_sns(mapper_dict)</pre>
+<p>One implementation detail we will use is uniquely identifying each MapReduce run using a UUID. In this way, it will be easy for a given run to find the necessary files to work within S3. Without this, it would be much harder or impossible to know what files a given Lambda function should be looking at or processing.</p>
+<p>As this crawler process starts, it lists the content of our input bucket on S3. Each file or S3 <kbd>key</kbd>&#160;the crawler finds is wrapped up into a payload that it later uses to trigger the mappers. In the preceding code block, you can see the format of the payload objects. Downstream, the reducers will need to know how many total mappers were executed so that they know when to begin their work. The final <kbd>for</kbd> loop will amend each payload with the total number of mapper jobs being executed along with a unique <kbd>job_id</kbd>, which is merely an integer from <kbd>0</kbd> to <kbd>number_of_mappers - 1</kbd>.</p>
+<p>To trigger the mappers in parallel, the crawler sends an&#160;SNS event. We could have accomplished this with mostly the same result by invoking the mappers directly. Personally, I prefer using SNS in these cases since the behavior is asynchronous by default. If you remember back to the chapter on the Fanout pattern, invoking an&#160;<span>asynchronously&#160;</span>Lambda function requires you to pass the correct argument to the Lambda <kbd>invoke</kbd> API. In this case, there isn't anything special to remember, and our code can trigger the event in the most basic fashion. In this particular case, there is otherwise little difference between the two methods and either would work.</p>
+<p>What is important to recognize here is that an SNS event is triggered for each file the crawl function finds in S3. In our example, there are 14 different files of approximately 100 MB each. Fourteen records mean that we will have 14 mapper functions running in parallel, each processing a specific S3 file. Mappers know which file to process because we've told them via the <kbd>bucket</kbd> and <kbd>key</kbd> arguments in the payload.</p>
+<div class="packt_infobox">Astute readers may recognize this sub-pattern in the <kbd>crawl</kbd> function. A single function spawning multiple processes asynchronously is exactly what we discussed and implemented in the earlier chapters concerning the Fanout pattern. As noted in that chapter, you may use Fanout inside other more complex patterns such as MapReduce. As you move along with your serverless systems, look for opportunities to reuse patterns as they make sense when composing larger and more complex systems.</div>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Mapper implementation</h1>
+                </header>
+            
+            <article>
+                
+<p>Now that we have a way to invoke mappers in parallel, let's look at the logic that they implement. Remember again that our task is to count the number of <kbd>(From, To)</kbd> email addresses from a large number of email messages.</p>
+<p>The work involved here is relatively straightforward. With each mapper receiving a unique 100 MB file, each invocation will perform the same set of tasks:</p>
+<ol>
+<li>Download the file from S3</li>
+<li>Parse each message and extract the <kbd>From</kbd> and <kbd>To</kbd> fields, making sure to account for group sends (where the <kbd>From</kbd> user sends to multiple <kbd>To</kbd> addresses)</li>
+<li>Count the number of <span><kbd>(From, To)</kbd> occurrences</span></li>
+<li>Write the results to S3</li>
+</ol>
+<p>I've shown the full listing of <kbd>mapreduce/mapper.py</kbd>&#160; in the following code block:</p>
+<pre style="padding-left: 30px">import csv<br/>import itertools<br/>import json<br/>import os<br/>import sys<br/>import time<br/><br/>import email.parser<br/><br/># Make sure we can read big csv files<br/>csv.field_size_limit(sys.maxsize)<br/><br/>from .aws import (<br/>        download_from_s3,<br/>        write_csv_to_s3,<br/>)<br/><br/><br/>def _csv_lines_from_filepath(filepath, delete=True):<br/>    with open(filepath, 'rt') as fh:<br/>        reader = csv.DictReader(fh, fieldnames=('file', 'message'))<br/>        for row in reader:<br/>            yield row<br/><br/>    if delete:<br/>        os.remove(filepath)<br/><br/><br/>def map(event):<br/>    message = json.loads(event['Records'][0]['Sns']['Message'])<br/><br/>    total_jobs = message['total_jobs']<br/>    run_id = message['run_id']<br/>    job_id = message['job_id']<br/><br/>    counts = {}<br/><br/>    bucket = os.environ['REDUCE_RESULTS_BUCKET']<br/><br/>    tmp_file = download_from_s3(message['bucket'], message['key'])<br/><br/>    parser = email.parser.Parser()<br/><br/>    for line in _csv_lines_from_filepath(tmp_file):<br/>        msg = line['message']<br/>        eml = parser.parsestr(msg, headersonly=True)<br/>        _from = eml['From']<br/><br/>        _tos = eml.get('To')<br/>        if not _tos:<br/>            continue<br/><br/>        _tos = (t.strip() for t in _tos.split(','))<br/><br/>        for from_to in itertools.product([_from], _tos):<br/>            if from_to not in counts:<br/>                counts[from_to] = 1<br/>            else:<br/>                counts[from_to] += 1<br/><br/>    if not counts:<br/>        return<br/><br/>    metadata = {<br/>            'job_id': str(job_id),<br/>            'run_id': str(run_id),<br/>            'total_jobs': str(total_jobs),<br/>    }<br/><br/>    key = 'run-%s/mapper-%s-done.csv' % (run_id, job_id)<br/>    write_csv_to_s3(bucket, key, counts, Metadata=metadata)</pre>
+<p>As with the crawler, there isn't much complexity to this mapper code. To count the number of <kbd>(From, To)</kbd> combinations I'm using a basic Python dictionary with the keys being a two-element tuple of <kbd>(From, To)</kbd> and the value being a number. The other bits of code around this deal with downloading the file from S3, parsing the email message, and calculating all of the <kbd>(From, To)</kbd> combinations, when an email contains multiple To recipients.</p>
+<p>Once the final result is ready, the mapper writes a new CSV file to S3. Using the <kbd>Metadata</kbd> argument, we can communicate any extra information to our reducers without having to write to the file content. Here, we need to tell the reducers a few extra things such as:</p>
+<ul>
+<li>The <kbd>run_id</kbd>, which is used to limit the files scanned and processed since we're sharing an S3 bucket across MapReduce runs</li>
+<li>The <kbd>job_id</kbd>, so we know which individual mapper job has finished</li>
+<li>The total number of jobs, so the reducer will only start once all mappers have completed</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Reducer implementation</h1>
+                </header>
+            
+            <article>
+                
+<p>At this point in our MapReduce run, the mappers have run and eventually write their intermediate output data to S3. Mappers were triggered by an invocation of SNS events on a given SNS topic. We will set up the reducers to be triggered based on an&#160;<span><kbd>s3:ObjectCreated</kbd>&#160;event. Taking a look at the <kbd>serverless.yml</kbd> file, we can see how I've done this:</span></p>
+<pre style="padding-left: 30px">functions:<br/>  Reducer:<br/>    handler: handler.reducer<br/>    events:<br/>      - s3:<br/>          bucket: brianz-${env:ENV}-mapreduce-results<br/>          event: s3:ObjectCreated:*<br/>          rules:<br/>            - suffix: '-done.csv'</pre>
+<p>The <kbd>s3</kbd> section in the <kbd>events</kbd> block says: <em>Whenever a new object is uploaded to s3 with the&#160;</em><kbd>-done.csv</kbd>&#160;<em>suffix, invoke the</em> <kbd>hander.reducer</kbd> <em>function</em>.</p>
+<p>Just as the mapper was reasonably straightforward, so too is the reducer. Much of the logic in the reducer is a matter of coordination, determining whether it's time to do its work. Let's enumerate the steps in the reducer to show precisely what it's doing:</p>
+<ol>
+<li>Extra metadata from the S3 file that triggered the invocation. Key pieces of data in that <kbd>Metadata</kbd> attribute are necessary for coordination of the entire process.</li>
+<li>List the contents of our S3 bucket and <kbd>run_id</kbd> prefix to determine whether all mappers have finished.</li>
+<li>If there are still reducers running, there is nothing more to do. If all of the reducers <em>have</em> finished, start the final reduce step.</li>
+<li>Write an empty file to S3, as a way to claim a lock on the final reduce step. Without this, it would be possible for two or more reducers to run concurrently if they were invoked at nearly the same time.</li>
+<li>In the final reduce step, download all of the intermediate files from the mappers and perform the final aggregation.</li>
+<li>Write the final output to S3.</li>
+</ol>
+<p>The full listing of <kbd>mapreduce/reducer.py</kbd> is shown as follows:</p>
+<pre style="padding-left: 30px">import csv<br/>import json<br/>import time<br/>import os<br/>import uuid<br/>import io<br/><br/>from .aws import (<br/>        download_from_s3,<br/>        list_s3_bucket,<br/>        read_from_s3,<br/>        s3_file_exists,<br/>        write_to_s3,<br/>        write_csv_to_s3,<br/>)<br/><br/><br/>def _get_final_results_key(run_id):<br/>    return 'run-%s/FinalResults.csv' % (run_id, )<br/><br/><br/>def _get_batch_job_prefix(run_id):<br/>    return 'run-%s/mapper-' % (run_id, )<br/><br/><br/>def _get_job_metadata(event):<br/>    s3_record = event['Records'][0]['s3']<br/>    bucket = s3_record['bucket']['name']<br/>    key = s3_record['object']['key']<br/><br/>    s3_obj = read_from_s3(bucket, key)<br/>    job_metadata = s3_obj['Metadata']<br/><br/>    run_id = job_metadata['run_id']<br/>    total_jobs = int(job_metadata['total_jobs'])<br/>    return (bucket, run_id, total_jobs)<br/><br/><br/>def reduce(event):<br/>    bucket, run_id, total_jobs = _get_job_metadata(event)<br/><br/>    # count up all of the final done files and make sure they equal the <br/>    total number of mapper jobs<br/>    prefix = _get_batch_job_prefix(run_id)<br/>    final_files = [<br/>            (bucket, key) for (_, key) in \<br/>            list_s3_bucket(bucket, prefix) \<br/>            if key.endswith('-done.csv')<br/>    ]<br/>    if len(final_files) != total_jobs:<br/>        print(<br/>            'Reducers are still running...skipping. Expected %d done <br/>             files but found %s' % (<br/>                total_jobs, len(final_files),<br/>            )<br/>        )<br/>        return<br/><br/>    # Let's put a lock file here so we can claim that we're finishing <br/>    up the final reduce step<br/>    final_results_key = _get_final_results_key(run_id)<br/>    if s3_file_exists(bucket, final_results_key):<br/>        print('Skipping final reduce step')<br/>        return<br/><br/>    # write blank file to lock the final reduce step<br/>    write_to_s3(bucket, final_results_key, {})<br/><br/>    print('Starting final reduce phase')<br/><br/>    s3_mapper_files = list_s3_bucket(bucket, prefix)<br/><br/>    final_results = {}<br/><br/>    for (bucket, key) in s3_mapper_files:<br/>        print('reading', key)<br/><br/>        tmp_fn = download_from_s3(bucket, key)<br/><br/>        with open(tmp_fn, 'r') as csv_fh:<br/>            reader = csv.DictReader(csv_fh, fieldnames=('key', <br/>            'count'))<br/>            for line in reader:<br/>                key = line['key']<br/>                count = int(line['count'])<br/><br/>                if key in final_results:<br/>                    final_results[key] += count<br/>                else:<br/>                    final_results[key] = count<br/><br/>    print('Final final_results:', len(final_results))<br/>    print('Writing fiinal output data')<br/>    write_csv_to_s3(bucket, final_results_key, final_results)</pre>
+<p>Stepping through this code is hopefully a simple exercise. As you can see, most of the work is that of coordination, reading data from S3, and determining whether it's time to perform the final reduce step. You can see that when the last mapper is finished, the total number of intermediate files will equal the number of mapper jobs initially invoked.</p>
+<p>Looking at S3, we can see the final results after a successful run:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/7d49365c-7db4-4d3f-8054-0c4d4e4ece2b.png" style="width:43.92em;height:24.58em;"/></div>
+<p>Here, each mapper job created a unique <kbd>mapper-job_id-done.csv</kbd> file. Once all 14 files arrived in S3, the final reducer step began, which ultimately read all 14 files and produced the <kbd>FinalResults.csv</kbd> file. You can also see how individual MapReduce runs are segregated in S3 with the UUID embedded in each S3 key path. This is necessary so that each run can operate independently and know which files it should be scanning through in S3. Again, a critical check in the final reducer step is to determine whether all of the mappers have finished their work and uploaded their results to S3. The reducer will determine the mapper's state of completeness by counting the number of files in S3 using the <kbd>run_id</kbd> as a prefix during the S3 scan. If the number of these <kbd>-done.csv</kbd>&#160;files is less than the total number of mappers, they have not all completed.</p>
+<p>If we take a look at <kbd>FinalResults.csv</kbd>, we can see the count of the following:</p>
+<pre><strong>$ head FinalResults.csv </strong><br/><strong>"('phillip.allen@enron.com', 'tim.belden@enron.com')",31</strong><br/><strong>"('phillip.allen@enron.com', 'john.lavorato@enron.com')",63</strong><br/><strong>"('phillip.allen@enron.com', 'leah.arsdall@enron.com')",3</strong><br/><strong>"('phillip.allen@enron.com', 'randall.gay@enron.com')",23</strong><br/><strong>"('phillip.allen@enron.com', 'greg.piper@enron.com')",6</strong><br/><strong>"('phillip.allen@enron.com', 'david.l.johnson@enron.com')",4</strong><br/><strong>"('phillip.allen@enron.com', 'john.shafer@enron.com')",4</strong><br/><strong>"('phillip.allen@enron.com', 'joyce.teixeira@enron.com')",3</strong><br/><strong>"('phillip.allen@enron.com', 'mark.scott@enron.com')",3</strong><br/><strong>"('phillip.allen@enron.com', 'zimam@enron.com')",4</strong></pre>
+<p>What is neat about this is that the processing of all 1.5 GB of data happens quite quickly. In my testing, the system produced the final results after approximately 50 seconds.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Understanding the limitations of serverless MapReduce</h1>
+                </header>
+            
+            <article>
+                
+<p>MapReduce on a serverless platform can work very well. However, there are limitations that you need to keep in mind. First and foremost, memory, storage, and time limits will ultimately determine whether this pattern is possible for your dataset. Additionally, systems such as Hadoop are frameworks that one may use for any analysis. When implementing MapReduce in a serverless context, you will likely be implementing a system that will solve a particular problem.</p>
+<p><span>I find that a serverless MapReduce implementation is viable when your final dataset is relatively small (a few hundred megabytes) such that your reducer can process all of the data without going over the memory limits for your FaaS provider. I will talk through some of the details behind that sentiment in the following.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Memory limits</h1>
+                </header>
+            
+            <article>
+                
+<p>In the reducer phase, all of the data produced from the mappers must, at some point, be read and stored in memory. In our example application, the reducer reads 14 separate files sequentially and builds up a mapping of <kbd>(From, To)</kbd> addresses with corresponding numbers. The number of unique combinations for this dataset is&#160;<span>311,209. That is, our final results file is a CSV with just over 311,000 lines for a total of 18.2 MB. As you can imagine, this is well within the boundaries of a single Lambda function; reading 14 files keeping approximately 18 MB of data in memory isn't beyond the abilities of an individual Lambda function.</span></p>
+<p>Imagine a case where we are counting IP addresses from a large number of large log files along with some other metric. IP addresses have the form <kbd>192.168.1.200</kbd> and can vary in their lengths when represented as a string. For this example, presume the format of the lines produced by the reducer will look like&#160;<kbd>176.100.206.13,0.6088772</kbd>, which is a single line of CSV with the IP address in the first column and a made-up metric in the second column. This string is 24 bytes long. Currently, the maximum memory for a single Lambda function is 3 GB, which is&#160;3,221,225,472 bytes. With an average length of 24 bytes per IP address, we can hold less than 135 million unique IP addresses in memory—<kbd>3,221,225,472 / 24 =&#160;134,217,728</kbd>.&#160;<span>There are approximately 3,706,452,992 unique IP4 addresses. It's clear that a serverless MapReduce implementation for working with IP addresses would break down if the number of unique IP addresses in the dataset was in the order of 100 million or more.</span></p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Storage limits</h1>
+                </header>
+            
+            <article>
+                
+<p>FaaS systems have storage limits just like they have memory limits. If you have looked at the code I've implemented in the example application, you may have noticed that I download files and store them in <kbd>/tmp</kbd> before processing them. This&#160;strategy isn't necessary, as it's possible to read data from S3 and store it in memory. In my testing, I found performance gains when downloading the files to disk and then reading them with the standard filesystem <kbd>open</kbd> calls. Some of the CSV APIs I was using were also easier to use with a real file handler rather than a String in memory.</p>
+<p>When downloading data and storing the files locally, you must keep in mind the storage limits enforced by your FaaS provider. For example, AWS Lambda currently gives you 512 MB of ephemeral storage in <kbd>/tmp</kbd>. If you have a need to download files larger than 512 MB, you would need to find another solution, such as reading data directly into memory and skipping disks entirely. Reading large data into memory will cut into your memory for the final result set, so the balance of getting this right when dealing with huge datasets can be tricky.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Time limits</h1>
+                </header>
+            
+            <article>
+                
+<p>The final limit to keep in mind is the execution limit. Even if your MapReduce implementation can stay within the storage and memory limits of your FaaS provider, you will still have to ensure your functions complete their work within a given time limit. As of this writing, AWS Lambda functions have an upper limit of 300 seconds. If any part of your MapReduce system takes longer than 300 seconds, you're out of luck and will have to find a workaround. With mappers, it's relatively simple to break the work into smaller pieces and execute more concurrent mappers. However, when the reducer runs, it must load all of the mapper data to compile it down to the final result set. If this takes longer than 300 seconds, it will be impossible to produce the final results.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Exploring alternate implementations</h1>
+                </header>
+            
+            <article>
+                
+<p>While you may find great success implementing your serverless MapReduce system, there are alternatives that still fall under the serverless umbrella or leverage managed services, which should give you a high degree of confidence. I'll talk through some of the other systems or techniques you should consider when working on your own data analysis.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">AWS Athena</h1>
+                </header>
+            
+            <article>
+                
+<p>AWS Athena is a relatively new service from AWS. Of course, this is specific to AWS, but other cloud providers may offer comparable services. Athena gives you the ability to write SQL queries to analyze data stored on S3. Before you can analyze your data with SQL, you must create a virtual&#160;<em>database</em>&#160;with associated <em>tables</em> across your structured or semi-structured S3 files. You may create these tables manually or with another AWS service called <strong>Glue</strong>.</p>
+<p>I won't go into all of the details of setting up a new Athena database or tables but will show you the results and ease of use after you've set those up. In this example, I've created a database and table for web server&#160;logs from the <strong>Big Data Benchmark</strong> dataset.</p>
+<div class="packt_infobox">This data is publicly accessible on S3, and the details may be found at the Big Data Benchmark website:&#160;<a href="https://amplab.cs.berkeley.edu/benchmark/">https://amplab.cs.berkeley.edu/benchmark/</a></div>
+<p>Following is a screenshot from the AWS Athena console. As you can see on the left, I've loaded up my <kbd>uservisits</kbd> table, which merely points to the public S3 bucket for the <kbd>uservisits</kbd> log data. I've already created a table so that Athena knows the structure and datatypes for the CSV data stored on S3. Once this is done, I can use ANSI-SQL queries to analyze the data. In the following screenshot, you can see how I've selected the first 10 rows:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/79604fe2-00cc-4317-8d2d-72cbb745cd15.png"/></div>
+<p>It's also possible to rename columns to something meaningful and change datatypes for each column. In my previous example table, several columns are named <kbd>colX</kbd>, where I've renamed other columns <kbd>ip</kbd>, <kbd>score</kbd>, and <kbd>agent</kbd>.</p>
+<p>From there, I'll run a query that calculates the total score grouped by IP address. This query and the results can be seen in the following screenshot:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/6adb762a-eb47-483c-8545-78a2be0914ff.png"/></div>
+<p>The final results of this query were quite impressive in my opinion. The query scanned just over 24 GB of data on S3 and took just under five minutes to execute. I can view this metadata in the <span class="packt_screen">History</span> area of Athena:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/24150ad7-b44c-4528-9db6-53bfbe198aab.png"/></div>
+<p>Given the simplicity of the Athena system, it's one that I would strongly suggest you investigate. What is nice about this is that new data may arrive on S3 at regular intervals, and your queries would reflect the results whenever they're run. Additionally, the overhead and price for running these queries are quite low. Anything you can do with ANSI-SQL is possible with Athena. However, Athena has limitations in that your data needs to be well structured and the data prepared ahead of time. In our example MapReduce application, we had application logic that was extracting the <kbd>To</kbd> and <kbd>From</kbd> fields from email text. To do this with Athena would require a data preparation step to extract that data from the source data, and then&#160;store the extracted and structured information on S3.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Using a data store for results</h1>
+                </header>
+            
+            <article>
+                
+<p>In our example MapReduce system, we stored the state in S3. That is, every mapper would work on a subset of the dataset, do some initial reduce step, and then save the intermediate results as a file on S3. This technique is helpful since it's relatively simple and storing static data on S3 is painless. Since each mapper is writing a unique file to S3, we also didn't have to worry much about race conditions or other mappers overwriting our data.</p>
+<p>The downside of this technique is that our reducer needs to read in all of the intermediate results to do the final reduce step. As I explained earlier, this <em>could</em> be a limiting factor for your system depending on the size of the final result. One alternative implementation would be using a data store such as Redis to store the mapper keys and values.</p>
+<p>The way this would work is that mappers, working in parallel, would process subsets of the initial dataset. Once the mappers have finished their initial aggregation, they would write the results to Redis, which would act as a central location for all of the reduced data. Mappers would either insert new records for a particular key if that key did not exist or update the data for a key. In some cases, such as counting items, we wouldn't even need a reducer as the mappers would merely increment the value stored in Redis if the key was already present.</p>
+<p>In cases where we would like to calculate an average or something else that depends on keeping track of all values for a particular key, the reduce step would consist of scanning through all keys and performing the final reduce step based on the values stored for each key.</p>
+<p>Imagine a case where we were calculating the average value per key. Mappers would perform work that looked something along these lines:</p>
+<pre style="padding-left: 30px">results = {}<br/><br/>for key, value in input_data.items():<br/>    if key not in results:<br/>        results[key] = [value]<br/>    else:<br/>        results[key].append(value)<br/><br/>r = redis.StrictRedis()<br/><br/># Use a pipeline to ensure we don't hit a race condition<br/>p = r.pipeline()<br/>for key, values in results.items():<br/>    p.lpush(key, *values)<br/>p.execute()</pre>
+<p>Making sure to use the <kbd>pipeline</kbd> technique to ensure we don't hit a race condition, our mappers push results into Redis as lists for each key. Reducers would then iterate around all of the keys and perform a count of the number of items in each list, as well as summing up the entire list. For example, the average value for a particular key named <kbd>height</kbd> would look like the following:</p>
+<pre style="padding-left: 30px">l = len(r.lrange('height', 0, -1))<br/>avg_height = sum((float(i) for i in r.lrange('height', 0, -1))) / l</pre>
+<p>While Redis is incredibly performant, it would still be easy to overwhelm a single Redis server with enough concurrency from serverless functions. The Redis (or another data store) technique could also be a good workaround for cases when you reach memory limitation in your serverless MapReduce systems. There are other things to consider too, such as, how do you finally report the entire result set in aggregate, if needed. Also, how or when do you clear out the Redis DB?</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Using Elastic MapReduce</h1>
+                </header>
+            
+            <article>
+                
+<p>Elastic MapReduce (EMR) from AWS is another alternative if you need the full power of Hadoop. EMR is just what it sounds like, a managed Hadoop system that is easy to scale up or down as required. The advantage of EMR is that Hadoop developers should feel comfortable since it is a managed Hadoop infrastructure on demand. EMR can also run other frameworks, such as Spark and Hive.</p>
+<p>EMR doesn't fit with the <em>serverless</em>&#160;theme really, since you pay for every minute that a cluster is up, regardless of whether it's running any of your jobs. Still, the fact that you can have a fully-managed Hadoop cluster is quite attractive if your use cases warrant it. Another beautiful thing about EMR, as with all things cloud, is that it's possible to create a cluster on-demand, run your jobs, and then shut it down. Creating and destroying an EMR cluster requires some form of automation with API calls, CloudFormation, or Terraform, but it's still possible and the more automation you can put in place, the better.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>In this chapter, I gave an overview of what the MapReduce pattern looked like in a general sense and demonstrated how MapReduce works with some example code. From there, we reviewed the MapReduce pattern as applied to serverless architectures. We stepped through the details of implementing this pattern by parsing 1.5 GB of email data and counting the unique occurrences of <kbd>From</kbd> and <kbd>To</kbd> email addresses. I showed that a serverless system could be built using this pattern to perform our task in less than a minute, on average.</p>
+<p>We covered some of the limitations of this pattern when implemented on a serverless platform. Finally, we discussed alternative solutions for general data analysis problems using serverless platforms such as AWS Athena and managed systems such as EMR, as well as ways to use a centralized data store such as Redis in a serverless MapReduce system.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+</body>
+</html>

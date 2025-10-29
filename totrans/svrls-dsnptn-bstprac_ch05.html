@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:m="http://www.w3.org/1998/Math/MathML" xmlns:pls="http://www.w3.org/2005/01/pronunciation-lexicon" xmlns:ssml="http://www.w3.org/2001/10/synthesis">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Scaling Out with the Fan-Out Pattern</title>
+  <link type="text/css" rel="stylesheet" media="all" href="style.css"/>
+  <link type="text/css" rel="stylesheet" media="all" href="core.css"/>
+</head>
+<body>
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Scaling Out with the Fan-Out Pattern</h1>
+                </header>
+            
+            <article>
+                
+<p>The next turn in our serverless journey takes us away from web-centric patterns and towards those suitable for a variety of problems, web and otherwise. In this chapter, we'll discuss the fan-out pattern, which may be used in many different contexts, either by itself as a standalone system or within a larger project as a sub-unit. Conceptually, the fan-out pattern is precisely what it sounds like—one serverless entry point results in multiple invocations of downstream systems. Big data platforms and computer science algorithms have been using this trick for a very long time; by taking a sizable computational problem and breaking it into smaller pieces, a system can get to the result faster by working on those smaller pieces concurrently. Conceptually, this is precisely how MapReduce works in the mapping step.&#160;</p>
+<p>In this chapter, we will discuss how to split a single unit of work into multiple smaller groups of work using the fan-out pattern. We will go through use cases for this pattern and the various problems for which it's well suited.</p>
+<p>By the end of this chapter, you can expect to know the following:</p>
+<ul>
+<li>How to set up a fan-out architecture for resizing images in parallel</li>
+<li>How to use the fan-out pattern to split a single large input file into smaller files and process those pieces in parallel</li>
+<li>What types of problem is the fan-out pattern is suitable for?</li>
+</ul>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">System architecture</h1>
+                </header>
+            
+            <article>
+                
+<p>In many ways, this is the most straightforward pattern covered in this book. A single entry point, whether it be an HTTP request, some event notification, or anything&#160;else supported on your cloud provider of choice, triggers multiple&#160;invocations&#160;of some other serverless function in parallel. What one gains in this architecture is parallelism and hence speed. Our first example is one which is easy to understand and which you can view as the <kbd>Hello World</kbd> of serverless architectures.</p>
+<p>Imagine a system which takes an image and creates multiple versions of the original image<span>&#160;with different sizes smaller than the original</span>. How can this be solved at its simplest? Once a user uploads an image, our system notices the new image upload&#160;and, using a <kbd>for</kbd> loop, iterates and creates the various thumbnails. Some fictitious code to do this may look like the following:</p>
+<pre style="padding-left: 30px">const sizes = [128, 256, 512, 1024];<br/>const img = readSomeImage();<br/><br/>sizes.forEach(function(size) {<br/>  img.resize(size, AUTO);<br/>})</pre>
+<p>This can work just fine but runs the risk of slowing down drastically as a single process is in charge of the entire pipeline for one image. Logically speaking, each resize event is completely independent, only depending on the original image to perform its task. As such, this is a perfect task to run in parallel. The following diagram shows the general design for the fan-out pattern, where a single entry point triggers multiple downstream processes:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/94ee5054-cece-42f2-b8f4-547b50747179.jpg" style="width:21.92em;height:18.75em;"/></div>
+<p>Some event or trigger will result in a call to an entry point function. In the image resize&#160;example, this event occurs when an image is uploaded to an AWS S3 bucket. Admittedly, setting this up is very simple, and AWS makes the invocation of Lambda functions quite easy due to all their cross-service integrations. However, one may apply this pattern to any cloud provider, and the trigger could very well be the uploading of an image over an <kbd>HTTP POST</kbd> rather than to an S3 bucket. Once the entry function is invoked, it will be responsible for triggering multiple <kbd>worker</kbd> functions, passing them the needed data to do their jobs. The key to this entire architecture is that the triggering of the worker processes occurs in such a way that they all run in parallel, or as close to parallel as possible.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Synchronous versus asynchronous invocation</h1>
+                </header>
+            
+            <article>
+                
+<p><span>The sole job of the entry point function is to initiate the fan-out and distribute work to multiple sub-functions. With this design, it's important to remember our goal, to parallelize the workload such that all of the worker functions are running in parallel. Just as our naive implementation with a <kbd>for</kbd> loop works synchronously, it's entirely possible to attempt to build an architecture as pictured above, but wind up with one which is synchronous. How can this happen?</span></p>
+<p>Eventually, the entry point must make multiple calls to kick off the sub-tasks. For that, we'll use some form of looping. Using AWS as an example, the entry point can use the AWS APIs to invoke Lambda functions within that loop. The following code block demonstrates invoking a <kbd>lambda</kbd> function via the JavaScript AWS SDK:</p>
+<pre style="padding-left: 30px">const sizes = [128, 256, 1024];<br/>const lambda = new aws.Lambda();<br/><br/>for (var i=0; i&lt;sizes.length; i++) {<br/>  var params = {<br/>    FunctionName: 'fanout-ResizeImage',<br/>    Payload: JSON.stringify({"size": sizes[i]})<br/>  }<br/><br/>  lambda.invoke(params, function(error, data) {<br/>    if (error) {<br/>      callback(error)<br/>    } <br/>    else {<br/>      callback(null, 'success')<br/>    } <br/>  }); <br/>}</pre>
+<p>It's safe to ignore much of the detail in the preceding code block. At a high level, our Node.js code iterates around an array of three items and invokes a named Lambda function each time. You may think that this code implements the architecture shown in the diagram above. However, running this, you'd quickly learn that this code operates entirely synchronously. That is, each iteration of the loop waits for a response to be returned from the <kbd>lambda.invoke</kbd> call. The reason for this is that, by default, Lambda invocation APIs assume a request type of request/response. More plainly, the default mode of operation is synchronous, where the client is expecting a return value from the invoked function. The good news is that this is trivial to fix by calling the <kbd>invoke</kbd> function with the correct parameter, which instructs it that we don't care about a return value. Merely add&#160;<kbd>InvocationType: "Event"</kbd> to the <kbd>params</kbd> and you're all done.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Resizing images in parallel</h1>
+                </header>
+            
+            <article>
+                
+<p>This example will be implemented in Node.js for no other reason than to change things from the Python code in previous chapters. There is a single dependency in this example, which&#160;we use for the image resizing, called <kbd>jimp</kbd>. I'll touch on some of the steps to get going with a new Node project using the Serverless Framework.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Setting up the project</h1>
+                </header>
+            
+            <article>
+                
+<p>Setting up a new Node.js project isn't any different from&#160;doing so with any other supported language. We'll tell serverless to use the <kbd>aws-nodejs</kbd> template and name our project <kbd>fanout</kbd>. The <kbd>-p</kbd> argument simply tells Serverless to place all of the generated code in the <kbd>serverless</kbd> directory, which is relative to the location where we execute this command. Consider the following code:</p>
+<pre><strong>root@4b26ed909d56:/code# sls create -t aws-nodejs -p serverless -n fanout</strong></pre>
+<p>Next, we'll add our single dependency for&#160;<kbd>jimp</kbd>. Here, I'm using <kbd>yarn</kbd>, but <kbd>npm</kbd> works fine as well:</p>
+<pre><strong>root@4b26ed909d56:/code/serverless# yarn add jimp</strong><br/><strong>yarn add v1.3.2 </strong><br/><strong>info No lockfile found. </strong><br/><strong>[1/4] Resolving packages... </strong><br/><strong>[2/4] Fetching packages... </strong><br/><strong>[3/4] Linking dependencies... </strong></pre>
+<pre><strong>[4/4] Building fresh packages... </strong><br/><strong>success Saved lockfile. </strong><br/><strong>success Saved 88 new dependencies.</strong><br/><strong>....</strong><br/><span><strong>Done in 4.33s.</strong><br/></span></pre>
+<p>Once all that is done, our code layout looks like the following:</p>
+<pre><strong>$ tree -L 1 .</strong><br/><strong>.</strong><br/><strong>├── handler.js</strong><br/><strong>├── node_modules</strong><br/><strong>├── package.json</strong><br/><strong>├── serverless.yml</strong><br/><strong>└── yarn.lock</strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Setting up trigger and worker functions</h1>
+                </header>
+            
+            <article>
+                
+<p>Next, let's wire up the <kbd>trigger</kbd> function and define the <kbd>worker</kbd> function. As noted earlier, this entire process will begin upon uploading an image to S3. The Serverless Framework makes this type of wiring straightforward with the <kbd>events</kbd> section in <kbd>serverless.yml</kbd>:</p>
+<pre style="padding-left: 30px">functions:<br/>  UploadImage:<br/>    handler: handler.uploadImage<br/>    events:<br/>      - s3:<br/>          bucket: brianz-image-resize-fanout<br/>          event: s3:ObjectCreated:*<br/>  ResizeImage:<br/>    handler: handler.resizeImage</pre>
+<p>What this says is that the <kbd>uploadImage</kbd> function will be called whenever an object is created in the named S3 bucket. That's all there is to it. Again, this event could have been anything else supported in AWS, provided the trigger gives access to some image which needs resizing. If you're using a cloud provider other than AWS, you'll need to figure out which trigger makes sense for your platform.</p>
+<p>You'll also notice the definition of the <kbd>ResizeImage</kbd> function. What's curious is that there are no <kbd>events</kbd> listed. That is because, in our case, the <kbd>uploadImage</kbd> function will act as the trigger, calling this Lambda function manually using&#160;<kbd>aws-sdk</kbd>.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Setting up permissions</h1>
+                </header>
+            
+            <article>
+                
+<p>As with all things AWS, we'll need to ensure IAM permissions are set up correctly. The <kbd>UploadImage</kbd> function will interact with a single AWS resource other than itself, and that is the <kbd>ResizeImage</kbd> function. For <kbd>UploadImage</kbd> to invoke <kbd>ResizeImage</kbd>, we need to grant it explicit permission.</p>
+<p>Additionally, <kbd>ResizeImage</kbd> needs access to&#160;write data to the final resting place of the resized photos. We'll place these images in a different S3 bucket and again grant access via the <kbd>iamRoleStatements</kbd> section.</p>
+<p>You can see both of these statements in the following code, along with other configurations in the full <kbd>serverless.yml</kbd> file:</p>
+<pre style="padding-left: 30px">service: fanout<br/><br/>provider:<br/>  name: aws<br/>  runtime: nodejs4.3<br/>  region: ${env:AWS_REGION}<br/>  timeout: 30<br/>  iamRoleStatements:<br/>    - Effect: Allow<br/>      Action:<br/>        - lambda:InvokeFunction<br/>      Resource: "arn:aws:lambda:${env:AWS_REGION}:*:function:fanout-${opt:stage}-ResizeImage"<br/>    - Effect: Allow<br/>      Action:<br/>        - s3:PutObject<br/>      Resource:<br/>        - "arn:aws:s3:::brianz-image-resize-fanout-results/*"<br/><br/>functions:<br/>  UploadImage:<br/>    handler: handler.uploadImage<br/>    events:<br/>      - s3:<br/>          bucket: brianz-image-resize-fanout<br/>          event: s3:ObjectCreated:*<br/>  ResizeImage:<br/>    handler: handler.resizeImage<br/><br/>plugins:<br/>  - serverless-prune-plugin</pre>
+<div class="packt_infobox">From a security perspective, there is a slight imperfection in our IAM roles above since both functions are granted the same permissions. That is, <kbd>ResizeImage</kbd> is allowed to call itself, and <kbd>uploadImage</kbd> is allowed access to the results S3 bucket. Ideally, only the functions which need the permissions would be granted those permissions. It is possible to set up per-function IAM access using the Serverless Framework but it's a bit verbose and outside the scope of this book.</div>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Implementing the application code</h1>
+                </header>
+            
+            <article>
+                
+<p>With the setup done, we can now focus on the application code. Let's take a look at the <kbd>uploadImage</kbd> function, as that is the gateway to the entire process.</p>
+<p>We first need to initialize our two dependencies at the top of this <kbd>handler.js</kbd> file, as follows:</p>
+<ul>
+<li>The <kbd>aws-sdk</kbd>, which is automatically available in the Lambda runtime</li>
+<li>The <kbd>jimp</kbd> library for doing the image manipulation</li>
+</ul>
+<p>Going from the top down, our <kbd>uploadImage</kbd> function defines a few things. First, our <kbd>params</kbd> object contains the base of the Lamda invocation parameters. Note here that we're using an&#160;<kbd>InvocationType</kbd> of <kbd>"Event"</kbd>, which is extremely important in order to get the asynchronous fan-out described earlier. Next, we'll hardcode a few image widths to which we'll resize the original image.&#160;<kbd>jimp</kbd> is capable of taking a single dimension (height or width) and automatically calculating the other dimension to retain the original aspect ratio.</p>
+<p>The <kbd>uploadImage</kbd> function, when invoked, receives quite a bit of metadata about the invocation in the <kbd>event</kbd> parameter. In our case, the information about the uploaded images will be contained in this <kbd>event</kbd> object. All of that data ends up in an array of <kbd>Records</kbd>. In reality, there should only be a single record to deal with. Just to be safe, we'll continue working as if there are a variable number of items in here and grab them all.</p>
+<p>Finally, this function will iterate around the array of different sizes and invoke the appropriate callback as many times, with a slightly different payload. The list of <kbd>S3Objects</kbd> is the same for each iteration, but the size field for each <kbd>resizeImage</kbd> invocation will be different. The following code block shows the full implementation of the <kbd>uploadImage</kbd> function, which invokes the <kbd>ResizeImage</kbd> Lambda function asynchronously:</p>
+<pre style="padding-left: 30px">'use strict'; <br/><br/>const aws = require('aws-sdk');<br/>const Jimp = require("jimp");<br/><br/><br/>module.exports.uploadImage = (event, context, callback) =&gt; {<br/>  var params = { <br/>    FunctionName: 'fanout-dev-ResizeImage'<br/>    , InvocationType: "Event"<br/>  }<br/><br/>  var sizes = [128, 256, 1024];<br/><br/>  const s3Objects = event['Records'].map(function(r) {<br/>    return r["s3"]<br/>  }) <br/><br/>  const lambda = new aws.Lambda({<br/>    region: 'us-west-2'<br/>  }); <br/><br/>  for (var i=0; i&lt;sizes.length; i++) {<br/>    params['Payload'] = JSON.stringify({<br/>      "size": sizes[i]<br/>      , "s3Objects": s3Objects<br/>    }); <br/><br/>    lambda.invoke(params, function(error, data) {<br/>      if (error) {<br/>        callback(error)<br/>      } else {<br/>        callback(null, 'success')<br/>      } <br/>    }); <br/>  }<br/><br/>};</pre>
+<p>With that, we can turn our attention to the work on actually resizing the images. Just as in <kbd>uploadImage</kbd>, <kbd>resizeImage</kbd> receives a payload of data in the <kbd>event</kbd> parameter, which is an object type. Remember that the <kbd>S3Objects</kbd> attribute passed over to this function is an array of S3 images. It's safe to say that this will be an array of length one for this example.</p>
+<p>As this function iterates around the list of <kbd>S3Objects</kbd>, it will extract the pertinent data needed for it to&#160;perform the following tasks:</p>
+<ol>
+<li>Get the original image from S3</li>
+<li>Resize the in-memory image contents</li>
+<li>Write the resized image to a local buffer</li>
+<li>Upload the resized image to the destination bucket with the updated name</li>
+</ol>
+<p>The following code block shows the full implementation of the <kbd>resizeImage</kbd> function, which is responsible for downsizing an image:</p>
+<pre style="padding-left: 30px">module.exports.resizeImage = (event, context, callback) =&gt; { <br/><br/>  const size = event.size;<br/>  const S3 = new aws.S3();<br/><br/>  event.s3Objects.map(function(s3Object) {<br/>    var bucket = s3Object.bucket.name;<br/>    var key = s3Object.object.key;<br/>    var parts = key.split('.');<br/>    var name = parts[0];<br/>    var suffix = parts[1];<br/><br/>    function uploadToS3(err, buffer) {<br/>      const keyName = name + "-" + size + "." + suffix<br/>      var params = { <br/>        Body: buffer,<br/>        Bucket: bucket + '-results',<br/>        Key: keyName<br/>      } <br/><br/>      S3.putObject(params, function(err, data) {<br/>        if ( err ) { <br/>          callback(err);<br/>        } else {<br/>          console.log('successfully uploaded resized image: ' + <br/>          keyName)<br/>          callback(null, "success");<br/>        } <br/>      })<br/>    }<br/><br/>    S3.getObject({Bucket: bucket, Key: key}, function(err, data) {<br/>      if ( err ) {<br/>        console.log('Error reading S3 item: ' + bucket + ' ' + key);<br/>      } else {<br/>        Jimp.read(data.Body, function(err, buffer) {<br/>          buffer<br/>            .resize(size, Jimp.AUTO)<br/>            .getBuffer( Jimp.MIME_JPEG, uploadToS3 )<br/>        })<br/>      }<br/>    });<br/><br/>    callback(null, "success");<br/><br/>  });<br/><br/>};</pre>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Testing our code</h1>
+                </header>
+            
+            <article>
+                
+<p>To test this, all that's needed is to upload an image to our target directory. I'll use one of my photos from the High Sierra in California,&#160;along with the AWS command-line interface. The original photo is&#160;2,816 × 2,112 pixels:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/eeba7e7c-feff-48f6-830b-1488988bb923.jpg" style="width:30.25em;height:22.67em;"/></div>
+<pre><span><strong>$ aws s3 cp 1186218980_878902b096_o.jpg s3://brianz-image-resize-fanout/ --acl public-read</strong><br/><strong>upload: ./1186218980_878902b096_o.jpg to s3://brianz-image-resize-fanout/1186218980_878902b096_o.jpg</strong><br/></span></pre>
+<p>Let's inspect the logs from the <kbd>ResizeImage</kbd> function. What we expect to see is three invocations right around the same time. Bear in mind that these may finish at entirely different times since the workload between them may vary; however, the starting times should be very close together. Looking at the <span class="packt_screen">CloudWatch</span> log results, we can see what we're hoping for:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/d0d66f3c-56cd-4a4d-84fc-1dc1ca12ca32.png" style="width:43.75em;height:13.42em;"/></div>
+<p>Success! Each one of these log streams corresponds to a unique invocation of <kbd>ResizeImage</kbd>. Additionally, the <span class="packt_screen">Last Event Time</span> is precisely the same across all three invocations.</p>
+<div class="packt_tip">In this case, each <span class="packt_screen">Log Streams</span> corresponds to a single invocation, but that isn't always necessarily true. As more and more requests come in, CloudWatch will group Log statements into existing streams. Here, I started with no <span class="packt_screen">Log Streams</span> at all for clarity.</div>
+<p>It's possible to view the logs in the AWS console or use the <kbd>sls logs</kbd> command to see them all together. Unfortunately, the start times are not automatically added to the <kbd>CloudWatch</kbd>,&#160;<kbd>Log</kbd> statement when using the AWS API (which is what <kbd>sls</kbd> commands ultimately use). However, we can see the results from any of our <kbd>console.log</kbd> statements along with the ending times:</p>
+<pre><strong>root@39152c09a5f4:/code/serverless# sls logs -f ResizeImage -s $ENV </strong><br/><strong>START RequestId: 5cc66bc4-e53e-11e7-ba30-f5d23778d6cb </strong><br/><strong>    Version: $LATEST</strong><br/><strong>START RequestId: 5cc5f6f2-e53e-11e7-8ff7-c3f67f0d5aef </strong><br/><strong>    Version: $LATEST</strong><br/><strong>START RequestId: 5cc6e173-e53e-11e7-9de2-85f253c2cf2b</strong><br/><strong>    Version: $LATEST</strong><br/><br/><strong>2017-12-20 04:29:34.608 (+00:00) 5cc6e173-e53e-11e7-9de2-85f253c2cf2b</strong><br/><strong>  successfully uploaded resized image: 1186218980_878902b096_o.jpg-128.jpg</strong><br/><strong>END RequestId: 5cc6e173-e53e-11e7-9de2-85f253c2cf2b</strong><br/><strong>REPORT RequestId: 5cc6e173-e53e-11e7-9de2-85f253c2cf2b</strong><br/><strong>   Duration: 6059.70 ms Billed Duration: 6100 ms</strong><br/><strong>   Memory Size: 1024 MB Max Memory Used: 424 MB</strong><br/><br/><strong>2017-12-20 04:29:34.696 (+00:00) 5cc66bc4-e53e-11e7-ba30-f5d23778d6cb</strong><br/><strong>  successfully uploaded resized image: 1186218980_878902b096_o.jpg-256.jpg</strong><br/><strong>END RequestId: 5cc66bc4-e53e-11e7-ba30-f5d23778d6cb</strong><br/><strong>REPORT RequestId: 5cc66bc4-e53e-11e7-ba30-f5d23778d6cb </strong><br/><strong>  Duration: 6302.95 ms Billed Duration: 6400 ms</strong><br/><strong>  Memory Size: 1024 MB Max Memory Used: 426 MB</strong><br/><br/><strong>2017-12-20 04:29:35.456 (+00:00) 5cc5f6f2-e53e-11e7-8ff7-c3f67f0d5aef</strong><br/><strong>  successfully uploaded resized image: 1186218980_878902b096_o.jpg-1024.jpg</strong><br/><strong>END RequestId: 5cc5f6f2-e53e-11e7-8ff7-c3f67f0d5aef</strong><br/><strong>REPORT RequestId: 5cc5f6f2-e53e-11e7-8ff7-c3f67f0d5aef</strong><br/><strong>   Duration: 6980.45 ms Billed Duration: 7000 ms</strong><br/><strong>   Memory Size: 1024 MB Max Memory Used: 481 MB</strong></pre>
+<p>These results also make sense. The smallest resizing job uses the least amount of memory and completes first. The largest resize job uses the most memory and finishes last. We need to acknowledge that the 128 px job starts early and gets a tiny head start. However, looking at the duration, it's also clear that the total execution time is higher when the resized file is bigger. I suspect this is due to the uploading to S3 and not the resizing process itself. Regardless, for this example, it's unimportant which takes longer and why. What is important is that we now have a system which receives a single input and invokes multiple worker processes in parallel. Had this work been done synchronously, the execution would have taken approximately 20 seconds, which is the sum of all three resize durations. Using the fan-out pattern, this is cut down to 7 seconds, which is the time it takes for the longest running task to complete.</p>
+<p>Looking into the S3 bucket of the results, we can view the three new images with the new widths embedded in the name. Additionally, you can see the image sizes vary, where the smallest image has the smallest file size and the largest image the largest file size:</p>
+<pre><strong><span>$ aws s3 ls s3://brianz-image-resize-fanout-results/1186218980_878902b096_o<br/>2017-12-20 04:29:36 1027150 1186218980_878902b096_o-1024.jpg<br/>2017-12-20 04:29:35 20795 1186218980_878902b096_o-128.jpg<br/>2017-12-20 04:29:35 78093 1186218980_878902b096_o-256.jpg</span></strong></pre>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Alternate Implementations</h1>
+                </header>
+            
+            <article>
+                
+<p>The preceding example is merely one, albeit common, <span>example&#160;</span>of how you can implement a fan-out pattern. There are many ways to turn one event or trigger into multiple parallel processes. Some options for this are specific to the cloud service you're using. Since the vast majority of my cloud experience is with AWS, I'll cover some alternative architectures. These may be portable to other cloud providers with corollary service offerings under different names.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Using notifications with subscriptions</h1>
+                </header>
+            
+            <article>
+                
+<p>My preceding example was controlled by a master receiver function, which was invoked on some trigger and then performed the work of calling the worker processes manually. One alternative is to replace the&#160;entry point function with a <strong>Simple Notification Service</strong>&#160;(<strong>SNS</strong>) topic. If you're unfamiliar with SNS, it's just what it sounds like—a system which, when triggered, notifies subscribers that something has happened.</p>
+<p>Because our example was focused on transforming an image in multiple ways, it makes sense to set up a trigger when a new file is added. However, what happens when we want to start doing some processing when another type of event occurs? For example, a new user signs up on our website via their Facebook account, and we want to do the following:</p>
+<ul>
+<li>Send them a welcome email</li>
+<li>Set up their account</li>
+<li>Pull their Facebook social&#160;graph</li>
+</ul>
+<p>This&#160;workflow is all made up, but the main idea is the same—a single event results in multiple jobs, which may operate in parallel.</p>
+<p>In cases like this, an event of interest would trigger an SNS notification on a particular topic. SNS payloads can contain whatever your application code decides to send. Downstream, zero or more subscribers may be listening to that topic and choose to do some work when a new notification arrives. On AWS, Lambda functions may be triggered by SNS notifications.</p>
+<p>Our fan-out architecture looks slightly different if using SNS to trigger one or more Lambda workers:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/4354b836-08d6-420d-8ffb-33d1ee9d847c.jpg" style="width:19.58em;height:20.17em;"/></div>
+<p>Now we're freed from the burden of keeping track of what worker processes need to be called when an interesting event occurs. With the SNS design, individual workers subscribe to the SNS topic and trigger upon receiving an SNS notification. It's important to note that each one of these workers is a unique Lambda function with separate application code. In case, where the parallel jobs are all performing disparate tasks, there is no problem, since these would always need to be separated out and managed as unique functions. This design fits very nicely when the work to be parallelized can occur based on a singular event, but where each job is unique and can stand alone. Crawling a user's Facebook social graph and inserting some records in your <span>database are entirely separable. For that reason, this architecture is an excellent choice. When a new job needs to run based on the same event, the work involves implementing the application code and subscribing to the existing SNS topic.</span></p>
+<p>This model doesn't work very well if all of the workers are performing the same task. The reason for this is that an SNS trigger occurs on a single topic and delivers the same payload to all subscribers. In the image resize example, the <kbd>UploadImage</kbd>&#160;function invoked&#160;<kbd>ResizeImage</kbd> three times with three different payloads. If we had built the image resize example with the SNS design, each resizing worker would need to be its own independently managed Lambda function with the knowledge of what size to use when resizing images. To be more clear, there would be three different Lambda functions which corresponded to the three different image sizes we wanted to resize:</p>
+<ul>
+<li><kbd>ResizeImage256</kbd></li>
+<li><kbd>ResizeImage512</kbd></li>
+<li><kbd>ResizeImage1024</kbd></li>
+</ul>
+<p>If we wanted to add a new image size, it would mean implementing a new function. That rapidly becomes unwieldy, and problems such as this aren't a good fit for this design.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Using notifications with queues</h1>
+                </header>
+            
+            <article>
+                
+<p>Another take on this is to use an SNS notification to deliver to multiple queues. When an SNS event is triggered, that notification takes place fairly quickly (a few seconds, at most). If there are 100 subscribers attached to that topic, all 100 subscribers will wake up and start working in parallel. That behavior may be exactly what you need in certain scenarios. However, in those cases where you may not want your system to operate at full capacity, it's possible to deliver SNS data to one or more <strong>Simple Queuing Service</strong> (<strong>SQS</strong>)<span>&#160;</span>queues:</p>
+<div class="CDPAlignCenter CDPAlign"><img src="images/cf58db97-ceba-4de6-9811-4836491136a7.jpg" style="width:20.42em;height:21.08em;"/></div>
+<p>Here, the subscribers to an SNS topic are SQS queues rather than Lamba functions. This sort of design may work well when you don't necessarily want, or need to keep up with, a high volume of events. By throwing data on queues, it's easier to control the consumption rate of the data.</p>
+<p>SQS behaves as one would expect a queue to act; that is, data placed into the queue remains in the queue until some process comes along and consumes it, finally marking it as consumed. This&#160;pattern would be a great design to protect some backing service such as a relational database. Take the case where a high number of transactions arrives all at once and they ultimately need to be written to a database. Using the previous example, this could result in an equally high number of database writes since there is nothing to slow down the workers being invoked&#160;once the SNS event is triggered. To buffer that work, the SNS notifications trigger writes to the SQS queues, which result in all of the data queuing up for future processing. Workers process then poll the queues at some acceptable and known rate so as not to overwhelm the database either saturating the number of open connections or putting too much load on it.</p>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+
+
+  <div id="sbo-rt-content"><section>
+
+                            <header>
+                    <h1 class="header-title">Summary</h1>
+                </header>
+            
+            <article>
+                
+<p>This chapter introduced the fan-out pattern and discussed its overall merits and basic architecture when using a serverless platform. We discussed, in detail, the implementation of an example serverless application, which created multiple resized images in parallel using this pattern. In this example, we also learned the basics of deploying a Node.js application using the Serverless Framework on top of AWS. We also discussed different implementations of the fan-out pattern using different AWS services and when those alternative designs may be suitable.</p>
+<p>Readers should understand the fan-out pattern well and be ready to use this pattern in future chapters in this book as part of more complex patterns.</p>
+<p>Next, we'll work on processing data using queues and the messaging pattern.&#160;</p>
+<div class="grammarly-disable-indicator"></div>
+
+
+            </article>
+
+            
+        </section>
+    </div>
+</body>
+</html>
