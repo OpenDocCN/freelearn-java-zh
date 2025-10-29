@@ -1,0 +1,714 @@
+- en: Asynchronous Processing with the Messaging Pattern
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In the last chapter, we discussed the Fan-out Pattern, which we can implement
+    using different strategies. At the end of that section, we reviewed an implementation
+    of the Fan-out Pattern, which used AWS's Simple Queuing Service (SQS) as a destination
+    for an event trigger. Queuing systems such as SQS provide a level of safety and
+    security because they're intended to be a mostly durable persistent store where
+    data lives until some process has the chance to pull it out, perform some work,
+    and delete the item. If a downstream worker processes a crash entirely and processing
+    stops for some time, queues merely back up, drastically reducing the risk of data
+    loss. If a worker process runs into some unrecoverable problem in the middle of
+    processing, queue items will typically be left on the queue to be retried by another
+    processor in the future.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In this chapter, we will cover using queues as messaging systems to glue together
+    multiple serverless components. Readers can already be familiar with queuing systems
+    such as RabbitMQ, ActiveMQ, or SQS. We will learn how to pass messages between
+    serverless systems using queues to provide durable and fault-tolerant distributed
+    systems for data-heavy applications.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'At the end of this chapter, you can expect to understand the following topics:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What queuing systems are available and make sense in a serverless architecture
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Options for processing messages using serverless functions (polling and fan-out)
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Differences between queues and streaming systems and when to use one over the
+    other
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Dead letter queues to ensure messages are never dropped
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Using queues as a way of rate limiting
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Basics of queuing systems
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Queuing systems are by no means new in the world of software. Generally speaking,
+    queues are one of the fundamental data structures most introductory computer science courses
+    cover. Before going any further, let's briefly review the queue as a fundamental
+    data structure in computer science.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Simply put, a queue is a collection of items where new items are pushed onto
+    the back and pulled off the front. Consider that we're all waiting in line for
+    a movie. Provided people follow the rules and don't line up out of order, you've
+    waited in a queue (which is, of course, the reason British English uses *queue,* which
+    is more accurate than the U.S. term *line*). Formally, we can define a queue as
+    a collection of items that have the property of first-in-first-out (FIFO). The
+    primary operators of a queue data type are `enqueue` and `dequeue`. These operators
+    add new items to the back of the queue and pop items off the front, respectively.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'In software, queueing systems such as RabbitMQ and the like are commonly used
+    to deal with asynchronous processing. A triggered event can mean that your system
+    needs to perform some recalculations or data processing that doesn''t need to
+    occur in real time. Rather than having a user sit and wait until they click a
+    button, an application will place metadata into a queue that contains enough information
+    for a downstream worker process to do its job. These worker processes'' sole responsibility
+    is to sit and wait until a new item arrives and then carry out some computation.
+    As messages show up in the queue, workers pluck off those messages, do their work,
+    and return for more. This architecture has multiple benefits:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Durability**: Provided clients write data to the queue successfully and the
+    queuing system is healthy, messages will persist in the queue until there is enough
+    computing power available to pull them off, process, and finally remove them.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Scalability**: Most queuing architectures are parallelizable, meaning multiple
+    workers can pull messages from a queue and process individual items in parallel.
+    To operate with more throughput, we can add more workers into the system, which
+    results in faster processing through greater parallelism.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Predictable load:** Often, worker processes will need to read and/or write
+    data from/to a database. When the load is exceptionally high, the queue can serve
+    as a buffer between the processing tasks and database. To limit pressure on a
+    database we can scale the number of worker processes such that the parallelism
+    is as high as possible, but not so much we overwhelm the database with an inordinate
+    amount of reads or writes.'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Readers should note that they can implement a Messaging Pattern with either
+    a queue or streaming system. In this chapter, we focus on queues but later discuss
+    the merits of stream systems and the differences between the two types of message
+    broker. In subsequent chapters, we will work through the details of streaming
+    systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: One of the most dangerous spots to be in is when all the incredible benefits
+    of a queue are in place, only to have the actual queue server (RabbitMQ and so
+    on) running as a single node. I have worked at multiple companies that have relied
+    quite heavily on RabbitMQ as the queueing backbone, running very high business-critical
+    workloads from it. However, we ran these RabbitMQ deployments as a single EC2
+    instance with lots of computing capacity. Inevitably, when an individual instance
+    runs into problems or for some reason dies, the entire system falls apart, resulting
+    in lost messages, failing clients who attempt to write the queue and error out,
+    and an all-around bad day.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Choosing a queue service
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The good news today is that multiple cloud providers now offer queuing systems
+    as a service. In the following examples, we''ll use SQS from AWS. While I haven''t
+    worked with them directly, Google Compute Cloud has Task Queue, and Azure has
+    Queue Storage. Undoubtedly, other cloud providers offer similar services. When
+    evaluating hosted queuing services, there are several factors to consider:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: What type of data fetching model is supported, pull or push?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: What is the maximum lifetime of messages or the maximum queue depth?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: What happens with messages that consistently fail? Is there a dead-letter queue
+    option?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Is there a guarantee of exactly-once delivery, or can messages be delivered
+    multiple times?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Is ordering guaranteed, or can messages arrive out of order relative to the
+    order from which they were sent?
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: 'Answers to these questions will vary by provider and by service offering for
+    a given cloud provider. SQS, for example, comes in two flavors: Standard Queues
+    and FIFO Queues. Which one you''ll pick when building on top of AWS will come
+    down to your particular use case. If building with a different cloud provider,
+    you''ll need to dig into their documentation to fully understand the behavior
+    and semantics of whatever queueing service you''re using.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Queues versus streams
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: You can think of a queue as a broker of messages. Some data producer will place
+    messages onto the queue, and some data consumer will read those messages. The
+    queue simply brokers that exchange of message passing. Stream processing systems
+    provide similar functionality, but with much different behavior, features, and
+    applications. I'll present a brief discussion of the differences between queues
+    and streams for the sake of clarity.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Apache Kafka is a very popular stream processing system in widespread use,
+    of which you can have heard. Today, cloud providers have come out with hosted
+    stream processing systems:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '**Azure**: Event Hubs'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**AWS**: Kinesis'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: '**Google Compute Cloud**: Cloud Dataflow'
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: So, what exactly is a stream processing system as opposed to a queueing system?
+    To my mind, the most significant and most easily understood difference is the
+    way in which items are processed or delivered. In a queuing system, messages that
+    arrive in the queue are typically processed once, by a single process. There are
+    of course exceptions to this rule, but in all systems I've worked on that use
+    a queue, the *happy path* was designed such that a single message would be read
+    and processed once.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Streaming systems, on the other hand, can be thought of as a collection of
+    records where old records eventually expire off the back (the oldest expiring
+    first), and new records are added to the front. Rather than being processed and
+    removed, messages sit there, without knowledge of who is reading them and without
+    being deleted by consumers. Data consumers are responsible for keeping track of
+    their position within the stream using an offset value. The streaming service
+    itself is responsible for retaining the messages, generally with some configurable
+    expiration period:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/fc1b1e00-3624-4611-8c52-b6dac6bd25bb.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: It is possible to have multiple consumers reading and processing the same message
+    when using a streaming system. For example, one consumer can be reading items
+    on the stream and calculating a running average of some metric, while another
+    consumer can be reading the same messages and calculating the standard deviation.
+    In a queuing system, this wouldn't be possible without duplicating messages across
+    different queues or implementing some logic or heuristic to remove messages only
+    after all consumers have done their job. Either way, a queue would not be a good
+    fit for such a problem whereas streaming systems are purpose-built just for this.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Another exciting feature of streaming systems is that new consumers who come
+    online can start at the back of the stream and work forward. For example, if a
+    stream holds one week's worth of data, any new system that starts will be able
+    to go back seven days and begin its processing from there. Because consumers keep
+    track of their location or offset within the stream, they can pick up where they
+    left off in the case of failure.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Technically speaking, you can implement the Messaging Pattern with a queue or
+    a stream, and the choice depends on the problem at hand. We'll look at AWS Kinesis
+    and discuss streaming systems in later chapters. For now, we'll focus on using
+    queues and specifically SQS for the example application. In my mind, a Message
+    Pattern at its core entails separating the communication between different system
+    via some message broker, such as a queue or streaming system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Asynchronous processing of Twitter streams
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Twitter is an excellent source of random data. Given the volume and variety
+    of data, we can readily come up with example (and real) problems to solve. In
+    our case, we''re going to build a serverless processing system by sipping off
+    the public twitter stream. Our example system will  have the following workflow:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Read a tweet with cat or dog images from the Twitter firehose
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Place messages on an SQS queue.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: Worker processes will read those image URLs off the queue and perform image
+    recognition.
+  prefs:
+  - PREF_OL
+  type: TYPE_NORMAL
+- en: While this example can be a bit contrived, the concepts demonstrated are true
+    to life. We'll use the AWS Rekognition service to perform image recognition and
+    labeling of any cat or dog images we find. Rekognition is quite fast at what it
+    does, but it's easy to imagine processing images with a much slower service. In
+    that case, adding items onto a queue and processing them at our leisure with one
+    or more worker processes would allow us to scale out to achieve a higher processing
+    rate.
+  prefs: []
+  type: TYPE_NORMAL
+- en: You can find all code in this chapter at [https://github.com/brianz/serverless-design-patterns/tree/master/ch6](https://github.com/brianz/serverless-design-patterns/tree/master/ch6).[](https://github.com/brianz/serverless-design-patterns/tree/master/ch6)
+  prefs: []
+  type: TYPE_NORMAL
+- en: System architecture
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'The system architecture for our image analysis example is quite simple. Ingestion
+    of tweets will begin using a stream listener for the Twitter API via the Python
+    `tweepy` library, [https://github.com/tweepy/tweepy](https://github.com/tweepy/tweepy).
+    This listener will filter out only specific tweets on our behalf. From there,
+    the listener will place messages onto an SQS queue. Once it delivers messages
+    to the queue, the job of our stream listener is complete. With this type of design,
+    we realize a real separation of concerns. If we enumerated the things our stream
+    listener cares about, the list would be quite short:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Twitter access
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Some business logic as to what types of data to extract from tweets
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Which queue to place the extracted tweet information in
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: That is it. Once the stream listener performs the last step of adding items
+    onto the queue, it neither cares about nor is affected by, any downstream processing
+    or lack thereof.
+  prefs: []
+  type: TYPE_NORMAL
+- en: From there, worker processes will pull images off the queue and perform their
+    bit of work, ultimately calling AWS Rekognition and storing the results in DynamoDB
+    for future review. Our example will use a classifier processor, which will run
+    with a single level of parallelism. That is, at any given time there will only
+    be a single classifier process running. However, there would be very few changes
+    if we wished to scale this out and operate multiple classifiers at the same time,
+    increasing our parallelism and hence the overall throughput of the system.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Again, with this design, the classifier''s job is much simpler than if we implemented
+    all of this work as a single process. Classifiers also care about a small number
+    of items to perform their work:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: Which queue to get data from
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: A small bit of business logic to perform the image classification
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Where to put the results
+  prefs:
+  - PREF_UL
+  type: TYPE_NORMAL
+- en: Our classifier neither knows nor cares how data arrived in the queue. All that
+    matters from the classifier's perspective is that data comes with the correct
+    format (which is quite simple) and that is has access to the resources it needs
+    to perform its job.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With a queue acting as the broker between data producer (stream listener) and
+    data consumer (classifier), we have a reasonably good level of durability. If
+    our listener dies (which it will by design, as you''ll see shortly) or if our
+    classifiers die, SQS will hold onto our data, ensuring we can get to it and process
+    it when our systems are back to full health. Also, we''d be able to scale this
+    up as needed, adding more classifiers in the event that the stream listener produced
+    more messages than a single classifier could keep up:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/e7a8be1d-12e9-4613-b019-4c371afb0eb2.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: Messages are placed onto an SQS queue by a stream listener process, which is
+    implemented as an AWS Lambda function and runs on a schedule. A single classifier
+    Lambda function also runs on a schedule and is responsible for pulling messages
+    from the queue, classifying them with AWS Rekognition and finally storing results
+    in DynamoDB.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Furthermore, this design allows for a level of flexibility that would be difficult
+    otherwise. Our example is processing tweets tagged with `#cat` or `#dog` and a
+    few other related hashtags. We could also modify our stream processor to grab
+    a more extensive set of tweets, perhaps directed at `@realDonaldTrump`. Those
+    tweets could be directed to an entirely different queue, which would be processed
+    separated and completely different. Since the volume of `@realDonalTrump` tweets
+    is much higher than `#cat` and `#dog` tweets, separating them out and handling
+    them differently would be an excellent idea from a systems architecture perspective.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Data producer
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Most of the complexities in this code revolve around the Twitter API, which
+    I won''t go into in detail. I haven''t worked with the Twitter API much myself,
+    but the tweepy GitHub page and website have plenty of resources and example code
+    to get you started, which is just what I followed to get this working. The following
+    code is the entry point to the entire process, which begins reading the public
+    Twitter stream for tweets related to cats or dogs and placing a subset of each
+    tweet onto the SQS queue:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE0]'
+  prefs: []
+  type: TYPE_PRE
+- en: Let's begin by looking at the `start` function, which does what you'd expect.
+    Once the listener class is instantiated and begins running, it will operate as
+    a long-lived daemon process invoking the `on_status` function whenever it encounters
+    a tweet. Since we are only interested in certain types of message, I'll pass a
+    list of tags to the `filter` function.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'All of our application logic is wrapped up in the `on_status` method. Tweets
+    are a reasonably elaborate data structure, and the actual image URLs we''re interested
+    in can live in multiple locations. As a Twitter API novice, I''m not entirely
+    sure of the exact logic to look for image URLs, but the little bit of logic in
+    `on_status` seems to get enough images for our example. After grabbing as many
+    image URLs as we can along with some extracted hashtags, we will publish that
+    data structure to our SQS queue using our `publish_tweet` wrapper function. Details
+    on `publish_tweet` can be found in the following queue-specific code block. It''s
+    not complex at all, and the only really important bit is to understand what exactly
+    ends up on the queue. In this case, we''re placing a Python dictionary onto SQS,
+    which ultimately gets serialized as a JSON record. This record contains the original
+    tweet text, a URL for the cat or dog image, and any hashtags embedded in the tweet:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE1]'
+  prefs: []
+  type: TYPE_PRE
+- en: Mimicking daemon processes with serverless functions
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: By definition, serverless functions are short-lived and have a maximum lifetime
+    before your platform of choice kills them. At the time of writing, the current
+    limitation for an AWS Lambda function is 300 seconds (5 minutes) and the default
+    6 seconds. Our example relies on a long-lived process that is continually reading
+    from the Twitter stream and publishing those results to the queue. How then can
+    we accomplish this long-lived behavior with an inherently short-lived system?
+  prefs: []
+  type: TYPE_NORMAL
+- en: To mimic a constantly-running process, we can take advantage of the scheduled
+    invocation of Lambda functions. Other cloud providers should provide similar functionality.
+    In short, we can use the maximum lifetime of Lambda functions to our advantage.
+    The trick here is to set the `timeout` value of our Lambda function to 58 seconds,
+    which is just below the scheduled invocation rate of 60 seconds.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Since that code will run indefinitely, we can rely on AWS killing the Lambda
+    function after 58 seconds. After a running `Firehose` Lambda function is killed,
+    we know another one will start up within a second or two, which results in a continually
+    running `Firehose` process.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'There is a chance that there will be one or two seconds when two instances
+    of firehose processing run concurrently. In this case, that''s not a concern since
+    the data consumer can handle duplicate data elegantly by merely ignoring duplicates.
+    If you plan on using the same pattern, it''s essential to ensure your data consumer
+    can deal with duplicates and is idempotent with its computation and processing.
+    This pattern may not be applicable for all problems, but it works well for this
+    and similar systems:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE2]'
+  prefs: []
+  type: TYPE_PRE
+- en: Data consumers
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: If you've worked with RabbitMQ or other queuing systems, you can be used to
+    registering workers on specific queues or topics where those listeners/workers
+    get notified when messages of interest arrive. With SQS, the model is entirely
+    different. SQS is a purely poll-based system; that is, any code that is interested
+    in reading data from a queue needs to poll using the appropriate AWS APIs. Additionally,
+    application code must explicitly delete messages from the queue once it has completed
+    its processing.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Some APIs for other queuing systems will automatically `ack` a message provided
+    no exception occurs, resulting in the removal of those message from the queue.
+    It's imperative to remember to delete messages from an SQS queue even if no processing
+    should occur.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'Just as the `Firehose` function executes on a one-minute interval, so too will
+    our `Classify` process. When this function runs, it starts by pulling batches
+    of records from the SQS queue in quantities of 10\. You can see in the following
+    that there is an infinite loop with the `while True:` statement. Again, once this
+    loop starts, it will run until the Lambda itself terminates it according to our
+    58-second timeout. If there aren''t any messages available for processing, everything
+    just shuts down. This technique is more straightforward to implement and less
+    expensive than dealing with the process sleeping. By merely quitting we can rely
+    on the next run to pick up the next batch of work and don''t need to waste CPU
+    cycles doing anything but wait for messages to arrive:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE3]'
+  prefs: []
+  type: TYPE_PRE
+- en: After the `classify_photos` function finds some messages, processing them isn't
+    very complicated. With tweets, there is a good chance our classifier will encounter
+    duplicate photos. This job will store results in DynamoDB, so the first step is
+    to check whether that URL already exists. Our DynamoDB table will use the URL
+    as the partition key, which is analogous to a simple primary key in a relational
+    database. This DynamoDB schema means that the URL must be unique. If we've already
+    stored a particular URL, we won't do any more processing. Still, we need to remember
+    to delete the message from the queue. Without that step, worker processes would
+    repeatedly process a queue item, resulting in a never empty queue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'For any new URLs, we''ll download the image and throw it over to the AWS Rekognition
+    service to get a listing of labels and associated scores. If you''re unfamiliar
+    with Rekognition, it''s quite a fantastic service. Rekognition provides several
+    impressive features such as facial recognition. We''ll be using the image detection
+    or *labeling* feature, which will detect objects in a given image with a corresponding
+    score:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/f7568edd-f0b9-4119-bd20-50e2415432f0.jpg)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'As an example, this image of a cat results in the following `Labels` from Rekognition:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE4]'
+  prefs: []
+  type: TYPE_PRE
+- en: So, our worker process will fetch pictures embedded in tweets and hand them
+    off to Rekognition for labeling. Once Rekognition finishes its work, the worker
+    process will store the scores and other data about the image and tweet in DynamoDB.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Viewing results
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'In this example, we don''t have a custom user interface to view results, so
+    the DynamoDB console will have to do. As we can see in the following screenshot,
+    I''m storing image URLs along with any embedded hashtags from the original tweet
+    as well as the detected labels and scores from the Rekognition query:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/b8aa2feb-fdf8-453a-a307-0b7ca37b3a4f.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: 'Using the DynamoDB API, let''s take a look at one of the records in detail
+    using Python''s `boto3` library from Amazon:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '[PRE5]'
+  prefs: []
+  type: TYPE_PRE
+- en: With that, we have a reasonably sophisticated system with very few lines of
+    application code. Most importantly and keeping this in context, every single system
+    we've leveraged is entirely managed. Amazon will do the hard work of maintaining
+    and scaling Lambda, SQS, and DynamoDB on our behalf. There are some tricks and
+    essential details about managing DynamoDB read and write capacity and I encourage
+    you to read up on that on your own.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Alternate Implementations
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Our example application is quite robust and can handle quite a bit of load and
+    traffic with few to no changes. As easy as this pattern is to understand, implement,
+    and run, it's not a silver bullet. You will likely require different implementations
+    of this Messaging Pattern in your scenarios. We'll review a few alternative applications
+    of the same pattern, which uses a queue as a message broker between disparate
+    systems.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using the Fan-out and Messaging Patterns together
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Earlier, during the explanation of our system architecture, I briefly discussed
+    the possibility of fanning out messages from the stream listener to multiple queues.
+    A design such as this would be useful when there are different types of workload
+    to be performed from a single data producer. The following example architecture
+    shows a system made up of an individual Twitter stream data producer that fans
+    out messages to multiple queues based on the payload:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/ab38d077-cdc4-4d47-8a72-3807825b645e.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: For this example, assume we're interested in processing a more extensive range
+    of tweets. This system will still classify dog and cat images as before; however,
+    this time we can split the processing apart more granularly by using separate
+    queues for cat images and dog images. We can not be able to warrant this split
+    in processing at the beginning, but it will allow us to treat and scale those
+    systems separately.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A better example is the splitting of `@realDonaldTrump` tweets into an entirely
+    different processing pipeline using a dedicated queue. The volume on this queue
+    would be much higher than cat and dog images. Likely, we'd want to be running
+    multiple concurrent workers to process this higher amount. Additionally, we could
+    do something completely different from the labeling of images, such as running
+    sentiment analysis on those tweets. Even in cases where the sentiment analysis
+    was underprovisioned and got behind, we could feel confident knowing that any
+    message on the queue could eventually be processed either by adding more worker
+    processes or by an eventual slowdown of new messages from the data producer.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using a queue as a rate-limiter
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: 'Many public APIs have rate limits. If you are attempting to pull down any substantial
+    amount of data using a particular API that requires many API calls, you''ll undoubtedly
+    need to work around those rate limits and find a way to get to your data as fast
+    as possible without exceeding your request quota. In cases such as this, a queue
+    architecture can help out:'
+  prefs: []
+  type: TYPE_NORMAL
+- en: '![](img/26af2a8a-757f-4401-be7f-352c137c42c9.png)'
+  prefs: []
+  type: TYPE_IMG
+- en: I have personally implemented this exact pattern with great success. Here, a
+    third-party API provides an endpoint to `/items`. The actual data being retrieved
+    is of little importance to explain the details. Here, the challenge is that we
+    can only fetch the required details of these items by making another API call
+    to an `/items/${id}` endpoint. When there are hundreds or thousands of things
+    to download, which each require a separate API call (or more), we need to be careful
+    to stay below the rate limit threshold. Typically, we would prefer that the system
+    also runs as quickly as possible, so the overall process of retrieving item details
+    doesn't take days or weeks.
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'With such constraints, we can use a queue and inspection of our consumption
+    rate limit to download items as fast as possible while also staying within the
+    bounds of our allotted rate limit. The trick here is to break up the work of producing
+    objects for download from the act of downloading those objects. For the sake of
+    this example, assume the `/items` endpoint retrieved up to 500 items at a time,
+    where each element has a structure that includes a unique numeric `id` along with
+    some metadata. Our goal of retrieving the entire view of each item requires another
+    API call to `/item/${id}`. The data producer would make a single call to the `/items`
+    endpoint and place messages onto the queue for each item that needs to be downloaded
+    and stored. Each message on the queue would be somewhat generic, comprising a
+    simple data structure such as `{''url'': ''https://some-domain.io/item/1234''}`.
+    This process could go as rapidly as it needed, since fetching an entire list of
+    objects could realistically be done quite quickly and probably under whatever
+    rate limit is imposed.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: 'I put any intelligence about downloading item details and dealing with rate
+    limiting into the downloader process. Just as with our cat and dog classifier,
+    the downloader job is scheduled to wake up every minute and download as many messages
+    as possible. Upon fetching the first item from the queue, the downloader will
+    check the consumed rate limit which is provided by our third-party API via HTTP
+    headers. There is no standard way of providing usage statistics to clients, but
+    I''ve seen this type of data returned in the following header format: `X-Ratelimit-Usage:
+    2142,3000`. In this example, the API enforces a limit of 3,000 requests per unit
+    time while the client has currently consumed 2,142 requests. If you do the math,
+    2,142 consumed units compared with a threshold of 3,000 equate to 71.4% usage.'
+  prefs: []
+  type: TYPE_NORMAL
+- en: After each API call, the downloader job checks its consumed API usage by doing
+    this simple calculation. Once it nears some upper limit, the downloader can merely
+    shut itself down and cease making API requests (perhaps when it gets above 90%
+    usage). Of course, there must be a single API call made to inspect this usage.
+    If the worker/downloader processes start up every two minutes, the worst-case
+    scenario is that the system makes a single API call every two minutes. Only after
+    some time has elapsed and the rate limits are reset (perhaps every 15 minutes)
+    can the downloader start pulling items in bulk again. By using the same trick
+    as our classifier example, it's trivial to have one or more downloader processing
+    continually running by playing with the timeout value along with the scheduled
+    invocation time.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Using a dead-letter queue
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: Under certain circumstances, worker processes can never successfully process
+    a message sitting in a queue. Take for example our image classifier problem. The
+    worker processes aren't responsible for much other than downloading an image,
+    sending it to Rekognition, and storing those results in DynamoDB. However, what
+    happens if, in between a tweet arriving in the queue and our processing of that
+    tweet, a Twitter user deletes the original image or tweet. In this case, our classifier
+    process would fail hard. Look for yourself, and you'll see there are no guards
+    against an HTTP 404 response code from the image fetch.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A hard failure like this will result in the application code skipping the `sqs.delete_message`
+    function altogether. After a configurable amount of time, that same message will
+    be available on the queue to another worker who will encounter the same problem
+    and fail in the same way. Without some protections in place, this cycle will repeat
+    itself indefinitely.
+  prefs: []
+  type: TYPE_NORMAL
+- en: It would be quite trivial to work around this case in the application code,
+    since dealing with any non-200 HTTP response codes is quite easy and missing a
+    few images isn't a significant problem. In more complicated applications where
+    the failure scenarios cannot be as easy to foresee, setting up some fallback mechanism
+    can be very helpful for debugging and for making the entire system more reliable.
+    Specific queuing systems, including SQS, offer what is called a dead-letter queue.
+  prefs: []
+  type: TYPE_NORMAL
+- en: A dead-letter queue is a separate queue where messages that cannot be successfully
+    processed wind up. We can set up a dead-letter queue and configure our primary
+    queue to place messages there if workers cannot successfully process messages
+    after ten attempts. In that case, we guarantee the messages will eventually be
+    removed from the primary queue either due to successful processing or by forceful
+    removal due to 10 failures. A useful benefit of this is that we'll catch any problematic
+    messages and can eventually inspect them and make changes to application code
+    as needed. Since the dead-letter queue is a queue itself, we're still responsible
+    for maintaining it and ensuring its health and size are kept in check.
+  prefs: []
+  type: TYPE_NORMAL
+- en: Summary
+  prefs:
+  - PREF_H1
+  type: TYPE_NORMAL
+- en: In this chapter, we discussed the details of the Messaging Pattern and walked
+    through a complete example using AWS SQS as a message broker. The example application
+    comprised a Lambda function as the data producer, SQS as the message broker, and
+    a Lambda function as the data consumer, which ultimately stored results in DynamoDB.
+    We also discussed the difference between queues and streaming systems and reviewed
+    their merits and use cases when one may be preferable over another. I also explained
+    alternative architectures and implementations of the Messaging Pattern with specific
+    problems and examples given for context.
+  prefs: []
+  type: TYPE_NORMAL
+- en: At this point, readers should have a good understanding of how to break apart
+    data-heavy serverless applications using queuing systems to provide scalability,
+    fault tolerance, and reliability. I presented alternative architectures, which
+    should give readers some insight into how they can structure their applications
+    for improved decoupling and performance.
+  prefs: []
+  type: TYPE_NORMAL
+- en: In the following chapter, we'll review another data-processing type of pattern
+    which is useful in big data systems, the Lambda Pattern.
+  prefs: []
+  type: TYPE_NORMAL
