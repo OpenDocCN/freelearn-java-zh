@@ -157,6 +157,7 @@
 +   [SpringMVC：设计现实世界的 Web 应用](docs/sprmvc-dsn-rw-webapp/README.md)
 +   [Spring Security 3.x 秘籍](docs/sprsec-3x-cb/README.md)
 +   [SpringSecurity 第四版](docs/sprsec-4e/README.md)
++   [无服务器设计模式最佳实践](docs/svrls-dsnptn-bstprac/README.md)
 +   [Spring5 软件架构](docs/sw-arch-spr5/README.md)
 +   [Java 测试驱动开发](docs/tdd-java/README.md)
 +   [Java 测试驱动开发](docs/test-dvn-java-dev/README.md)
